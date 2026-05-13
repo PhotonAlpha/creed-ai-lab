@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.creed</groupId>
+        <artifactId>spring-creed-auth-server</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>creed-resource</artifactId>
+    <packaging>pom</packaging>
+    <name>creed-resource</name>
+    <description>Resource microservices (OAuth2 resource servers)</description>
+
+    <modules>
+        <module>creed-resource-catalog</module>
+        <module>creed-resource-order</module>
+    </modules>
+</project>
