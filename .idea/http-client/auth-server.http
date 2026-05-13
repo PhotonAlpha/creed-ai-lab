@@ -1,0 +1,74 @@
+POST http://127.0.0.1:9000/oauth2/token
+Authorization: Basic Y3JlZWQtY2xpZW50OmNyZWVkLXNlY3JldA==
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&scope=api.read
+
+> {%
+    client.test("Request executed successfully", function() {
+        client.assert(response.status === 200, "Response status is  200");
+    });
+    console.log('ResponseData', response.body)
+    const {access_token} = response.body
+    client.global.set("auth_token", access_token);
+    client.log("Token updated: " + client.global.get("auth_token"));
+%}
+
+### gateway catalog items
+http://127.0.0.1:8080/api/catalog/items
+Accept: application/json
+Authorization: Bearer {{auth_token}}
+
+
+### gateway order items
+http://127.0.0.1:8080/api/order/items
+Accept: application/json
+Authorization: Bearer {{auth_token}}
+
+
+### gateway aggregate items
+http://127.0.0.1:8080/api/aggregate/summary
+Accept: application/json
+Authorization: Bearer {{auth_token}}
+
+
+### resource catalog
+http://127.0.0.1:8081/api/catalog/items
+Accept: application/json
+Authorization: Bearer {{auth_token}}
+
+
+### resource order
+http://127.0.0.1:8082/api/order/items
+Accept: application/json
+Authorization: Bearer {{auth_token}}
+
+
+### OIDC 手动流程
+GET http://127.0.0.1:9000/.well-known/openid-configuration
+### 1
+http://127.0.0.1:9000/oauth2/authorize?response_type=code&client_id=creed-oidc-client&redirect_uri=http://127.0.0.1:9090/login/oauth2/code/creed-oidc&scope=openid%20profile%20api.read&state=STATE
+
+### 2
+POST http://127.0.0.1:9000/oauth2/token
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic Y3JlZWQtb2lkYy1jbGllbnQ6b2lkYy1zZWNyZXQ=
+
+grant_type=authorization_code&redirect_uri=http://127.0.0.1:9090/login/oauth2/code/creed-oidc&code=jzFspCfjRH4VOkvRTOgmhFFZoXpBh8s4gWSnNXz_ghP5F_LGLbr9X-EkKLNZ0mUk43rGE3k76kP8FXXUlZn_xE0USA74fZJmdVSsiyG0VYhJD1uDCOYdK4MPTOh3QIJ3
+
+#example, 多了一个id_token
+
+```json
+{
+  "access_token": "eyJraWQiOiJjYjMzZGQ1Yy1lN2JjLTQ0MTgtODBhMC00NzNjOGRkNjljNDUiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJkZW1vIiwiYXVkIjoiY3JlZWQtb2lkYy1jbGllbnQiLCJuYmYiOjE3Nzg2OTIyNDMsInNjb3BlIjpbIm9wZW5pZCIsInByb2ZpbGUiLCJhcGkucmVhZCJdLCJpc3MiOiJodHRwOi8vMTI3LjAuMC4xOjkwMDAiLCJleHAiOjE3Nzg2OTMxNDMsImlhdCI6MTc3ODY5MjI0MywianRpIjoiOWNlYzEyZTItODgzZi00ZTViLWE3ZTgtOGMxMWI3YjM2MDEzIn0.IbFGYyC6rt0yrdSatJadqJN0xSQ7Hm2FFbHCVlSWApqGCAMMABfsHk1yCVYsYTuRTN-orzn_8GmKzge9DwHfbUgCIyhbnlQdoPlZAuOCzYoA0DFvaBnH3JUUgwzvdNi9ZazppNGOVudjWpDA80Dbgdfv_p2cloTXu3YTUAsVIVPDn7YFULd72yzNlqw8PbwmLVf2NkZp290XQ5-vXRGZfu7xyl9FVS2h6-052LU-Y_PnVXH37T876RLbJQG5ruvGEYSiz-o6V7NH0qJqH5dtg1sekMw3EMSHyAPaEbRTKfKPfzEHmesA60HbiOWWAh-hES4IyuQIvPbT62NkM32mfQ",
+  "refresh_token": "OiOTsPKxh1VdzFGqmZpsysQ36lyB7QYXM5z2sN5ksI_pI7zL3Uf3ah2Zdt71KYptkEfSjDwipPXjpnVIoX7e0KXpE_hg0M9C4qEMxg4wrFOoQfmt0O-n-Xel0BRdYavC",
+  "scope": "openid profile api.read",
+  "id_token": "eyJraWQiOiJjYjMzZGQ1Yy1lN2JjLTQ0MTgtODBhMC00NzNjOGRkNjljNDUiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJkZW1vIiwiYXVkIjoiY3JlZWQtb2lkYy1jbGllbnQiLCJhenAiOiJjcmVlZC1vaWRjLWNsaWVudCIsImF1dGhfdGltZSI6MTc3ODY5MTgyMCwiaXNzIjoiaHR0cDovLzEyNy4wLjAuMTo5MDAwIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiZGVtbyIsImV4cCI6MTc3ODY5NDA0MywiZ2l2ZW5fbmFtZSI6ImRlbW8iLCJpYXQiOjE3Nzg2OTIyNDMsImp0aSI6IjI5ZjA1Nzk5LWFiMzctNDg3Ny1iOTEyLWE5NGJkMDJjODVhZiIsInNpZCI6IktUZ1g2Y1diUXkxb2xJaktwN1VYQnZGaUtOM2Q0ZXFYOE4wZWtHX2U3UkEifQ.BNO1o1tDzoTD_XrJmjVsWl8iqS_ctWVD-kCnW_yAL38ziIiUESO6hJQ2VtpXKh17p-E9d7ShHSj2JChj3P5uFBUkLVfvu6nuvunqZpbvLJ9nwa4DiyiJBVXMeStPg1u7HRSEWrbIX9QTg9L2DkNumd5ibJ7RXuTsrqdaGpc4ra0olPBSzB9ssO5xdxZwyAZ_71dNV5Cmxt0hBvbiPXOnAetKCaQdYynmPfN2RImprQCDou8PXxU3c4AYP2xHMtlAhB7lKcCQDK8IBl23HWH4ronIlJ22vp1BxWPhO2BIqNUttxrYOxvkrgTCIR34i3DUI2I9TDd3xAra6If8pwkqpw",
+  "token_type": "Bearer",
+  "expires_in": 899
+}
+```
+### 3 resource order
+http://127.0.0.1:8082/api/order/items
+Accept: application/json
+Authorization: Bearer eyJraWQiOiJjYjMzZGQ1Yy1lN2JjLTQ0MTgtODBhMC00NzNjOGRkNjljNDUiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJkZW1vIiwiYXVkIjoiY3JlZWQtb2lkYy1jbGllbnQiLCJuYmYiOjE3Nzg2OTIwNDMsInNjb3BlIjpbIm9wZW5pZCIsInByb2ZpbGUiLCJhcGkucmVhZCJdLCJpc3MiOiJodHRwOi8vMTI3LjAuMC4xOjkwMDAiLCJleHAiOjE3Nzg2OTI5NDMsImlhdCI6MTc3ODY5MjA0MywianRpIjoiZjAzYTU2ZjYtYzdmZS00YWI0LTg3MjEtYjU2N2UzMjY1NjllIn0.qCTZ7z0IeTy0hu182glOihBGN5ns8YD-GS3-PEkvjcHmxT5S30vFqSARo9A_UwFhqTjm4fLLssU193vMYHpU5GfP4WpqiuPe135-GRMYbiaHzGG97WEbHawRyM8JOtevpv_9bvcSwtZBx6x7e3oydYzIBDa-GNfV2jLs6ro-TXZaCTvjXuCZSZx1MO3HnZxrm3sPreK9lsMikcWXWi-8NpjiPGHaKM1GqbtJxfedPrAz_Ze_8LKO7ADMtvRt28Kb3gv4IokK2KtoBs8HNG3ZoaM0Cnpaa-me5AkY1IatOxwqjr5iaeRDlGqBbJJCyU4yqXP2Fh3CrF0sCqqGqw-KhA
