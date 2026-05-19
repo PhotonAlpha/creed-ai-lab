@@ -29,3 +29,9 @@ management:
     distribution:
       percentiles-histogram:
         http.server.requests: true
+
+creed:
+  metrics:
+    jvm-memory:
+      initial-delay-ms: 10000
+      interval-ms: 30000
