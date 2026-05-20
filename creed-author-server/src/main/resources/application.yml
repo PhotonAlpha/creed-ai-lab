@@ -22,7 +22,7 @@ management:
     health:
       show-details: when_authorized
     prometheus:
-      enabled: true
+      access: unrestricted
   metrics:
     tags:
       application: ${spring.application.name}
