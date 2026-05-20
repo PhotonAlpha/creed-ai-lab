@@ -1,0 +1,14 @@
+server:
+  port: 9100
+  servlet:
+    context-path: /report
+
+spring:
+  application:
+    name: creed-report
+  thymeleaf:
+    cache: false
+    mode: HTML
+    encoding: UTF-8
+    prefix: classpath:/templates/
+    suffix: .html
