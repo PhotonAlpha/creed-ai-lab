@@ -1,0 +1,52 @@
+# Activated when the `ssl` profile is on (default in application.yml).
+# Tests omit this profile to avoid needing certs on disk.
+server:
+  ssl:
+    bundle: creed-pem-server
+    # client-auth: need   # uncomment for mTLS termination at the embedded server
+
+spring:
+  ssl:
+    bundle:
+      # ---------- PEM bundles (cert + key files, hot-reloadable) ----------
+      pem:
+        creed-pem-server:
+          reload-on-update: true
+          keystore:
+            certificate: "classpath:certs/server.crt"
+            private-key: "classpath:certs/server.key"
+            # private-key-password: "${SERVER_KEY_PASSWORD:}"
+          # truststore is only needed if you want mTLS on the server side
+          truststore:
+            certificate: "classpath:certs/ca.crt"
+        creed-pem-client:
+          keystore:
+            certificate: "classpath:certs/client.crt"
+            private-key: "classpath:certs/client.key"
+          truststore:
+            certificate: "classpath:certs/ca.crt"
+      # ---------- JKS / PKCS12 bundles (classic keystore files) ----------
+      jks:
+        creed-jks-server:
+          key:
+            alias: server
+            # password: "${SERVER_KEY_PASSWORD:changeit}"
+          keystore:
+            location: "classpath:certs/server-keystore.p12"
+            password: "${SERVER_KEYSTORE_PASSWORD:changeit}"
+            type: PKCS12
+          truststore:
+            location: "classpath:certs/truststore.p12"
+            password: "${TRUSTSTORE_PASSWORD:changeit}"
+            type: PKCS12
+        creed-jks-client:
+          key:
+            alias: client
+          keystore:
+            location: "classpath:certs/client-keystore.p12"
+            password: "${CLIENT_KEYSTORE_PASSWORD:changeit}"
+            type: PKCS12
+          truststore:
+            location: "classpath:certs/truststore.p12"
+            password: "${TRUSTSTORE_PASSWORD:changeit}"
+            type: PKCS12

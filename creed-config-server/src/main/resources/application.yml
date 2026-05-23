@@ -1,0 +1,80 @@
+server:
+  port: 8443
+  servlet:
+    context-path: /config-server
+
+spring:
+  application:
+    name: creed-config-server
+  # `native` makes Spring Cloud Config serve from classpath:/config-repo/.
+  # `ssl` pulls in application-ssl.yml (embedded Tomcat HTTPS + SSL Bundles).
+  # Tests use @ActiveProfiles({"native","test"}) to skip the ssl profile so the
+  # context loads without real certs on disk.
+  profiles:
+    active: native,ssl
+  cloud:
+    config:
+      server:
+        native:
+          search-locations: classpath:/config-repo/
+  security:
+    user:
+      name: ${CREED_CONFIG_USER:creed-config}
+      password: ${CREED_CONFIG_PASSWORD:configpass}
+      roles: CONFIG_CLIENT
+
+# Used by HttpClientsConfiguration to pick which bundle the outbound
+# RestTemplate / RestClient should use. Swap to "creed-jks-client" if your
+# certs are distributed as JKS / PKCS12 instead of PEM.
+creed:
+  http-client:
+    enabled: true
+    ssl-bundle: creed-pem-client
+    connect-timeout: 5s
+    read-timeout: 10s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,env,configprops,sslbundles
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+
+# =============================================================================
+# JWS (Red Hat JBoss Web Server) deployment notes
+# -----------------------------------------------------------------------------
+# 1. Build:           mvn -pl creed-config-server -am clean package
+# 2. Drop the war:    $JWS_HOME/tomcat/webapps/creed-config-server.war
+# 3. Configure the HTTPS connector in $JWS_HOME/tomcat/conf/server.xml, e.g.
+#    <Connector port="8443" protocol="org.apache.coyote.http11.Http11Nio2Protocol"
+#               SSLEnabled="true" maxThreads="200" scheme="https" secure="true">
+#      <SSLHostConfig protocols="TLSv1.3,TLSv1.2">
+#        <Certificate certificateKeystoreFile="conf/server-keystore.p12"
+#                     certificateKeystorePassword="changeit"
+#                     type="RSA"/>
+#      </SSLHostConfig>
+#    </Connector>
+# 4. The `spring.ssl.bundle.*` blocks in application-ssl.yml STILL apply for
+#    outbound RestTemplate / RestClient calls (creed-pem-client / creed-jks-client)
+#    when deployed to JWS — only `server.ssl.*` is bypassed because the container
+#    owns the listener.
+# =============================================================================
+
+# =============================================================================
+# Generating the dev PKI referenced above
+# -----------------------------------------------------------------------------
+#  pwsh creed-config-server/scripts/generate-certs.ps1
+#    [-Force]                                  # overwrite existing
+#    [-Password changeit]                      # keystore/truststore password
+#    [-ValidityDays 365]                       # cert lifetime
+#    [-ServerCn localhost]                     # server CN
+#    [-ServerSan @('DNS:localhost','IP:127.0.0.1')]  # server SANs
+#
+# Drops ca.crt / server.{crt,key} / client.{crt,key} / *-keystore.p12 / truststore.p12
+# into src/main/resources/certs/, matching every path referenced in the bundles above.
+# Requires OpenSSL 3.x and the JDK's keytool on PATH.
+# =============================================================================

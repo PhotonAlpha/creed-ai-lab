@@ -23,6 +23,7 @@
         <module>creed-gateway</module>
         <module>creed-resource</module>
         <module>creed-report</module>
+        <module>creed-config-server</module>
     </modules>
 
     <dependencyManagement>

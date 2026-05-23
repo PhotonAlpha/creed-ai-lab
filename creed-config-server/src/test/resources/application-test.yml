@@ -1,0 +1,14 @@
+# Active under @ActiveProfiles({"native","test"}). The `ssl` profile is deliberately
+# omitted so the test context does not try to load certs from disk.
+server:
+  ssl:
+    enabled: false
+creed:
+  http-client:
+    enabled: false
+spring:
+  security:
+    user:
+      name: test-config
+      password: test-password
+      roles: CONFIG_CLIENT

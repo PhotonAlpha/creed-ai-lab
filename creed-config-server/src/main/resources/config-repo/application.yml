@@ -1,0 +1,4 @@
+# Shared defaults served by Spring Cloud Config (native profile, classpath repo).
+# Override per-app by adding {app-name}.yml or {app-name}-{profile}.yml next to this file.
+creed:
+  greeting: "hello from creed-config-server"
