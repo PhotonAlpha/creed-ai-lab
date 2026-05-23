@@ -1,4 +1,4 @@
-POST http://127.0.0.1:9000/oauth2/token
+POST http://127.0.0.1:9000/auth-server/oauth2/token
 Authorization: Basic Y3JlZWQtY2xpZW50OmNyZWVkLXNlY3JldA==
 Content-Type: application/x-www-form-urlencoded
 
@@ -72,3 +72,26 @@ grant_type=authorization_code&redirect_uri=http://127.0.0.1:9090/login/oauth2/co
 http://127.0.0.1:8082/api/order/items
 Accept: application/json
 Authorization: Bearer eyJraWQiOiJjYjMzZGQ1Yy1lN2JjLTQ0MTgtODBhMC00NzNjOGRkNjljNDUiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJkZW1vIiwiYXVkIjoiY3JlZWQtb2lkYy1jbGllbnQiLCJuYmYiOjE3Nzg2OTIwNDMsInNjb3BlIjpbIm9wZW5pZCIsInByb2ZpbGUiLCJhcGkucmVhZCJdLCJpc3MiOiJodHRwOi8vMTI3LjAuMC4xOjkwMDAiLCJleHAiOjE3Nzg2OTI5NDMsImlhdCI6MTc3ODY5MjA0MywianRpIjoiZjAzYTU2ZjYtYzdmZS00YWI0LTg3MjEtYjU2N2UzMjY1NjllIn0.qCTZ7z0IeTy0hu182glOihBGN5ns8YD-GS3-PEkvjcHmxT5S30vFqSARo9A_UwFhqTjm4fLLssU193vMYHpU5GfP4WpqiuPe135-GRMYbiaHzGG97WEbHawRyM8JOtevpv_9bvcSwtZBx6x7e3oydYzIBDa-GNfV2jLs6ro-TXZaCTvjXuCZSZx1MO3HnZxrm3sPreK9lsMikcWXWi-8NpjiPGHaKM1GqbtJxfedPrAz_Ze_8LKO7ADMtvRt28Kb3gv4IokK2KtoBs8HNG3ZoaM0Cnpaa-me5AkY1IatOxwqjr5iaeRDlGqBbJJCyU4yqXP2Fh3CrF0sCqqGqw-KhA
+
+
+
+### heavy API
+POST http://127.0.0.1:9000/auth-server/api/load/heavy
+Content-Type: application/json
+Authorization: Basic ZGVtbzpkZW1v
+
+### light API
+POST http://127.0.0.1:9000/auth-server/api/load/light
+Content-Type: application/json
+Authorization: Basic ZGVtbzpkZW1v
+
+### actuator API
+GET http://localhost:9000/auth-server/actuator
+Content-Type: application/json
+Authorization: Basic ZGVtbzpkZW1v
+
+
+### actuator API
+GET http://localhost:9000/auth-server/api/load/logging
+Content-Type: application/json
+Authorization: Basic ZGVtbzpkZW1v
