@@ -36,7 +36,8 @@ class JvmMemoryMetricsLoggerTest {
 
     @Test
     void loggingTomcatMetricsTest() {
-        metricsLogger.loggingTomcatMetrics();
+        metricsLogger.loggingHttpRequestActiveBucketMetrics();
+        metricsLogger.loggingHttpBucketMetrics();
     }
 
     @Test

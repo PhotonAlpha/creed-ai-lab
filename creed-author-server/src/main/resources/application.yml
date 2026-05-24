@@ -6,6 +6,26 @@ server:
 spring:
   application:
     name: creed-author-server
+  # `optional:` so local dev still boots when the config server is down.
+  # Drop the prefix in prod / CI to fail-fast on misconfiguration.
+#  config:
+#    import: "${CREED_CONFIG_IMPORT:optional:configserver:https://localhost:8443/config-server}"
+#  cloud:
+#    config:
+#      username: ${CREED_CONFIG_USER:creed-config}
+#      password: ${CREED_CONFIG_PASSWORD:configpass}
+#      fail-fast: false
+#      # Re-use the SSL Bundle defined below to trust the config server's self-signed cert.
+#      # Comment this out if the config server runs over plain HTTP.
+#      tls:
+#        enabled: true
+#        bundle: creed-config-trust
+#  ssl:
+#    bundle:
+#      pem:
+#        creed-config-trust:
+#          truststore:
+#            certificate: "${CREED_CONFIG_TRUST_CERT:classpath:certs/ca.crt}"
 
 management:
   health:
@@ -29,3 +49,5 @@ management:
     distribution:
       percentiles-histogram:
         http.server.requests: true
+      percentiles:
+        http.server.requests: 0.95, 0.99

@@ -4,6 +4,7 @@ import com.creed.auth.controller.dto.HeavyResponse;
 import com.creed.auth.metrics.JvmMemoryMetricsLogger;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.util.StopWatch;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -53,9 +54,14 @@ public class MockRestController {
 
     @GetMapping("/logging")
     public String logging() {
+        StopWatch stopWatch = new StopWatch("metrics");
+        stopWatch.start("metrics");
         jvmMemoryMetricsLogger.loggingJVMMetrics();
         jvmMemoryMetricsLogger.loggingTomcatMetrics();
-        jvmMemoryMetricsLogger.loggingTomcatBucketMetrics();
+        jvmMemoryMetricsLogger.loggingHttpBucketMetrics();
+        jvmMemoryMetricsLogger.loggingTomcatRequestMetrics();
+        stopWatch.stop();
+        log.info(stopWatch.prettyPrint(TimeUnit.MILLISECONDS));
         return "OK";
     }
 }
