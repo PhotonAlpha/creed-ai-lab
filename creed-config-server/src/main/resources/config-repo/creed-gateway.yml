@@ -1,0 +1,74 @@
+# Served to creed-gateway via spring.config.import=configserver:...
+#
+# Requirement 4: enable the gateway's own HTTPS listener from an SSL bundle defined here.
+# Requirement 5: route to the resource servers through Spring Cloud LoadBalancer (lb://),
+#                trusting their certificates via the creed-jks-client bundle.
+# Requirement 6: the PKCS12 keystore/truststore password is delivered as a {cipher} value,
+#                decrypted by the config server before this document is served.
+creed:
+  ssl:
+    keystore-password: '{cipher}AQAJVWCbSPUL5g65P1Jc1i/88Ve8n7x7DMgimvParJOce0p1ft/CHkL8gHDVJUJCBQHiBD0C6f6d2flTp4y58w7A0bR+Jf/46Hfk9NrfyXe12qjlQo1MRCoAUY/mjIsUY910y1qvs3dqNPaUM5fcVuhhrZd0cg/0PXbYM5NWFgE96xKpdASLyjzVE8G8kV0QTBdpaHc3Xe2hqz2d4pL8Dn9VqyIR8P5Qo9IbD2djorvApEwlYMnX5y4sJcyB3lzFnqEIC2Ui+VgM7v60cTanQJfXHZgu+ePvQ+wyoqZ/QBIs9BNgPOMVF7B4MfqUNdjqT9qWmG9Brv9jYsrKKf6QTuu6FVDDzu2E9x6MVMmXjvyhy8Xj2I2SaVE63YAOix2KWOE='
+  resource:
+    catalog-url: lb://catalog-resource/api/catalog/items
+    order-url: lb://order-resource/api/order/items
+
+server:
+  ssl:
+    bundle: creed-jks-server
+
+spring:
+  ssl:
+    bundle:
+      jks:
+        # Gateway's own HTTPS listener.
+        creed-jks-server:
+          key:
+            alias: server
+          keystore:
+            location: "classpath:certs/server-keystore.p12"
+            password: "${creed.ssl.keystore-password}"
+            type: PKCS12
+          truststore:
+            location: "classpath:certs/truststore.p12"
+            password: "${creed.ssl.keystore-password}"
+            type: PKCS12
+        # Used by the gateway HttpClient and the @LoadBalanced WebClient to trust the
+        # resource servers (and present a client cert if they ever require mTLS).
+        creed-jks-client:
+          key:
+            alias: client
+          keystore:
+            location: "classpath:certs/client-keystore.p12"
+            password: "${creed.ssl.keystore-password}"
+            type: PKCS12
+          truststore:
+            location: "classpath:certs/truststore.p12"
+            password: "${creed.ssl.keystore-password}"
+            type: PKCS12
+  cloud:
+    # Static service registry backing Spring Cloud LoadBalancer (no Eureka/Consul needed).
+    # lb://catalog-resource -> https://localhost:8081, lb://order-resource -> https://localhost:8082.
+    discovery:
+      client:
+        simple:
+          instances:
+            catalog-resource:
+              - uri: https://localhost:8081
+            order-resource:
+              - uri: https://localhost:8082
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            ssl:
+              # Requirement 5: gateway routes trust the resource servers via this bundle.
+              ssl-bundle: creed-jks-client
+          routes:
+            - id: catalog-resource
+              uri: lb://catalog-resource
+              predicates:
+                - Path=/api/catalog/**
+            - id: order-resource
+              uri: lb://order-resource
+              predicates:
+                - Path=/api/order/**

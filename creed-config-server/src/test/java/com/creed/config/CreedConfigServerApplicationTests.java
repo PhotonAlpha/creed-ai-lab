@@ -31,8 +31,11 @@ class CreedConfigServerApplicationTests {
 
     @Test
     void contextLoadsConfigServerInfrastructure() {
-        // @EnableConfigServer wires this bean; absence means the annotation was lost.
-        assertThat(context.containsBean("configServerProperties")).isTrue();
+        // @EnableConfigServer wires this @ConfigurationProperties bean (registered under a
+        // derived name, so assert by type); absence means the annotation was lost.
+        assertThat(context.getBeanNamesForType(
+                org.springframework.cloud.config.server.config.ConfigServerProperties.class))
+                .isNotEmpty();
         // Security chain is wired.
         assertThat(context.getBeanNamesForType(org.springframework.security.web.SecurityFilterChain.class))
                 .isNotEmpty();

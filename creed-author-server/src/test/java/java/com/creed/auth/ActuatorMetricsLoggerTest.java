@@ -1,7 +1,7 @@
 package java.com.creed.auth;
 
 import com.creed.auth.CreedAuthorServerApplication;
-import com.creed.auth.metrics.JvmMemoryMetricsLogger;
+import com.creed.auth.metrics.ActuatorMetricsLogger;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
@@ -17,9 +17,9 @@ import org.springframework.test.context.TestPropertySource;
 @SpringBootTest(classes = CreedAuthorServerApplication.class)
 @TestPropertySource(properties = {"spring.config.location=classpath:/"})
 @Slf4j
-class JvmMemoryMetricsLoggerTest {
+class ActuatorMetricsLoggerTest {
     @Resource
-    JvmMemoryMetricsLogger metricsLogger;
+    ActuatorMetricsLogger metricsLogger;
 
     @Test
     void listKeysTest() {

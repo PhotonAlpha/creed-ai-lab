@@ -26,6 +26,8 @@ param(
     [string]   $ServerCn     = 'localhost',
     [string[]] $ServerSan    = @('DNS:localhost', 'IP:127.0.0.1'),
     [string]   $ClientCn     = 'creed-config-client',
+    # RSA key-pair used by Spring Cloud Config Server for asymmetric {cipher} encryption.
+    [string]   $EncryptAlias = 'config-key',
     [switch]   $Force
 )
 
@@ -75,9 +77,10 @@ $cliCrt   = PathOf 'client.crt'
 $srvP12   = PathOf 'server-keystore.p12'
 $cliP12   = PathOf 'client-keystore.p12'
 $trustP12 = PathOf 'truststore.p12'
+$encP12   = PathOf 'config-encrypt.p12'
 $caSerial = PathOf 'ca.srl'
 
-$generated = @($caKey, $caCrt, $srvKey, $srvCsr, $srvCrt, $cliKey, $cliCsr, $cliCrt, $srvP12, $cliP12, $trustP12, $caSerial)
+$generated = @($caKey, $caCrt, $srvKey, $srvCsr, $srvCrt, $cliKey, $cliCsr, $cliCrt, $srvP12, $cliP12, $trustP12, $encP12, $caSerial)
 
 if (-not $Force) {
     $existing = $generated | Where-Object { Test-Path $_ }
@@ -182,8 +185,50 @@ Invoke-Native 'keytool' @(
     '-noprompt'
 )
 
+Write-Host "6/6  Generating RSA key-pair for Spring Cloud Config asymmetric encryption"
+if (Test-Path $encP12) { Remove-Item -LiteralPath $encP12 -Force }
+Invoke-Native 'keytool' @(
+    '-genkeypair',
+    '-alias',      $EncryptAlias,
+    '-keyalg',     'RSA',
+    '-keysize',    '2048',
+    '-keystore',   $encP12,
+    '-storetype',  'PKCS12',
+    '-storepass',  $Password,
+    '-keypass',    $Password,
+    '-dname',      'CN=Creed Config Encrypt, O=creed, OU=dev',
+    '-validity',   $ValidityDays
+)
+
 # Tidy intermediate scratch (CSRs + openssl serial file).
 @($srvCsr, $cliCsr, $caSerial) | Where-Object { Test-Path $_ } | Remove-Item -Force
+
+# -------------------------------------------------------------------------
+# Distribute the dev PKI to the consuming modules.
+#
+# Each client module trusts the config-server (and the other resource servers)
+# via ca.crt / truststore.p12, terminates its own HTTPS with server-keystore.p12,
+# and (gateway) talks mTLS to the resource servers with client-keystore.p12.
+# The config-encrypt.p12 key-store stays ONLY in the config-server.
+# -------------------------------------------------------------------------
+$repoRoot   = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+$clientCerts = @('ca.crt', 'server-keystore.p12', 'client-keystore.p12', 'truststore.p12')
+$targets = @(
+    'creed-resource\creed-resource-catalog\src\main\resources\certs',
+    'creed-resource\creed-resource-order\src\main\resources\certs',
+    'creed-gateway\src\main\resources\certs'
+)
+
+Write-Host ""
+Write-Host "Distributing client PKI to consuming modules:"
+foreach ($rel in $targets) {
+    $dest = Join-Path $repoRoot $rel
+    if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest -Force | Out-Null }
+    foreach ($name in $clientCerts) {
+        Copy-Item -LiteralPath (PathOf $name) -Destination (Join-Path $dest $name) -Force
+    }
+    Write-Host ("  -> {0}" -f $dest)
+}
 
 Write-Host ""
 Write-Host "Done. Files in $OutputDir :"
@@ -198,3 +243,4 @@ Write-Host "  PEM  creed-pem-client  <- client.crt + client.key (truststore: ca.
 Write-Host "  JKS  creed-jks-server  <- server-keystore.p12 (alias 'server', pwd=$Password)"
 Write-Host "  JKS  creed-jks-client  <- client-keystore.p12 (alias 'client', pwd=$Password)"
 Write-Host "  JKS  truststore.p12    <- shared truststore (alias 'creed-ca', pwd=$Password)"
+Write-Host "  RSA  config-encrypt.p12 <- config-server {cipher} key (alias '$EncryptAlias', pwd=$Password)"

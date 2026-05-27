@@ -4,6 +4,9 @@ server:
   ssl:
     enabled: false
 creed:
+  # Disable the programmatic HTTPS customizer (TomcatHttpsConfiguration) in tests.
+  https:
+    enabled: false
   http-client:
     enabled: false
 spring:

@@ -6,6 +6,18 @@ server:
 spring:
   application:
     name: creed-author-server
+
+logging:
+  file:
+    # 日志输出目录,logback-spring.xml 据此分别写出业务日志与指标日志
+    path: ./logs
+
+creed:
+  auth:
+    # OAuth2/OIDC issuer. MUST include the context-path above so it equals the URL where the
+    # discovery document is served (<issuer>/.well-known/openid-configuration). Resource servers
+    # and the gateway must use this exact value as their jwt.issuer-uri.
+    issuer: ${CREED_AUTH_ISSUER:http://127.0.0.1:9000/auth-server}
   # `optional:` so local dev still boots when the config server is down.
   # Drop the prefix in prod / CI to fail-fast on misconfiguration.
 #  config:

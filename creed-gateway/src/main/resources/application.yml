@@ -4,28 +4,28 @@ server:
 spring:
   application:
     name: creed-gateway
+  # Requirement 4: fetch this app's config (HTTPS SSL bundle), plus the LoadBalancer
+  # instances and lb:// routes (requirement 5), from creed-config-server over HTTPS.
+  # The config server's self-signed CA is trusted via the local PKCS12 truststore below.
+  config:
+    import: "${CREED_CONFIG_IMPORT:configserver:https://localhost:8443/config-server}"
+  cloud:
+    config:
+      username: ${CREED_CONFIG_USER:creed-config}
+      password: ${CREED_CONFIG_PASSWORD:configpass}
+      fail-fast: true
+      tls:
+        enabled: true
+        trust-store: classpath:certs/truststore.p12
+        trust-store-type: PKCS12
+        trust-store-password: ${CREED_CONFIG_TRUSTSTORE_PASSWORD:changeit}
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: http://127.0.0.1:9000
-  cloud:
-    gateway:
-      server:
-        webflux:
-          routes:
-            - id: catalog-resource
-              uri: http://127.0.0.1:8081
-              predicates:
-                - Path=/api/catalog/**
-            - id: order-resource
-              uri: http://127.0.0.1:8082
-              predicates:
-                - Path=/api/order/**
+          # Must equal the authorization server's issuer, which includes its /auth-server context-path.
+          issuer-uri: ${CREED_AUTH_ISSUER:http://127.0.0.1:9000/auth-server}
 
 creed:
   oauth2:
     jwk-set-cache-minutes: 10
-  resource:
-    catalog-url: http://127.0.0.1:8081/api/catalog/items
-    order-url: http://127.0.0.1:8082/api/order/items

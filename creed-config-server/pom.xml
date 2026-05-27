@@ -14,7 +14,7 @@
     <name>creed-config-server</name>
     <description>Spring Cloud Config Server with Spring Boot 3 SSL Bundles (embedded Tomcat / JBoss Web Server / RestTemplate)</description>
     <!-- WAR packaging so the same artifact can run embedded (dev) or be deployed to Red Hat JBoss Web Server (JWS). -->
-    <packaging>war</packaging>
+    <packaging>jar</packaging>
 
     <dependencies>
         <dependency>
@@ -44,6 +44,23 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!--
+            Requirement 6: asymmetric {cipher} decryption with an RSA key-store.
+            spring-security-rsa provides KeyStoreKeyFactory / RsaSecretEncryptor; the
+            BouncyCastle PKIX provider is needed to read the PKCS12 key material.
+        -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-rsa</artifactId>
+            <version>1.1.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <!-- Matches the bcprov-jdk18on version Spring Boot pulls in transitively. -->
+            <version>1.80</version>
         </dependency>
 
         <dependency>

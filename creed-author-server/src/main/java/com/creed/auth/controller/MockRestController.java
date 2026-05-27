@@ -1,7 +1,7 @@
 package com.creed.auth.controller;
 
 import com.creed.auth.controller.dto.HeavyResponse;
-import com.creed.auth.metrics.JvmMemoryMetricsLogger;
+import com.creed.auth.metrics.ActuatorMetricsLogger;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StopWatch;
@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 public class MockRestController {
     public static final Random RANDOM = new Random();
     @Resource
-    JvmMemoryMetricsLogger jvmMemoryMetricsLogger;
+    ActuatorMetricsLogger actuatorMetricsLogger;
 
     @PostMapping("/heavy")
 
@@ -56,10 +56,10 @@ public class MockRestController {
     public String logging() {
         StopWatch stopWatch = new StopWatch("metrics");
         stopWatch.start("metrics");
-        jvmMemoryMetricsLogger.loggingJVMMetrics();
-        jvmMemoryMetricsLogger.loggingTomcatMetrics();
-        jvmMemoryMetricsLogger.loggingHttpBucketMetrics();
-        jvmMemoryMetricsLogger.loggingTomcatRequestMetrics();
+        actuatorMetricsLogger.loggingJVMMetrics();
+        actuatorMetricsLogger.loggingTomcatMetrics();
+        actuatorMetricsLogger.loggingHttpBucketMetrics();
+        actuatorMetricsLogger.loggingTomcatRequestMetrics();
         stopWatch.stop();
         log.info(stopWatch.prettyPrint(TimeUnit.MILLISECONDS));
         return "OK";

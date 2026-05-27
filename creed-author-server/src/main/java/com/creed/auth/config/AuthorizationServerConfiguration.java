@@ -5,6 +5,7 @@ import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -51,8 +52,6 @@ import java.util.function.Function;
 @Configuration
 @EnableWebSecurity
 public class AuthorizationServerConfiguration {
-
-    static final String ISSUER = "http://127.0.0.1:9000";
 
     @Bean
     @Order(1)
@@ -206,8 +205,16 @@ public class AuthorizationServerConfiguration {
         return OAuth2AuthorizationServerConfiguration.jwtDecoder(jwkSource);
     }
 
+    /**
+     * The issuer MUST be the externally reachable base URL of this authorization server, including
+     * the servlet context-path it is deployed under ({@code /auth-server}). It becomes the {@code iss}
+     * claim and the base for the OIDC metadata URLs, so it has to agree with where the discovery
+     * document is actually served ({@code <issuer>/.well-known/openid-configuration}); otherwise
+     * resource servers using {@code withIssuerLocation(issuer)} cannot find it.
+     */
     @Bean
-    AuthorizationServerSettings authorizationServerSettings() {
-        return AuthorizationServerSettings.builder().issuer(ISSUER).build();
+    AuthorizationServerSettings authorizationServerSettings(
+            @Value("${creed.auth.issuer:http://127.0.0.1:9000/auth-server}") String issuer) {
+        return AuthorizationServerSettings.builder().issuer(issuer).build();
     }
 }

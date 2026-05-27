@@ -19,6 +19,9 @@ import org.springframework.web.client.RestTemplate;
  * Spring Boot 3 SSL Bundles are looked up by name from {@link SslBundles} and applied to
  * blocking HTTP clients via the builders. Either the JKS bundle ("creed-jks-client") or
  * the PEM bundle ("creed-pem-client") defined in application.yml can be used here.
+ *
+ * <p>The inbound HTTPS listener is configured separately, programmatically, by
+ * {@link com.creed.config.web.TomcatHttpsConfiguration}.
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "creed.http-client", name = "enabled", havingValue = "true", matchIfMissing = true)
@@ -36,7 +39,7 @@ public class HttpClientsConfiguration {
                                   HttpClientProperties props) {
         SslBundle bundle = sslBundles.getBundle(props.getSslBundle());
         return builder
-                .setSslBundle(bundle)
+                .sslBundle(bundle)
                 .connectTimeout(props.getConnectTimeout())
                 .readTimeout(props.getReadTimeout())
                 .build();

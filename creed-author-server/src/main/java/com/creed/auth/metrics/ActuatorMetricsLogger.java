@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.FunctionTimer;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.LongTaskTimer;
+import io.micrometer.core.instrument.Measurement;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
@@ -13,18 +14,24 @@ import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.distribution.CountAtBucket;
 import io.micrometer.core.instrument.distribution.HistogramSnapshot;
 import io.micrometer.core.instrument.distribution.HistogramSupport;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.metrics.MetricsEndpoint;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StopWatch;
 import org.springframework.util.StringUtils;
 
 import java.text.DecimalFormat;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
@@ -35,9 +42,14 @@ import java.util.stream.StreamSupport;
  * @description creed-ai-lab
  * @date 2026-05-20T16
  */
-@Slf4j
 @Service
-public class JvmMemoryMetricsLogger {
+public class ActuatorMetricsLogger {
+    /**
+     * 指标日志使用固定的具名 logger("METRICS"),与类名/包名解耦。
+     * 任何项目只要复用本类与 logback 中的 {@code <logger name="METRICS">} 配置即可通用。
+     */
+    private static final Logger log = LoggerFactory.getLogger("METRICS");
+
     public static final DecimalFormat DF = new DecimalFormat("0");
     public static final DecimalFormat DF_00 = new DecimalFormat("0.00");
     public static final DecimalFormat DF_0 = new DecimalFormat("0.0");
@@ -127,6 +139,15 @@ public class JvmMemoryMetricsLogger {
             "jvm.threads.peak",
             "jvm.threads.states"
     );
+    private static final List<String> EXECUTOR_METRIC_NAMES = List.of(
+            "executor.active",
+            "executor.queued",
+            "executor.completed",
+            "executor.pool.size",
+            "executor.pool.core",
+            "executor.pool.max",
+            "executor.queue.remaining"
+    );
     private static final List<String> TOMCAT_METRIC_NAMES = List.of(
             "tomcat.cache.access",
             "tomcat.cache.hit",
@@ -163,8 +184,8 @@ public class JvmMemoryMetricsLogger {
     private final String application;
     private final MetricsEndpoint metricsEndpoint;
 
-    public JvmMemoryMetricsLogger(MeterRegistry meterRegistry,
-                                  @Value("${spring.application.name:unknown}") String application) {
+    public ActuatorMetricsLogger(MeterRegistry meterRegistry,
+                                 @Value("${spring.application.name:unknown}") String application) {
         this.meterRegistry = meterRegistry;
         this.application = application;
         metricsEndpoint = new MetricsEndpoint(meterRegistry);
@@ -393,7 +414,51 @@ public class JvmMemoryMetricsLogger {
         loggingJVMMemory("jvm.memory.max");
         loggingMetric("jvm.memory.usage.after.gc", DF_00);
     }
+    /**
+     * executor.* 线程池指标,按线程池(name 标签,如 applicationTaskExecutor)分别打印一行,
+     * 覆盖 active / queued / completed / pool.size / pool.core / pool.max / queue.remaining。
+     * <p>
+     * 仅遍历一次注册表:对每个 executor.* 指标按线程池名归集,并直接从 {@link Meter#measure()} 读取数值。
+     * 这样避免了对每个指标重复调用 {@code metricsEndpoint.metric()}(每次都会重新扫描注册表并聚合),
+     * 也避免了用 {@code find(name)} 逐个指标查询(Search 内部同样是对全部 Meter 的过滤)。
+     */
+    public void loggingThreadPoolMetrics() {
+        // name(线程池) -> (metric -> value);TreeMap 让线程池输出顺序稳定
+        Map<String, Map<String, Double>> metricsByPool = new TreeMap<>();
+        for (Meter meter : meterRegistry.getMeters()) {
+            String metricType = meter.getId().getName();
+            if (!EXECUTOR_METRIC_NAMES.contains(metricType)) {
+                continue;
+            }
+            String poolName = meter.getId().getTag("name");
+            if (!StringUtils.hasText(poolName)) {
+                continue;
+            }
+            double value = StreamSupport.stream(meter.measure().spliterator(), false)
+                    .mapToDouble(Measurement::getValue)
+                    .findFirst()
+                    .orElse(0d);
+            metricsByPool.computeIfAbsent(poolName, k -> new HashMap<>()).put(metricType, value);
+        }
 
+        if (metricsByPool.isEmpty()) {
+            log.info("actuator-metrics{metric_type=executor,application={},note=no_meters_registered}", application);
+            return;
+        }
+
+        metricsByPool.forEach((poolName, values) -> {
+            StringBuilder sb = new StringBuilder("actuator-metrics{metric_type=executor,application=")
+                    .append(application).append(",name=").append(poolName).append(",");
+            // 按 EXECUTOR_METRIC_NAMES 的固定顺序输出,保证每行字段顺序一致
+            for (String metricType : EXECUTOR_METRIC_NAMES) {
+                String metricName = StringUtils.replace(metricType, ".", "_");
+                sb.append(metricName).append("=")
+                        .append(DF.format(values.getOrDefault(metricType, 0d))).append(",");
+            }
+            sb.append("}");
+            log.info("{}", sb);
+        });
+    }
     protected void loggingJVMMemory(String metricType) {
         String metricName = StringUtils.replace(metricType, ".", "_");
         log.info("actuator-metrics{metric_type={},application={},{}={},{}={},{}={}}", metricName, application,
@@ -419,28 +484,18 @@ public class JvmMemoryMetricsLogger {
         log.info("{}", stringBuilder);
     }
 
-    // @Scheduled(fixedDelayString = "${creed.metrics.jvm-memory.interval-ms:30000}",
-    //         initialDelayString = "${creed.metrics.jvm-memory.initial-delay-ms:10000}")
-    public void logMetrics(List<String>  metricNames) {
-        List<MetricsEndpoint.AvailableTag> availableTags = metricsEndpoint.metric("tomcat.threads.busy", null).getAvailableTags();
-        availableTags.stream()
-                .map(tag -> tag.getTag() + String.join(",", tag.getValues()))
-                .collect(Collectors.joining(":"));
-        for (String name : metricNames) {
-            /* for (Gauge gauge : meterRegistry.find(name).gauges()) {
-                double value = gauge.value();
-                if (Double.isNaN(value)) {
-                    continue;
-                }
-
-                log.info("metric_type=jvm_memory application=\"{}\" metric=\"{}\" area=\"{}\" id=\"{}\" value={}",
-                        application,
-                        name,
-                        tag(gauge, "area"),
-                        tag(gauge, "id"),
-                        (long) value);
-            } */
-        }
+     @Scheduled(fixedDelayString = "${creed.metrics.jvm-memory.interval-ms:30000}",
+             initialDelayString = "${creed.metrics.jvm-memory.initial-delay-ms:10000}")
+    public void logMetrics() {
+         StopWatch stopWatch = new StopWatch("metrics");
+         stopWatch.start("metrics");
+         loggingJVMMetrics();
+         loggingTomcatMetrics();
+         loggingHttpBucketMetrics();
+         loggingTomcatRequestMetrics();
+         loggingThreadPoolMetrics();
+         stopWatch.stop();
+         log.info(stopWatch.prettyPrint(TimeUnit.MILLISECONDS));
     }
 
 

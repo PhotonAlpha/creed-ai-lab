@@ -1,10 +1,11 @@
 # Activated when the `ssl` profile is on (default in application.yml).
 # Tests omit this profile to avoid needing certs on disk.
-server:
-  ssl:
-    bundle: creed-pem-server
-    # client-auth: need   # uncomment for mTLS termination at the embedded server
-
+#
+# NOTE: the inbound HTTPS listener is NOT configured here via `server.ssl.*`.
+# Requirement 1 wires it programmatically in TomcatHttpsConfiguration
+# (WebServerFactoryCustomizer<TomcatServletWebServerFactory>), which points the
+# factory at the `creed-pem-server` bundle defined below. To terminate mTLS at the
+# embedded server, set client-auth in that customizer instead.
 spring:
   ssl:
     bundle:
@@ -28,6 +29,7 @@ spring:
       # ---------- JKS / PKCS12 bundles (classic keystore files) ----------
       jks:
         creed-jks-server:
+          reload-on-update: true
           key:
             alias: server
             # password: "${SERVER_KEY_PASSWORD:changeit}"
@@ -40,6 +42,7 @@ spring:
             password: "${TRUSTSTORE_PASSWORD:changeit}"
             type: PKCS12
         creed-jks-client:
+          reload-on-update: true
           key:
             alias: client
           keystore:
@@ -50,3 +53,4 @@ spring:
             location: "classpath:certs/truststore.p12"
             password: "${TRUSTSTORE_PASSWORD:changeit}"
             type: PKCS12
+

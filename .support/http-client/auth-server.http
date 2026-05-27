@@ -15,7 +15,7 @@ grant_type=client_credentials&scope=api.read
 %}
 
 ### gateway catalog items
-http://127.0.0.1:8080/api/catalog/items
+https://127.0.0.1:8080/api/catalog/items
 Accept: application/json
 Authorization: Bearer {{auth_token}}
 
@@ -39,7 +39,7 @@ Authorization: Bearer {{auth_token}}
 
 
 ### resource order
-http://127.0.0.1:8082/api/order/items
+https://127.0.0.1:8082/api/order/items
 Accept: application/json
 Authorization: Bearer {{auth_token}}
 
