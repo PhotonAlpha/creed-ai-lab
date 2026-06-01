@@ -44,6 +44,16 @@
         </rollingPolicy>
     </appender>
 
+    <!-- ============ OpenTelemetry:日志通过 OTLP 推送到 Collector(Loki) ============ -->
+    <!-- 端点 / 资源属性 由 application.yml 中 otel.* 配置驱动,这里无需重复指定。 -->
+    <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+        <captureExperimentalAttributes>true</captureExperimentalAttributes>
+        <captureMdcAttributes>*</captureMdcAttributes>
+        <captureKeyValuePairAttributes>true</captureKeyValuePairAttributes>
+        <captureLoggerContext>true</captureLoggerContext>
+        <captureCodeAttributes>true</captureCodeAttributes>
+    </appender>
+
     <!-- ============ 文件:指标日志 ============ -->
     <appender name="METRICS" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${METRICS_FILE}.log</file>
@@ -65,10 +75,11 @@
         <appender-ref ref="CONSOLE"/>
     </logger>
 
-    <!-- 业务日志:控制台 + 业务文件 -->
+    <!-- 业务日志:控制台 + 业务文件 + OTLP -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="BUSINESS"/>
+        <appender-ref ref="OTEL"/>
     </root>
 
 </configuration>

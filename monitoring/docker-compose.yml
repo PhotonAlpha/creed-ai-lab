@@ -9,6 +9,7 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: unless-stopped
+    networks: [creed-monitoring]
 
   grafana:
     image: grafana/grafana:latest
@@ -18,6 +19,7 @@ services:
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
     volumes:
       - grafana-data:/var/lib/grafana
       - ./provisioning/datasources:/etc/grafana/provisioning/datasources:ro
@@ -25,7 +27,63 @@ services:
       - ./dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
+      - tempo
+      - loki
     restart: unless-stopped
+    networks: [creed-monitoring]
+
+  # OpenTelemetry Collector: single OTLP ingress for the auth-server,
+  # fans out to Tempo (traces), Loki (logs), Prometheus scrape (metrics).
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: creed-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    ports:
+      - "4317:4317"   # OTLP gRPC (apps)
+      - "4318:4318"   # OTLP HTTP (apps)
+      - "8889:8889"   # Prometheus exporter scrape
+      - "13133:13133" # health_check
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      - tempo
+      - loki
+    restart: unless-stopped
+    networks: [creed-monitoring]
+
+  # Tempo: single-binary trace backend (OTLP gRPC in, HTTP query out).
+  tempo:
+    image: grafana/tempo:latest
+    container_name: creed-tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    ports:
+      - "3200:3200" # Tempo query API (Grafana datasource)
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    restart: unless-stopped
+    networks: [creed-monitoring]
+
+  # Loki: single-binary log backend with OTLP ingest enabled.
+  loki:
+    image: grafana/loki:latest
+    container_name: creed-loki
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+    networks: [creed-monitoring]
 
 volumes:
   grafana-data:
+  tempo-data:
+  loki-data:
+
+networks:
+  creed-monitoring:
+    driver: bridge
