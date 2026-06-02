@@ -2,7 +2,9 @@ server:
   port: 9000
   servlet:
     context-path: /auth-server
-
+  tomcat:
+    mbeanregistry:
+      enabled: true
 spring:
   application:
     name: creed-author-server
@@ -71,17 +73,30 @@ management:
         http.server.requests: true
       percentiles:
         http.server.requests: 0.95, 0.99
-  # Micrometer-side sampling probability for the OTel bridge. The OTel SDK's own
-  # `otel.traces.sampler` (below) is set to "parentbased_always_on" so this is what
-  # actually decides whether root spans are recorded.
+    # Micrometer→OTel 桥接(otel.instrumentation.micrometer.enabled=true)会把整个 Micrometer
+    # 注册表桥到 OTLP。JVM/system/process 指标 OTel 原生埋点已经产出(jvm_memory_used_bytes 等),
+    # 这里关掉 Micrometer 侧的同名 binder,避免在 collector 里出现重名但标签不同的重复序列。
+    # Tomcat、logback 等 OTel 原生没有的指标仍由 Micrometer 提供。
+    enable:
+      jvm: false
+      system: false
+      process: false
+  # Micrometer-side sampling probability for the OTel bridge. Set to 0.0 to stop
+  # recording any spans (链路追踪关闭)。otel.traces.exporter=none below also disables export.
   tracing:
     sampling:
-      probability: ${CREED_OTEL_SAMPLE_RATE:1.0}
+      probability: ${CREED_OTEL_SAMPLE_RATE:0.0}
 
 # ============ OpenTelemetry ============
 # Read by opentelemetry-spring-boot-starter; configures traces, metrics and logs in one place.
 # Override CREED_OTEL_ENDPOINT (e.g. http://otel-collector:4318) per environment.
 otel:
+  # OTel 原生埋点(runtime-telemetry / spring-webmvc)不产出 Tomcat 指标。开启 Micrometer→OTel
+  # 桥接,把 Spring/Micrometer 独有的指标(Tomcat 线程池、会话、logback 等)经 OTLP 上报。
+  # 需配合 server.tomcat.mbeanregistry.enabled=true 才能让 TomcatMetrics binder 注册。
+  instrumentation:
+    micrometer:
+      enabled: true
   service:
     name: ${spring.application.name}
   resource:
@@ -89,19 +104,27 @@ otel:
       service.name: ${spring.application.name}
       service.namespace: creed
       deployment.environment: ${CREED_ENV:local}
+      # 不设置时 OTel SDK 每次启动随机生成一个 UUID 作为 service.instance.id,
+      # 导致 collector 的 instance 标签每次重启都变,Grafana 下拉框堆积死实例。
+      # 固定为 服务名:端口,单实例本地开发下稳定且足够区分。多副本部署请改成每实例唯一值。
+      service.instance.id: ${spring.application.name}:${server.port}
   # 多导出器以逗号分隔。`logging` 是 SDK 自带的 LoggingExporter,会在每批信号导出前
   # 把它们以可读格式打印到 stdout——是最直观的“OTLP 推送时机/内容”观察手段。
-  # 不需要时改回 `otlp`。
+  # 当前只保留 metrics:traces / logs 的 exporter 设为 none,完全不采集、不上报。
   traces:
-    exporter: otlp,logging
+    exporter: none
     sampler: parentbased_always_on
   metrics:
     exporter: otlp,logging
   logs:
-    exporter: otlp,logging
+    exporter: none
   exporter:
     otlp:
       endpoint: ${CREED_OTEL_ENDPOINT:http://localhost:4318}
       protocol: http/protobuf
       compression: gzip
-      timeout: 10s
+      timeout: 60s
+  metric:
+    export:
+      interval: 10000
+

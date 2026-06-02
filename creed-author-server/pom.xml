@@ -13,7 +13,7 @@
     <artifactId>creed-author-server</artifactId>
     <name>creed-author-server</name>
     <description>Spring Authorization Server (OAuth2 / OIDC)</description>
-    <packaging>war</packaging>
+    <packaging>jar</packaging>
 
     <dependencies>
         <dependency>

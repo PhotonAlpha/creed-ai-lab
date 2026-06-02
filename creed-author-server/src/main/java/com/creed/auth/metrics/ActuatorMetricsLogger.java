@@ -484,7 +484,7 @@ public class ActuatorMetricsLogger {
         log.info("{}", stringBuilder);
     }
 
-     @Scheduled(fixedDelayString = "${creed.metrics.jvm-memory.interval-ms:30000}",
+     @Scheduled(fixedDelayString = "${creed.metrics.jvm-memory.interval-ms:180000}",
              initialDelayString = "${creed.metrics.jvm-memory.initial-delay-ms:10000}")
     public void logMetrics() {
          StopWatch stopWatch = new StopWatch("metrics");
