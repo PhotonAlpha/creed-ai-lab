@@ -148,6 +148,14 @@ public class ActuatorMetricsLogger {
             "executor.pool.max",
             "executor.queue.remaining"
     );
+    /**
+     * Apache HttpClient 5 connection-pool gauges registered by
+     * {@code PoolingHttpClientConnectionManagerMetricsBinder} (see {@code GatewayRestTemplateConfiguration}).
+     * Every meter carries an {@code httpclient=<name>} tag; {@code total.connections} additionally splits
+     * into {@code state=available} / {@code state=leased}.
+     */
+    private static final String HTTPCLIENT_POOL_PREFIX = "httpcomponents.httpclient.pool";
+
     private static final List<String> TOMCAT_METRIC_NAMES = List.of(
             "tomcat.cache.access",
             "tomcat.cache.hit",
@@ -459,6 +467,56 @@ public class ActuatorMetricsLogger {
             log.info("{}", sb);
         });
     }
+    /**
+     * httpcomponents.httpclient.pool.* — Apache HttpClient 5 connection-pool metrics, one line per pool
+     * ({@code httpclient} 标签,如 {@code creed-gateway})。覆盖
+     * total.max / total.connections(available+leased) / total.pending / route.max.default。
+     * <p>
+     * 与 {@link #loggingThreadPoolMetrics()} 同样的策略:只遍历一次注册表,对每个指标按连接池名(httpclient
+     * 标签)归集,并直接从 {@link Meter#measure()} 读数。{@code total.connections} 带 state 标签会拆成两条
+     * 序列,这里把 state 拼进字段名(如 {@code total_connections_available})以保留区分。
+     */
+    public void loggingHttpClientPoolMetrics() {
+        // httpclient(连接池) -> (字段名 -> 数值);TreeMap 让输出顺序稳定
+        Map<String, Map<String, Double>> metricsByClient = new TreeMap<>();
+        for (Meter meter : meterRegistry.getMeters()) {
+            String metricType = meter.getId().getName();
+            if (!metricType.startsWith(HTTPCLIENT_POOL_PREFIX)) {
+                continue;
+            }
+            String clientName = meter.getId().getTag("httpclient");
+            if (!StringUtils.hasText(clientName)) {
+                continue;
+            }
+            // 字段名:去掉公共前缀,把 state(available/leased)拼到末尾以区分同名指标的两条序列
+            String field = StringUtils.replace(
+                    metricType.substring(HTTPCLIENT_POOL_PREFIX.length() + 1), ".", "_");
+            String state = meter.getId().getTag("state");
+            if (StringUtils.hasText(state)) {
+                field = field + "_" + state;
+            }
+            double value = StreamSupport.stream(meter.measure().spliterator(), false)
+                    .mapToDouble(Measurement::getValue)
+                    .findFirst()
+                    .orElse(0d);
+            metricsByClient.computeIfAbsent(clientName, k -> new TreeMap<>()).put(field, value);
+        }
+
+        if (metricsByClient.isEmpty()) {
+            log.info("actuator-metrics{metric_type=httpcomponents_httpclient_pool,application={},note=no_meters_registered}",
+                    application);
+            return;
+        }
+
+        metricsByClient.forEach((clientName, values) -> {
+            StringBuilder sb = new StringBuilder("actuator-metrics{metric_type=httpcomponents_httpclient_pool,application=")
+                    .append(application).append(",httpclient=").append(clientName).append(",");
+            values.forEach((field, value) -> sb.append(field).append("=").append(DF.format(value)).append(","));
+            sb.append("}");
+            log.info("{}", sb);
+        });
+    }
+
     protected void loggingJVMMemory(String metricType) {
         String metricName = StringUtils.replace(metricType, ".", "_");
         log.info("actuator-metrics{metric_type={},application={},{}={},{}={},{}={}}", metricName, application,
@@ -494,6 +552,7 @@ public class ActuatorMetricsLogger {
          loggingHttpBucketMetrics();
          loggingTomcatRequestMetrics();
          loggingThreadPoolMetrics();
+         loggingHttpClientPoolMetrics();
          stopWatch.stop();
          log.info(stopWatch.prettyPrint(TimeUnit.MILLISECONDS));
     }

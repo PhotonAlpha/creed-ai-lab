@@ -91,6 +91,10 @@
                     <version>3.14.0</version>
                     <configuration>
                         <release>${java.version}</release>
+                        <!-- Retain method parameter names in bytecode (-parameters). Spring MVC needs
+                             them to bind @RequestParam/@PathVariable when no explicit name is given,
+                             e.g. MockRestController.callGateway(@RequestParam ... path). -->
+                        <parameters>true</parameters>
                     </configuration>
                 </plugin>
             </plugins>

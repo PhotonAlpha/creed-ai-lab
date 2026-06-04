@@ -8,6 +8,17 @@ server:
 spring:
   application:
     name: creed-author-server
+  # Trust material for the outbound HttpClient5 RestTemplate that calls creed-gateway over HTTPS.
+  # creed-gateway presents a self-signed server cert (CN=localhost) issued by the dev CA bundled in
+  # truststore.p12 (password "changeit"). We only need to TRUST the gateway here, so no key entry.
+  ssl:
+    bundle:
+      jks:
+        creed-gateway-trust:
+          truststore:
+            location: "classpath:certs/truststore.p12"
+            password: "${CREED_GATEWAY_TRUSTSTORE_PASSWORD:changeit}"
+            type: PKCS12
 
 logging:
   file:
@@ -23,6 +34,15 @@ logging:
     io.opentelemetry.sdk.logs.export: TRACE
 
 creed:
+  # Outbound HttpClient5 RestTemplate -> creed-gateway (HTTPS). See GatewayRestTemplateConfiguration.
+  gateway:
+    base-url: ${CREED_GATEWAY_BASE_URL:https://localhost:8080}
+    ssl-bundle: creed-gateway-trust
+    connect-timeout: 5s
+    read-timeout: 10s
+    # Connection pool sizing — exposed as httpcomponents.httpclient.pool.* metrics.
+    max-total-connections: 50
+    max-connections-per-route: 20
   auth:
     # OAuth2/OIDC issuer. MUST include the context-path above so it equals the URL where the
     # discovery document is served (<issuer>/.well-known/openid-configuration). Resource servers
@@ -115,7 +135,8 @@ otel:
     exporter: none
     sampler: parentbased_always_on
   metrics:
-    exporter: otlp,logging
+    exporter: none
+#    exporter: otlp,logging
   logs:
     exporter: none
   exporter:

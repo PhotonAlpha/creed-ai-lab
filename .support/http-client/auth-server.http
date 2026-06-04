@@ -95,3 +95,8 @@ Authorization: Basic ZGVtbzpkZW1v
 GET http://localhost:9000/auth-server/api/load/logging
 Content-Type: application/json
 Authorization: Basic ZGVtbzpkZW1v
+
+### load/gateway
+GET http://localhost:9000/auth-server/api/load/gateway?path=/api/catalog/items
+Content-Type: application/json
+Authorization: Basic ZGVtbzpkZW1v

@@ -4,11 +4,14 @@ import com.creed.auth.controller.dto.HeavyResponse;
 import com.creed.auth.metrics.ActuatorMetricsLogger;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
 import org.springframework.util.StopWatch;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.RestTemplate;
 
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
@@ -25,6 +28,24 @@ public class MockRestController {
     public static final Random RANDOM = new Random();
     @Resource
     ActuatorMetricsLogger actuatorMetricsLogger;
+
+    /** HttpClient5-backed RestTemplate that calls creed-gateway over HTTPS (GatewayRestTemplateConfiguration). */
+    @Resource
+    RestTemplate gatewayRestTemplate;
+
+    /**
+     * Calls creed-gateway over HTTPS through the pooled HttpClient5 RestTemplate. The {@code path}
+     * resolves against the gateway base URL (default https://localhost:8080), e.g.
+     * {@code /api/load/gateway?path=/api/catalog/items}. Each call leases a connection from the pool,
+     * so the httpcomponents.httpclient.pool.* metrics move while requests are in flight.
+     */
+    @GetMapping("/gateway")
+    public ResponseEntity<String> callGateway(@RequestParam(defaultValue = "/api/catalog/items") String path) {
+        ResponseEntity<String> response = gatewayRestTemplate.getForEntity(path, String.class);
+        log.info("gateway call path={} status={}", path, response.getStatusCode());
+        actuatorMetricsLogger.loggingHttpClientPoolMetrics();
+        return response;
+    }
 
     @PostMapping("/heavy")
 
@@ -60,6 +81,7 @@ public class MockRestController {
         actuatorMetricsLogger.loggingTomcatMetrics();
         actuatorMetricsLogger.loggingHttpBucketMetrics();
         actuatorMetricsLogger.loggingTomcatRequestMetrics();
+        actuatorMetricsLogger.loggingHttpClientPoolMetrics();
         stopWatch.stop();
         log.info(stopWatch.prettyPrint(TimeUnit.MILLISECONDS));
         return "OK";

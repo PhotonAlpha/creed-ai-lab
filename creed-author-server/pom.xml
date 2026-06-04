@@ -37,6 +37,17 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
+        <!--
+            Apache HttpClient 5: backs the outbound RestTemplate used to call creed-gateway over
+            HTTPS. Using it explicitly (instead of letting Boot pick it up via an SslBundle) lets us
+            own the PoolingHttpClientConnectionManager and bind its pool metrics to Micrometer with
+            PoolingHttpClientConnectionManagerMetricsBinder (shipped in micrometer-core).
+        -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+        </dependency>
+
         <!-- ============ OpenTelemetry ============ -->
         <!-- Bridges Micrometer Observation/Tracing to OpenTelemetry -->
         <dependency>
