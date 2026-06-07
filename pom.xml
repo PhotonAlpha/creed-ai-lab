@@ -13,8 +13,8 @@
 
     <properties>
         <java.version>21</java.version>
-        <spring-boot.version>3.5.14</spring-boot.version>
-        <spring-cloud.version>2025.0.2</spring-cloud.version>
+        <spring-boot.version>4.0.6</spring-boot.version>
+        <spring-cloud.version>2025.1.1</spring-cloud.version>
         <!-- OpenTelemetry Java Instrumentation BOM: aligns opentelemetry-spring-boot-starter,
              OTLP exporters and the Logback appender on a single version. -->
         <otel-instrumentation.version>2.20.1</otel-instrumentation.version>
@@ -31,6 +31,7 @@
         <module>creed-resource</module>
         <module>creed-report</module>
         <module>creed-config-server</module>
+        <module>creed-none-author</module>
     </modules>
 
     <dependencyManagement>

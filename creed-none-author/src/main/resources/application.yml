@@ -1,0 +1,34 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: creed-none-author
+
+# Resilience4j retry configuration — the equivalent of Spring Retry's
+# @Retryable(maxAttemptsExpression / @Backoff(delayExpression, maxDelayExpression)).
+resilience4j:
+  retry:
+    instances:
+      mockRetry:
+        # @Retryable.maxAttemptsExpression  -> total attempts incl. the first call
+        max-attempts: 3
+        # @Backoff.delayExpression          -> initial wait between attempts
+        wait-duration: 500ms
+        # @Backoff: exponential growth, capped by maxDelayExpression
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        # @Backoff.maxDelayExpression       -> upper bound on the wait
+        exponential-max-wait-duration: 5s
+        # @Retryable(value = {IllegalStateException.class})
+        retry-exceptions:
+          - java.lang.IllegalStateException
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, retries, retryevents
+  endpoint:
+    health:
+      show-details: always
