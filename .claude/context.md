@@ -92,7 +92,7 @@ spring-creed-auth-server/
 ### 3.4 creed-report
 - **关键源文件**：
   - `com.creed.report.CreedReportApplication`
-  - `com.creed.report.web.ReportController`
+  - `com.creed.report.controller.ReportController`
   - `com.creed.report.service.ServerInfoService` / `AssetService`
   - `com.creed.report.model.ServerInfo`
 - 用途：生成服务器信息相关的 HTML 报告

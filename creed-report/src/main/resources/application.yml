@@ -12,3 +12,21 @@ spring:
     encoding: UTF-8
     prefix: classpath:/templates/
     suffix: .html
+
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+    access:
+      default: unrestricted
+  defaults:
+    metrics:
+      export:
+        enabled: on
+
+  endpoint:
+    env:
+      access: unrestricted
+      show-values: always

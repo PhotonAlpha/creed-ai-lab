@@ -1,4 +1,4 @@
-package com.creed.report.web;
+package com.creed.report.controller;
 
 import com.creed.report.model.ServerInfo;
 import com.creed.report.service.AssetService;
@@ -21,7 +21,7 @@ import java.util.List;
 public class ReportController {
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final DateTimeFormatter FILE_TS = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    public static final DateTimeFormatter FILE_TS = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final ServerInfoService serverInfoService;
     private final AssetService assetService;
@@ -35,7 +35,7 @@ public class ReportController {
         this.templateEngine = templateEngine;
     }
 
-    @GetMapping({"/", "/report"})
+    @GetMapping({ "/report"})
     public String report(Model model) {
         List<ServerInfo> servers = serverInfoService.listServers();
         model.addAttribute("servers", servers);

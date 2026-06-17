@@ -1,0 +1,112 @@
+/*
+ * Minimal custom styling. Layout/spacing/typography/components all come from
+ * Bootstrap 5 utilities in the template. Only the things Bootstrap has no
+ * equivalent for live here: the GitHub diff color palette, the split-diff
+ * grid, and the Ruby code-token colors.
+ */
+
+:root {
+    --diff-add-line: #e6ffec;
+    --diff-add-num: #ccffd8;
+    --diff-del-line: #ffebe9;
+    --diff-del-num: #ffd7d5;
+    --diff-hunk: #ddf4ff;
+    --diff-hunk-fg: #0550ae;
+    --diff-empty: #f6f8fa;
+}
+
+body {
+    color: #1f2328;
+}
+
+/* GitHub uses an orange active-tab underline rather than Bootstrap's blue */
+.nav-underline .nav-link {
+    color: #1f2328;
+}
+
+.nav-underline .nav-link.active {
+    border-bottom-color: #fd8c73;
+    color: #1f2328;
+    font-weight: 600;
+}
+
+/* chevron flips when its target collapses (Bootstrap toggles aria-expanded) */
+.chevron {
+    transition: transform .15s ease;
+}
+
+.chevron[aria-expanded="false"] {
+    transform: rotate(-90deg);
+}
+
+/* ---------- Split-diff grid (no Bootstrap equivalent) ---------- */
+.diff-table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    width: 100%;
+    line-height: 20px;
+    tab-size: 4;
+}
+
+.diff-table col.col-num {
+    width: 56px;
+}
+
+.diff-table td {
+    padding: 0 10px;
+    vertical-align: top;
+}
+
+.diff-table .blob-num {
+    text-align: right;
+    color: rgba(31, 35, 40, .4);
+    white-space: nowrap;
+    user-select: none;
+}
+
+.diff-table .blob-code {
+    position: relative;
+    padding-left: 22px;
+}
+
+/* Only the code text preserves its own whitespace — applying pre-wrap to the
+   whole <td> would also render the template's indentation/newlines. */
+.diff-table .code-content {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.diff-table .blob-code .marker {
+    position: absolute;
+    left: 8px;
+    user-select: none;
+}
+
+/* Set both --bs-table-bg (so colors win when the table uses Bootstrap's
+   .table class, which paints cells via that variable) and background-color
+   (so it still works without .table). */
+.add-num   { --bs-table-bg: var(--diff-add-num);  background-color: var(--diff-add-num); }
+.add-code  { --bs-table-bg: var(--diff-add-line); background-color: var(--diff-add-line); }
+.add-code .marker { color: #1a7f37; }
+.del-num   { --bs-table-bg: var(--diff-del-num);  background-color: var(--diff-del-num); }
+.del-code  { --bs-table-bg: var(--diff-del-line); background-color: var(--diff-del-line); }
+.del-code .marker { color: #cf222e; }
+.empty-num,
+.empty-code { --bs-table-bg: var(--diff-empty); background-color: var(--diff-empty); }
+
+.diff-table tr.hunk td,
+.diff-table tr.expand td {
+    --bs-table-bg: var(--diff-hunk);
+    background-color: var(--diff-hunk);
+    color: var(--diff-hunk-fg);
+    padding-top: 4px;
+    padding-bottom: 4px;
+}
+
+/* ---------- Ruby tokens (GitHub light palette) ---------- */
+.tok-kw  { color: #cf222e; }
+.tok-fn  { color: #6639ba; }
+.tok-str { color: #0a3069; }
+.tok-com { color: #59636e; }
+.tok-sym,
+.tok-num { color: #0550ae; }

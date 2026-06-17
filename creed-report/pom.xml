@@ -16,6 +16,7 @@
 
     <properties>
         <webjars-bootstrap.version>5.3.3</webjars-bootstrap.version>
+        <webjars-bootstrap-icons.version>1.11.3</webjars-bootstrap-icons.version>
         <webjars-locator.version>0.59</webjars-locator.version>
     </properties>
 
@@ -29,9 +30,18 @@
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.webjars</groupId>
             <artifactId>bootstrap</artifactId>
             <version>${webjars-bootstrap.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.webjars.npm</groupId>
+            <artifactId>bootstrap-icons</artifactId>
+            <version>${webjars-bootstrap-icons.version}</version>
         </dependency>
         <dependency>
             <groupId>org.webjars</groupId>

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="'Commit ' + ${commit.shortSha}">Commit</title>
+    <!-- All assets are inlined so the file renders offline with no network access. -->
+    <style th:utext="${bootstrapCss}">/* bootstrap css inlined here */</style>
+    <style th:utext="${bootstrapIconsCss}">/* bootstrap-icons css (font embedded) inlined here */</style>
+    <style th:utext="${styleCss}">/* project diff styles inlined here */</style>
+</head>
+<body class="bg-white">
+
+<!-- ============ Global header ============ -->
+<header class="bg-light border-bottom p-3">
+    <div class="d-flex align-items-center gap-2">
+        <i class="bi bi-list fs-3 me-2" role="button"></i>
+        <i class="bi bi-github fs-3"></i>
+        <div class="fs-5 d-flex align-items-center gap-2">
+            <a href="#" class="link-primary text-decoration-none">octocat</a>
+            <span class="text-secondary">/</span>
+            <a href="#" class="link-primary fw-semibold text-decoration-none">linguist</a>
+            <i class="bi bi-diagram-2 text-secondary small"></i>
+        </div>
+
+        <div class="ms-auto d-flex align-items-center gap-2">
+            <span class="badge text-bg-light border"><i class="bi bi-wifi-off me-1"></i> Offline snapshot</span>
+            <span class="rounded-circle d-inline-block bg-warning" style="width:24px;height:24px"></span>
+        </div>
+    </div>
+</header>
+
+<!-- ============ Repo sub navigation ============ -->
+<nav class="border-bottom px-3">
+    <ul class="nav nav-underline">
+        <li class="nav-item"><a class="nav-link active" href="#"><i class="bi bi-code-square"></i> Code</a></li>
+        <li class="nav-item"><a class="nav-link" href="#"><i class="bi bi-exclamation-circle"></i> Pull requests
+            <span class="badge rounded-pill text-bg-light border ms-1">24</span></a></li>
+        <li class="nav-item"><a class="nav-link" href="#"><i class="bi bi-play-circle"></i> Actions</a></li>
+        <li class="nav-item"><a class="nav-link" href="#"><i class="bi bi-table"></i> Projects</a></li>
+        <li class="nav-item"><a class="nav-link" href="#"><i class="bi bi-shield-check"></i> Security and quality</a></li>
+        <li class="nav-item"><a class="nav-link" href="#"><i class="bi bi-graph-up"></i> Insights</a></li>
+    </ul>
+</nav>
+
+<!-- ============ Page body ============ -->
+<main class="container-fluid px-4 py-3">
+
+    <!-- Commit title row -->
+    <div class="d-flex align-items-start justify-content-between">
+        <h1 class="h2 fw-normal mb-3">Commit <span class="font-monospace text-secondary" th:text="${commit.shortSha}">e415a13</span></h1>
+        <button class="btn btn-light btn-sm border"><i class="bi bi-file-earmark-code"></i> Browse files</button>
+    </div>
+
+    <!-- Author line -->
+    <div class="d-flex align-items-center gap-2 mb-3">
+        <span class="rounded-circle d-inline-block bg-secondary" style="width:20px;height:20px"></span>
+        <span>
+            <strong th:text="${commit.author}">Scott J. Goldman</strong>
+            <span class="text-secondary">committed on <span th:text="${commit.date}">Sep 1, 2012</span></span>
+        </span>
+    </div>
+
+    <!-- Commit message card -->
+    <div class="card">
+        <div class="card-body">
+            <div class="font-monospace fw-semibold mb-2" th:text="${commit.title}">commit title</div>
+            <pre class="mb-0 font-monospace small text-body mb-0" th:text="${commit.description}">description</pre>
+        </div>
+        <div class="card-footer bg-white d-flex align-items-center flex-wrap gap-2 small text-secondary">
+            <i class="bi bi-signpost-split"></i>
+            <span class="border rounded px-2 text-body fw-medium d-inline-flex align-items-center gap-1">
+                <i class="bi bi-diagram-2"></i> <span th:text="${commit.branch}">master</span>
+            </span>
+            <span>(<a href="#" class="text-decoration-none" th:text="${commit.pullRequest}">linguist#247</a>)</span>
+            <span>·</span>
+            <i class="bi bi-tag"></i>
+            <a href="#" class="text-decoration-none" th:text="${commit.tag}">v4.8.8</a>
+            <i class="bi bi-three-dots"></i>
+            <a href="#" class="text-decoration-none" th:text="${commit.version}">2.10.5</a>
+            <span class="ms-auto d-flex align-items-center gap-1">
+                <span>1 parent</span>
+                <code class="link-primary" th:text="${commit.parentSha}">6ec907a</code>
+                <span>commit <code class="link-primary" th:text="${commit.shortSha}">e415a13</code></span>
+            </span>
+        </div>
+    </div>
+
+    <!-- Files changed summary -->
+    <div class="d-flex align-items-center justify-content-between py-3 border-bottom">
+        <span><strong th:text="${commit.filesChanged}">3</strong> files changed</span>
+        <span class="d-flex align-items-center gap-2 small fw-bold">
+            <span class="text-success" th:text="'+' + ${commit.additions}">+11</span>
+            <span class="text-danger" th:text="'-' + ${commit.deletions}">-3</span>
+            <span class="d-inline-flex gap-1">
+                <span class="d-inline-block rounded-1 bg-success" style="width:10px;height:10px"></span>
+                <span class="d-inline-block rounded-1 bg-success" style="width:10px;height:10px"></span>
+                <span class="d-inline-block rounded-1 bg-success" style="width:10px;height:10px"></span>
+                <span class="d-inline-block rounded-1 bg-danger" style="width:10px;height:10px"></span>
+                <span class="d-inline-block rounded-1 bg-secondary-subtle" style="width:10px;height:10px"></span>
+            </span>
+        </span>
+    </div>
+
+    <!-- ============ File diffs ============ -->
+    <div class="card mb-3" th:each="file,it : ${commit.files}">
+        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-chevron-down chevron text-secondary" role="button"
+                   data-bs-toggle="collapse" th:attr="data-bs-target='#file' + ${it.index}" aria-expanded="true"></i>
+                <span class="font-monospace small fw-semibold" th:text="${file.name}">file.rb</span>
+            </div>
+            <div class="d-flex align-items-center gap-2 small fw-bold">
+                <span class="text-success" th:if="${file.additions > 0}" th:text="'+' + ${file.additions}">+1</span>
+                <span class="text-danger" th:if="${file.deletions > 0}" th:text="'-' + ${file.deletions}">-1</span>
+                <span class="d-inline-flex gap-1">
+                    <span th:each="b : ${file.statBlocks}" class="d-inline-block rounded-1"
+                          th:classappend="${b == 'add'} ? 'bg-success' : (${b == 'del'} ? 'bg-danger' : 'bg-secondary-subtle')"
+                          style="width:10px;height:10px"></span>
+                </span>
+            </div>
+        </div>
+
+        <div class="collapse show" th:id="'file' + ${it.index}">
+            <table class="diff-table font-monospace small mb-0 table table-hover table-borderless">
+                <colgroup>
+                    <col class="col-num">
+                    <col class="col-code">
+                    <col class="col-num">
+                    <col class="col-code">
+                </colgroup>
+                <tbody>
+                <th:block th:each="row : ${file.rows}">
+
+                    <!-- Hunk header -->
+                    <tr th:if="${row.hunkHeader}" class="hunk">
+                        <td class="blob-num text-center"><i class="bi bi-arrows-expand" role="button"></i></td>
+                        <td colspan="3" class="ps-4" th:text="${row.hunkText}">@@ ... @@</td>
+                    </tr>
+
+                    <!-- Expand-down stub -->
+                    <tr th:if="${row.expandDown}" class="expand">
+                        <td class="blob-num text-center"><i class="bi bi-arrow-down-short" role="button"></i></td>
+                        <td colspan="3"></td>
+                    </tr>
+
+                    <!-- Code row (split view) -->
+                    <tr th:unless="${row.hunkHeader or row.expandDown}">
+                        <td class="blob-num" th:classappend="${row.left.type} + '-num'" th:text="${row.left.num}"></td>
+                        <td class="blob-code" th:classappend="${row.left.type} + '-code'">
+                            <span class="marker" th:if="${row.left.del}">-</span>
+                            <span class="code-content" th:if="${!row.left.empty}" th:text="${row.left.content}"
+                                  data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                  data-bs-placement="top" data-bs-html="true"
+                                  th:attr="data-bs-title=${file.name},data-bs-content='<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${file.name} + ' &middot; Line ' + ${row.left.num}"></span>
+                        </td>
+                        <td class="blob-num" th:classappend="${row.right.type} + '-num'" th:text="${row.right.num}"></td>
+                        <td class="blob-code" th:classappend="${row.right.type} + '-code'">
+                            <span class="marker" th:if="${row.right.add}">+</span>
+                            <span class="code-content" th:if="${!row.right.empty}" th:text="${row.right.content}"
+                                  data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                  data-bs-placement="top" data-bs-html="true"
+                                  th:attr="data-bs-title=${file.name},data-bs-content='<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${file.name} + ' &middot; Line ' + ${row.right.num}"></span>
+                        </td>
+                    </tr>
+
+                </th:block>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <p class="text-secondary small mt-3 mb-0">
+        Powered by Spring Boot &middot; Thymeleaf &middot; Bootstrap 5 &middot; offline export
+    </p>
+
+</main>
+
+<script th:utext="${bootstrapJs}">/* bootstrap js inlined here */</script>
+<script>
+    // Show a popover with the file path + line number when hovering a code line.
+    document.querySelectorAll('.code-content[data-bs-toggle="popover"]')
+        .forEach(el => new bootstrap.Popover(el, { container: 'body' }));
+</script>
+</body>
+</html>
