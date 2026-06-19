@@ -1,6 +1,7 @@
 package com.creed.report.controller;
 
 import com.creed.report.model.EnvironmentSnapshot;
+import com.creed.report.model.RenderedEnvironment;
 import com.creed.report.service.EnvironmentInspectionService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -37,5 +38,20 @@ public class EnvironmentInspectionController {
             @RequestParam(name = "spring.config.additional-location",
                     defaultValue = EnvironmentInspectionService.DEFAULT_ADDITIONAL_LOCATION) String additionalLocation) {
         return service.inspect(profilesActive, configLocation, additionalLocation);
+    }
+
+    /**
+     * The effective (active) properties only — sorted alphabetically by key and rendered
+     * into both {@code .properties} and YAML text.
+     */
+    @GetMapping("/api/environment/rendered")
+    public RenderedEnvironment rendered(
+            @RequestParam(name = "spring.profiles.active",
+                    defaultValue = EnvironmentInspectionService.DEFAULT_PROFILES_ACTIVE) String profilesActive,
+            @RequestParam(name = "spring.config.location",
+                    defaultValue = EnvironmentInspectionService.DEFAULT_CONFIG_LOCATION) String configLocation,
+            @RequestParam(name = "spring.config.additional-location",
+                    defaultValue = EnvironmentInspectionService.DEFAULT_ADDITIONAL_LOCATION) String additionalLocation) {
+        return service.render(profilesActive, configLocation, additionalLocation);
     }
 }

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Creed &middot; Effective Properties (YAML / Properties)</title>
+    <link rel="stylesheet" th:href="@{/webjars/bootstrap/css/bootstrap.min.css}">
+    <style>
+        body { background-color: #f5f7fa; }
+        .report-header { background: linear-gradient(90deg, #2b5876, #4e4376); color: #fff; }
+        pre.dump {
+            background: #1e1e2e; color: #e6e6e6; border-radius: .5rem;
+            padding: 1rem; font-size: .82rem; line-height: 1.4;
+            max-height: 70vh; overflow: auto; margin: 0; white-space: pre;
+        }
+        .src-name { font-size: .85em; word-break: break-all; }
+        textarea.form-control { font-family: monospace; font-size: .85rem; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark report-header shadow-sm">
+    <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">Creed &middot; Effective Properties</span>
+        <span class="text-light small">
+            Active properties only &mdash; sorted A&rarr;Z, rendered as YAML and .properties
+        </span>
+    </div>
+</nav>
+
+<div class="container-fluid my-4 px-4">
+
+    <!-- Launch arguments form -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <strong>Launch arguments</strong>
+            <a class="btn btn-outline-secondary btn-sm" th:href="@{/environment}">&larr; Full inspector</a>
+        </div>
+        <div class="card-body">
+            <form method="get" th:action="@{/environment/rendered}">
+                <div class="mb-3">
+                    <label class="form-label mb-1"><code>spring.profiles.active</code></label>
+                    <input type="text" class="form-control" name="spring.profiles.active"
+                           th:value="${profilesActive}">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label mb-1"><code>spring.config.location</code></label>
+                    <textarea class="form-control" name="spring.config.location" rows="3"
+                              th:text="${configLocation}"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label mb-1"><code>spring.config.additional-location</code></label>
+                    <textarea class="form-control" name="spring.config.additional-location" rows="2"
+                              th:text="${additionalLocation}"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm">Render</button>
+                <a class="btn btn-outline-secondary btn-sm" th:href="@{/environment/rendered}">Reset to defaults</a>
+            </form>
+        </div>
+    </div>
+
+    <div class="d-flex align-items-center gap-2 mb-3">
+        <span class="text-muted">Active profiles:</span>
+        <span class="badge bg-success" th:each="p : ${rendered.activeProfiles}" th:text="${p}">profile</span>
+        <span class="badge bg-secondary ms-auto"
+              th:text="${#lists.size(rendered.effective)} + ' keys'">0 keys</span>
+    </div>
+
+    <!-- Side-by-side YAML / Properties -->
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <strong>YAML</strong>
+                    <button class="btn btn-outline-secondary btn-sm" type="button"
+                            onclick="copyText('yamlText', this)">Copy</button>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">
+                        <code>(value)</code> marks a node that has both its own value and
+                        nested children (e.g. <code>keystore=JKS</code> alongside
+                        <code>keystore.location</code>) — unrepresentable in plain YAML.
+                    </p>
+                    <pre class="dump" id="yamlText" th:text="${rendered.yamlText}">yaml</pre>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <strong>.properties</strong>
+                    <button class="btn btn-outline-secondary btn-sm" type="button"
+                            onclick="copyText('propsText', this)">Copy</button>
+                </div>
+                <div class="card-body">
+                    <pre class="dump" id="propsText" th:text="${rendered.propertiesText}">props</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <p class="text-muted small mt-3 mb-0">
+        Raw JSON at <a th:href="@{/api/environment/rendered}"><code>/api/environment/rendered</code></a>
+        &middot; Powered by Spring Boot &middot; Thymeleaf &middot; Bootstrap 5
+    </p>
+</div>
+
+<script th:src="@{/webjars/bootstrap/js/bootstrap.bundle.min.js}"></script>
+<script>
+    function copyText(id, btn) {
+        const text = document.getElementById(id).innerText;
+        navigator.clipboard.writeText(text).then(() => {
+            const original = btn.innerText;
+            btn.innerText = 'Copied!';
+            setTimeout(() => btn.innerText = original, 1200);
+        });
+    }
+</script>
+</body>
+</html>

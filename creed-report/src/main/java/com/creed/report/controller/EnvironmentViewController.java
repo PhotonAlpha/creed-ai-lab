@@ -1,6 +1,7 @@
 package com.creed.report.controller;
 
 import com.creed.report.model.EnvironmentSnapshot;
+import com.creed.report.model.RenderedEnvironment;
 import com.creed.report.service.EnvironmentInspectionService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -38,5 +39,24 @@ public class EnvironmentViewController {
         model.addAttribute("additionalLocation", additionalLocation);
         model.addAttribute("snapshot", snapshot);
         return "environment";
+    }
+
+    @GetMapping("/environment/rendered")
+    public String rendered(
+            @RequestParam(name = "spring.profiles.active",
+                    defaultValue = EnvironmentInspectionService.DEFAULT_PROFILES_ACTIVE) String profilesActive,
+            @RequestParam(name = "spring.config.location",
+                    defaultValue = EnvironmentInspectionService.DEFAULT_CONFIG_LOCATION) String configLocation,
+            @RequestParam(name = "spring.config.additional-location",
+                    defaultValue = EnvironmentInspectionService.DEFAULT_ADDITIONAL_LOCATION) String additionalLocation,
+            Model model) {
+
+        RenderedEnvironment rendered = service.render(profilesActive, configLocation, additionalLocation);
+
+        model.addAttribute("profilesActive", profilesActive);
+        model.addAttribute("configLocation", configLocation);
+        model.addAttribute("additionalLocation", additionalLocation);
+        model.addAttribute("rendered", rendered);
+        return "environment-rendered";
     }
 }
