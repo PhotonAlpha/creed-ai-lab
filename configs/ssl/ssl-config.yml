@@ -1,0 +1,16 @@
+creed:
+  ssl:
+    bundle:
+      jks:
+        # Gateway's own HTTPS listener.
+        creed-jks-server:
+          key:
+            alias: server
+          keystore:
+            location: "classpath:certs/server-keystore.p12"
+            password: "${creed.ssl.keystore-password}"
+            type: PKCS12
+          truststore:
+            location: "classpath:certs/truststore.p12"
+            password: "${creed.ssl.keystore-password}"
+            type: PKCS12

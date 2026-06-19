@@ -27,6 +27,9 @@ management:
         enabled: on
 
   endpoint:
+    configprops:
+      access: unrestricted
+      show-values: always
     env:
       access: unrestricted
       show-values: always

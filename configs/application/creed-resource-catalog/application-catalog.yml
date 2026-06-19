@@ -1,0 +1,65 @@
+server:
+  port: 48080
+
+leaf:
+  name: com.ethan.leaf.test
+  console:
+    enable: true
+  segment:
+    enable: true
+  snowflake:
+    worker-id:
+      default: 1
+    enable: true
+
+---
+spring:
+  config:
+    activate:
+      on-profile: adc
+
+  cloud:
+    discovery:
+      client:
+        simple:
+          instances:
+            catalog-cluster:
+              - uri: https://localhost:8081
+                metadata:
+                  zone: zone1
+              - uri: https://localhost:8082
+                metadata:
+                  zone: zone2
+            order-cluster:
+              - uri: https://localhost:8091
+                metadata:
+                  zone: zone1
+              - uri: https://localhost:8092
+                metadata:
+                  zone: zone2
+
+---
+spring:
+  config:
+    activate:
+      on-profile: tdc
+
+  cloud:
+    discovery:
+      client:
+        simple:
+          instances:
+            catalog-cluster:
+              - uri: https://localhost:18081
+                metadata:
+                  zone: zone1
+              - uri: https://localhost:18082
+                metadata:
+                  zone: zone2
+            order-cluster:
+              - uri: https://localhost:18091
+                metadata:
+                  zone: zone1
+              - uri: https://localhost:18092
+                metadata:
+                  zone: zone2

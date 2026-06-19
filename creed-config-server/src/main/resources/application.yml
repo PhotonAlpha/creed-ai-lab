@@ -17,6 +17,25 @@ spring:
       server:
         native:
           search-locations: classpath:/config-repo/
+    discovery:
+      client:
+        simple:
+          instances:
+            catalog-cluster:
+              - uri: https://localhost:8081
+                metadata:
+                  zone: zone1
+              - uri: https://localhost:8082
+                metadata:
+                  zone: zone2
+            order-cluster:
+              - uri: https://localhost:8091
+                metadata:
+                  zone: zone1
+              - uri: https://localhost:8092
+                metadata:
+                  zone: zone2
+
   security:
     user:
       name: ${CREED_CONFIG_USER:creed-config}

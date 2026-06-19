@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Creed &middot; Environment Inspector</title>
+    <link rel="stylesheet" th:href="@{/webjars/bootstrap/css/bootstrap.min.css}">
+    <style>
+        body { background-color: #f5f7fa; }
+        .report-header { background: linear-gradient(90deg, #2b5876, #4e4376); color: #fff; }
+        code.k { color: #0a3069; word-break: break-all; }
+        td.val { word-break: break-all; max-width: 0; }
+        .table thead th { white-space: nowrap; }
+        .src-name { font-size: .85em; word-break: break-all; }
+        .badge-input { background-color: #6f42c1; }
+        textarea.form-control { font-family: monospace; font-size: .85rem; }
+        .sticky-head thead th { position: sticky; top: 0; z-index: 1; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark report-header shadow-sm">
+    <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">Creed &middot; Environment Inspector</span>
+        <span class="text-light small">
+            Properties Spring Boot would activate at startup &mdash; resolved on a standalone Environment
+        </span>
+    </div>
+</nav>
+
+<div class="container my-4">
+
+    <!-- Launch arguments form -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white"><strong>Launch arguments</strong></div>
+        <div class="card-body">
+            <form method="get" th:action="@{/environment}">
+                <div class="mb-3">
+                    <label class="form-label mb-1"><code>spring.profiles.active</code></label>
+                    <input type="text" class="form-control" name="spring.profiles.active"
+                           th:value="${profilesActive}">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label mb-1"><code>spring.config.location</code></label>
+                    <textarea class="form-control" name="spring.config.location" rows="3"
+                              th:text="${configLocation}"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label mb-1"><code>spring.config.additional-location</code></label>
+                    <textarea class="form-control" name="spring.config.additional-location" rows="2"
+                              th:text="${additionalLocation}"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm">Inspect</button>
+                <a class="btn btn-outline-secondary btn-sm" th:href="@{/environment}">Reset to defaults</a>
+            </form>
+        </div>
+    </div>
+
+    <!-- Profiles -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="text-muted">Active profiles</h6>
+                    <div>
+                        <span class="badge bg-success me-1 mb-1" th:each="p : ${snapshot.activeProfiles}"
+                              th:text="${p}">profile</span>
+                        <span class="text-muted" th:if="${#lists.isEmpty(snapshot.activeProfiles)}">none</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="text-muted">Default profiles</h6>
+                    <div>
+                        <span class="badge bg-secondary me-1 mb-1" th:each="p : ${snapshot.defaultProfiles}"
+                              th:text="${p}">profile</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Effective properties -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <strong>Effective properties</strong>
+            <span class="badge bg-secondary"
+                  th:text="${#lists.size(snapshot.effective)} + ' keys'">0 keys</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive" style="max-height: 600px; overflow:auto;">
+                <table class="table table-sm table-hover table-striped align-middle mb-0 sticky-head">
+                    <thead class="table-dark">
+                    <tr>
+                        <th>#</th>
+                        <th>Property</th>
+                        <th>Value (resolved)</th>
+                        <th>From source</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="e, it : ${snapshot.effective}">
+                        <td th:text="${it.count}">1</td>
+                        <td><code class="k" th:text="${e.name}">key</code></td>
+                        <td class="val">
+                            <span th:text="${e.resolved}">value</span>
+                            <span class="badge bg-warning text-dark ms-1"
+                                  th:if="${e.unresolved}"
+                                  th:title="${'raw: ' + e.raw}">unresolved</span>
+                        </td>
+                        <td class="src-name text-muted" th:text="${e.source}">source</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Property sources, in precedence order -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <strong>Property sources</strong>
+            <span class="text-muted small ms-2">highest &rarr; lowest precedence</span>
+        </div>
+        <div class="card-body">
+            <div class="accordion" id="sourcesAccordion">
+                <div class="accordion-item" th:each="src, si : ${snapshot.propertySources}">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button"
+                                data-bs-toggle="collapse"
+                                th:data-bs-target="'#src' + ${si.index}">
+                            <span class="badge me-2"
+                                  th:classappend="${si.index == 0} ? 'badge-input' : 'bg-secondary'"
+                                  th:text="${si.count}">1</span>
+                            <span class="src-name" th:text="${src.name}">source name</span>
+                            <span class="badge bg-light text-dark border ms-2"
+                                  th:text="${#lists.size(src.properties)} + ' props'">0 props</span>
+                        </button>
+                    </h2>
+                    <div th:id="'src' + ${si.index}" class="accordion-collapse collapse"
+                         data-bs-parent="#sourcesAccordion">
+                        <div class="accordion-body p-0">
+                            <table class="table table-sm table-striped mb-0">
+                                <tbody>
+                                <tr th:each="p : ${src.properties}">
+                                    <td style="width:40%"><code class="k" th:text="${p.name}">key</code></td>
+                                    <td class="val" th:text="${p.raw}">value</td>
+                                </tr>
+                                <tr th:if="${#lists.isEmpty(src.properties)}">
+                                    <td class="text-muted text-center py-2">
+                                        (not enumerable &mdash; cannot list keys)
+                                    </td>
+                                </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <p class="text-muted small mb-0">
+        Raw JSON available at <a th:href="@{/api/environment}"><code>/api/environment</code></a>
+        &middot; Powered by Spring Boot &middot; Thymeleaf &middot; Bootstrap 5
+    </p>
+</div>
+
+<script th:src="@{/webjars/bootstrap/js/bootstrap.bundle.min.js}"></script>
+</body>
+</html>

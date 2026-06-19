@@ -1,0 +1,6 @@
+creed:
+  metrics:
+    jvm-memory:
+      initial-delay-ms: 5000
+      interval-ms: 60000
+  greeting: "creed-author-server says hi via config-server"
