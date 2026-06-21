@@ -1,28 +1,22 @@
 package com.creed.partner.api;
 
-import java.net.URI;
-import java.util.LinkedHashMap;
-import java.util.Map;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.cloud.client.ServiceInstance;
-import org.springframework.cloud.client.loadbalancer.LoadBalancerClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.util.UriComponentsBuilder;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Requirement 1: aggregate the catalog and order resource-server APIs through Spring Cloud
- * LoadBalancer. Each {@code lb://<service-id>/...} URL is resolved to a concrete, health-checked
- * instance via {@link LoadBalancerClient#choose(String)} (which consults the health-check supplier
- * from {@code PartnerLoadBalancerConfiguration}), then called over the audited {@code partnerRestClient}.
- *
- * <p>The scheme is taken from the chosen instance's TLS flag rather than the {@code lb} URL, so the
- * {@code lb} scheme never reaches the underlying JDK client.
+ * LoadBalancer. Each call targets an {@code https://<service-id>/...} URL where {@code <service-id>} is
+ * a logical service name (not a host); the {@code @LoadBalanced} {@code partnerRestClient} resolves it
+ * to a concrete, health-checked instance. Using the {@code https} scheme (instead of {@code lb}) means
+ * the framework's URI reconstruct keeps a valid scheme, so no scheme-fixing transformer is needed.
  */
 @RestController
 @RequestMapping("/api/partner")
@@ -30,17 +24,14 @@ import org.springframework.web.util.UriComponentsBuilder;
 public class PartnerAggregateController {
 
     private final RestClient partnerRestClient;
-    private final LoadBalancerClient loadBalancerClient;
     private final String catalogUrl;
     private final String orderUrl;
 
     public PartnerAggregateController(
             RestClient partnerRestClient,
-            LoadBalancerClient loadBalancerClient,
-            @Value("${creed.partner.catalog-url:lb://catalog-resource/api/catalog/items}") String catalogUrl,
-            @Value("${creed.partner.order-url:lb://order-resource/api/order/items}") String orderUrl) {
+            @Value("${creed.partner.catalog-url:https://catalog-resource/api/catalog/items}") String catalogUrl,
+            @Value("${creed.partner.order-url:https://order-resource/api/order/items}") String orderUrl) {
         this.partnerRestClient = partnerRestClient;
-        this.loadBalancerClient = loadBalancerClient;
         this.catalogUrl = catalogUrl;
         this.orderUrl = orderUrl;
     }
@@ -69,21 +60,6 @@ public class PartnerAggregateController {
     }
 
     private JsonNode fetch(String lbUrl) {
-        URI original = URI.create(lbUrl);
-        String serviceId = original.getHost();
-        ServiceInstance instance = loadBalancerClient.choose(serviceId);
-        if (instance == null) {
-            throw new IllegalStateException("No healthy instances available for service '" + serviceId + "'");
-        }
-        // Force the transport scheme from the instance's TLS flag; the lb:// scheme must not leak down.
-        String scheme = instance.isSecure() ? "https" : "http";
-        URI resolved = UriComponentsBuilder.fromUri(original)
-                .scheme(scheme)
-                .host(instance.getHost())
-                .port(instance.getPort())
-                .build(true)
-                .toUri();
-        log.info("lb://{} -> {}", serviceId, resolved);
-        return partnerRestClient.get().uri(resolved).retrieve().body(JsonNode.class);
+        return partnerRestClient.get().uri(lbUrl).retrieve().body(JsonNode.class);
     }
 }

@@ -1,0 +1,34 @@
+# creed-gateway-partner — HTTPS on 8095. Run with the `local` environment
+# (http-client.private.env.json sets verifyHostCertificate=false) to skip the self-signed cert check.
+
+### aggregate catalog + order (load-balanced, audited)
+GET https://localhost:8095/api/partner/aggregate
+Accept: application/json
+
+### load-balanced passthrough to catalog
+GET https://localhost:8095/api/partner/catalog
+Accept: application/json
+
+### load-balanced passthrough to order
+GET https://localhost:8095/api/partner/order
+Accept: application/json
+
+### actuator: list metrics
+GET https://localhost:8095/actuator/metrics
+Accept: application/json
+
+### actuator: aggregate pool — max connections
+GET https://localhost:8095/actuator/metrics/httpcomponents.httpclient.pool.total.max?tag=httpclient:creed-partner-aggregate
+Accept: application/json
+
+### actuator: aggregate pool — total connections (state=available|leased)
+GET https://localhost:8095/actuator/metrics/httpcomponents.httpclient.pool.total.connections?tag=httpclient:creed-partner-aggregate
+Accept: application/json
+
+### actuator: aggregate pool — pending (requests waiting for a connection)
+GET https://localhost:8095/actuator/metrics/httpcomponents.httpclient.pool.total.pending?tag=httpclient:creed-partner-aggregate
+Accept: application/json
+
+### actuator: health-check pool — max connections
+GET https://localhost:8095/actuator/metrics/httpcomponents.httpclient.pool.total.max?tag=httpclient:creed-partner-health
+Accept: application/json

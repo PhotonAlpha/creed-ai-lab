@@ -29,6 +29,7 @@ spring:
   ssl:
     bundle:
       jks:
+        # Inbound HTTPS listener identity (serverAuth cert).
         creed-partner-server:
           key:
             alias: creed-gateway-partner
@@ -40,8 +41,29 @@ spring:
             location: "file:${creed.rootPath}/creed-gateway-partner-truststore.p12"
             password: "${CREED_ORDER_TRUSTSTORE_PASSWORD:changeit}"
             type: PKCS12
+        # Outbound identity for downstream resource-server calls (clientAuth -CLI cert);
+        # truststore trusts the Creed CA so the resource servers' certificates are accepted.
+        creed-partner-client:
+          key:
+            alias: creed-gateway-partner-cli
+          keystore:
+            location: "file:${creed.rootPath}/creed-gateway-partner-CLI-keystore.p12"
+            password: "${CREED_ORDER_KEYSTORE_PASSWORD:changeit}"
+            type: PKCS12
+          truststore:
+            location: "file:${creed.rootPath}/creed-gateway-partner-CLI-truststore.p12"
+            password: "${CREED_ORDER_TRUSTSTORE_PASSWORD:changeit}"
+            type: PKCS12
   application:
     name: creed-gateway-partner
+
+# Expose the metrics endpoint so the HttpClient 5 pool gauges (httpclient5.pool.connections.*)
+# registered in PartnerClientConfiguration are visible via actuator.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
 
 # TomcatHttpsConfiguration (creed.https.enabled=true by default) wires the embedded
 # HTTPS listener to the SSL bundle named by `creed.https.bundle`. Outside the `cloud`
@@ -50,4 +72,7 @@ spring:
 creed:
   https:
     bundle: creed-partner-server
+  partner:
+    # SSL bundle used by the downstream (load-balanced) calls and the LB health checks.
+    client-bundle: creed-partner-client
   rootPath: "/Users/ethan/Desktop/workspace/sourcecode/github_space/creed-ai-lab/.support/scripts/pki"
