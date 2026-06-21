@@ -1,7 +1,9 @@
-﻿!.idea
+!.idea
 
 .idea/*
 
 !.idea/http-client
 !.idea/runConfigurations
 **/target
+logs
+.DS_Store

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Update",
+      "Write",
+      "MultiEdit",
+      "Bash(npm *)",
+      "Bash(node *)",
+      "Bash(waza *)",
+      "Bash(~/bin/waza *)",
+      "Bash(mvn *)",
+      "Bash(java *)",
+      "Bash(curl *)",
+      "Bash(keytool *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(ls *)",
+      "Bash(lsof *)",
+      "Bash(pkill *)"
+    ]
+  }
+}

@@ -23,6 +23,7 @@
              an older API and fails with NoClassDefFoundError: ComponentLoader). -->
         <opentelemetry.version>1.54.1</opentelemetry.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
+        <lombok.version>1.18.46</lombok.version>
     </properties>
 
     <modules>
@@ -31,6 +32,7 @@
         <module>creed-resource</module>
         <module>creed-report</module>
         <module>creed-config-server</module>
+        <module>creed-gateway-partner</module>
     </modules>
 
     <dependencyManagement>
@@ -77,6 +79,13 @@
         </dependencies>
     </dependencyManagement>
 
+    <dependencies>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
+    </dependencies>
+
     <build>
         <pluginManagement>
             <plugins>
@@ -95,6 +104,16 @@
                              them to bind @RequestParam/@PathVariable when no explicit name is given,
                              e.g. MockRestController.callGateway(@RequestParam ... path). -->
                         <parameters>true</parameters>
+                        <!-- Since JDK 23 javac no longer runs annotation processors found only on the
+                             classpath; Lombok must be declared explicitly here or @Slf4j/@Data etc. are
+                             silently skipped. Version is managed by the Spring Boot BOM. -->
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                                <version>${lombok.version}</version>
+                            </path>
+                        </annotationProcessorPaths>
                     </configuration>
                 </plugin>
             </plugins>

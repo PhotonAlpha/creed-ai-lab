@@ -1,0 +1,37 @@
+### sample items (legacy)
+GET https://localhost:8091/api/order/items
+
+### ping / liveness
+GET https://localhost:8091/api/order/ping
+
+### list all orders
+GET https://localhost:8091/api/order
+
+### get one order
+GET https://localhost:8091/api/order/ORD-900
+
+### create order
+POST https://localhost:8091/api/order
+Content-Type: application/json
+
+{
+  "customer": "Charlie",
+  "item": "Monitor",
+  "quantity": 1,
+  "total": 199.99
+}
+
+### update order
+PUT https://localhost:8091/api/order/ORD-901
+Content-Type: application/json
+
+{
+  "status": "SHIPPED",
+  "quantity": 3
+}
+
+### delete order
+DELETE https://localhost:8091/api/order/ORD-901
+
+### secondary instance
+GET https://localhost:8092/api/order/items

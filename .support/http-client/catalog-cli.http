@@ -1,0 +1,37 @@
+### sample items (legacy)
+GET https://localhost:8081/api/catalog/items
+
+### ping / liveness
+GET https://localhost:8081/api/catalog/ping
+
+### list all products
+GET https://localhost:8081/api/catalog
+
+### get one product
+GET https://localhost:8081/api/catalog/CAT-1
+
+### create product
+POST https://localhost:8081/api/catalog
+Content-Type: application/json
+
+{
+  "name": "Stapler",
+  "category": "Office",
+  "price": 12.90,
+  "stock": 30
+}
+
+### update product
+PUT https://localhost:8081/api/catalog/CAT-2
+Content-Type: application/json
+
+{
+  "price": 1.50,
+  "stock": 450
+}
+
+### delete product
+DELETE https://localhost:8081/api/catalog/CAT-2
+
+### secondary instance
+GET https://localhost:8082/api/catalog/items

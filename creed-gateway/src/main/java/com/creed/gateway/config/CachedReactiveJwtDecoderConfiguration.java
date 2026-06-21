@@ -1,21 +1,18 @@
 package com.creed.gateway.config;
 
-import java.time.Duration;
-
-
 import com.github.benmanes.caffeine.cache.Caffeine;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.caffeine.CaffeineCache;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
-
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-@Configuration
+import java.time.Duration;
+
+//@Configuration
 public class CachedReactiveJwtDecoderConfiguration {
 
     @Bean

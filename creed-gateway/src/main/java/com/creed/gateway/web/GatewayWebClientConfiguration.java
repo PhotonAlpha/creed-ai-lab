@@ -1,7 +1,7 @@
-package com.creed.gateway.config;
+package com.creed.gateway.web;
 
-import javax.net.ssl.SSLException;
-
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
@@ -10,10 +10,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
-
-import io.netty.handler.ssl.SslContext;
-import io.netty.handler.ssl.SslContextBuilder;
 import reactor.netty.http.client.HttpClient;
+
+import javax.net.ssl.SSLException;
 
 /**
  * Requirement 5: the gateway aggregates data from the resource servers over HTTPS, trusting their
@@ -36,7 +35,7 @@ public class GatewayWebClientConfiguration {
     @Bean
     WebClient resourceWebClient(
             SslBundles sslBundles,
-            @Value("${creed.webclient.ssl-bundle:creed-jks-client}") String bundleName) {
+            @Value("${creed.webclient.bundle:creed-jks-client}") String bundleName) {
         SslBundle bundle = sslBundles.getBundle(bundleName);
         SslManagerBundle managers = bundle.getManagers();
 

@@ -1,4 +1,4 @@
-package com.creed.resource.order.web;
+package com.creed.resource.catalog.web;
 
 import org.springframework.boot.ssl.SslBundles;
 import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
