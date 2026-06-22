@@ -9,3 +9,4 @@ logs
 .DS_Store
 .support/scripts/pki
 *.iml
+creed-report/local-example.md
