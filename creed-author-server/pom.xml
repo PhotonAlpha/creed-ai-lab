@@ -28,10 +28,7 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
+
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
@@ -48,24 +45,6 @@
             <artifactId>httpclient5</artifactId>
         </dependency>
 
-        <!-- ============ OpenTelemetry ============ -->
-        <!-- Bridges Micrometer Observation/Tracing to OpenTelemetry -->
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-tracing-bridge-otel</artifactId>
-        </dependency>
-        <!-- Pulls in the OTel SDK auto-config + OTLP exporters for traces/metrics/logs
-             and provides the SdkLoggerProvider the Logback appender needs. -->
-        <dependency>
-            <groupId>io.opentelemetry.instrumentation</groupId>
-            <artifactId>opentelemetry-spring-boot-starter</artifactId>
-        </dependency>
-        <!-- Logback appender that ships log records over OTLP to the collector -->
-        <dependency>
-            <groupId>io.opentelemetry.instrumentation</groupId>
-            <artifactId>opentelemetry-logback-appender-1.0</artifactId>
-        </dependency>
-
         <!-- Config client: spring.config.import=configserver:... pulls remote config from creed-config-server -->
         <!--<dependency>
             <groupId>org.springframework.cloud</groupId>
@@ -76,10 +55,7 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-        </dependency>
+
     </dependencies>
 
     <build>

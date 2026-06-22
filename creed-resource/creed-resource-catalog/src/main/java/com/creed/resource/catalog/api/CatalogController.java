@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @RestController
@@ -49,6 +50,11 @@ public class CatalogController {
     @GetMapping("/ping")
     public Map<String, Object> ping(@AuthenticationPrincipal Jwt jwt) {
         log.info("ping");
+        try {
+            TimeUnit.MILLISECONDS.sleep(500);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
         return Map.of(
                 "service", "creed-resource-catalog",
                 "status", "UP",

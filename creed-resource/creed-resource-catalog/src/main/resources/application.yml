@@ -1,6 +1,8 @@
 spring:
   config:
     import: "optional:configserver:"
+  profiles:
+    include: actuator
   ssl:
     bundle:
       jks:

@@ -4,6 +4,10 @@ server:
 spring:
   config:
     import: "optional:configserver:"
+  application:
+    name: creed-gateway-partner
+  profiles:
+    include: actuator
   cloud:
     # Requirement 1: static service registry backing Spring Cloud LoadBalancer (no Eureka/Consul).
     # Two instances per service; all HTTPS with self-signed certs (signed by the Creed CA), trusted
@@ -54,8 +58,7 @@ spring:
             location: "file:${creed.rootPath}/creed-gateway-partner-CLI-truststore.p12"
             password: "${CREED_ORDER_TRUSTSTORE_PASSWORD:changeit}"
             type: PKCS12
-  application:
-    name: creed-gateway-partner
+
 
 # Expose the metrics endpoint so the HttpClient 5 pool gauges (httpclient5.pool.connections.*)
 # registered in PartnerClientConfiguration are visible via actuator.

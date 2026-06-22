@@ -1,2 +1,5 @@
 server:
   port: 8092
+spring:
+  application:
+    name: creed-resource-order-secondary

@@ -41,10 +41,7 @@
             <artifactId>httpclient5</artifactId>
         </dependency>
 
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
+
 
         <!--
             Requirement 6: asymmetric {cipher} decryption with an RSA key-store.
