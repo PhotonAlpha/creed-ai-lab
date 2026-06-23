@@ -12,7 +12,7 @@ import org.springframework.cloud.loadbalancer.annotation.LoadBalancerClients;
  * <p>{@link LoadBalancerClients} applies {@link PartnerLoadBalancerConfiguration} (the health-check
  * supplier) as the default configuration for every load-balanced service.
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "com.creed")
 @LoadBalancerClients(defaultConfiguration = PartnerLoadBalancerConfiguration.class)
 public class CreedGatewayPartnerApplication {
     public static void main(String[] args) {

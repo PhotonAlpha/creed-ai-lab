@@ -2,6 +2,7 @@ server:
   tomcat:
     mbeanregistry:
       enabled: true
+
 logging:
   level:
     # OTel SDK exporter 的日志级别。SDK 内部用 JUL 写日志,Spring Boot 把它桥到 SLF4J:

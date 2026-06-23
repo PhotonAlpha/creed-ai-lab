@@ -1,41 +1,32 @@
-package com.creed.auth.metrics;
+package com.creed.simple.config;
 
-import com.nimbusds.jose.util.Pair;
-import io.micrometer.core.instrument.FunctionCounter;
-import io.micrometer.core.instrument.FunctionTimer;
-import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.LongTaskTimer;
-import io.micrometer.core.instrument.Measurement;
-import io.micrometer.core.instrument.Meter;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Tag;
-import io.micrometer.core.instrument.TimeGauge;
+import io.micrometer.core.instrument.*;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.distribution.CountAtBucket;
 import io.micrometer.core.instrument.distribution.HistogramSnapshot;
 import io.micrometer.core.instrument.distribution.HistogramSupport;
+import jakarta.annotation.Resource;
+import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.metrics.MetricsEndpoint;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StopWatch;
 import org.springframework.util.StringUtils;
 
 import java.text.DecimalFormat;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.TreeMap;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
+
+import static com.creed.ThreadPoolConfig.TASK_EXECUTOR;
+
 
 /**
  * @author EthanCao
@@ -44,6 +35,20 @@ import java.util.stream.StreamSupport;
  */
 @Service
 public class ActuatorMetricsLogger {
+    @Lazy
+    @Resource
+    ActuatorMetricsLogger self;
+
+    @Async(TASK_EXECUTOR)
+    public void initTaskExecutor() {
+        try {
+            TimeUnit.SECONDS.sleep(1);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        log.info("Initializing task executor successful");
+    }
+
     /**
      * 指标日志使用固定的具名 logger("METRICS"),与类名/包名解耦。
      * 任何项目只要复用本类与 logback 中的 {@code <logger name="METRICS">} 配置即可通用。
@@ -53,75 +58,7 @@ public class ActuatorMetricsLogger {
     public static final DecimalFormat DF = new DecimalFormat("0");
     public static final DecimalFormat DF_00 = new DecimalFormat("0.00");
     public static final DecimalFormat DF_0 = new DecimalFormat("0.0");
-    /**
-     * description JvmMemoryMetricsLogger
-     * @author EthanCao
-     * @since 2026-05-22T22
-    {
-    "names": [
-    "application.ready.time",
-    "application.started.time",
-    "disk.free",
-    "disk.total",
-    "executor.active",
-    "executor.completed",
-    "executor.pool.core",
-    "executor.pool.max",
-    "executor.pool.size",
-    "executor.queue.remaining",
-    "executor.queued",
-    "http.server.requests",
-    "http.server.requests.active",
-    "jvm.buffer.count",
-    "jvm.buffer.memory.used",
-    "jvm.buffer.total.capacity",
-    "jvm.classes.loaded",
-    "jvm.classes.unloaded",
-    "jvm.compilation.time",
-    "jvm.gc.live.data.size",
-    "jvm.gc.max.data.size",
-    "jvm.gc.memory.allocated",
-    "jvm.gc.memory.promoted",
-    "jvm.gc.overhead",
-    "jvm.info",
-    "jvm.memory.committed",
-    "jvm.memory.max",
-    "jvm.memory.usage.after.gc",
-    "jvm.memory.used",
-    "jvm.threads.daemon",
-    "jvm.threads.live",
-    "jvm.threads.peak",
-    "jvm.threads.started",
-    "jvm.threads.states",
-    "logback.events",
-    "process.cpu.time",
-    "process.cpu.usage",
-    "process.files.max",
-    "process.files.open",
-    "process.start.time",
-    "process.uptime",
-    "system.cpu.count",
-    "system.cpu.usage",
-    "system.load.average.1m",
-    "tomcat.cache.access",
-    "tomcat.cache.hit",
-    "tomcat.connections.config.max",
-    "tomcat.connections.current",
-    "tomcat.connections.keepalive.current",
-    "tomcat.global.error",
-    "tomcat.global.received",
-    "tomcat.global.request",
-    "tomcat.global.request.max",
-    "tomcat.global.sent",
-    "tomcat.servlet.error",
-    "tomcat.servlet.request",
-    "tomcat.servlet.request.max",
-    "tomcat.threads.busy",
-    "tomcat.threads.config.max",
-    "tomcat.threads.current"
-    ]
-    }
-     */
+
     private static final List<String> JVM_USAGE_METRIC_NAMES = List.of(
             "jvm.memory.used",
             "jvm.memory.committed",
@@ -542,8 +479,8 @@ public class ActuatorMetricsLogger {
         log.info("{}", stringBuilder);
     }
 
-     @Scheduled(fixedDelayString = "${creed.metrics.jvm-memory.interval-ms:180000}",
-             initialDelayString = "${creed.metrics.jvm-memory.initial-delay-ms:10000}")
+     @Scheduled(fixedDelayString = "${creed.metrics.jvm-memory.interval-ms:10000}",
+             initialDelayString = "${creed.metrics.jvm-memory.initial-delay-ms:1000}")
     public void logMetrics() {
          StopWatch stopWatch = new StopWatch("metrics");
          stopWatch.start("metrics");
@@ -553,6 +490,7 @@ public class ActuatorMetricsLogger {
          loggingTomcatRequestMetrics();
          loggingThreadPoolMetrics();
          loggingHttpClientPoolMetrics();
+         self.initTaskExecutor();
          stopWatch.stop();
          log.info(stopWatch.prettyPrint(TimeUnit.MILLISECONDS));
     }

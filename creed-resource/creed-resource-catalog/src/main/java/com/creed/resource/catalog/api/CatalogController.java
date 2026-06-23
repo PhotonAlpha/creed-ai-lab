@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -33,10 +34,17 @@ public class CatalogController {
         seed("Pen", "Stationery", "1.20", 500);
     }
 
+    public static final Random random = new Random();
     /** Original sample endpoint — kept for backwards compatibility; JWT is optional under permitAll. */
     @GetMapping("/items")
     public Map<String, Object> items(@AuthenticationPrincipal Jwt jwt) {
         log.info("get items");
+        try {
+            int i = random.nextInt(0, 8);
+            TimeUnit.SECONDS.sleep(i);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
         return Map.of(
                 "service", "creed-resource-catalog",
                 "subject", subjectOf(jwt),

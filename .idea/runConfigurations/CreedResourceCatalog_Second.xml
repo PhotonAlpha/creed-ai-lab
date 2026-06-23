@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="CreedResourceCatalog-Second" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="creed-resource-catalog" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.creed.resource.catalog.CreedResourceCatalogApplication" />
+    <option name="VM_PARAMETERS" value="-Dspring.profiles.active=secondary" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

@@ -1,4 +1,4 @@
-package com.creed.auth.config;
+package com.creed;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
@@ -26,7 +26,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 @EnableScheduling
 public class ThreadPoolConfig {
 
-    public static final String TASK_EXECUTOR = "taskExecutor";
+    public static final String TASK_EXECUTOR = "myTask";
 
 
     @Bean(name = TASK_EXECUTOR)

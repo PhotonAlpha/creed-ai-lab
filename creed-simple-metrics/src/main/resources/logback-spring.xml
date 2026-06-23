@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  日志配置:业务日志与指标日志分离。
+  - 业务日志:控制台 + ${LOG_PATH}/${appName}.log
+  - 指标日志:名为 "METRICS" 的具名 logger 的输出单独写入
+             ${LOG_PATH}/${appName}-metrics.log,且不再回流到业务日志(additivity=false)。
+             代码侧使用 LoggerFactory.getLogger("METRICS") 即可写入,与具体类名解耦,各项目通用。
+-->
+<configuration scan="true" scanPeriod="60 seconds">
+
+    <!-- 复用 Spring Boot 默认的转换规则(彩色输出、CONSOLE_LOG_PATTERN 等) -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="creed-author-server"/>
+    <!-- 日志根目录,可通过 logging.file.path 覆盖,默认写到 ./logs -->
+    <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="./logs"/>
+
+    <property name="BUSINESS_FILE" value="${LOG_PATH}/${appName}"/>
+    <property name="METRICS_FILE" value="${LOG_PATH}/${appName}-metrics"/>
+
+    <!-- 指标日志使用纯净的时间戳格式,便于后续采集/解析 -->
+    <property name="METRICS_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %msg%n"/>
+
+    <!-- ============ 控制台:业务日志 ============ -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ============ 文件:业务日志 ============ -->
+    <appender name="BUSINESS" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${BUSINESS_FILE}.log</file>
+        <encoder>
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${BUSINESS_FILE}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>15</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ============ OpenTelemetry:日志通过 OTLP 推送到 Collector(Loki) ============ -->
+    <!-- 端点 / 资源属性 由 application.yml 中 otel.* 配置驱动,这里无需重复指定。 -->
+    <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+        <captureExperimentalAttributes>true</captureExperimentalAttributes>
+        <captureMdcAttributes>*</captureMdcAttributes>
+        <captureKeyValuePairAttributes>true</captureKeyValuePairAttributes>
+        <captureLoggerContext>true</captureLoggerContext>
+        <captureCodeAttributes>true</captureCodeAttributes>
+    </appender>
+
+    <!-- ============ 文件:指标日志 ============ -->
+    <appender name="METRICS" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${METRICS_FILE}.log</file>
+        <encoder>
+            <pattern>${METRICS_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${METRICS_FILE}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>15</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- 指标日志:单独落盘到指标文件,同时输出到控制台;additivity=false 避免回流到业务文件 -->
+    <logger name="METRICS" level="INFO" additivity="false">
+        <appender-ref ref="METRICS"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <!-- 业务日志:控制台 + 业务文件 + OTLP -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="BUSINESS"/>
+        <appender-ref ref="OTEL"/>
+    </root>
+
+</configuration>
