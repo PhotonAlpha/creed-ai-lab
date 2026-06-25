@@ -22,6 +22,7 @@ import java.text.DecimalFormat;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -135,6 +136,74 @@ public class ActuatorMetricsLogger {
         metricsEndpoint = new MetricsEndpoint(meterRegistry);
     }
 
+    // ------------------------------------------------------------------------------------------------------------
+    // Splunk-friendly key=value exposition helpers
+    //
+    // Every metric line is rendered as a flat, space-delimited key=value record that Splunk auto-extracts
+    // (KV_MODE=auto) with no props.conf needed:
+    //     actuator-metrics metric=<name> application=<app> <label>=<v> ... value=<n>
+    // The field names {@code metric}, {@code application} and {@code value} are STATIC across every line, so a single
+    // query can filter by {@code metric=...} and aggregate {@code value} (stats/timechart) — unlike a Prometheus
+    // {@code name{labels} value} line, whose metric name and value are positional and need custom extraction.
+    // Dots in Micrometer meter names are converted to underscores so the {@code metric} token stays a clean value.
+    // These few helpers replace the hand-built string templates that used to be repeated in every logging method.
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** Marker token prefixing every metric line, used as a cheap Splunk base-search anchor. */
+    private static final String LINE_PREFIX = "actuator-metrics metric=";
+
+    /** Micrometer meter names use dots; underscores keep the {@code metric} token a single clean value. */
+    private static String prometheusName(String metricType) {
+        return StringUtils.replace(metricType, ".", "_");
+    }
+
+    /** A single {@code key=value} field. */
+    private static String label(String key, String value) {
+        return key + "=" + value;
+    }
+
+    /** Append one {@code key=value} field to an existing (possibly empty) space-delimited field string. */
+    private static String addLabel(String labels, String key, String value) {
+        String pair = label(key, value);
+        return labels.isEmpty() ? pair : labels + " " + pair;
+    }
+
+    /** Render a meter's tags as a space-delimited {@code key=value} field string (no metric/application/value). */
+    private static String tagLabels(Meter.Id id) {
+        return StreamSupport.stream(id.getTagsAsIterable().spliterator(), false)
+                .map(t -> label(t.getKey(), t.getValue()))
+                .collect(Collectors.joining(" "));
+    }
+
+    /** First measurement value of a meter, or 0 when it exposes none. */
+    private static double firstMeasurement(Meter meter) {
+        return StreamSupport.stream(meter.measure().spliterator(), false)
+                .mapToDouble(Measurement::getValue)
+                .findFirst()
+                .orElse(0d);
+    }
+
+    /** Build one flat Splunk record: {@code actuator-metrics metric=<name> application=<app> <labels> value=<n>}. */
+    private String format(String metricName, String extraLabels, String value) {
+        StringBuilder sb = new StringBuilder(LINE_PREFIX)
+                .append(prometheusName(metricName))
+                .append(" application=").append(application);
+        if (!extraLabels.isEmpty()) {
+            sb.append(' ').append(extraLabels);
+        }
+        return sb.append(" value=").append(value).toString();
+    }
+
+    /** Log one flat Splunk sample line. */
+    private void emit(String metricName, String extraLabels, String value) {
+        log.info("{}", format(metricName, extraLabels, value));
+    }
+
+    /** Line marking that no meters were registered for {@code metricName} this cycle. */
+    private void emitNoMeters(String metricName) {
+        log.info("{}{} application={} note=no_meters_registered", LINE_PREFIX, prometheusName(metricName), application);
+    }
+
     public MetricsEndpoint.MetricNamesDescriptor listKeys() {
         MetricsEndpoint.MetricNamesDescriptor metricNamesDescriptor = metricsEndpoint.listNames();
         log.info("Metrics names: {}", metricNamesDescriptor.getNames());
@@ -174,8 +243,7 @@ public class ActuatorMetricsLogger {
             if (!isReportableUri(meter.getId().getTag("uri"))) {
                 continue;
             }
-            log.info("actuator-metrics{metric_type={}_count,application={},{}value={}}",
-                    metricPrefix, application, tagSuffix(meter.getId()), DF.format(meter.takeSnapshot().count()));
+            emit(metricPrefix + "_count", tagLabels(meter.getId()), DF.format(meter.takeSnapshot().count()));
         }
     }
 
@@ -192,20 +260,19 @@ public class ActuatorMetricsLogger {
      * Each surviving API costs {@code HTTP_SLO_SECONDS.length + 2} lines, with at most {@code HTTP_TOP_N} APIs.
      * ({@code _count} is handled separately by {@link #loggingHttpCount} for every API.)
      *
-     * @param metricPrefix metric_type prefix (e.g. {@code http_server_requests_seconds}); this method appends
+     * @param metricPrefix metric name prefix (e.g. {@code http_server_requests_seconds}); this method appends
      *                     {@code _bucket} / {@code _sum} / {@code _max}
      * @param meters       the timers to report; {@link Timer} and {@link LongTaskTimer} both expose
      *                     {@link HistogramSupport#takeSnapshot()}
      */
     private void loggingSlowestHttpHistograms(String metricPrefix, Collection<? extends HistogramSupport> meters) {
         if (meters.isEmpty()) {
-            log.info("actuator-metrics{metric_type={}_bucket,application={},note=no_meters_registered}",
-                    metricPrefix, application);
+            emitNoMeters(metricPrefix + "_bucket");
             return;
         }
         meters.stream()
                 .filter(meter -> isReportableUri(meter.getId().getTag("uri")))
-                .map(meter -> Pair.of(tagSuffix(meter.getId()), meter.takeSnapshot()))
+                .map(meter -> Pair.of(tagLabels(meter.getId()), meter.takeSnapshot()))
                 .sorted(Comparator.comparingDouble(
                         (Pair<String, HistogramSnapshot> pair) -> pair.getRight().max(TimeUnit.SECONDS)).reversed())
                 .limit(HTTP_TOP_N)
@@ -220,25 +287,22 @@ public class ActuatorMetricsLogger {
      */
     private void loggingHttpHistograms(String metricPrefix, Collection<? extends HistogramSupport> meters) {
         if (meters.isEmpty()) {
-            log.info("actuator-metrics{metric_type={}_bucket,application={},note=no_meters_registered}",
-                    metricPrefix, application);
+            emitNoMeters(metricPrefix + "_bucket");
             return;
         }
         meters.stream()
                 .filter(meter -> isReportableUri(meter.getId().getTag("uri")))
-                .forEach(meter -> loggingHttpSnapshot(metricPrefix, tagSuffix(meter.getId()), meter.takeSnapshot()));
+                .forEach(meter -> loggingHttpSnapshot(metricPrefix, tagLabels(meter.getId()), meter.takeSnapshot()));
     }
 
-    private void loggingHttpSnapshot(String metricPrefix, String tagSuffix, HistogramSnapshot snapshot) {
+    private void loggingHttpSnapshot(String metricPrefix, String labels, HistogramSnapshot snapshot) {
         for (double le : HTTP_SLO_SECONDS) {
-            log.info("actuator-metrics{metric_type={}_bucket,application={},{}le={},count={}}",
-                    metricPrefix, application, tagSuffix, DF_00.format(le), DF.format(cumulativeCountAt(snapshot, le)));
+            emit(metricPrefix + "_bucket", addLabel(labels, "le", DF_00.format(le)),
+                    DF.format(cumulativeCountAt(snapshot, le)));
         }
         // _count is emitted for every API by loggingHttpCount; only the top-N bucket/sum/max detail lives here.
-        log.info("actuator-metrics{metric_type={}_sum,application={},{}value={}}",
-                metricPrefix, application, tagSuffix, DF_00.format(snapshot.total(TimeUnit.SECONDS)));
-        log.info("actuator-metrics{metric_type={}_max,application={},{}value={}}",
-                metricPrefix, application, tagSuffix, DF_00.format(snapshot.max(TimeUnit.SECONDS)));
+        emit(metricPrefix + "_sum", labels, DF_00.format(snapshot.total(TimeUnit.SECONDS)));
+        emit(metricPrefix + "_max", labels, DF_00.format(snapshot.max(TimeUnit.SECONDS)));
     }
 
     /**
@@ -271,6 +335,7 @@ public class ActuatorMetricsLogger {
                 && !uri.startsWith("/webjars")
                 && !"/favicon.ico".equals(uri);
     }
+
     public void loggingTomcatMetrics() {
         loggingMetricKeys(List.of(
                 Pair.of("tomcat.threads.busy", null),
@@ -302,15 +367,12 @@ public class ActuatorMetricsLogger {
                 .tag("name", "dispatcherServlet")
                 .functionTimer();
         if (timer == null) {
-            log.info("actuator-metrics{metric_type=tomcat_servlet_request_seconds_count,application={},note=no_meters_registered}",
-                    application);
+            emitNoMeters("tomcat_servlet_request_seconds_count");
             return;
         }
-        String tagSuffix = tagSuffix(timer.getId());
-        log.info("actuator-metrics{metric_type=tomcat_servlet_request_seconds_count,application={},{}value={}}",
-                application, tagSuffix, DF.format(timer.count()));
-        log.info("actuator-metrics{metric_type=tomcat_servlet_request_seconds_sum,application={},{}value={}}",
-                application, tagSuffix, DF_00.format(timer.totalTime(TimeUnit.SECONDS)));
+        String labels = tagLabels(timer.getId());
+        emit("tomcat_servlet_request_seconds_count", labels, DF.format(timer.count()));
+        emit("tomcat_servlet_request_seconds_sum", labels, DF_00.format(timer.totalTime(TimeUnit.SECONDS)));
     }
 
     /**
@@ -319,13 +381,11 @@ public class ActuatorMetricsLogger {
     private void loggingServletErrorMetrics() {
         Collection<FunctionCounter> counters = meterRegistry.find("tomcat.servlet.error").functionCounters();
         if (counters.isEmpty()) {
-            log.info("actuator-metrics{metric_type=tomcat_servlet_error_total,application={},note=no_meters_registered}",
-                    application);
+            emitNoMeters("tomcat_servlet_error_total");
             return;
         }
         for (FunctionCounter counter : counters) {
-            log.info("actuator-metrics{metric_type=tomcat_servlet_error_total,application={},{}value={}}",
-                    application, tagSuffix(counter.getId()), DF.format(counter.count()));
+            emit("tomcat_servlet_error_total", tagLabels(counter.getId()), DF.format(counter.count()));
         }
     }
 
@@ -335,21 +395,13 @@ public class ActuatorMetricsLogger {
     private void loggingServletRequestMaxMetrics() {
         Collection<TimeGauge> gauges = meterRegistry.find("tomcat.servlet.request.max").timeGauges();
         if (gauges.isEmpty()) {
-            log.info("actuator-metrics{metric_type=tomcat_servlet_request_max_seconds,application={},note=no_meters_registered}",
-                    application);
+            emitNoMeters("tomcat_servlet_request_max_seconds");
             return;
         }
         for (TimeGauge gauge : gauges) {
-            log.info("actuator-metrics{metric_type=tomcat_servlet_request_max_seconds,application={},{}value={}}",
-                    application, tagSuffix(gauge.getId()), DF_00.format(gauge.value(TimeUnit.SECONDS)));
+            emit("tomcat_servlet_request_max_seconds", tagLabels(gauge.getId()),
+                    DF_00.format(gauge.value(TimeUnit.SECONDS)));
         }
-    }
-
-    private String tagSuffix(Meter.Id id) {
-        String tagPart = StreamSupport.stream(id.getTagsAsIterable().spliterator(), false)
-                .map(t -> t.getKey() + "=" + t.getValue())
-                .collect(Collectors.joining(","));
-        return tagPart.isEmpty() ? "" : tagPart + ",";
     }
 
     public void loggingJVMMetrics() {
@@ -358,158 +410,99 @@ public class ActuatorMetricsLogger {
         loggingJVMMemory("jvm.memory.max");
         loggingMetric("jvm.memory.usage.after.gc", DF_00);
     }
+
     /**
-     * executor.* 线程池指标,按线程池(name 标签,如 applicationTaskExecutor)分别打印一行,
+     * executor.* 线程池指标,按线程池(name 标签,如 applicationTaskExecutor)逐条打印 Prometheus 行,
      * 覆盖 active / queued / completed / pool.size / pool.core / pool.max / queue.remaining。
      * <p>
-     * 仅遍历一次注册表:对每个 executor.* 指标按线程池名归集,并直接从 {@link Meter#measure()} 读取数值。
-     * 这样避免了对每个指标重复调用 {@code metricsEndpoint.metric()}(每次都会重新扫描注册表并聚合),
-     * 也避免了用 {@code find(name)} 逐个指标查询(Search 内部同样是对全部 Meter 的过滤)。
+     * 复用 {@link #loggingMeters} 的单次注册表遍历策略:对每个 executor.* 指标按 name 标签过滤,
+     * 直接从 {@link Meter#measure()} 读数,避免对每个指标重复扫描注册表。
      */
     public void loggingThreadPoolMetrics() {
-        // name(线程池) -> (metric -> value);TreeMap 让线程池输出顺序稳定
-        Map<String, Map<String, Double>> metricsByPool = new TreeMap<>();
-        for (Meter meter : meterRegistry.getMeters()) {
-            String metricType = meter.getId().getName();
-            if (!EXECUTOR_METRIC_NAMES.contains(metricType)) {
-                continue;
-            }
-            String poolName = meter.getId().getTag("name");
-            if (!StringUtils.hasText(poolName)) {
-                continue;
-            }
-            double value = StreamSupport.stream(meter.measure().spliterator(), false)
-                    .mapToDouble(Measurement::getValue)
-                    .findFirst()
-                    .orElse(0d);
-            metricsByPool.computeIfAbsent(poolName, k -> new HashMap<>()).put(metricType, value);
-        }
-
-        if (metricsByPool.isEmpty()) {
-            log.info("actuator-metrics{metric_type=executor,application={},note=no_meters_registered}", application);
-            return;
-        }
-
-        metricsByPool.forEach((poolName, values) -> {
-            StringBuilder sb = new StringBuilder("actuator-metrics{metric_type=executor,application=")
-                    .append(application).append(",name=").append(poolName).append(",");
-            // 按 EXECUTOR_METRIC_NAMES 的固定顺序输出,保证每行字段顺序一致
-            for (String metricType : EXECUTOR_METRIC_NAMES) {
-                String metricName = StringUtils.replace(metricType, ".", "_");
-                sb.append(metricName).append("=")
-                        .append(DF.format(values.getOrDefault(metricType, 0d))).append(",");
-            }
-            sb.append("}");
-            log.info("{}", sb);
-        });
+        loggingMeters("executor", meter -> EXECUTOR_METRIC_NAMES.contains(meter.getId().getName())
+                && StringUtils.hasText(meter.getId().getTag("name")), DF);
     }
+
     /**
-     * httpcomponents.httpclient.pool.* — Apache HttpClient 5 connection-pool metrics, one line per pool
+     * httpcomponents.httpclient.pool.* — Apache HttpClient 5 连接池指标,逐条打印 Prometheus 行
      * ({@code httpclient} 标签,如 {@code creed-gateway})。覆盖
-     * total.max / total.connections(available+leased) / total.pending / route.max.default。
+     * total.max / total.connections(state=available|leased)/ total.pending / route.max.default。
      * <p>
-     * 与 {@link #loggingThreadPoolMetrics()} 同样的策略:只遍历一次注册表,对每个指标按连接池名(httpclient
-     * 标签)归集,并直接从 {@link Meter#measure()} 读数。{@code total.connections} 带 state 标签会拆成两条
-     * 序列,这里把 state 拼进字段名(如 {@code total_connections_available})以保留区分。
+     * 复用 {@link #loggingMeters} 的单次遍历策略:{@code total.connections} 带 state 标签的两条序列会原样
+     * 各打一行,state 作为 Prometheus 标签保留(不再拼进字段名)。
      */
     public void loggingHttpClientPoolMetrics() {
-        // httpclient(连接池) -> (字段名 -> 数值);TreeMap 让输出顺序稳定
-        Map<String, Map<String, Double>> metricsByClient = new TreeMap<>();
-        for (Meter meter : meterRegistry.getMeters()) {
-            String metricType = meter.getId().getName();
-            if (!metricType.startsWith(HTTPCLIENT_POOL_PREFIX)) {
-                continue;
-            }
-            String clientName = meter.getId().getTag("httpclient");
-            if (!StringUtils.hasText(clientName)) {
-                continue;
-            }
-            // 字段名:去掉公共前缀,把 state(available/leased)拼到末尾以区分同名指标的两条序列
-            String field = StringUtils.replace(
-                    metricType.substring(HTTPCLIENT_POOL_PREFIX.length() + 1), ".", "_");
-            String state = meter.getId().getTag("state");
-            if (StringUtils.hasText(state)) {
-                field = field + "_" + state;
-            }
-            double value = StreamSupport.stream(meter.measure().spliterator(), false)
-                    .mapToDouble(Measurement::getValue)
-                    .findFirst()
-                    .orElse(0d);
-            metricsByClient.computeIfAbsent(clientName, k -> new TreeMap<>()).put(field, value);
-        }
+        loggingMeters(HTTPCLIENT_POOL_PREFIX, meter -> meter.getId().getName().startsWith(HTTPCLIENT_POOL_PREFIX)
+                && StringUtils.hasText(meter.getId().getTag("httpclient")), DF);
+    }
 
-        if (metricsByClient.isEmpty()) {
-            log.info("actuator-metrics{metric_type=httpcomponents_httpclient_pool,application={},note=no_meters_registered}",
-                    application);
+    /**
+     * Single-pass registry scan shared by {@link #loggingThreadPoolMetrics()} and
+     * {@link #loggingHttpClientPoolMetrics()}: every meter matching {@code filter} is rendered as one flat Splunk
+     * sample line. Lines are keyed by {@code name + labels} in a {@link TreeMap} so output ordering is stable across
+     * cycles. An {@link #emitNoMeters} line is logged when nothing matches.
+     */
+    private void loggingMeters(String noMetersName, Predicate<Meter> filter, DecimalFormat decimalFormat) {
+        Map<String, String> lines = new TreeMap<>();
+        for (Meter meter : meterRegistry.getMeters()) {
+            if (!filter.test(meter)) {
+                continue;
+            }
+            Meter.Id id = meter.getId();
+            String labels = tagLabels(id);
+            String sortKey = prometheusName(id.getName()) + " " + labels;
+            lines.put(sortKey, format(id.getName(), labels, decimalFormat.format(firstMeasurement(meter))));
+        }
+        if (lines.isEmpty()) {
+            emitNoMeters(noMetersName);
             return;
         }
-
-        metricsByClient.forEach((clientName, values) -> {
-            StringBuilder sb = new StringBuilder("actuator-metrics{metric_type=httpcomponents_httpclient_pool,application=")
-                    .append(application).append(",httpclient=").append(clientName).append(",");
-            values.forEach((field, value) -> sb.append(field).append("=").append(DF.format(value)).append(","));
-            sb.append("}");
-            log.info("{}", sb);
-        });
+        lines.values().forEach(line -> log.info("{}", line));
     }
 
+    /**
+     * Emits a JVM memory gauge split by Micrometer's {@code area} tag: a total line plus per-area
+     * ({@code heap} / {@code nonheap}) lines, all under the same Prometheus metric name.
+     */
     protected void loggingJVMMemory(String metricType) {
-        String metricName = StringUtils.replace(metricType, ".", "_");
-        log.info("actuator-metrics{metric_type={},application={},{}={},{}={},{}={}}", metricName, application,
-                metricName + "_total", DF.format(metricsExtractor().apply(metricType, null)),
-                metricName + "_heap", DF.format(metricsExtractor().apply(metricType, List.of("area:heap"))),
-                metricName + "_nonheap", DF.format(metricsExtractor().apply(metricType, List.of("area:nonheap"))));
+        emit(metricType, "", DF.format(metricsExtractor().apply(metricType, null)));
+        emit(metricType, label("area", "heap"), DF.format(metricsExtractor().apply(metricType, List.of("area:heap"))));
+        emit(metricType, label("area", "nonheap"),
+                DF.format(metricsExtractor().apply(metricType, List.of("area:nonheap"))));
     }
-
 
     protected void loggingMetric(String metricType, DecimalFormat decimalFormat) {
-        String metricName = StringUtils.replace(metricType, ".", "_");
-        log.info("actuator-metrics{metric_type={},application={},{}={}}", metricName, application,
-                metricName, decimalFormat.format(metricsExtractor().apply(metricType, null)));
+        emit(metricType, "", decimalFormat.format(metricsExtractor().apply(metricType, null)));
     }
 
     protected void loggingMetricKeys(List<Pair<String, List<String>>> metricKeys, DecimalFormat decimalFormat) {
-        StringBuilder stringBuilder = new StringBuilder("actuator-metrics{");
         for (Pair<String, List<String>> pair : metricKeys) {
-            String metricName = StringUtils.replace(pair.getLeft(), ".", "_");
-            stringBuilder.append(metricName).append("=").append(decimalFormat.format(metricsExtractor().apply(pair.getLeft(), pair.getRight()))).append(",");
+            emit(pair.getLeft(), "", decimalFormat.format(metricsExtractor().apply(pair.getLeft(), pair.getRight())));
         }
-        stringBuilder.append("}");
-        log.info("{}", stringBuilder);
     }
 
-     @Scheduled(fixedDelayString = "${creed.metrics.jvm-memory.interval-ms:10000}",
-             initialDelayString = "${creed.metrics.jvm-memory.initial-delay-ms:1000}")
+    @Scheduled(fixedDelayString = "${creed.metrics.jvm-memory.interval-ms:10000}",
+            initialDelayString = "${creed.metrics.jvm-memory.initial-delay-ms:1000}")
     public void logMetrics() {
-         StopWatch stopWatch = new StopWatch("metrics");
-         stopWatch.start("metrics");
-         loggingJVMMetrics();
-         loggingTomcatMetrics();
-         loggingHttpBucketMetrics();
-         loggingTomcatRequestMetrics();
-         loggingThreadPoolMetrics();
-         loggingHttpClientPoolMetrics();
-         self.initTaskExecutor();
-         stopWatch.stop();
-         log.info(stopWatch.prettyPrint(TimeUnit.MILLISECONDS));
+        StopWatch stopWatch = new StopWatch("metrics");
+        stopWatch.start("metrics");
+        loggingJVMMetrics();
+        loggingTomcatMetrics();
+        loggingHttpBucketMetrics();
+        loggingTomcatRequestMetrics();
+        loggingThreadPoolMetrics();
+        loggingHttpClientPoolMetrics();
+        self.initTaskExecutor();
+        stopWatch.stop();
+        log.info(stopWatch.prettyPrint(TimeUnit.MILLISECONDS));
     }
-
 
     protected BiFunction<String, List<String>, Double> metricsExtractor() {
         return (metricType, tags) ->
-
                 Optional.ofNullable(metricsEndpoint.metric(metricType, tags))
-                .map(MetricsEndpoint.MetricDescriptor::getMeasurements)
-                .orElse(Collections.emptyList())
-                .stream().findFirst().map(MetricsEndpoint.Sample::getValue)
-                .orElse(0.0);
-    }
-    private static String tag(Gauge gauge, String key) {
-        for (Tag t : gauge.getId().getTagsAsIterable()) {
-            if (t.getKey().equals(key)) {
-                return t.getValue();
-            }
-        }
-        return "";
+                        .map(MetricsEndpoint.MetricDescriptor::getMeasurements)
+                        .orElse(Collections.emptyList())
+                        .stream().findFirst().map(MetricsEndpoint.Sample::getValue)
+                        .orElse(0.0);
     }
 }

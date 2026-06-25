@@ -1,0 +1,47 @@
+# creed-simple-metrics — Camel Spring Boot, HTTPS on 8096. APIs are declared with the XML REST DSL
+# (creed-simple-metrics/src/main/resources/camel/*.xml) and served via camel-servlet under /camel/*.
+# Run with the `local` environment (http-client.private.env.json sets verifyHostCertificate=false)
+# to skip the self-signed cert check.
+
+### hello — self-contained demo route
+GET https://localhost:8096/camel/api/hello
+Accept: application/json
+
+### time — self-contained demo route
+GET https://localhost:8096/camel/api/time
+Accept: application/json
+
+### echo — round-trips the posted JSON (REST DSL JSON binding)
+POST https://localhost:8096/camel/api/echo
+Content-Type: application/json
+Accept: application/json
+
+{
+  "ping": "pong",
+  "n": 42
+}
+
+### catalog — mTLS passthrough, round-robin across the two catalog instances (8081/8082)
+GET https://localhost:8096/camel/api/catalog
+Accept: application/json
+
+### order — mTLS passthrough, round-robin across the two order instances (8091/8092)
+GET https://localhost:8096/camel/api/order
+Accept: application/json
+
+### aggregate — multicast to catalog + order, merged by AggregateStrategy
+GET https://localhost:8096/camel/api/aggregate
+Accept: application/json
+
+### aggregate-notify — multicast aggregates on thread pool A; wireTap fires a notification on pool B
+# Check the logs for thread names: catalog/order branches run on agg-poolA-*, notification on notify-poolB-*
+GET https://localhost:8096/camel/api/aggregate-notify
+Accept: application/json
+
+### actuator: list metrics
+GET https://localhost:8096/actuator/metrics
+Accept: application/json
+
+### actuator: health
+GET https://localhost:8096/actuator/health
+Accept: application/json

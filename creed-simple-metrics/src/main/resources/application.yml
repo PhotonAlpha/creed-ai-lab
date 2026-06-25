@@ -9,10 +9,15 @@ spring:
     import: "optional:configserver:"
   application:
     name: creed-simple-metrics
+  main:
+    # The classic <camelContext> Spring XML registers the <threadPool> beans into the Spring graph,
+    # which forms a cycle with camel-spring-boot's health-check registry auto-config
+    # (threadPool -> camelContext -> HealthCheckRegistry -> threadPool). Allow it to be broken.
+    allow-circular-references: true
   cloud:
-    # Requirement 1: static service registry backing Spring Cloud LoadBalancer (no Eureka/Consul).
-    # Two instances per service; all HTTPS with self-signed certs (signed by the Creed CA), trusted
-    # via the partner SSL bundle. The load balancer round-robins across the healthy instances.
+    # Static service registry backing Spring Cloud LoadBalancer (no Eureka/Consul). The
+    # RemoteClusterProcessor calls https://<service-id>/... and the LB round-robins across these
+    # healthy instances (all HTTPS with Creed-CA self-signed certs, trusted via the partner bundle).
     discovery:
       client:
         simple:
@@ -23,14 +28,6 @@ spring:
             order-resource:
               - uri: https://localhost:8091
               - uri: https://localhost:8092
-    loadbalancer:
-      # Requirement 2: only route to instances that pass a health check on the path below.
-      health-check:
-        initial-delay: 0s
-        interval: 10s
-        path:
-          catalog-resource: /api/catalog/ping
-          order-resource: /api/order/ping
   ssl:
     bundle:
       jks:
@@ -61,13 +58,33 @@ spring:
             type: PKCS12
 
 
+# Apache Camel (Spring Boot) configuration.
+# All routes/rests/threadPools live in camel-context.xml (classic <camelContext> Spring XML DSL),
+# imported via @ImportResource. REST transport + JSON binding + inline-routes are configured there in
+# <restConfiguration>; only the servlet mount point is a Spring Boot property.
+camel:
+  main:
+    # Routes come from the inline <camelContext>, so disable camel-spring-boot's file/RouteBuilder
+    # collector — otherwise it scans the default classpath:camel/* dirs for route files (and would need
+    # camel-xml-io-dsl, which we dropped in favour of camel-spring-xml).
+    routes-collector-enabled: false
+  servlet:
+    mapping:
+      # CamelHttpTransportServlet mount point; APIs live under https://host:8096/camel/api/*
+      context-path: /camel/*
+
 # Expose the metrics endpoint so the HttpClient 5 pool gauges (httpclient5.pool.connections.*)
-# registered in PartnerClientConfiguration are visible via actuator.
+# registered in CamelHttpClientConfiguration are visible via actuator.
 management:
   endpoints:
     web:
       exposure:
         include: health,info,metrics
+  tracing:
+    sampling:
+      # Trace every request (Boot defaults to 0.1 = 10%); 1.0 makes trace/span IDs show up in the
+      # logs on every call. Lower this in production.
+      probability: 1.0
 
 # TomcatHttpsConfiguration (creed.https.enabled=true by default) wires the embedded
 # HTTPS listener to the SSL bundle named by `creed.https.bundle`. Outside the `cloud`
@@ -77,6 +94,7 @@ creed:
   https:
     bundle: creed-partner-server
   partner:
-    # SSL bundle used by the downstream (load-balanced) calls and the LB health checks.
+    # SSL bundle whose client cert + CA truststore back the @LoadBalanced RestClient's mTLS request
+    # factory (see LoadBalancedRestClientConfiguration) used by RemoteClusterProcessor.
     client-bundle: creed-partner-client
   rootPath: "/Users/ethan/Desktop/workspace/sourcecode/github_space/creed-ai-lab/.support/scripts/pki"

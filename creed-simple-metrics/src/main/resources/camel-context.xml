@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Classic Spring XML DSL: a single <camelContext> that loads ALL the REST routes (plus the supporting
+  direct: routes and the two thread pools). Loaded via @ImportResource on SimpleMetricsApplication.
+
+  Differences from the modern XML IO DSL this replaced:
+    - wrapped in a Spring <beans> document and uses the camel "spring" namespace;
+    - thread pools are declared inline with <threadPool> (referenced by id).
+  NOTE: Camel 4 unified the route model, so the EIP attributes here are the SAME as the IO DSL
+  (aggregationStrategy / executorService), NOT the Camel 3 *Ref names (strategyRef / executorServiceRef).
+
+  REST is served through the camel-servlet transport (restConfiguration component="servlet"); the
+  servlet mount point stays in application.yml (camel.servlet.mapping.context-path=/camel/*), so the
+  APIs live under https://host:8096/camel/api/*.
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+                           http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://camel.apache.org/schema/spring
+                           http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <camelContext xmlns="http://camel.apache.org/schema/spring">
+
+        <!-- ===== thread pools (referenced by id via executorService) ===== -->
+        <!-- Pool A: branches of the aggregation multicast run here (threads named agg-poolA-*). -->
+        <threadPool id="aggregatePoolA" threadName="agg-poolA"
+                    poolSize="8" maxPoolSize="8" maxQueueSize="200"/>
+        <!-- Pool B: the wire-tapped notification runs here (threads named notify-poolB-*). -->
+        <threadPool id="notificationPoolB" threadName="notify-poolB"
+                    poolSize="4" maxPoolSize="4" maxQueueSize="100"/>
+
+        <!-- ===== REST transport + JSON binding ===== -->
+        <restConfiguration component="servlet" bindingMode="json" inlineRoutes="false"/>
+
+        <!-- ===== REST API surface ===== -->
+        <rest path="/api">
+            <get path="/hello" produces="application/json">
+                <to uri="direct:hello"/>
+            </get>
+            <get path="/time" produces="application/json">
+                <to uri="direct:time"/>
+            </get>
+            <post path="/echo" consumes="application/json" produces="application/json">
+                <to uri="direct:echo"/>
+            </post>
+            <get path="/catalog" produces="application/json">
+                <to uri="direct:catalog"/>
+            </get>
+            <get path="/order" produces="application/json">
+                <to uri="direct:order"/>
+            </get>
+            <get path="/aggregate" produces="application/json">
+                <to uri="direct:aggregate"/>
+            </get>
+            <get path="/aggregate-notify" produces="application/json">
+                <to uri="direct:aggregateNotify"/>
+            </get>
+        </rest>
+
+        <!-- ===== self-contained routes ===== -->
+        <route id="hello">
+            <from uri="direct:hello"/>
+            <to uri="bean:apiHandlers?method=hello"/>
+        </route>
+
+        <route id="time">
+            <from uri="direct:time"/>
+            <to uri="bean:apiHandlers?method=time"/>
+        </route>
+
+        <route id="echo">
+            <from uri="direct:echo"/>
+            <log message="echo received: ${body}"/>
+        </route>
+
+        <!-- ===== downstream-backed routes ===== -->
+        <route id="catalog">
+            <from uri="direct:catalog"/>
+            <log message="catalog branch on thread=${threadName}"/>
+            <to uri="direct:fetch-catalog"/>
+            <setHeader name="source">
+                <constant>catalog</constant>
+            </setHeader>
+        </route>
+
+        <route id="order">
+            <from uri="direct:order"/>
+            <log message="order branch on thread=${threadName}"/>
+            <to uri="direct:fetch-order"/>
+            <setHeader name="source">
+                <constant>order</constant>
+            </setHeader>
+        </route>
+
+        <route id="aggregate">
+            <from uri="direct:aggregate"/>
+            <multicast aggregationStrategy="aggregateStrategy" parallelProcessing="true">
+                <to uri="direct:catalog"/>
+                <to uri="direct:order"/>
+            </multicast>
+        </route>
+
+        <!-- Aggregation + notification:
+             1) wireTap fires a fire-and-forget notification on thread pool B;
+             2) the multicast aggregates catalog + order on thread pool A. -->
+        <route id="aggregateNotify">
+            <from uri="direct:aggregateNotify"/>
+            <wireTap uri="direct:notification" executorService="notificationPoolB"/>
+            <multicast aggregationStrategy="aggregateStrategy" parallelProcessing="true"
+                       executorService="aggregatePoolA">
+                <to uri="direct:catalog"/>
+                <to uri="direct:order"/>
+            </multicast>
+        </route>
+
+        <route id="notification">
+            <from uri="direct:notification"/>
+            <log message="notification sent for aggregate request on thread=${threadName}"/>
+        </route>
+
+        <!-- ===== downstream cluster calls (Spring Cloud LoadBalancer, invoked in a Processor) =====
+             The instance is chosen by Spring Cloud LB resolving the https://<service-id> URL; the call
+             and JSON binding happen inside RemoteClusterProcessor (mTLS @LoadBalanced RestClient). -->
+        <route id="fetch-catalog">
+            <from uri="direct:fetch-catalog"/>
+            <setHeader name="clusterUrl">
+                <constant>https://catalog-resource/api/catalog/items</constant>
+            </setHeader>
+            <process ref="remoteClusterProcessor"/>
+        </route>
+
+        <route id="fetch-order">
+            <from uri="direct:fetch-order"/>
+            <setHeader name="clusterUrl">
+                <constant>https://order-resource/api/order/items</constant>
+            </setHeader>
+            <process ref="remoteClusterProcessor"/>
+        </route>
+
+    </camelContext>
+</beans>

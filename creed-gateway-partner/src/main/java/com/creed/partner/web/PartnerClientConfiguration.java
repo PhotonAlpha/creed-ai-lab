@@ -68,13 +68,17 @@ public class PartnerClientConfiguration {
      * @param socketTimeout
      * @return
      *  严格来说不是必须的，但应该加 —— 我已加上，理由：
-     *
-     *   - 默认其实也会关：@Bean 的 destroyMethod 默认值是 INFER，Spring 会自动探测并调用 bean 上的 close()/shutdown()。PoolingHttpClientConnectionManager 实现了 Closeable，所以即使不写，关停时 Spring 也会调
+     * <p>
+     *   - 默认其实也会关：
+     *   @Bean 的 destroyMethod 默认值是 INFER，Spring 会自动探测并调用 bean 上的 close()/shutdown()。
+     *   PoolingHttpClientConnectionManager 实现了 Closeable，所以即使不写，关停时 Spring 也会调
      *   close()。
-     *   - 为什么仍要显式写：① 与 creed-author-server 的 GatewayRestTemplateConfiguration 约定一致；② 意图明确，不依赖"推断"这个隐式行为。
-     *
+     *   - 为什么仍要显式写：
+     *   ① 与 creed-author-server 的 GatewayRestTemplateConfiguration 约定一致；
+     *   ② 意图明确，不依赖"推断"这个隐式行为。
+     * <p>
      *   更关键的是配套的那一半——我同时在 HttpClients.custom() 上加了 .setConnectionManagerShared(true)（也是 author-server 的做法）：
-     *
+     * <p>
      *   - 连接池现在是 Spring 管理的 bean，由 Spring 负责 close()；
      *   - shared(true) 让 CloseableHttpClient.close() 不再去关这个池 —— 避免"客户端和 Spring 都关一次"的双重关闭，单一 owner 模型干净。
      */
@@ -166,6 +170,34 @@ public class PartnerClientConfiguration {
 
     // ---- helpers ------------------------------------------------------------------------------
 
+    /**
+     *
+     * @param bundle
+     * @param maxTotal
+     * @param maxPerRoute
+     * @param connectTimeout
+     * @param socketTimeout
+     * @return
+     *
+     * 你发出请求  ──────►  对方开始回数据  ──►  数据一段段传回来  ──►  收完
+     *               ↑                        ↑
+     *           responseTimeout          socketTimeout
+     *          （第188行：等"开口"）    （第173行：等"下一口"）
+     *
+     *   一句话区分
+     *
+     *   - 第 188 行 responseTimeout：我把请求发出去了，对方多久内得开始回我。比如设 5 秒，5 秒还没听到任何动静（第一个字节都没回），就报超时。
+     *   - 第 173 行 socketTimeout：对方已经在回数据了，但数据是一段一段来的。两段数据之间最多能卡多久。比如设 10 秒，对方传了一半突然不传了，卡超过 10 秒就报超时。
+     *
+     *   为什么看起来"一样"
+     *
+     *   因为它们单位都是毫秒、写法长得像（都是 Timeout.ofMilliseconds(...)），而且在很多简单场景下，如果对方一直不回数据，两个超时都可能触发，所以容易误以为重复。但本质上：
+     *
+     *   - 一个是连接这条"水管"本身的默认读超时（173 行，连接管理器级别）。
+     *   - 一个是单次请求等响应的超时（188 行，请求级别），且会在请求期间临时盖过前者。
+     *
+     *   所以不是配了两遍同一个东西，而是给"等开头"和"防中途卡死"分别设了值。
+     */
     private static PoolingHttpClientConnectionManager connectionManager(
             SslBundle bundle, int maxTotal, int maxPerRoute, Duration connectTimeout, Duration socketTimeout) {
         ConnectionConfig connectionConfig = ConnectionConfig.custom()

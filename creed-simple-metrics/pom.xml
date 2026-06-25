@@ -22,37 +22,72 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-thymeleaf</artifactId>
-        </dependency>
 
-        <!-- Requirement 1+2: client-side load balancing (lb:// service IDs) with health checks,
-             backed by the SimpleDiscoveryClient registry declared in application.yml. -->
-        <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-starter-loadbalancer</artifactId>
-        </dependency>
         <!-- Provides the configserver: resolver for the optional spring.config.import below
              (kept for parity with the other modules; the config server is optional here). -->
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-config</artifactId>
         </dependency>
-        <!-- Apache HttpClient 5: backs the downstream RestClient request factory (version managed
-             by the Spring Boot BOM). -->
-        <dependency>
-            <groupId>org.apache.httpcomponents.client5</groupId>
-            <artifactId>httpclient5</artifactId>
-        </dependency>
 
+        <!-- ===== Apache Camel (Spring Boot) ===== -->
+        <!-- Core Camel-on-Spring-Boot auto-configuration + CamelContext. -->
+        <dependency>
+            <groupId>org.apache.camel.springboot</groupId>
+            <artifactId>camel-spring-boot-starter</artifactId>
+        </dependency>
+        <!-- REST DSL + the servlet transport that mounts the routes on the embedded Tomcat
+             (CamelHttpTransportServlet under camel.servlet.mapping.context-path). -->
+        <dependency>
+            <groupId>org.apache.camel.springboot</groupId>
+            <artifactId>camel-rest-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.camel.springboot</groupId>
+            <artifactId>camel-servlet-starter</artifactId>
+        </dependency>
+        <!-- Classic Spring XML DSL: enables the <camelContext xmlns=".../schema/spring"> element
+             (with inline <threadPool>, <restConfiguration>, <rest> and <route>) loaded via
+             @ImportResource (see SimpleMetricsApplication / camel-context.xml). -->
+        <dependency>
+            <groupId>org.apache.camel</groupId>
+            <artifactId>camel-spring-xml</artifactId>
+        </dependency>
+        <!-- JSON binding for the REST DSL and the downstream-response unmarshalling. -->
+        <dependency>
+            <groupId>org.apache.camel.springboot</groupId>
+            <artifactId>camel-jackson-starter</artifactId>
+        </dependency>
+        <!-- Spring Cloud LoadBalancer: the downstream call now happens in a Camel Processor that uses
+             a @LoadBalanced RestClient, so the instance is chosen by Spring Cloud LB (over the
+             SimpleDiscoveryClient registry in application.yml) instead of Camel's loadBalance EIP. -->
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-loadbalancer</artifactId>
         </dependency>
+        <!-- Bridges Camel routes to Micrometer Observation, so each route/processor and the
+             downstream call create spans and propagate the trace context (trace/span IDs then flow
+             through the routes and appear in the correlated logs). -->
+        <dependency>
+            <groupId>org.apache.camel.springboot</groupId>
+            <artifactId>camel-observation-starter</artifactId>
+        </dependency>
 
+        <!-- ===== Distributed tracing (Micrometer Tracing + Brave) ===== -->
+        <!-- Brave bridge: turns Micrometer Observations into Brave spans and populates the
+             traceId/spanId MDC that Spring Boot's default log pattern (LOG_CORRELATION_PATTERN) shows.
+             Version managed by the Spring Boot (micrometer-tracing) BOM. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-brave</artifactId>
+        </dependency>
 
-
+        <!-- Apache HttpClient 5: backs the @LoadBalanced RestClient's mTLS request factory
+             (version managed by the Spring Boot BOM). -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+        </dependency>
     </dependencies>
 
 </project>
