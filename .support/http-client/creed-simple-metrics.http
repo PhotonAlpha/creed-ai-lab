@@ -38,6 +38,37 @@ Accept: application/json
 GET https://localhost:8096/camel/api/aggregate-notify
 Accept: application/json
 
+
+### fulfillment — complex pipeline: multicast aggregate (catalog+order bulk) -> filter fulfillable
+# orders (status NEW/PAID & catalog stock >= qty) -> multicast enrich (shipping + risk) -> wireTap
+# notification on success. POST; empty/no-fault body = happy path.
+POST https://localhost:8096/camel/api/fulfillment
+Content-Type: application/json
+Accept: application/json
+
+{
+  "failCatalog": false,
+  "failOrder": false
+}
+
+### fulfillment (fault-inject order) — order cluster returns 500 -> failure response body, HTTP 502
+POST https://localhost:8096/camel/api/fulfillment
+Content-Type: application/json
+Accept: application/json
+
+{
+  "failOrder": true
+}
+
+### fulfillment (fault-inject catalog) — catalog cluster returns 500 -> failure response body, HTTP 502
+POST https://localhost:8096/camel/api/fulfillment
+Content-Type: application/json
+Accept: application/json
+
+{
+  "failCatalog": true
+}
+
 ### actuator: list metrics
 GET https://localhost:8096/actuator/metrics
 Accept: application/json

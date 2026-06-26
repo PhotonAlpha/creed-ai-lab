@@ -4,6 +4,12 @@ GET https://localhost:8081/api/catalog/items
 ### ping / liveness
 GET https://localhost:8081/api/catalog/ping
 
+### bulk feed (large product list for load/aggregation; Item-1..Item-{size}, random stock)
+GET https://localhost:8081/api/catalog/bulk?size=200
+
+### bulk feed — fault injection (returns HTTP 500)
+GET https://localhost:8081/api/catalog/bulk?fail=true
+
 ### list all products
 GET https://localhost:8081/api/catalog
 

@@ -4,6 +4,12 @@ GET https://localhost:8091/api/order/items
 ### ping / liveness
 GET https://localhost:8091/api/order/ping
 
+### bulk feed (large order list for load/aggregation; random item/status/qty)
+GET https://localhost:8091/api/order/bulk?size=500&itemRange=250
+
+### bulk feed — fault injection (returns HTTP 500)
+GET https://localhost:8091/api/order/bulk?fail=true
+
 ### list all orders
 GET https://localhost:8091/api/order
 

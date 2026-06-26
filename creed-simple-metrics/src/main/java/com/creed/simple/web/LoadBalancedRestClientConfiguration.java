@@ -1,10 +1,13 @@
 package com.creed.simple.web;
 
+import io.micrometer.core.instrument.binder.MeterBinder;
+import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
@@ -44,6 +47,12 @@ public class LoadBalancedRestClientConfiguration {
                 .setMaxConnTotal(maxTotal)
                 .setMaxConnPerRoute(maxPerRoute)
                 .build();
+    }
+
+    @Bean
+    MeterBinder healthCheckHttpPoolMetrics(
+            @Qualifier("clusterHttpConnectionManager") PoolingHttpClientConnectionManager healthPool) {
+        return new PoolingHttpClientConnectionManagerMetricsBinder(healthPool, "loadBalancedPool");
     }
 
     @Bean

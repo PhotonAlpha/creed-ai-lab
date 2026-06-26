@@ -6,7 +6,18 @@ Camel-on-Spring-Boot 演示模块（HTTPS 8096）。所有路由/REST/线程池�
 `LoadBalancerAuditInterceptor` 打印 LB 选中的真实实例。
 
 REST 走 camel-servlet，API 在 `https://localhost:8096/camel/api/*`（hello / time / echo / catalog /
-order / aggregate / aggregate-notify）。
+order / aggregate / aggregate-notify / **fulfillment**）。
+
+`POST /api/fulfillment`（请求体可选 `{"failCatalog":bool,"failOrder":bool}`）是一个复杂编排示例：
+1. **multicast** 并行拉取 catalog/order 的 **bulk** 大列表并聚合（`fulfillmentAggregateStrategy`）；
+2. 按业务规则**过滤** order 列表——仅保留 status∈{NEW,PAID} 且 catalog 中存在该 item 且 `stock≥quantity`
+   的订单（`FulfillmentFilterProcessor`）；
+3. 再用 **multicast** 调内部 router（`direct:enrich-shipping` / `direct:enrich-risk`）**丰富**响应
+   （`enrichmentAggregateStrategy`）；
+4. 成功则 **wireTap** 触发 `direct:fulfillment-notification`（fire-and-forget，线程池 B）；
+5. 任一下游返回**错误状态码**时（`RemoteClusterProcessor` 在 `resilient=true` 下捕获），经
+   `<choice>` 走 `FailureResponseProcessor` 返回失败响应体并设置对应 HTTP 状态码。
+   下游 bulk 端点支持 `?fail=true` 故障注入，可用请求体 `{"failOrder":true}` 触发该分支。
 
 ---
 

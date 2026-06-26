@@ -56,6 +56,11 @@
             <get path="/aggregate-notify" produces="application/json">
                 <to uri="direct:aggregateNotify"/>
             </get>
+            <!-- Complex pipeline: aggregate (multicast) -> filter -> enrich (multicast) -> notify/fail.
+                 Optional JSON body {"failCatalog":true,"failOrder":true} fault-injects a downstream 5xx. -->
+            <post path="/fulfillment" consumes="application/json" produces="application/json">
+                <to uri="direct:fulfillment"/>
+            </post>
         </rest>
 
         <!-- ===== self-contained routes ===== -->
@@ -136,6 +141,92 @@
                 <constant>https://order-resource/api/order/items</constant>
             </setHeader>
             <process ref="remoteClusterProcessor"/>
+        </route>
+
+        <!-- ============================================================================
+             Complex fulfillment pipeline (GET /api/fulfillment):
+               1. multicast  -> fetch catalog + order BULK lists in parallel, aggregate
+               5. if a branch failed (error status) -> return a failure response body
+               2. filter     -> keep only fulfillable orders (status + catalog stock)
+               3. multicast  -> internal routers enrich with shipping + risk
+               4. success    -> wireTap a fire-and-forget notification
+             ============================================================================ -->
+        <route id="fulfillment">
+            <from uri="direct:fulfillment"/>
+            <!-- (0) lift the optional fault-injection flags from the JSON body into headers -->
+            <process ref="fulfillmentRequestProcessor"/>
+            <!-- (1) parallel aggregate of the two downstream clusters -->
+            <multicast aggregationStrategy="fulfillmentAggregateStrategy" parallelProcessing="true"
+                       executorService="aggregatePoolA">
+                <to uri="direct:fetch-catalog-bulk"/>
+                <to uri="direct:fetch-order-bulk"/>
+            </multicast>
+            <choice>
+                <!-- (5) any downstream error status -> failure response body -->
+                <when>
+                    <simple>${header.downstreamError} == true</simple>
+                    <log loggingLevel="WARN"
+                         message="fulfillment downstream failure status=${header.downstreamStatus}"/>
+                    <process ref="failureResponseProcessor"/>
+                </when>
+                <otherwise>
+                    <!-- (2) filter the aggregated orders down to the fulfillable ones -->
+                    <process ref="fulfillmentFilterProcessor"/>
+                    <!-- (3) enrich via a second multicast over internal routers -->
+                    <setProperty name="fulfillmentBase">
+                        <simple>${body}</simple>
+                    </setProperty>
+                    <multicast aggregationStrategy="enrichmentAggregateStrategy" parallelProcessing="true"
+                               executorService="aggregatePoolA">
+                        <to uri="direct:enrich-shipping"/>
+                        <to uri="direct:enrich-risk"/>
+                    </multicast>
+                    <!-- (4) success -> notify (fire-and-forget on pool B) -->
+                    <wireTap uri="direct:fulfillment-notification" executorService="notificationPoolB"/>
+                </otherwise>
+            </choice>
+        </route>
+
+        <!-- Downstream BULK fetches, resilient=true so RemoteClusterProcessor captures error status
+             into branchError/branchStatus instead of throwing. failCatalog/failOrder request headers
+             (from the REST query) fault-inject a 5xx on the matching cluster. -->
+        <route id="fetch-catalog-bulk">
+            <from uri="direct:fetch-catalog-bulk"/>
+            <setHeader name="source"><constant>catalog</constant></setHeader>
+            <setHeader name="resilient"><constant>true</constant></setHeader>
+            <setHeader name="clusterUrl">
+                <simple>https://catalog-resource/api/catalog/bulk?fail=${header.failCatalog}</simple>
+            </setHeader>
+            <process ref="remoteClusterProcessor"/>
+        </route>
+
+        <route id="fetch-order-bulk">
+            <from uri="direct:fetch-order-bulk"/>
+            <setHeader name="source"><constant>order</constant></setHeader>
+            <setHeader name="resilient"><constant>true</constant></setHeader>
+            <setHeader name="clusterUrl">
+                <simple>https://order-resource/api/order/bulk?fail=${header.failOrder}</simple>
+            </setHeader>
+            <process ref="remoteClusterProcessor"/>
+        </route>
+
+        <!-- Internal enrichment routers (no downstream HTTP): each tags itself with a source header
+             and delegates the per-order computation to the fulfillmentEnricher bean. -->
+        <route id="enrich-shipping">
+            <from uri="direct:enrich-shipping"/>
+            <setHeader name="source"><constant>shipping</constant></setHeader>
+            <to uri="bean:fulfillmentEnricher?method=shipping"/>
+        </route>
+
+        <route id="enrich-risk">
+            <from uri="direct:enrich-risk"/>
+            <setHeader name="source"><constant>risk</constant></setHeader>
+            <to uri="bean:fulfillmentEnricher?method=risk"/>
+        </route>
+
+        <route id="fulfillment-notification">
+            <from uri="direct:fulfillment-notification"/>
+            <log message="fulfillment notification: ${body[summary]} on thread=${threadName}"/>
         </route>
 
     </camelContext>

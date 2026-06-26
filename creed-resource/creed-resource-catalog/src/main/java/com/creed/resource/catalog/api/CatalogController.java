@@ -54,6 +54,35 @@ public class CatalogController {
                         Map.of("sku", "CAT-2", "name", "Pen")));
     }
 
+    /**
+     * Bulk catalog feed for load/aggregation testing — returns a large, freshly generated product list.
+     *
+     * <p>Products are named {@code Item-1 .. Item-{size}} (the convention the order service references)
+     * with randomised stock in {@code [0, 15]}, so a downstream stock check filters out a realistic
+     * fraction of orders.
+     *
+     * @param size number of products to generate (default 200)
+     * @param fail when {@code "true"}, fault-injects a 500 so callers can exercise their error path
+     */
+    @GetMapping("/bulk")
+    public ResponseEntity<List<Product>> bulk(
+            @RequestParam(defaultValue = "200") int size,
+            @RequestParam(defaultValue = "false") String fail) {
+        if ("true".equalsIgnoreCase(fail)) {
+            log.warn("bulk fault injection -> 500");
+            return ResponseEntity.status(500).build();
+        }
+        log.info("bulk size={}", size);
+        String[] categories = {"Stationery", "Electronics", "Hardware", "Grocery"};
+        List<Product> list = new ArrayList<>(size);
+        for (int i = 1; i <= size; i++) {
+            int stock = random.nextInt(0, 16);
+            BigDecimal price = BigDecimal.valueOf(random.nextInt(1, 500)).movePointLeft(1);
+            list.add(new Product("CAT-B" + i, "Item-" + i, categories[i % categories.length], price, stock, Instant.now()));
+        }
+        return ResponseEntity.ok(list);
+    }
+
     /** Lightweight liveness/echo endpoint — handy for verifying the HTTPS listener is up. */
     @GetMapping("/ping")
     public Map<String, Object> ping(@AuthenticationPrincipal Jwt jwt) {

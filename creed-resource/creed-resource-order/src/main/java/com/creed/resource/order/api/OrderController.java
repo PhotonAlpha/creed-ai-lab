@@ -53,6 +53,40 @@ public class OrderController {
                         Map.of("id", "ORD-901", "total", 7.0)));
     }
 
+    /**
+     * Bulk order feed for load/aggregation testing — returns a large, freshly generated order list.
+     *
+     * <p>Each order references an item {@code Item-1 .. Item-{itemRange}} (a superset of the catalog's
+     * {@code Item-1 .. 200}, so some items have no catalog match), a random status across the lifecycle,
+     * and a random quantity in {@code [1, 20]}. This deliberately produces orders that the aggregator's
+     * fulfillment filter will reject (wrong status, missing item, or insufficient stock).
+     *
+     * @param size      number of orders to generate (default 500)
+     * @param itemRange upper bound of the referenced item ids (default 250)
+     * @param fail      when {@code "true"}, fault-injects a 500 so callers can exercise their error path
+     */
+    @GetMapping("/bulk")
+    public ResponseEntity<List<Order>> bulk(
+            @RequestParam(defaultValue = "500") int size,
+            @RequestParam(defaultValue = "250") int itemRange,
+            @RequestParam(defaultValue = "false") String fail) {
+        if ("true".equalsIgnoreCase(fail)) {
+            log.warn("bulk fault injection -> 500");
+            return ResponseEntity.status(500).build();
+        }
+        log.info("bulk size={} itemRange={}", size, itemRange);
+        String[] statuses = {"NEW", "PAID", "SHIPPED", "CANCELLED"};
+        List<Order> list = new ArrayList<>(size);
+        for (int i = 1; i <= size; i++) {
+            int qty = random.nextInt(1, 21);
+            String item = "Item-" + random.nextInt(1, itemRange + 1);
+            String status = statuses[random.nextInt(statuses.length)];
+            BigDecimal total = BigDecimal.valueOf(random.nextInt(1, 500)).movePointLeft(1).multiply(BigDecimal.valueOf(qty));
+            list.add(new Order("ORD-B" + i, "cust-" + random.nextInt(1, 200), item, qty, total, status, Instant.now()));
+        }
+        return ResponseEntity.ok(list);
+    }
+
     /** Lightweight liveness/echo endpoint — handy for verifying the HTTPS listener is up. */
     @GetMapping("/ping")
     public Map<String, Object> ping(@AuthenticationPrincipal Jwt jwt) {

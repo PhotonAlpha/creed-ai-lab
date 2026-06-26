@@ -16,7 +16,6 @@ import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
@@ -50,7 +49,7 @@ import java.time.Duration;
  * keeps {@code https}. The {@link LoadBalancerAuditInterceptor} is added <em>after</em> the LB
  * interceptor (innermost) so it observes the resolved instance URL, request timing and status.
  */
-@Configuration(proxyBeanMethods = false)
+//@Configuration(proxyBeanMethods = false)
 public class PartnerClientConfiguration {
 
     private static final String POOL_AGGREGATE = "creed-partner-aggregate";

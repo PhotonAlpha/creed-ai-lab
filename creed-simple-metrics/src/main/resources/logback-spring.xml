@@ -15,6 +15,9 @@
     <!-- 日志根目录,可通过 logging.file.path 覆盖,默认写到 ./logs -->
     <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="./logs"/>
 
+    <property scope="context" name="log-pattern" value="%d{dd-MM-yyyy HH:mm:ss.SSS} ${LOG_LEVEL_PATTERN:-%5p} [%thread][${spring.application.name:-},%X{traceId:-},%X{spanId:-}] %-40.40logger{39}[%line] : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
+    <property scope="context" name="console-pattern" value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}) %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr([%thread][${spring.application.name:-},%X{traceId:-},%X{spanId:-}]) %clr(%-40.40logger{39}){cyan}[%line] %clr(:) %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
+
     <property name="BUSINESS_FILE" value="${LOG_PATH}/${appName}"/>
     <property name="METRICS_FILE" value="${LOG_PATH}/${appName}-metrics"/>
 
@@ -24,7 +27,7 @@
     <!-- ============ 控制台:业务日志 ============ -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <pattern>${console-pattern}</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
@@ -33,7 +36,7 @@
     <appender name="BUSINESS" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${BUSINESS_FILE}.log</file>
         <encoder>
-            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <pattern>${log-pattern}</pattern>
             <charset>UTF-8</charset>
         </encoder>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
