@@ -1,629 +1,3807 @@
 {
-  "annotations": {
-    "list": [
+  "annotations":  {
+    "list":  [
       {
-        "builtIn": 1,
-        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
-        "enable": true,
-        "hide": true,
-        "iconColor": "rgba(0, 211, 255, 1)",
-        "name": "Annotations & Alerts",
-        "type": "dashboard"
+        "builtIn":  1,
+        "datasource":  "-- Grafana --",
+        "enable":  true,
+        "hide":  true,
+        "iconColor":  "rgba(0, 211, 255, 1)",
+        "limit":  100,
+        "name":  "Annotations \u0026 Alerts",
+        "showIn":  0,
+        "type":  "dashboard"
+      },
+      {
+        "datasource":  "Prometheus",
+        "enable":  true,
+        "expr":  "resets(process_uptime_seconds{application=\"$application\", instance=\"$instance\"}[1m]) \u003e 0",
+        "iconColor":  "rgba(255, 96, 96, 1)",
+        "name":  "Restart Detection",
+        "showIn":  0,
+        "step":  "1m",
+        "tagKeys":  "restart-tag",
+        "textFormat":  "uptime reset",
+        "titleFormat":  "Restart"
       }
     ]
   },
-  "description": "Native Micrometer/Prometheus JVM & HTTP metrics for Spring Boot apps scraped directly via /actuator/prometheus (pull mode, e.g. creed-simple-metrics on :8096). Faithful port of the OTLP-push 'OTel JVM & HTTP Statistics' dashboard, with metric/label names mapped to the Micrometer Prometheus registry (jvm_memory_used_bytes{area,id}, jvm_threads_states_threads{state}, jvm_gc_pause_seconds_*, http_server_requests_seconds_*, tomcat_*_threads, ...) and keyed off job/instance instead of service_name/service_instance_id. Note: this registry exposes no histogram buckets, so latency/GC panels use the _max gauge and sum/count average instead of histogram_quantile.",
-  "editable": true,
-  "fiscalYearStartMonth": 0,
-  "graphTooltip": 1,
-  "links": [],
-  "liveNow": false,
-  "refresh": "30s",
-  "schemaVersion": 39,
-  "tags": ["spring-boot", "micrometer", "prometheus", "jvm"],
-  "templating": {
-    "list": [
-      {
-        "current": {},
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "definition": "label_values(jvm_memory_used_bytes, job)",
-        "hide": 0,
-        "includeAll": false,
-        "label": "Job",
-        "multi": false,
-        "name": "job",
-        "options": [],
-        "query": {
-          "query": "label_values(jvm_memory_used_bytes, job)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+  "description":  "Dashboard for Micrometer instrumented applications (Java, Spring Boot, Micronaut)",
+  "editable":  true,
+  "gnetId":  4701,
+  "graphTooltip":  1,
+  "hideControls":  false,
+  "id":  null,
+  "links":  [
+
+  ],
+  "refresh":  "30s",
+  "rows":  [
+    {
+      "collapse":  false,
+      "height":  "100px",
+      "panels":  [
+        {
+          "cacheTimeout":  null,
+          "colorBackground":  false,
+          "colorValue":  true,
+          "colors":  [
+            "rgba(245, 54, 54, 0.9)",
+            "rgba(237, 129, 40, 0.89)",
+            "rgba(50, 172, 45, 0.97)"
+          ],
+          "datasource":  "Prometheus",
+          "decimals":  1,
+          "editable":  true,
+          "error":  false,
+          "format":  "s",
+          "gauge":  {
+            "maxValue":  100,
+            "minValue":  0,
+            "show":  false,
+            "thresholdLabels":  false,
+            "thresholdMarkers":  true
+          },
+          "height":  "",
+          "id":  63,
+          "interval":  null,
+          "links":  [
+
+          ],
+          "mappingType":  1,
+          "mappingTypes":  [
+            {
+              "name":  "value to text",
+              "value":  1
+            },
+            {
+              "name":  "range to text",
+              "value":  2
+            }
+          ],
+          "maxDataPoints":  100,
+          "nullPointMode":  "connected",
+          "nullText":  null,
+          "postfix":  "",
+          "postfixFontSize":  "50%",
+          "prefix":  "",
+          "prefixFontSize":  "70%",
+          "rangeMaps":  [
+            {
+              "from":  "null",
+              "text":  "N/A",
+              "to":  "null"
+            }
+          ],
+          "span":  3,
+          "sparkline":  {
+            "fillColor":  "rgba(31, 118, 189, 0.18)",
+            "full":  false,
+            "lineColor":  "rgb(31, 120, 193)",
+            "show":  false
+          },
+          "tableColumn":  "",
+          "targets":  [
+            {
+              "expr":  "process_uptime_seconds{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "",
+              "metric":  "",
+              "refId":  "A",
+              "step":  14400
+            }
+          ],
+          "thresholds":  "",
+          "title":  "Uptime",
+          "transparent":  false,
+          "type":  "singlestat",
+          "valueFontSize":  "80%",
+          "valueMaps":  [
+            {
+              "op":  "=",
+              "text":  "N/A",
+              "value":  "null"
+            }
+          ],
+          "valueName":  "current"
         },
-        "refresh": 2,
-        "regex": "",
-        "sort": 1,
-        "type": "query"
-      },
-      {
-        "current": {},
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "definition": "label_values(jvm_memory_used_bytes{job=\"$job\"}, instance)",
-        "hide": 0,
-        "includeAll": false,
-        "label": "Instance",
-        "multi": false,
-        "name": "instance",
-        "options": [],
-        "query": {
-          "query": "label_values(jvm_memory_used_bytes{job=\"$job\"}, instance)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        {
+          "cacheTimeout":  null,
+          "colorBackground":  false,
+          "colorValue":  true,
+          "colors":  [
+            "rgba(245, 54, 54, 0.9)",
+            "rgba(237, 129, 40, 0.89)",
+            "rgba(50, 172, 45, 0.97)"
+          ],
+          "datasource":  "Prometheus",
+          "decimals":  null,
+          "editable":  true,
+          "error":  false,
+          "format":  "dateTimeAsIso",
+          "gauge":  {
+            "maxValue":  100,
+            "minValue":  0,
+            "show":  false,
+            "thresholdLabels":  false,
+            "thresholdMarkers":  true
+          },
+          "height":  "",
+          "id":  92,
+          "interval":  null,
+          "links":  [
+
+          ],
+          "mappingType":  1,
+          "mappingTypes":  [
+            {
+              "name":  "value to text",
+              "value":  1
+            },
+            {
+              "name":  "range to text",
+              "value":  2
+            }
+          ],
+          "maxDataPoints":  100,
+          "nullPointMode":  "connected",
+          "nullText":  null,
+          "postfix":  "",
+          "postfixFontSize":  "50%",
+          "prefix":  "",
+          "prefixFontSize":  "70%",
+          "rangeMaps":  [
+            {
+              "from":  "null",
+              "text":  "N/A",
+              "to":  "null"
+            }
+          ],
+          "span":  3,
+          "sparkline":  {
+            "fillColor":  "rgba(31, 118, 189, 0.18)",
+            "full":  false,
+            "lineColor":  "rgb(31, 120, 193)",
+            "show":  false
+          },
+          "tableColumn":  "",
+          "targets":  [
+            {
+              "expr":  "process_start_time_seconds{application=\"$application\", instance=\"$instance\"}*1000",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "",
+              "metric":  "",
+              "refId":  "A",
+              "step":  14400
+            }
+          ],
+          "thresholds":  "",
+          "title":  "Start time",
+          "transparent":  false,
+          "type":  "singlestat",
+          "valueFontSize":  "70%",
+          "valueMaps":  [
+            {
+              "op":  "=",
+              "text":  "N/A",
+              "value":  "null"
+            }
+          ],
+          "valueName":  "current"
         },
-        "refresh": 2,
-        "regex": "",
-        "sort": 1,
-        "type": "query"
-      }
-    ]
-  },
-  "time": { "from": "now-30m", "to": "now" },
-  "timepicker": {},
-  "timezone": "",
-  "title": "Spring Boot (Micrometer) JVM & HTTP Statistics",
-  "uid": "spring-boot-statistics",
-  "version": 1,
-  "weekStart": "",
-  "panels": [
-    {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
-      "id": 100,
-      "panels": [],
-      "title": "Overview",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1,
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null },
-            { "color": "yellow", "value": 0.7 },
-            { "color": "red", "value": 0.9 }
-          ] }
+        {
+          "cacheTimeout":  null,
+          "colorBackground":  false,
+          "colorValue":  true,
+          "colors":  [
+            "rgba(50, 172, 45, 0.97)",
+            "rgba(237, 129, 40, 0.89)",
+            "rgba(245, 54, 54, 0.9)"
+          ],
+          "datasource":  "Prometheus",
+          "decimals":  2,
+          "editable":  true,
+          "error":  false,
+          "format":  "percent",
+          "gauge":  {
+            "maxValue":  100,
+            "minValue":  0,
+            "show":  false,
+            "thresholdLabels":  false,
+            "thresholdMarkers":  true
+          },
+          "id":  65,
+          "interval":  null,
+          "links":  [
+
+          ],
+          "mappingType":  1,
+          "mappingTypes":  [
+            {
+              "name":  "value to text",
+              "value":  1
+            },
+            {
+              "name":  "range to text",
+              "value":  2
+            }
+          ],
+          "maxDataPoints":  100,
+          "nullPointMode":  "connected",
+          "nullText":  null,
+          "postfix":  "",
+          "postfixFontSize":  "50%",
+          "prefix":  "",
+          "prefixFontSize":  "70%",
+          "rangeMaps":  [
+            {
+              "from":  "null",
+              "text":  "N/A",
+              "to":  "null"
+            }
+          ],
+          "span":  3,
+          "sparkline":  {
+            "fillColor":  "rgba(31, 118, 189, 0.18)",
+            "full":  false,
+            "lineColor":  "rgb(31, 120, 193)",
+            "show":  false
+          },
+          "tableColumn":  "",
+          "targets":  [
+            {
+              "expr":  "sum(jvm_memory_used_bytes{application=\"$application\", instance=\"$instance\", area=\"heap\"})*100/sum(jvm_memory_max_bytes{application=\"$application\",instance=\"$instance\", area=\"heap\"})",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "",
+              "refId":  "A",
+              "step":  14400
+            }
+          ],
+          "thresholds":  "70,90",
+          "title":  "Heap used",
+          "type":  "singlestat",
+          "valueFontSize":  "80%",
+          "valueMaps":  [
+            {
+              "op":  "=",
+              "text":  "N/A",
+              "value":  "null"
+            }
+          ],
+          "valueName":  "current"
+        },
+        {
+          "cacheTimeout":  null,
+          "colorBackground":  false,
+          "colorValue":  true,
+          "colors":  [
+            "rgba(50, 172, 45, 0.97)",
+            "rgba(237, 129, 40, 0.89)",
+            "rgba(245, 54, 54, 0.9)"
+          ],
+          "datasource":  "Prometheus",
+          "decimals":  2,
+          "editable":  true,
+          "error":  false,
+          "format":  "percent",
+          "gauge":  {
+            "maxValue":  100,
+            "minValue":  0,
+            "show":  false,
+            "thresholdLabels":  false,
+            "thresholdMarkers":  true
+          },
+          "id":  75,
+          "interval":  null,
+          "links":  [
+
+          ],
+          "mappingType":  2,
+          "mappingTypes":  [
+            {
+              "name":  "value to text",
+              "value":  1
+            },
+            {
+              "name":  "range to text",
+              "value":  2
+            }
+          ],
+          "maxDataPoints":  100,
+          "nullPointMode":  "connected",
+          "nullText":  null,
+          "postfix":  "",
+          "postfixFontSize":  "50%",
+          "prefix":  "",
+          "prefixFontSize":  "70%",
+          "rangeMaps":  [
+            {
+              "from":  "null",
+              "text":  "N/A",
+              "to":  "null"
+            },
+            {
+              "from":  "-99999999999999999999999999999999",
+              "text":  "N/A",
+              "to":  "0"
+            }
+          ],
+          "span":  3,
+          "sparkline":  {
+            "fillColor":  "rgba(31, 118, 189, 0.18)",
+            "full":  false,
+            "lineColor":  "rgb(31, 120, 193)",
+            "show":  false
+          },
+          "tableColumn":  "",
+          "targets":  [
+            {
+              "expr":  "sum(jvm_memory_used_bytes{application=\"$application\", instance=\"$instance\", area=\"nonheap\"})*100/sum(jvm_memory_max_bytes{application=\"$application\",instance=\"$instance\", area=\"nonheap\"})",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "",
+              "refId":  "A",
+              "step":  14400
+            }
+          ],
+          "thresholds":  "70,90",
+          "title":  "Non-Heap used",
+          "type":  "singlestat",
+          "valueFontSize":  "80%",
+          "valueMaps":  [
+            {
+              "op":  "=",
+              "text":  "N/A",
+              "value":  "null"
+            },
+            {
+              "op":  "=",
+              "text":  "x",
+              "value":  ""
+            }
+          ],
+          "valueName":  "current"
         }
-      },
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
-      "id": 101,
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(jvm_memory_used_bytes{job=\"$job\", instance=\"$instance\", area=\"heap\"}) / sum(jvm_memory_max_bytes{job=\"$job\", instance=\"$instance\", area=\"heap\"} > 0)", "refId": "A" }
       ],
-      "title": "Heap Used",
-      "type": "stat"
+      "repeat":  null,
+      "repeatIteration":  null,
+      "repeatRowId":  null,
+      "showTitle":  true,
+      "title":  "Quick Facts",
+      "titleSize":  "h6"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1,
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null },
-            { "color": "yellow", "value": 0.7 },
-            { "color": "red", "value": 0.9 }
-          ] }
+      "collapse":  false,
+      "height":  250,
+      "panels":  [
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  111,
+          "legend":  {
+            "avg":  false,
+            "current":  true,
+            "max":  false,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "sum(rate(http_server_requests_seconds_count{application=\"$application\", instance=\"$instance\"}[1m]))",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "HTTP",
+              "refId":  "A"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Rate",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "decimals":  null,
+              "format":  "ops",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+            "HTTP":  "#890f02",
+            "HTTP - 5xx":  "#bf1b00"
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  112,
+          "legend":  {
+            "avg":  false,
+            "current":  true,
+            "max":  false,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "sum(rate(http_server_requests_seconds_count{application=\"$application\", instance=\"$instance\", status=~\"5..\"}[1m]))",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "HTTP - 5xx",
+              "refId":  "A"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Errors",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "decimals":  null,
+              "format":  "ops",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  113,
+          "legend":  {
+            "avg":  false,
+            "current":  true,
+            "max":  false,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "sum(rate(http_server_requests_seconds_sum{application=\"$application\", instance=\"$instance\", status!~\"5..\"}[1m]))/sum(rate(http_server_requests_seconds_count{application=\"$application\", instance=\"$instance\", status!~\"5..\"}[1m]))",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  1,
+              "legendFormat":  "HTTP - AVG",
+              "refId":  "A"
+            },
+            {
+              "expr":  "max(http_server_requests_seconds_max{application=\"$application\", instance=\"$instance\", status!~\"5..\"})",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  1,
+              "legendFormat":  "HTTP - MAX",
+              "refId":  "B"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Duration",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "format":  "s",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "description":  "",
+          "fill":  1,
+          "id":  119,
+          "legend":  {
+            "alignAsTable":  false,
+            "avg":  false,
+            "current":  true,
+            "max":  false,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "tomcat_threads_busy_threads{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  2,
+              "legendFormat":  "TOMCAT - BSY",
+              "refId":  "A"
+            },
+            {
+              "expr":  "tomcat_threads_current_threads{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  2,
+              "legendFormat":  "TOMCAT - CUR",
+              "refId":  "B"
+            },
+            {
+              "expr":  "tomcat_threads_config_max_threads{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  2,
+              "legendFormat":  "TOMCAT - MAX",
+              "refId":  "C"
+            },
+            {
+              "expr":  "jetty_threads_busy{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  2,
+              "legendFormat":  "JETTY - BSY",
+              "refId":  "D"
+            },
+            {
+              "expr":  "jetty_threads_current{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  2,
+              "legendFormat":  "JETTY - CUR",
+              "refId":  "E"
+            },
+            {
+              "expr":  "jetty_threads_config_max{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  2,
+              "legendFormat":  "JETTY - MAX",
+              "refId":  "F"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Utilisation",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
         }
-      },
-      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
-      "id": 102,
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(process_cpu_usage{job=\"$job\", instance=\"$instance\"})", "refId": "A" }
       ],
-      "title": "CPU Utilization",
-      "type": "stat"
+      "repeat":  null,
+      "repeatIteration":  null,
+      "repeatRowId":  null,
+      "showTitle":  true,
+      "title":  "I/O Overview",
+      "titleSize":  "h6"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] } } },
-      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
-      "id": 103,
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(jvm_threads_live_threads{job=\"$job\", instance=\"$instance\"})", "refId": "A" }
+      "collapse":  false,
+      "height":  "250px",
+      "panels":  [
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  24,
+          "legend":  {
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "sum(jvm_memory_used_bytes{application=\"$application\", instance=\"$instance\", area=\"heap\"})",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "used",
+              "metric":  "",
+              "refId":  "A",
+              "step":  2400
+            },
+            {
+              "expr":  "sum(jvm_memory_committed_bytes{application=\"$application\", instance=\"$instance\", area=\"heap\"})",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "committed",
+              "refId":  "B",
+              "step":  2400
+            },
+            {
+              "expr":  "sum(jvm_memory_max_bytes{application=\"$application\", instance=\"$instance\", area=\"heap\"})",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "max",
+              "refId":  "C",
+              "step":  2400
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "JVM Heap",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "mbytes",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "format":  "bytes",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  0,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  25,
+          "legend":  {
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "sum(jvm_memory_used_bytes{application=\"$application\", instance=\"$instance\", area=\"nonheap\"})",
+              "format":  "time_series",
+              "interval":  "",
+              "intervalFactor":  2,
+              "legendFormat":  "used",
+              "metric":  "",
+              "refId":  "A",
+              "step":  2400
+            },
+            {
+              "expr":  "sum(jvm_memory_committed_bytes{application=\"$application\", instance=\"$instance\", area=\"nonheap\"})",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "committed",
+              "refId":  "B",
+              "step":  2400
+            },
+            {
+              "expr":  "sum(jvm_memory_max_bytes{application=\"$application\", instance=\"$instance\", area=\"nonheap\"})",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "max",
+              "refId":  "C",
+              "step":  2400
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "JVM Non-Heap",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "mbytes",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "format":  "bytes",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  0,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  26,
+          "legend":  {
+            "alignAsTable":  false,
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "sum(jvm_memory_used_bytes{application=\"$application\", instance=\"$instance\"})",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "used",
+              "metric":  "",
+              "refId":  "A",
+              "step":  2400
+            },
+            {
+              "expr":  "sum(jvm_memory_committed_bytes{application=\"$application\", instance=\"$instance\"})",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "committed",
+              "refId":  "B",
+              "step":  2400
+            },
+            {
+              "expr":  "sum(jvm_memory_max_bytes{application=\"$application\", instance=\"$instance\"})",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "max",
+              "refId":  "C",
+              "step":  2400
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "JVM Total",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "mbytes",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "format":  "bytes",
+              "label":  "",
+              "logBase":  1,
+              "max":  null,
+              "min":  0,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  86,
+          "legend":  {
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "process_memory_vss_bytes{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  true,
+              "intervalFactor":  2,
+              "legendFormat":  "vss",
+              "metric":  "",
+              "refId":  "A",
+              "step":  2400
+            },
+            {
+              "expr":  "process_memory_rss_bytes{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "rss",
+              "refId":  "B"
+            },
+            {
+              "expr":  "process_memory_swap_bytes{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "swap",
+              "refId":  "C"
+            },
+            {
+              "expr":  "process_memory_rss_bytes{application=\"$application\", instance=\"$instance\"} + process_memory_swap_bytes{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "total",
+              "refId":  "D"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "JVM Process Memory",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "mbytes",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "format":  "bytes",
+              "label":  "",
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        }
       ],
-      "title": "Live Threads",
-      "type": "stat"
+      "repeat":  null,
+      "repeatIteration":  null,
+      "repeatRowId":  null,
+      "showTitle":  true,
+      "title":  "JVM Memory",
+      "titleSize":  "h6"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "purple", "value": null } ] } } },
-      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
-      "id": 104,
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(jvm_classes_loaded_classes{job=\"$job\", instance=\"$instance\"})", "refId": "A" }
+      "collapse":  false,
+      "height":  250,
+      "panels":  [
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  106,
+          "legend":  {
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "system_cpu_usage{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  1,
+              "legendFormat":  "system",
+              "metric":  "",
+              "refId":  "A",
+              "step":  2400
+            },
+            {
+              "expr":  "process_cpu_usage{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  1,
+              "legendFormat":  "process",
+              "refId":  "B"
+            },
+            {
+              "expr":  "avg_over_time(process_cpu_usage{application=\"$application\", instance=\"$instance\"}[15m])",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  1,
+              "legendFormat":  "process-15m",
+              "refId":  "C"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "CPU Usage",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "short",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "decimals":  1,
+              "format":  "percentunit",
+              "label":  "",
+              "logBase":  1,
+              "max":  "1",
+              "min":  0,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  93,
+          "legend":  {
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "system_load_average_1m{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "system-1m",
+              "metric":  "",
+              "refId":  "A",
+              "step":  2400
+            },
+            {
+              "expr":  "system_cpu_count{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "cpus",
+              "refId":  "B"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Load",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "short",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "decimals":  1,
+              "format":  "short",
+              "label":  "",
+              "logBase":  1,
+              "max":  null,
+              "min":  0,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  32,
+          "legend":  {
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "jvm_threads_live_threads{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "live",
+              "metric":  "",
+              "refId":  "A",
+              "step":  2400
+            },
+            {
+              "expr":  "jvm_threads_daemon_threads{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "daemon",
+              "metric":  "",
+              "refId":  "B",
+              "step":  2400
+            },
+            {
+              "expr":  "jvm_threads_peak_threads{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "peak",
+              "refId":  "C",
+              "step":  2400
+            },
+            {
+              "expr":  "process_threads{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "interval":  "",
+              "intervalFactor":  2,
+              "legendFormat":  "process",
+              "refId":  "D",
+              "step":  2400
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Threads",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "short",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "decimals":  0,
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  0,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+            "blocked":  "#bf1b00",
+            "new":  "#fce2de",
+            "runnable":  "#7eb26d",
+            "terminated":  "#511749",
+            "timed-waiting":  "#c15c17",
+            "waiting":  "#eab839"
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  124,
+          "legend":  {
+            "alignAsTable":  false,
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "rightSide":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "jvm_threads_states_threads{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "{{state}}",
+              "refId":  "A"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Thread States",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "description":  "The percent of time spent on Garbage Collection over all CPUs assigned to the JVM process.",
+          "fill":  1,
+          "id":  138,
+          "legend":  {
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "sum(rate(jvm_gc_pause_seconds_sum{application=\"$application\", instance=\"$instance\"}[1m])) by (application, instance) / on(application, instance) system_cpu_count",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "CPU time spent on GC",
+              "refId":  "A"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "GC Pressure",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "decimals":  1,
+              "format":  "percentunit",
+              "label":  null,
+              "logBase":  1,
+              "max":  "1",
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+            "debug":  "#1F78C1",
+            "error":  "#BF1B00",
+            "info":  "#508642",
+            "trace":  "#6ED0E0",
+            "warn":  "#EAB839"
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "height":  "",
+          "id":  91,
+          "legend":  {
+            "alignAsTable":  false,
+            "avg":  false,
+            "current":  true,
+            "hideEmpty":  false,
+            "hideZero":  false,
+            "max":  true,
+            "min":  false,
+            "rightSide":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  true,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+            {
+              "alias":  "error",
+              "yaxis":  1
+            },
+            {
+              "alias":  "warn",
+              "yaxis":  1
+            }
+          ],
+          "spaceLength":  10,
+          "span":  6,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "increase(logback_events_total{application=\"$application\", instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "interval":  "",
+              "intervalFactor":  2,
+              "legendFormat":  "{{level}}",
+              "metric":  "",
+              "refId":  "A",
+              "step":  1200
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Log Events",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "transparent":  false,
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "short",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "decimals":  0,
+              "format":  "opm",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  61,
+          "legend":  {
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  3,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "process_files_open_files{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  2,
+              "legendFormat":  "open",
+              "metric":  "",
+              "refId":  "A",
+              "step":  2400
+            },
+            {
+              "expr":  "process_files_max_files{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  2,
+              "legendFormat":  "max",
+              "metric":  "",
+              "refId":  "B",
+              "step":  2400
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "File Descriptors",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "short",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "decimals":  0,
+              "format":  "short",
+              "label":  null,
+              "logBase":  10,
+              "max":  null,
+              "min":  0,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        }
       ],
-      "title": "Loaded Classes",
-      "type": "stat"
+      "repeat":  null,
+      "repeatIteration":  null,
+      "repeatRowId":  null,
+      "showTitle":  true,
+      "title":  "JVM Misc",
+      "titleSize":  "h6"
     },
     {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
-      "id": 200,
-      "panels": [],
-      "title": "JVM Memory",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "id": 201,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(jvm_memory_used_bytes{job=\"$job\", instance=\"$instance\", area=\"heap\"})", "legendFormat": "used", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(jvm_memory_committed_bytes{job=\"$job\", instance=\"$instance\", area=\"heap\"})", "legendFormat": "committed", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(jvm_memory_max_bytes{job=\"$job\", instance=\"$instance\", area=\"heap\"} > 0)", "legendFormat": "max", "refId": "C" }
+      "collapse":  false,
+      "height":  "250px",
+      "panels":  [
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  3,
+          "legend":  {
+            "alignAsTable":  false,
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "rightSide":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "minSpan":  4,
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "repeat":  "jvm_memory_pool_heap",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  4,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "jvm_memory_used_bytes{application=\"$application\", instance=\"$instance\", id=~\"$jvm_memory_pool_heap\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "interval":  "",
+              "intervalFactor":  2,
+              "legendFormat":  "used",
+              "metric":  "",
+              "refId":  "A",
+              "step":  1800
+            },
+            {
+              "expr":  "jvm_memory_committed_bytes{application=\"$application\", instance=\"$instance\", id=~\"$jvm_memory_pool_heap\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "interval":  "",
+              "intervalFactor":  2,
+              "legendFormat":  "commited",
+              "metric":  "",
+              "refId":  "B",
+              "step":  1800
+            },
+            {
+              "expr":  "jvm_memory_max_bytes{application=\"$application\", instance=\"$instance\", id=~\"$jvm_memory_pool_heap\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "interval":  "",
+              "intervalFactor":  2,
+              "legendFormat":  "max",
+              "metric":  "",
+              "refId":  "C",
+              "step":  1800
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "$jvm_memory_pool_heap",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "mbytes",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "format":  "bytes",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  0,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        }
       ],
-      "title": "Heap Memory",
-      "type": "timeseries"
+      "repeat":  "persistence_counts",
+      "repeatIteration":  null,
+      "repeatRowId":  null,
+      "showTitle":  true,
+      "title":  "JVM Memory Pools (Heap)",
+      "titleSize":  "h6"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "id": 202,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(jvm_memory_used_bytes{job=\"$job\", instance=\"$instance\", area=\"nonheap\"})", "legendFormat": "used", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(jvm_memory_committed_bytes{job=\"$job\", instance=\"$instance\", area=\"nonheap\"})", "legendFormat": "committed", "refId": "B" }
+      "collapse":  false,
+      "height":  250,
+      "panels":  [
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  78,
+          "legend":  {
+            "alignAsTable":  false,
+            "avg":  false,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "rightSide":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "minSpan":  4,
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "repeat":  "jvm_memory_pool_nonheap",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  4,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "jvm_memory_used_bytes{application=\"$application\", instance=\"$instance\", id=~\"$jvm_memory_pool_nonheap\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "interval":  "",
+              "intervalFactor":  2,
+              "legendFormat":  "used",
+              "metric":  "",
+              "refId":  "A",
+              "step":  1800
+            },
+            {
+              "expr":  "jvm_memory_committed_bytes{application=\"$application\", instance=\"$instance\", id=~\"$jvm_memory_pool_nonheap\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "interval":  "",
+              "intervalFactor":  2,
+              "legendFormat":  "commited",
+              "metric":  "",
+              "refId":  "B",
+              "step":  1800
+            },
+            {
+              "expr":  "jvm_memory_max_bytes{application=\"$application\", instance=\"$instance\", id=~\"$jvm_memory_pool_nonheap\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "interval":  "",
+              "intervalFactor":  2,
+              "legendFormat":  "max",
+              "metric":  "",
+              "refId":  "C",
+              "step":  1800
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "$jvm_memory_pool_nonheap",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "mbytes",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "format":  "bytes",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  0,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        }
       ],
-      "title": "Non-Heap Memory",
-      "type": "timeseries"
+      "repeat":  null,
+      "repeatIteration":  null,
+      "repeatRowId":  null,
+      "showTitle":  true,
+      "title":  "JVM Memory Pools (Non-Heap)",
+      "titleSize":  "h6"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never", "stacking": { "mode": "normal" } } } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "id": 203,
-      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (id) (jvm_memory_used_bytes{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{id}}", "refId": "A" }
+      "collapse":  false,
+      "height":  250,
+      "panels":  [
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  98,
+          "legend":  {
+            "avg":  false,
+            "current":  false,
+            "max":  false,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  false
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  4,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "rate(jvm_gc_pause_seconds_count{application=\"$application\", instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  1,
+              "legendFormat":  "{{action}} ({{cause}})",
+              "refId":  "A"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Collections",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "format":  "ops",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  "",
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  101,
+          "legend":  {
+            "avg":  false,
+            "current":  false,
+            "max":  false,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  false
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  4,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "rate(jvm_gc_pause_seconds_sum{application=\"$application\", instance=\"$instance\"}[1m])/rate(jvm_gc_pause_seconds_count{application=\"$application\", instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "hide":  false,
+              "instant":  false,
+              "intervalFactor":  1,
+              "legendFormat":  "avg {{action}} ({{cause}})",
+              "refId":  "A"
+            },
+            {
+              "expr":  "jvm_gc_pause_seconds_max{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "instant":  false,
+              "intervalFactor":  1,
+              "legendFormat":  "max {{action}} ({{cause}})",
+              "refId":  "B"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Pause Durations",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "format":  "s",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  "",
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  99,
+          "legend":  {
+            "avg":  false,
+            "current":  false,
+            "max":  false,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  false
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  4,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "rate(jvm_gc_memory_allocated_bytes_total{application=\"$application\", instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "interval":  "",
+              "intervalFactor":  1,
+              "legendFormat":  "allocated",
+              "refId":  "A"
+            },
+            {
+              "expr":  "rate(jvm_gc_memory_promoted_bytes_total{application=\"$application\", instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "interval":  "",
+              "intervalFactor":  1,
+              "legendFormat":  "promoted",
+              "refId":  "B"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Allocated/Promoted",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "format":  "Bps",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        }
       ],
-      "title": "Memory Used by Pool",
-      "type": "timeseries"
+      "repeat":  null,
+      "repeatIteration":  null,
+      "repeatRowId":  null,
+      "showTitle":  true,
+      "title":  "Garbage Collection",
+      "titleSize":  "h6"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Live-data size after the last GC. The Micrometer registry has no per-pool 'used after GC' meter (unlike OTel jvm.memory.used_after_last_gc), so this shows the whole-heap jvm_gc_live_data_size_bytes against jvm_gc_max_data_size_bytes.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "id": 204,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(jvm_gc_live_data_size_bytes{job=\"$job\", instance=\"$instance\"})", "legendFormat": "live data", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(jvm_gc_max_data_size_bytes{job=\"$job\", instance=\"$instance\"})", "legendFormat": "max data", "refId": "B" }
+      "collapse":  false,
+      "height":  "250px",
+      "panels":  [
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  37,
+          "legend":  {
+            "avg":  false,
+            "current":  false,
+            "max":  false,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  false
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  6,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "jvm_classes_loaded_classes{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "loaded",
+              "metric":  "",
+              "refId":  "A",
+              "step":  1200
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Classes loaded",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "short",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  0,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "editable":  true,
+          "error":  false,
+          "fill":  1,
+          "grid":  {
+            "leftLogBase":  1,
+            "leftMax":  null,
+            "leftMin":  null,
+            "rightLogBase":  1,
+            "rightMax":  null,
+            "rightMin":  null
+          },
+          "id":  38,
+          "legend":  {
+            "avg":  false,
+            "current":  false,
+            "max":  false,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  false
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  6,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "delta(jvm_classes_loaded_classes{application=\"$application\",instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "hide":  false,
+              "interval":  "",
+              "intervalFactor":  1,
+              "legendFormat":  "delta-1m",
+              "metric":  "",
+              "refId":  "A",
+              "step":  1200
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Class delta",
+          "tooltip":  {
+            "msResolution":  false,
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "cumulative"
+          },
+          "type":  "graph",
+          "x-axis":  true,
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "y-axis":  true,
+          "y_formats":  [
+            "ops",
+            "short"
+          ],
+          "yaxes":  [
+            {
+              "decimals":  null,
+              "format":  "short",
+              "label":  "",
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        }
       ],
-      "title": "Live Data Size After GC",
-      "type": "timeseries"
+      "repeat":  null,
+      "repeatIteration":  null,
+      "repeatRowId":  null,
+      "showTitle":  true,
+      "title":  "Classloading",
+      "titleSize":  "h6"
     },
     {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
-      "id": 300,
-      "panels": [],
-      "title": "CPU / Threads / Classes",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "percentunit", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 25 },
-      "id": 301,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(process_cpu_usage{job=\"$job\", instance=\"$instance\"})", "legendFormat": "process cpu", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(system_cpu_usage{job=\"$job\", instance=\"$instance\"})", "legendFormat": "system cpu", "refId": "B" }
+      "collapse":  false,
+      "height":  "250px",
+      "panels":  [
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  131,
+          "legend":  {
+            "avg":  false,
+            "current":  false,
+            "max":  false,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  false
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "minSpan":  4,
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "repeat":  "jvm_buffer_pool",
+          "seriesOverrides":  [
+            {
+              "alias":  "count",
+              "yaxis":  2
+            },
+            {
+              "alias":  "buffers",
+              "yaxis":  2
+            }
+          ],
+          "spaceLength":  10,
+          "span":  4,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "jvm_buffer_memory_used_bytes{application=\"$application\", instance=\"$instance\", id=~\"$jvm_buffer_pool\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "used",
+              "refId":  "A"
+            },
+            {
+              "expr":  "jvm_buffer_total_capacity_bytes{application=\"$application\", instance=\"$instance\", id=~\"$jvm_buffer_pool\"}",
+              "format":  "time_series",
+              "intervalFactor":  2,
+              "legendFormat":  "capacity",
+              "refId":  "B"
+            },
+            {
+              "expr":  "jvm_buffer_count_buffers{application=\"$application\", instance=\"$instance\", id=~\"$jvm_buffer_pool\"}",
+              "format":  "time_series",
+              "hide":  false,
+              "intervalFactor":  2,
+              "legendFormat":  "buffers",
+              "refId":  "C"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "$jvm_buffer_pool",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "format":  "decbytes",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "decimals":  0,
+              "format":  "short",
+              "label":  "",
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            }
+          ]
+        }
       ],
-      "title": "CPU Utilization",
-      "type": "timeseries"
+      "repeat":  null,
+      "repeatIteration":  null,
+      "repeatRowId":  null,
+      "showTitle":  true,
+      "title":  "Buffer Pools",
+      "titleSize":  "h6"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never", "stacking": { "mode": "normal" } } } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 25 },
-      "id": 302,
-      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (state) (jvm_threads_states_threads{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{state}}", "refId": "A" }
+      "collapse":  false,
+      "collapsed":  false,
+      "height":  "250px",
+      "panels":  [
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  139,
+          "legend":  {
+            "avg":  true,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  6,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "tomcat_connections_current_connections{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "current",
+              "refId":  "A"
+            },
+            {
+              "expr":  "tomcat_connections_keepalive_current_connections{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "keep-alive",
+              "refId":  "B"
+            },
+            {
+              "expr":  "tomcat_connections_config_max_connections{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "config max",
+              "refId":  "C"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Tomcat Connections",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "decimals":  null,
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  140,
+          "legend":  {
+            "avg":  true,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  6,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "tomcat_threads_busy_threads{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "busy",
+              "refId":  "A"
+            },
+            {
+              "expr":  "tomcat_threads_current_threads{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "current",
+              "refId":  "B"
+            },
+            {
+              "expr":  "tomcat_threads_config_max_threads{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "config max",
+              "refId":  "C"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Tomcat Threads",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "decimals":  null,
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  141,
+          "legend":  {
+            "avg":  true,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  6,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "rate(tomcat_global_received_bytes_total{application=\"$application\", instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "received",
+              "refId":  "A"
+            },
+            {
+              "expr":  "rate(tomcat_global_sent_bytes_total{application=\"$application\", instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "sent",
+              "refId":  "B"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Tomcat Network Throughput",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "decimals":  null,
+              "format":  "Bps",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  142,
+          "legend":  {
+            "avg":  true,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  6,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "rate(tomcat_global_request_seconds_count{application=\"$application\", instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "req/s",
+              "refId":  "A"
+            },
+            {
+              "expr":  "rate(tomcat_global_error_total{application=\"$application\", instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "err/s",
+              "refId":  "B"
+            },
+            {
+              "expr":  "tomcat_global_request_max_seconds{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "max req duration (s)",
+              "refId":  "C"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Tomcat Global Requests",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "decimals":  null,
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  143,
+          "legend":  {
+            "avg":  true,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  6,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "sum by (name) (rate(tomcat_servlet_request_seconds_count{application=\"$application\", instance=\"$instance\"}[1m]))",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "{{name}} req/s",
+              "refId":  "A"
+            },
+            {
+              "expr":  "sum by (name) (rate(tomcat_servlet_error_total{application=\"$application\", instance=\"$instance\"}[1m]))",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "{{name}} err/s",
+              "refId":  "B"
+            },
+            {
+              "expr":  "tomcat_servlet_request_max_seconds{application=\"$application\", instance=\"$instance\"}",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "{{name}} max (s)",
+              "refId":  "C"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Tomcat Servlet Requests",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "decimals":  null,
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        },
+        {
+          "aliasColors":  {
+
+          },
+          "bars":  false,
+          "dashLength":  10,
+          "dashes":  false,
+          "datasource":  "Prometheus",
+          "fill":  1,
+          "id":  144,
+          "legend":  {
+            "avg":  true,
+            "current":  true,
+            "max":  true,
+            "min":  false,
+            "show":  true,
+            "total":  false,
+            "values":  true
+          },
+          "lines":  true,
+          "linewidth":  1,
+          "links":  [
+
+          ],
+          "nullPointMode":  "null",
+          "percentage":  false,
+          "pointradius":  5,
+          "points":  false,
+          "renderer":  "flot",
+          "seriesOverrides":  [
+
+          ],
+          "spaceLength":  10,
+          "span":  6,
+          "stack":  false,
+          "steppedLine":  false,
+          "targets":  [
+            {
+              "expr":  "rate(tomcat_cache_access_total{application=\"$application\", instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "access/s",
+              "refId":  "A"
+            },
+            {
+              "expr":  "rate(tomcat_cache_hit_total{application=\"$application\", instance=\"$instance\"}[1m])",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "hit/s",
+              "refId":  "B"
+            },
+            {
+              "expr":  "rate(tomcat_cache_hit_total{application=\"$application\", instance=\"$instance\"}[5m]) / rate(tomcat_cache_access_total{application=\"$application\", instance=\"$instance\"}[5m])",
+              "format":  "time_series",
+              "intervalFactor":  1,
+              "legendFormat":  "hit ratio",
+              "refId":  "C"
+            }
+          ],
+          "thresholds":  [
+
+          ],
+          "timeFrom":  null,
+          "timeShift":  null,
+          "title":  "Tomcat Cache",
+          "tooltip":  {
+            "shared":  true,
+            "sort":  0,
+            "value_type":  "individual"
+          },
+          "type":  "graph",
+          "xaxis":  {
+            "buckets":  null,
+            "mode":  "time",
+            "name":  null,
+            "show":  true,
+            "values":  [
+
+            ]
+          },
+          "yaxes":  [
+            {
+              "decimals":  null,
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  "0",
+              "show":  true
+            },
+            {
+              "format":  "short",
+              "label":  null,
+              "logBase":  1,
+              "max":  null,
+              "min":  null,
+              "show":  true
+            }
+          ]
+        }
       ],
-      "title": "Threads by State",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Micrometer exposes the loaded-class count as a gauge (jvm_classes_loaded_classes) and unloaded as a counter (jvm_classes_unloaded_classes_total); there is no loaded counter, so 'loaded' is the current count and 'unloaded/s' is the counter rate.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 25 },
-      "id": 303,
-      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(jvm_classes_loaded_classes{job=\"$job\", instance=\"$instance\"})", "legendFormat": "loaded", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(jvm_classes_unloaded_classes_total{job=\"$job\", instance=\"$instance\"}[$__rate_interval]))", "legendFormat": "unloaded/s", "refId": "B" }
-      ],
-      "title": "Classes (loaded / unload rate)",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
-      "id": 400,
-      "panels": [],
-      "title": "Garbage Collection",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "No histogram buckets on jvm_gc_pause_seconds, so p95 is unavailable; avg = rate(sum)/rate(count) and max = jvm_gc_pause_seconds_max, grouped by the gc label (e.g. G1 Young Generation).",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
-      "id": 401,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (gc) (rate(jvm_gc_pause_seconds_sum{job=\"$job\", instance=\"$instance\"}[$__rate_interval])) / sum by (gc) (rate(jvm_gc_pause_seconds_count{job=\"$job\", instance=\"$instance\"}[$__rate_interval]))", "legendFormat": "avg {{gc}}", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (gc) (jvm_gc_pause_seconds_max{job=\"$job\", instance=\"$instance\"})", "legendFormat": "max {{gc}}", "refId": "B" }
-      ],
-      "title": "GC Pause Duration",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never", "stacking": { "mode": "normal" } } } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
-      "id": 402,
-      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (gc) (rate(jvm_gc_pause_seconds_count{job=\"$job\", instance=\"$instance\"}[$__rate_interval]))", "legendFormat": "{{gc}}", "refId": "A" }
-      ],
-      "title": "GC Collection Rate",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
-      "id": 500,
-      "panels": [],
-      "title": "HTTP Server",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 43 },
-      "id": 501,
-      "options": { "legend": { "calcs": ["lastNotNull", "mean"], "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(http_server_requests_seconds_count{job=\"$job\", instance=\"$instance\"}[$__rate_interval]))", "legendFormat": "total", "refId": "A" }
-      ],
-      "title": "Request Rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "No histogram buckets on http_server_requests_seconds, so p95/p99 are unavailable; avg = rate(sum)/rate(count) and max = http_server_requests_seconds_max.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 43 },
-      "id": 502,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(http_server_requests_seconds_sum{job=\"$job\", instance=\"$instance\"}[$__rate_interval])) / clamp_min(sum(rate(http_server_requests_seconds_count{job=\"$job\", instance=\"$instance\"}[$__rate_interval])), 0.001)", "legendFormat": "avg", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(http_server_requests_seconds_max{job=\"$job\", instance=\"$instance\"})", "legendFormat": "max", "refId": "B" }
-      ],
-      "title": "Request Latency",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 43 },
-      "id": 503,
-      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(http_server_requests_seconds_count{job=\"$job\", instance=\"$instance\", status=~\"5..\"}[$__rate_interval]))", "legendFormat": "5xx", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(http_server_requests_seconds_count{job=\"$job\", instance=\"$instance\", status=~\"4..\"}[$__rate_interval]))", "legendFormat": "4xx", "refId": "B" }
-      ],
-      "title": "Error Rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 51 },
-      "id": 504,
-      "options": { "legend": { "calcs": ["lastNotNull", "mean"], "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (method, status, uri) (rate(http_server_requests_seconds_count{job=\"$job\", instance=\"$instance\"}[$__rate_interval]))", "legendFormat": "{{method}} {{status}} {{uri}}", "refId": "A" }
-      ],
-      "title": "Requests by Method / Status / URI",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 59 },
-      "id": 600,
-      "panels": [],
-      "title": "HTTP Client Connection Pool (Apache HttpClient 5)",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Pooled connections from io.micrometer httpcomponents.httpclient.pool.* gauges. The httpclient label is the pool name (e.g. loadBalancedPool / healthCheckPool). Empty for services without a pooled RestTemplate/RestClient.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 60 },
-      "id": 601,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (httpclient) (httpcomponents_httpclient_pool_total_connections{job=\"$job\", instance=\"$instance\", state=\"leased\"})", "legendFormat": "{{httpclient}} leased", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (httpclient) (httpcomponents_httpclient_pool_total_connections{job=\"$job\", instance=\"$instance\", state=\"available\"})", "legendFormat": "{{httpclient}} available", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (httpclient) (httpcomponents_httpclient_pool_total_max{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{httpclient}} max", "refId": "C" }
-      ],
-      "title": "Pool Connections (leased / available / max)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Threads blocked waiting to lease a connection from the pool (httpcomponents.httpclient.pool.total.pending). Sustained > 0 means the pool is undersized for the load.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 60 },
-      "id": 602,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (httpclient) (httpcomponents_httpclient_pool_total_pending{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{httpclient}}", "refId": "A" }
-      ],
-      "title": "Pending Connection Acquisitions",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Leased connections as a fraction of the pool's total max. Approaching 1 means the pool is saturated and new requests will queue (see Pending panel).",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "percentunit", "min": 0, "max": 1, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 60 },
-      "id": 603,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (httpclient) (httpcomponents_httpclient_pool_total_connections{job=\"$job\", instance=\"$instance\", state=\"leased\"}) / clamp_min(sum by (httpclient) (httpcomponents_httpclient_pool_total_max{job=\"$job\", instance=\"$instance\"}), 1)", "legendFormat": "{{httpclient}}", "refId": "A" }
-      ],
-      "title": "Pool Saturation (leased / max)",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 68 },
-      "id": 700,
-      "panels": [],
-      "title": "Tomcat (Connector Thread Pool / Connections / Servlet)",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Tomcat connector worker threads (tomcat.threads.*). busy = threads serving requests, current = threads alive in the pool, max = configured ceiling. busy approaching max means the connector is thread-starved.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 69 },
-      "id": 701,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (tomcat_threads_busy_threads{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}} busy", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (tomcat_threads_current_threads{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}} current", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (tomcat_threads_config_max_threads{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}} max", "refId": "C" }
-      ],
-      "title": "Tomcat Threads",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Tomcat connector socket connections (tomcat.connections.*). current = open sockets, keepalive = idle kept-alive sockets, max = connector connection ceiling.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 69 },
-      "id": 702,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (tomcat_connections_current_connections{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}} current", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (tomcat_connections_keepalive_current_connections{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}} keep-alive", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (tomcat_connections_config_max_connections{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}} max", "refId": "C" }
-      ],
-      "title": "Tomcat Connections",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Per-servlet throughput and errors (tomcat.servlet.*). The name label is the servlet (e.g. dispatcherServlet, CamelServlet).",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 77 },
-      "id": 703,
-      "options": { "legend": { "calcs": ["lastNotNull", "mean"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (rate(tomcat_servlet_request_seconds_count{job=\"$job\", instance=\"$instance\"}[$__rate_interval]))", "legendFormat": "{{name}} requests/s", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (rate(tomcat_servlet_error_total{job=\"$job\", instance=\"$instance\"}[$__rate_interval]))", "legendFormat": "{{name}} errors/s", "refId": "B" }
-      ],
-      "title": "Servlet Throughput / Errors",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Slowest single servlet request observed since startup (tomcat.servlet.request.max). This is a high-water gauge, not a rolling window.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 77 },
-      "id": 704,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (name) (tomcat_servlet_request_max_seconds{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Servlet Max Request Time",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 85 },
-      "id": 800,
-      "panels": [],
-      "title": "Application Thread Pools (Executors)",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "executor.active — current threads executing a task, per executor bean (name).",
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] } } },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 86 },
-      "id": 808,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (executor_active_threads{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Active Threads (current)",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "executor.pool.size — current live threads in the pool, per executor bean (name).",
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } } },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 86 },
-      "id": 809,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (executor_pool_size_threads{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Pool Size (current)",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "executor.pool.core — configured core pool size, per executor bean (name).",
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "purple", "value": null } ] } } },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 86 },
-      "id": 810,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (executor_pool_core_threads{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Core Pool Size",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "executor.pool.max — configured max pool size, per executor bean (name). Unbounded pools report Integer.MAX_VALUE (2147483647); filtered out (< 100000) so only bounded pools show a value.",
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "orange", "value": null } ] } } },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 86 },
-      "id": 811,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (executor_pool_max_threads{job=\"$job\", instance=\"$instance\"}) < 100000", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Max Pool Size",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "executor.active — threads currently executing a task, per executor bean (name). Approaching the pool's max means the pool is busy.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 90 },
-      "id": 801,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (executor_active_threads{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Active Threads",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "executor.pool.size — threads currently alive in the pool, per executor bean (name). Grows from core toward max under load.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 90 },
-      "id": 802,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (executor_pool_size_threads{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Pool Size (live threads)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "executor.pool.core — configured core pool size (always-kept threads), per executor bean (name).",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 90 },
-      "id": 803,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (executor_pool_core_threads{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Core Pool Size",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "executor.pool.max — configured maximum pool size, per executor bean (name). Unbounded pools report Integer.MAX_VALUE (2147483647); that sentinel is filtered out (< 100000) so the axis stays on the real range (such pools simply show no line).",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 90 },
-      "id": 804,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (executor_pool_max_threads{job=\"$job\", instance=\"$instance\"}) < 100000", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Max Pool Size",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "executor.queued — tasks currently waiting in the executor's queue, per executor bean (name). Sustained > 0 means tasks are backing up behind busy threads.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 98 },
-      "id": 805,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (executor_queued_tasks{job=\"$job\", instance=\"$instance\"})", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Queued Tasks",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "executor.queue.remaining — remaining queue capacity, per executor bean (name). Approaching 0 means the queue is about to reject (or fall back to CallerRunsPolicy). Unbounded queues report Integer.MAX_VALUE (2147483647); that sentinel is filtered out (< 100000) so the axis stays on the real range.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 98 },
-      "id": 806,
-      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (executor_queue_remaining_tasks{job=\"$job\", instance=\"$instance\"}) < 100000", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Queue Remaining Capacity",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Completed-task throughput per executor, derived from the executor.completed counter (executor_completed_tasks_total). Available here because this app uses micrometer-registry-prometheus (a client-readable registry), unlike the write-only OTel shim.",
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 106 },
-      "id": 807,
-      "options": { "legend": { "calcs": ["lastNotNull", "mean", "max"], "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (name) (rate(executor_completed_tasks_total{job=\"$job\", instance=\"$instance\"}[$__rate_interval]))", "legendFormat": "{{name}}", "refId": "A" }
-      ],
-      "title": "Task Completion Rate",
-      "type": "timeseries"
+      "repeat":  null,
+      "repeatIteration":  null,
+      "repeatRowId":  null,
+      "showTitle":  true,
+      "title":  "Tomcat",
+      "titleSize":  "h6"
     }
-  ]
+  ],
+  "schemaVersion":  14,
+  "style":  "dark",
+  "tags":  [
+
+  ],
+  "templating":  {
+    "list":  [
+      {
+        "allValue":  null,
+        "current":  {
+
+        },
+        "datasource":  "Prometheus",
+        "hide":  0,
+        "includeAll":  false,
+        "label":  "Application",
+        "multi":  false,
+        "name":  "application",
+        "options":  [
+
+        ],
+        "query":  "label_values(application)",
+        "refresh":  2,
+        "regex":  "",
+        "sort":  0,
+        "tagValuesQuery":  "",
+        "tags":  [
+
+        ],
+        "tagsQuery":  "",
+        "type":  "query",
+        "useTags":  false
+      },
+      {
+        "allFormat":  "glob",
+        "allValue":  null,
+        "current":  {
+
+        },
+        "datasource":  "Prometheus",
+        "hide":  0,
+        "includeAll":  false,
+        "label":  "Instance",
+        "multi":  false,
+        "multiFormat":  "glob",
+        "name":  "instance",
+        "options":  [
+
+        ],
+        "query":  "label_values(jvm_memory_used_bytes{application=\"$application\"}, instance)",
+        "refresh":  2,
+        "regex":  "",
+        "sort":  0,
+        "tagValuesQuery":  "",
+        "tags":  [
+
+        ],
+        "tagsQuery":  "",
+        "type":  "query",
+        "useTags":  false
+      },
+      {
+        "allFormat":  "glob",
+        "allValue":  null,
+        "current":  {
+
+        },
+        "datasource":  "Prometheus",
+        "hide":  2,
+        "includeAll":  true,
+        "label":  "JVM Memory Pools Heap",
+        "multi":  false,
+        "multiFormat":  "glob",
+        "name":  "jvm_memory_pool_heap",
+        "options":  [
+
+        ],
+        "query":  "label_values(jvm_memory_used_bytes{application=\"$application\", instance=\"$instance\", area=\"heap\"},id)",
+        "refresh":  1,
+        "regex":  "",
+        "sort":  1,
+        "tagValuesQuery":  "",
+        "tags":  [
+
+        ],
+        "tagsQuery":  "",
+        "type":  "query",
+        "useTags":  false
+      },
+      {
+        "allFormat":  "glob",
+        "allValue":  null,
+        "current":  {
+
+        },
+        "datasource":  "Prometheus",
+        "hide":  2,
+        "includeAll":  true,
+        "label":  "JVM Memory Pools Non-Heap",
+        "multi":  false,
+        "multiFormat":  "glob",
+        "name":  "jvm_memory_pool_nonheap",
+        "options":  [
+
+        ],
+        "query":  "label_values(jvm_memory_used_bytes{application=\"$application\", instance=\"$instance\", area=\"nonheap\"},id)",
+        "refresh":  1,
+        "regex":  "",
+        "sort":  2,
+        "tagValuesQuery":  "",
+        "tags":  [
+
+        ],
+        "tagsQuery":  "",
+        "type":  "query",
+        "useTags":  false
+      },
+      {
+        "allFormat":  "glob",
+        "allValue":  null,
+        "current":  {
+
+        },
+        "datasource":  "Prometheus",
+        "hide":  2,
+        "includeAll":  true,
+        "label":  "JVM Buffer Pools",
+        "multi":  false,
+        "multiFormat":  "glob",
+        "name":  "jvm_buffer_pool",
+        "options":  [
+
+        ],
+        "query":  "label_values(jvm_buffer_memory_used_bytes{application=\"$application\", instance=\"$instance\"},id)",
+        "refresh":  1,
+        "regex":  "",
+        "sort":  1,
+        "tagValuesQuery":  "",
+        "tags":  [
+
+        ],
+        "tagsQuery":  "",
+        "type":  "query",
+        "useTags":  false
+      }
+    ]
+  },
+  "time":  {
+    "from":  "now-24h",
+    "to":  "now"
+  },
+  "timepicker":  {
+    "now":  true,
+    "refresh_intervals":  [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ],
+    "time_options":  [
+      "5m",
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d",
+      "30d"
+    ]
+  },
+  "timezone":  "browser",
+  "title":  "JVM (Micrometer)",
+  "version":  33,
+  "uid":  "jvm-micrometer"
 }
