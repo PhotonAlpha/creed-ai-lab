@@ -1,4 +1,4 @@
-package com.creed.partner.lb;
+package com.creed.simple.lb;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,16 +20,12 @@ import java.util.function.BiConsumer;
 public interface HealthCheckServiceSupplier {
     Logger LOGGER = LoggerFactory.getLogger(HealthCheckServiceSupplier.class);
     default ServiceInstanceListSupplier healthCheckServiceInstanceListSupplierBuilder(RestClient restClient,
-                                                                                      String pathOverride,
                                                                                       ServiceInstanceListSupplier delegate,
                                                                                       LoadBalancerClientFactory loadBalancerClientFactory,
                                                                                       BiConsumer<ServiceInstance, Boolean> nextConsumer) {
-        // pathOverride (the per-cluster creed.partner.clusters.<name>.health-check.path) takes precedence
-        // over the framework-resolved path so the probe path lives in the cluster config, not in
-        // spring.cloud.loadbalancer.health-check.path.
         return new HealthCheckServiceInstanceListSupplier(delegate, loadBalancerClientFactory,
                 (serviceInstance, healthCheckPath) -> Mono.defer(() ->
-                                isAlive(serviceInstance, StringUtils.hasText(pathOverride) ? pathOverride : healthCheckPath, restClient)
+                                isAlive(serviceInstance, healthCheckPath, restClient)
                         )
                         .doOnNext(alive -> nextConsumer.accept(serviceInstance, alive))
         );

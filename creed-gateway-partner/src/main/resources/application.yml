@@ -23,13 +23,12 @@ spring:
               - uri: https://localhost:8091
               - uri: https://localhost:8092
     loadbalancer:
-      # Requirement 2: only route to instances that pass a health check on the path below.
+      # Requirement 2: only route to instances that pass a health check. The probe PATH now lives in
+      # creed.partner.clusters.<name>.health-check.path (PartnerLoadBalancerConfiguration overrides the
+      # framework path with the per-cluster value); only the scheduling stays here.
       health-check:
         initial-delay: 0s
         interval: 10s
-        path:
-          catalog-resource: /api/catalog/ping
-          order-resource: /api/order/ping
   ssl:
     bundle:
       jks:
@@ -76,6 +75,55 @@ creed:
   https:
     bundle: creed-partner-server
   partner:
-    # SSL bundle used by the downstream (load-balanced) calls and the LB health checks.
-    client-bundle: creed-partner-client
+    # One entry per downstream cluster. Each entry is turned by PartnerClientConfiguration#clusterClients
+    # into a business pool + load-balanced/audited RestClient, a (smaller) health-check pool + RestClient,
+    # and two Micrometer pool binders — so adding a cluster is a YAML edit, not four new @Bean methods.
+    #
+    # Keys per cluster:
+    #   service-id    – load-balancer service-id (must match spring.cloud.discovery.client.simple.instances)
+    #   client-bundle – SSL bundle for the mTLS downstream + health calls (default: creed-partner-client)
+    #   path          – downstream business path; business URL = https://<service-id><path>
+    #   http.*        – business pool tunables (max-total, max-per-route, *-timeout)
+    #   health-check.path / health-check.http.* – probe path + the smaller health-check pool tunables
+    clusters:
+      catalog:
+        service-id: catalog-resource
+        client-bundle: creed-partner-client
+        path: /api/catalog/items
+        http:
+          max-total: 50
+          max-per-route: 20
+          connect-timeout: 5s
+          socket-timeout: 10s
+          connection-request-timeout: 3s
+          response-timeout: 10s
+        health-check:
+          path: /api/catalog/ping
+          http:
+            max-total: 10
+            max-per-route: 5
+            connect-timeout: 2s
+            socket-timeout: 2s
+            connection-request-timeout: 2s
+            response-timeout: 2s
+      order:
+        service-id: order-resource
+        client-bundle: creed-partner-client
+        path: /api/order/items
+        http:
+          max-total: 50
+          max-per-route: 20
+          connect-timeout: 5s
+          socket-timeout: 10s
+          connection-request-timeout: 3s
+          response-timeout: 10s
+        health-check:
+          path: /api/order/ping
+          http:
+            max-total: 10
+            max-per-route: 5
+            connect-timeout: 2s
+            socket-timeout: 2s
+            connection-request-timeout: 2s
+            response-timeout: 2s
   rootPath: "/Users/ethan/Desktop/workspace/sourcecode/github_space/creed-ai-lab/.support/scripts/pki"

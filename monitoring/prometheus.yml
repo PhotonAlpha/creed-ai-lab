@@ -21,3 +21,18 @@ scrape_configs:
           - otel-collector:8889
         labels:
           source: otel
+
+  # Pull-mode metrics: creed-simple-metrics exposes the Micrometer Prometheus registry
+  # directly (micrometer-registry-prometheus), unlike the OTLP-push modules above.
+  # It serves HTTPS with a Creed-CA self-signed cert, so skip TLS verification; Prometheus
+  # runs in Docker, so reach the host app via host.docker.internal.
+  - job_name: creed-simple-metrics
+    scheme: https
+    metrics_path: /actuator/prometheus
+    tls_config:
+      insecure_skip_verify: true
+    static_configs:
+      - targets:
+          - host.docker.internal:8096
+        labels:
+          application: creed-simple-metrics

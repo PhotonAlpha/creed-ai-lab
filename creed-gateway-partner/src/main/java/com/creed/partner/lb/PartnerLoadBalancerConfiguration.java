@@ -1,21 +1,16 @@
 package com.creed.partner.lb;
 
+import com.creed.partner.web.PartnerClusterProperties;
+import com.creed.partner.web.PartnerClusterProperties.ClusterSpec;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.cloud.client.DefaultServiceInstance;
-import org.springframework.cloud.client.ServiceInstance;
-import org.springframework.cloud.loadbalancer.core.HealthCheckServiceInstanceListSupplier;
 import org.springframework.cloud.loadbalancer.core.ServiceInstanceListSupplier;
 import org.springframework.cloud.loadbalancer.core.ServiceInstanceListSupplierBuilder;
 import org.springframework.cloud.loadbalancer.support.LoadBalancerClientFactory;
-import org.springframework.cloud.loadbalancer.support.ServiceInstanceListSuppliers;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.client.RestClient;
-import reactor.core.publisher.Mono;
 
-import java.util.List;
+import java.util.Map;
 
 /**
  * Requirement 2: per-client Spring Cloud LoadBalancer configuration that adds health checks on top of
@@ -29,45 +24,52 @@ import java.util.List;
  *
  * <p>Instead of the stock {@code ServiceInstanceListSupplier.builder().withBlockingHealthChecks(RestClient)}
  * — whose alive-probe lambda swallows every error in a bare {@code catch (Exception ignored)} and reports
- * no status — we plug in our own {@link HealthCheckServiceInstanceListSupplier} via {@code .with(...)}. The
- * probe is a faithful copy of Spring Cloud's blocking RestClient health check
- * ({@code ServiceInstanceListSupplierBuilder#blockingHealthCheckServiceInstanceListSupplier}) plus logging:
- * it prints the HTTP status returned by each instance and, when the call throws, logs the otherwise-ignored
- * exception. Only instances answering {@code 200 OK} are handed to the load balancer.
+ * no status — we plug in our own {@code HealthCheckServiceInstanceListSupplier} via {@code .with(...)}. The
+ * probe is a faithful copy of Spring Cloud's blocking RestClient health check plus logging.
+ *
+ * <p>Both the health-check {@link RestClient} and the probe path come from the per-cluster configuration
+ * ({@link PartnerClusterProperties}, bound from {@code creed.partner.clusters.<name>}): each load-balancer
+ * child context is keyed by service-id, so we find the matching cluster and use its dynamically-registered
+ * {@code <cluster>HealthCheckRestClient} bean and its {@code health-check.path}.
  */
 @Slf4j
 public class PartnerLoadBalancerConfiguration implements HealthCheckServiceSupplier {
-    @Value("${custom.cluster.ping-url:}")
-    private String selfHealthCheckPath;
-
-
 
     @Bean
     ServiceInstanceListSupplier partnerServiceInstanceListSupplier(ConfigurableApplicationContext context) {
-        RestClient healthCheckRestClient = context.getBean("healthCheckRestClient", RestClient.class);
+        String serviceId = context.getEnvironment().getProperty(LoadBalancerClientFactory.PROPERTY_NAME);
+        Map.Entry<String, ClusterSpec> cluster = findClusterByServiceId(context, serviceId);
+        if (cluster == null) {
+            // No cluster declared for this service-id: fall back to plain discovery (no health probe).
+            log.warn("[LB] no cluster configured for service-id '{}'; skipping health checks", serviceId);
+            return ServiceInstanceListSupplier.builder()
+                    .withBlockingDiscoveryClient()
+                    .withCaching()
+                    .build(context);
+        }
+
+        String healthCheckPath = cluster.getValue().healthCheck().path();
+        RestClient healthCheckRestClient =
+                context.getBean(cluster.getKey() + "HealthCheckRestClient", RestClient.class);
         ServiceInstanceListSupplierBuilder.DelegateCreator healthCheckCreator = (ctx, delegate) -> {
             LoadBalancerClientFactory loadBalancerClientFactory = ctx.getBean(LoadBalancerClientFactory.class);
-            return healthCheckServiceInstanceListSupplierBuilder(healthCheckRestClient,
+            return healthCheckServiceInstanceListSupplierBuilder(healthCheckRestClient, healthCheckPath,
                     delegate, loadBalancerClientFactory, (instance, alive) -> {});
         };
 
-        List<ServiceInstance> instances = List.of(
-                new DefaultServiceInstance("creed-1", "creed-service", "10.0.0.1", 8443, true),
-                new DefaultServiceInstance("creed-2", "creed-service", "10.0.0.2", 8443, true)
-        );
-        ServiceInstanceListSupplier baseInstanceListSupplier = ServiceInstanceListSuppliers.from("creed-service", instances.toArray(new ServiceInstance[0]));
-
         return ServiceInstanceListSupplier.builder()
-                .withBlockingDiscoveryClient()//这是从默认配置文件读取
-//                .withBase(baseInstanceListSupplier) // 添加自定义的cluster
+                .withBlockingDiscoveryClient() // instances come from spring.cloud.discovery.client.simple
                 .with(healthCheckCreator)
                 .withCaching()
                 .build(context);
     }
 
-    @Override
-    public Mono<Boolean> isAlive(ServiceInstance serviceInstance, String healthCheckPath, RestClient restClient) {
-        return HealthCheckServiceSupplier.super.isAlive(serviceInstance, StringUtils.defaultIfBlank(selfHealthCheckPath, healthCheckPath), restClient);
+    private static Map.Entry<String, ClusterSpec> findClusterByServiceId(
+            ConfigurableApplicationContext context, String serviceId) {
+        return context.getBean(PartnerClusterProperties.class).clusters().entrySet().stream()
+                .filter(entry -> entry.getValue().serviceId().equals(serviceId))
+                .findFirst()
+                .orElse(null);
     }
 
 }

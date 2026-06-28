@@ -79,7 +79,8 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+#        include: health,info,metrics,prometheus
+        include: "*"
   tracing:
     sampling:
       # Trace every request (Boot defaults to 0.1 = 10%); 1.0 makes trace/span IDs show up in the

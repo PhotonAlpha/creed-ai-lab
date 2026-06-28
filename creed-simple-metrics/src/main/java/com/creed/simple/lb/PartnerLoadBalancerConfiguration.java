@@ -1,6 +1,7 @@
 package com.creed.simple.lb;
 
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.loadbalancer.core.HealthCheckServiceInstanceListSupplier;
 import org.springframework.cloud.loadbalancer.core.ServiceInstanceListSupplier;
@@ -69,15 +70,15 @@ public class PartnerLoadBalancerConfiguration {
                         restClient.get().uri(uri).retrieve().toBodilessEntity().getStatusCode();
                 boolean alive = HttpStatus.OK.equals(statusCode);
                 stopWatch.stop();
-                log.info("[LB-HEALTH] {} ({}) -> status={}, alive={}, cost={} ms",
+                log.debug("[LB-HEALTH] {} ({}) -> status={}, alive={}, cost={} ms",
                         serviceInstance.getServiceId(), uri, statusCode, alive, stopWatch.getTotalTimeMillis());
                 return Mono.just(alive);
             }
             catch (Exception ex) {
                 stopWatch.stop();
                 // Spring Cloud's stock probe swallows this in `catch (Exception ignored)`; we log it.
-                log.warn("[LB-HEALTH] {} ({}) -> probe failed, marking DOWN: {}, cost={} ms",
-                        serviceInstance.getServiceId(), uri, ex.getMessage(), stopWatch.getTotalTimeMillis(), ex);
+                log.warn("[LB-HEALTH] {} ({}) -> probe failed, marking DOWN: {}, cost={} ms, {}",
+                        serviceInstance.getServiceId(), uri, ex.getMessage(), stopWatch.getTotalTimeMillis(), ExceptionUtils.getMessage(ex));
                 return Mono.just(false);
             }
         });
@@ -113,15 +114,14 @@ public class PartnerLoadBalancerConfiguration {
 
         @Override
         protected Mono<Boolean> isAlive(ServiceInstance serviceInstance) {
-            log.info("[LB-HEALTH] checking instance serviceId={} instanceId={} uri={} host={} port={} "
-                            + "secure={} metadata={}",
-                    serviceInstance.getServiceId(), serviceInstance.getInstanceId(), serviceInstance.getUri(),
-                    serviceInstance.getHost(), serviceInstance.getPort(), serviceInstance.isSecure(),
-                    serviceInstance.getMetadata());
             return super.isAlive(serviceInstance)
-                    .doOnNext(alive -> log.info("[LB-HEALTH] instance serviceId={} instanceId={} uri={} -> alive={}",
-                            serviceInstance.getServiceId(), serviceInstance.getInstanceId(),
-                            serviceInstance.getUri(), alive));
+                    .doOnNext(alive -> {
+                        if (!alive) {
+                            log.warn("[LB-HEALTH] instance serviceId={} instanceId={} uri={} -> alive={}",
+                                    serviceInstance.getServiceId(), serviceInstance.getInstanceId(),
+                                    serviceInstance.getUri(), alive);
+                        }
+                    });
         }
     }
 }

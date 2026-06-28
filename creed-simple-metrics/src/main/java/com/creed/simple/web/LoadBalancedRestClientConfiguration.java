@@ -1,22 +1,24 @@
 package com.creed.simple.web;
 
+import com.creed.simple.lb.PartnerLoadBalancerConfiguration;
+import com.creed.simple.lb.RestClientSuppliers;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
-import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
-import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
+import org.springframework.cloud.loadbalancer.annotation.LoadBalancerClients;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
+
+import java.time.Duration;
 
 /**
  * A {@link LoadBalanced} {@link RestClient} the {@link com.creed.simple.route.RemoteClusterProcessor}
@@ -32,39 +34,76 @@ import org.springframework.web.client.RestClient;
  * {@code creed.partner.client-bundle}, so the resource servers' self-signed HTTPS is accepted.
  */
 @Configuration(proxyBeanMethods = false)
+@LoadBalancerClients(defaultConfiguration = PartnerLoadBalancerConfiguration.class)
 public class LoadBalancedRestClientConfiguration {
 
     /** Shared mTLS connection manager (Spring closes it via destroyMethod). */
     @Bean(destroyMethod = "close")
     PoolingHttpClientConnectionManager clusterHttpConnectionManager(
             SslBundles sslBundles,
-            @Value("${creed.partner.client-bundle:creed-partner-client}") String bundleName,
+            @Value("${creed.partner.client-bundle:creed-partner-server}") String bundleName,
             @Value("${creed.partner.http.max-total:50}") int maxTotal,
-            @Value("${creed.partner.http.max-per-route:20}") int maxPerRoute) {
+            @Value("${creed.partner.http.max-per-route:20}") int maxPerRoute,
+            @Value("${creed.partner.http.connect-timeout:5s}") Duration connectTimeout,
+            @Value("${creed.partner.http.socket-timeout:10s}") Duration socketTimeout) {
         SslBundle bundle = sslBundles.getBundle(bundleName);
-        return PoolingHttpClientConnectionManagerBuilder.create()
-                .setTlsSocketStrategy(new DefaultClientTlsStrategy(bundle.createSslContext()))
-                .setMaxConnTotal(maxTotal)
-                .setMaxConnPerRoute(maxPerRoute)
-                .build();
+        return RestClientSuppliers.connectionManagerFrom(
+                bundle,
+                maxTotal,
+                maxPerRoute,
+                connectTimeout, socketTimeout);
+    }
+
+    @Bean(destroyMethod = "close")
+    PoolingHttpClientConnectionManager healthCheckHttpConnectionManager(
+            SslBundles sslBundles,
+            @Value("${creed.partner.client-bundle:creed-partner-server}") String bundleName,
+            @Value("${creed.partner.health-check.http.max-total:10}") int maxTotal,
+            @Value("${creed.partner.health-check.http.max-per-route:5}") int maxPerRoute,
+            @Value("${creed.partner.health-check.http.connect-timeout:2s}") Duration connectTimeout,
+            @Value("${creed.partner.health-check.http.socket-timeout:2s}") Duration socketTimeout) {
+        return RestClientSuppliers.connectionManagerFrom(
+                sslBundles.getBundle(bundleName),
+                maxTotal,
+                maxPerRoute,
+                connectTimeout,
+                socketTimeout);
     }
 
     @Bean
-    MeterBinder healthCheckHttpPoolMetrics(
+    MeterBinder clusterCheckHttpPoolMetrics(
             @Qualifier("clusterHttpConnectionManager") PoolingHttpClientConnectionManager healthPool) {
         return new PoolingHttpClientConnectionManagerMetricsBinder(healthPool, "loadBalancedPool");
     }
 
     @Bean
+    MeterBinder healthCheckHttpPoolMetrics(
+            @Qualifier("healthCheckHttpConnectionManager") PoolingHttpClientConnectionManager healthCheckHttpConnectionManager) {
+        return new PoolingHttpClientConnectionManagerMetricsBinder(healthCheckHttpConnectionManager, "healthCheckPool");
+    }
+
+    @Bean
     ClientHttpRequestFactory clusterRequestFactory(
-            PoolingHttpClientConnectionManager clusterHttpConnectionManager) {
-        CloseableHttpClient httpClient = HttpClients.custom()
-                .setConnectionManager(clusterHttpConnectionManager)
-                // The pool is a Spring-managed bean; mark it shared so closing the client does not also
-                // close the bean (Spring owns its lifecycle).
-                .setConnectionManagerShared(true)
-                .build();
-        return new HttpComponentsClientHttpRequestFactory(httpClient);
+            @Qualifier("clusterHttpConnectionManager") PoolingHttpClientConnectionManager clusterHttpConnectionManager,
+            @Value("${creed.partner.http.connection-request-timeout:3s}") Duration connectionRequestTimeout,
+            @Value("${creed.partner.http.response-timeout:10s}") Duration responseTimeout) {
+        HttpComponentsClientHttpRequestFactory requestFactory = RestClientSuppliers.requestFactoryFrom(clusterHttpConnectionManager,
+                connectionRequestTimeout,
+                responseTimeout
+        );
+        return new BufferingClientHttpRequestFactory(requestFactory);
+    }
+
+    @Bean
+    ClientHttpRequestFactory healthCheckClientHttpRequestFactory(
+            @Qualifier("healthCheckHttpConnectionManager") PoolingHttpClientConnectionManager clusterHttpConnectionManager,
+            @Value("${creed.partner.health-check.http.connection-request-timeout:2s}") Duration connectionRequestTimeout,
+            @Value("${creed.partner.health-check.http.response-timeout:2s}") Duration responseTimeout) {
+        HttpComponentsClientHttpRequestFactory requestFactory = RestClientSuppliers.requestFactoryFrom(clusterHttpConnectionManager,
+                connectionRequestTimeout,
+                responseTimeout
+        );
+        return new BufferingClientHttpRequestFactory(requestFactory);
     }
 
     /**
@@ -88,5 +127,11 @@ public class LoadBalancedRestClientConfiguration {
         return clusterRestClientBuilder
                 .requestInterceptor(auditInterceptor)
                 .build();
+    }
+
+    @Bean
+    RestClient healthCheckRestClient(
+            @Qualifier("healthCheckClientHttpRequestFactory") ClientHttpRequestFactory requestFactory) {
+        return RestClient.builder().requestFactory(requestFactory).build();
     }
 }
