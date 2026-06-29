@@ -73,3 +73,147 @@ camel:
 ```
 
 REST 传输 / JSON 绑定 / inlineRoutes 都在 XML 的 `<restConfiguration>` 里配，不在 `camel.rest.*`。
+
+# camel-observation 把 `<log>` 变成指标 → 基数爆炸
+
+## 现象
+
+`/actuator/prometheus` 里出现一堆名字超长、值恒为 `1.0` 的指标，例如：
+
+```
+fulfillment_notification_fulfillment_notification___totalOrders_500__fulfillable_62__filteredOut_438__catalogItems_200__on_thread_Camel__camel_1__thread__9___notify_poolB_total{component="camel-direct"} 1.0
+fulfillment_notification_fulfillment_notification___totalOrders_500__fulfillable_71__filteredOut_429__...thread__10___notify_poolB_total{component="camel-direct"} 1.0
+fulfillment_fulfillment_downstream_failure_status_500_total{component="camel-direct"} 10.0
+```
+
+旁边还有一组**正常**的 route 级 timer（这些是对的，保留）：
+
+```
+fulfillment_seconds_count{component="camel-direct",error="none"} 16        # fulfillment route 跑了 16 次
+fulfillment_seconds_sum{component="camel-direct",error="none"} 0.386
+fulfillment_active_seconds_count 0                                          # LongTaskTimer：当前在途数
+fulfillment_notification_seconds_count{...,error="none"} 6
+```
+
+## 根因
+
+`pom.xml` 引入了 **`camel-observation-starter`**：它把**每个 route 和每个 processor 节点**都包成一个 Micrometer `Observation`，再落进 Prometheus registry。
+
+生成的**指标名 = `<routeId>` + 该节点的 label**。而 `<log>` 节点的 label 就是它的**消息文本**。看 `camel-context.xml`：
+
+```xml
+<!-- :229 —— 消息里插了每个请求都不同的动态值 -->
+<log message="fulfillment notification: ${body[summary]} on thread=${threadName}"/>
+<!-- :168 -->
+<log message="fulfillment downstream failure status=${header.downstreamStatus}"/>
+```
+
+`${body[summary]}` = `{totalOrders=500, fulfillable=62, filteredOut=438, ...}`，`fulfillable/filteredOut` **每个请求都变**，再加上 `${threadName}`（`thread #9/#10/#12`…）。**每一个不同的消息字符串 = 一条全新的 time series**，值永远是 1。
+
+## 为什么危险
+
+- **无界增长**：动态数字 + 线程名随请求无限组合 → 时间序列数量爆炸 → Prometheus 内存暴涨、查询变慢、registry 被垃圾塞满。
+- **本质是日志，不是指标**：有用信息全在名字里、值恒为 1，没法聚合查询。典型的「把日志当指标」反模式。
+
+> 对比：`fulfillment_seconds`、`fulfillment_notification_seconds` 这类 **route 级 timer 是好的** —— 名字固定，只有 `error`/`component` 这种低基数 label。要干掉的只是名字里带动态内容的那些。
+
+## 修复方向（从轻到重）
+
+1. **改用 SLF4J 打这种动态日志**：把 `<log>` 换成一个小 `<process>`/bean 里 `log.info(...)`。它不再是被 observation 包裹的「节点」，就不会变指标，日志照常输出。（最推荐——动态内容本来就该进日志而非指标。）
+2. **让 camel-observation 只观测 route 级、不观测每个 processor 节点**（或排除 `log` EIP），从根上避免节点 label 进指标名。
+3. 给 `<log>` 设静态 `id` —— 但 observation 对 `<log>` 取的是 message 而非 id，单独设 id 不一定够，优先用 1 或 2。
+
+## 一句话
+
+`<log>` 的消息别塞 `${body...}`/`${threadName}` 这种逐请求变化的值——在 camel-observation 下，节点 label 会变成指标名，动态消息 = 基数爆炸。
+
+# Camel 线程池可观测（executor_* 指标）
+
+## 现象
+
+Camel 的 `<threadPool>`（`aggregatePoolA` / `notificationPoolB`）在 `/actuator/prometheus` 里**没有任何 `executor_*` 指标**，dashboard 的 “Application Thread Pools (Executors)” 面板对它们是空的；而 Spring 自己的 `myTask` / `taskScheduler` 却有。
+
+## 根因
+
+`executor_*` 来自 Micrometer 的 `ExecutorServiceMetrics` 绑定器，Spring Boot actuator 只会**自动**给容器里的 `ThreadPoolTaskExecutor` bean 绑定它。Camel 的 `<threadPool>` 是 Camel `ExecutorServiceManager` 内部建的普通 `ThreadPoolExecutor`、**不是 Spring bean**，没人给它调 `ExecutorServiceMetrics.monitor(...)` → 没指标。
+
+## 解决：把池声明成「被监控的 Spring `ExecutorService` bean」，Camel 按 id 引用
+
+`<multicast>/<wireTap>` 上的 `executorService="aggregatePoolA"` 本来就是**按 id 从 registry 查**，所以只要把同名 id 换成包过监控的 Spring bean，引用一行都不用改。见 `web/CamelThreadPoolConfiguration.java`：
+
+```java
+@Bean(destroyMethod = "shutdown")
+ExecutorService aggregatePoolA(MeterRegistry registry) {
+    ThreadPoolExecutor exec = new ThreadPoolExecutor(
+            8, 8, 0L, TimeUnit.MILLISECONDS,
+            new LinkedBlockingQueue<>(200),
+            new CustomizableThreadFactory("agg-poolA-"));   // 保留原线程名
+    return ExecutorServiceMetrics.monitor(registry, exec, "aggregatePoolA"); // name 作为 tag
+}
+```
+
+并在 `camel-context.xml` **删掉两个 `<threadPool>`**（池大小/队列照搬到 bean 里）。`monitor()` 返回的 `TimedExecutorService` 仍是 `ExecutorService`，Camel 直接能用。
+
+## 结果
+
+`executor_active_threads` / `pool_size_threads` / `pool_core_threads` / `pool_max_threads` / `queued_tasks` / `queue_remaining_tasks` / `completed_tasks_total`（+ `executor_seconds_*`）全部出现，tag `name="aggregatePoolA"|"notificationPoolB"`，正好落进现有 dashboard 的 Executors 面板（`group by (name)` 现在是 `myTask, taskScheduler, aggregatePoolA, notificationPoolB`）。
+
+> 备选：`camel-micrometer` 的 `InstrumentedThreadPoolFactory` 能一次性观测**所有** Camel 池，但指标名是 `camel.thread.pool.*` 那套、和 `executor_*` 面板对不上，还要加依赖。要和现有面板对齐就用上面的做法。
+
+# Camel REST API 计入 http_server_requests_seconds_bucket
+
+## 现象
+
+1. `/actuator/prometheus` **完全没有 `http_server_requests_seconds_bucket`**（连 actuator 端点都没有）。
+2. Camel REST（`/camel/api/*`）虽然被计数了，但 uri 是 **`UNKNOWN`**，所有端点挤成一条。
+
+## 根因
+
+- **没桶**：`http.server.requests` 默认不出直方图，只有 `_count/_sum/_max`。
+- **UNKNOWN**：Camel REST 由 `CamelHttpTransportServlet`（`/camel/api/*`）处理，**不走** Spring MVC 的 DispatcherServlet。Spring 的 `ServerHttpObservationFilter` 是 `/*` 的 servlet filter，所以请求其实被观测了，但没有匹配的 MVC path pattern → 默认约定把 uri 打成 `UNKNOWN`。
+
+## 解决（两部分）
+
+**① 开直方图并限定范围（`application.yml`）**
+
+```yaml
+management:
+  metrics:
+    distribution:
+      percentiles-histogram: { http.server.requests: true }
+      minimum-expected-value: { http.server.requests: 1ms }   # 限定桶范围，避免桶数过多
+      maximum-expected-value: { http.server.requests: 10s }
+```
+
+**② 给 Camel 路径一个真实 uri（`web/CamelRestObservationConvention.java`）**
+
+继承 `DefaultServerRequestObservationConvention`，对 `/camel/` 开头、且**非 4xx/5xx** 的请求把 uri 从 `UNKNOWN` 换成真实路径：
+
+```java
+@Component
+public class CamelRestObservationConvention extends DefaultServerRequestObservationConvention {
+    @Override
+    public KeyValues getLowCardinalityKeyValues(ServerRequestObservationContext context) {
+        KeyValues kv = super.getLowCardinalityKeyValues(context);
+        HttpServletRequest req = context.getCarrier();
+        HttpServletResponse resp = context.getResponse();
+        String path = (req != null) ? req.getRequestURI() : null;
+        int status = (resp != null) ? resp.getStatus() : 0;
+        if (path == null || !path.startsWith("/camel/") || status >= 400) return kv;
+        // 去掉默认的 uri tag，换成真实路径
+        KeyValues out = KeyValues.empty();
+        for (KeyValue k : kv) if (!"uri".equals(k.getKey())) out = out.and(k);
+        return out.and(KeyValue.of("uri", path));
+    }
+}
+```
+
+> Camel REST 路径是静态的（无路径参数），且只对成功响应替换 → 基数安全；乱打 404 仍是 `UNKNOWN`/`NOT_FOUND`，不会爆。提供一个 `ServerRequestObservationConvention` bean 即可替换默认约定。
+
+## 结果
+
+- uri 变成 `/camel/api/fulfillment`、`/camel/api/aggregate`、`/camel/api/hello`，`UNKNOWN` 消失。
+- `http_server_requests_seconds_bucket` 出现，含每个 Camel 端点的桶 → `histogram_quantile(0.95/0.99, …)` 可用。
+- dashboard 的 **Request Latency** 面板已从 avg+max **恢复成 p95/p99**（spring-boot-statistics.json，面板 502）。
+
+> 两套指标互补：Spring 的 `http_server_requests_seconds`（按 HTTP 端点/uri）与 camel-observation 的 route timer `fulfillment_seconds`（按路由），别混用。

@@ -86,6 +86,19 @@ management:
       # Trace every request (Boot defaults to 0.1 = 10%); 1.0 makes trace/span IDs show up in the
       # logs on every call. Lower this in production.
       probability: 1.0
+  metrics:
+    distribution:
+      # Emit http_server_requests_seconds_bucket so the dashboard's HTTP latency panel can use
+      # histogram_quantile (p95/p99). Off by default — without this only _count/_sum/_max exist.
+      # Camel REST calls (/camel/api/*) flow through the same ServerHttpObservationFilter, so once
+      # buckets are on AND CamelRestObservationConvention gives them a real uri, they show up here too.
+      percentiles-histogram:
+        http.server.requests: true
+      # Bound the bucket range so the histogram doesn't generate an excessive number of series.
+      minimum-expected-value:
+        http.server.requests: 1ms
+      maximum-expected-value:
+        http.server.requests: 10s
 
 # TomcatHttpsConfiguration (creed.https.enabled=true by default) wires the embedded
 # HTTPS listener to the SSL bundle named by `creed.https.bundle`. Outside the `cloud`

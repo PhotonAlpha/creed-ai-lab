@@ -22,13 +22,11 @@
 
     <camelContext xmlns="http://camel.apache.org/schema/spring">
 
-        <!-- ===== thread pools (referenced by id via executorService) ===== -->
-        <!-- Pool A: branches of the aggregation multicast run here (threads named agg-poolA-*). -->
-        <threadPool id="aggregatePoolA" threadName="agg-poolA"
-                    poolSize="8" maxPoolSize="8" maxQueueSize="200"/>
-        <!-- Pool B: the wire-tapped notification runs here (threads named notify-poolB-*). -->
-        <threadPool id="notificationPoolB" threadName="notify-poolB"
-                    poolSize="4" maxPoolSize="4" maxQueueSize="100"/>
+        <!-- ===== thread pools =====
+             Defined as Micrometer-monitored Spring ExecutorService beans in
+             CamelThreadPoolConfiguration (aggregatePoolA / notificationPoolB) instead of inline
+             <threadPool> elements, so they emit executor_* metrics. The executorService="<id>" refs
+             below resolve to those beans from the registry. -->
 
         <!-- ===== REST transport + JSON binding ===== -->
         <restConfiguration component="servlet" bindingMode="json" inlineRoutes="false"/>
