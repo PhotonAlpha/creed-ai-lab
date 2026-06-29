@@ -11,6 +11,13 @@
     <!-- 复用 Spring Boot 默认的转换规则(彩色输出、CONSOLE_LOG_PATTERN 等) -->
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
+    <!--
+      只保留 PoolingHttpClientConnectionManager 的 "endpoint leased" 那一行,
+      其余 DEBUG(releasing/released/acquired/executing exchange/keep-alive)全部丢弃。
+      TurboFilter 全局生效、在 appender 路由之前,不影响其它 logger。
+    -->
+    <turboFilter class="com.creed.simple.web.PoolLeasedOnlyTurboFilter"/>
+
     <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="creed-author-server"/>
     <!-- 日志根目录,可通过 logging.file.path 覆盖,默认写到 ./logs -->
     <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="./logs"/>
@@ -68,6 +75,11 @@
     <logger name="METRICS" level="INFO" additivity="false">
         <appender-ref ref="METRICS"/>
 <!--        <appender-ref ref="CONSOLE"/>-->
+    </logger>
+
+    <logger name="org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager" level="debug" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="BUSINESS"/>
     </logger>
 
     <!-- 业务日志:控制台 + 业务文件 + OTLP -->
