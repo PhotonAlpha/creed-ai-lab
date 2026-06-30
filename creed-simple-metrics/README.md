@@ -217,3 +217,41 @@ public class CamelRestObservationConvention extends DefaultServerRequestObservat
 - dashboard 的 **Request Latency** 面板已从 avg+max **恢复成 p95/p99**（spring-boot-statistics.json，面板 502）。
 
 > 两套指标互补：Spring 的 `http_server_requests_seconds`（按 HTTP 端点/uri）与 camel-observation 的 route timer `fulfillment_seconds`（按路由），别混用。
+
+
+
+@LoadBalanced RestClient.Builder 是一个 bean。Spring Cloud 注册了一个 BeanPostProcessor，在这个 builder bean 的 postProcessAfterInitialization 阶段就给它 .requestInterceptor(LB拦截器)。
+
+时间线：
+
+1. 创建 clusterRestClientBuilder bean
+2. BeanPostProcessor 介入 → builder 里已经有 [LB]      ← 注入“前”就发生了
+3. 你拿到这个 builder，注入到 clusterRestClient
+4. 你 .requestInterceptor(audit) 追加         → builder 变成 [LB, audit]
+5. .build()  
+
+RestClient 执行顺序：list 里 index 0 = 最外层。所以 [LB, audit] → LB 先把 https://service-id 改写成 host:port，audit 在它里面跑 → 看到解析后的实例。
+
+关键点：builder 是个可变、保序、可继续 append 的对象，而且 LB 在你拿到它之前就已经加好了，所以你 append 的永远在 LB 之后（更内层）。
+
+RestTemplate 为什么做不到
+
+RestTemplate 的 @LoadBalanced 不走 BeanPostProcessor，而是走一个 SmartInitializingSingleton（LoadBalancerAutoConfiguration）：它在                                                                     
+所有单例都创建完之后（afterSingletonsInstantiated）才回过头来，对每个 @LoadBalanced RestTemplate 执行：
+
+List<ClientHttpRequestInterceptor> list = new ArrayList<>(restTemplate.getInterceptors());                                                                                                             
+list.add(loadBalancerInterceptor);   // 追加到「末尾」                                                                                                                                                 
+restTemplate.setInterceptors(list);
+
+时间线正好反过来：
+
+1. 你的 @Bean 方法里 setInterceptors([audit])   → [audit]
+2. ……所有 bean 创建完……
+3. SmartInitializingSingleton 把 LB 追加到末尾    → [audit, LB]   ← 注入“后”才发生，且加在最后
+4. 你没有任何“在第 3 步之后再追加”的钩子
+
+再叠加 RestTemplate 的执行语义：list 末尾 = 最内层（最贴近真正发请求）。于是 [audit, LB]：
+- LB 在最内层改写 URI；
+- audit 在外层，先于 LB 执行，拿到的还是没解析的 https://service-id。
+
+也就是说：用 @LoadBalanced 的 RestTemplate，你自己的拦截器永远在 LB 外层，且没有“LB 加完之后我再加”的注入点 —— 这正是 RestClient 那个两段式技巧无法复制的根本原因。

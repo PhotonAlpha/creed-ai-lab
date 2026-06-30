@@ -4,9 +4,13 @@ import com.creed.simple.lb.PartnerLoadBalancerConfiguration;
 import com.creed.simple.lb.RestClientSuppliers;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
+import io.micrometer.observation.ObservationRegistry;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.ssl.NoSuchSslBundleException;
 import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
@@ -37,6 +41,8 @@ import java.time.Duration;
 @LoadBalancerClients(defaultConfiguration = PartnerLoadBalancerConfiguration.class)
 public class LoadBalancedRestClientConfiguration {
 
+    private static final Logger log = LoggerFactory.getLogger(LoadBalancedRestClientConfiguration.class);
+
     /** Shared mTLS connection manager (Spring closes it via destroyMethod). */
     @Bean(destroyMethod = "close")
     PoolingHttpClientConnectionManager clusterHttpConnectionManager(
@@ -46,9 +52,8 @@ public class LoadBalancedRestClientConfiguration {
             @Value("${creed.partner.http.max-per-route:20}") int maxPerRoute,
             @Value("${creed.partner.http.connect-timeout:5s}") Duration connectTimeout,
             @Value("${creed.partner.http.socket-timeout:10s}") Duration socketTimeout) {
-        SslBundle bundle = sslBundles.getBundle(bundleName);
         return RestClientSuppliers.connectionManagerFrom(
-                bundle,
+                resolveClientBundleOrNull(sslBundles, bundleName),
                 maxTotal,
                 maxPerRoute,
                 connectTimeout, socketTimeout);
@@ -63,11 +68,28 @@ public class LoadBalancedRestClientConfiguration {
             @Value("${creed.partner.health-check.http.connect-timeout:2s}") Duration connectTimeout,
             @Value("${creed.partner.health-check.http.socket-timeout:2s}") Duration socketTimeout) {
         return RestClientSuppliers.connectionManagerFrom(
-                sslBundles.getBundle(bundleName),
+                resolveClientBundleOrNull(sslBundles, bundleName),
                 maxTotal,
                 maxPerRoute,
                 connectTimeout,
                 socketTimeout);
+    }
+
+    /**
+     * Resolves the outbound mTLS bundle by name, returning {@code null} when it is not registered.
+     * {@code SslBundleConfiguration} deliberately skips registering {@code creed-partner-client} when its
+     * keystore/truststore fails to load, so this graceful lookup lets the pool fall back to a non-mTLS
+     * (plain) client instead of failing the context. A {@code null} bundle is the agreed degraded mode:
+     * the service boots, but downstream HTTPS calls may fail the handshake at runtime.
+     */
+    private static SslBundle resolveClientBundleOrNull(SslBundles sslBundles, String bundleName) {
+        try {
+            return sslBundles.getBundle(bundleName);
+        } catch (NoSuchSslBundleException ex) {
+            log.warn("mTLS SSL bundle '{}' is not registered — building a NON-mTLS connection manager;"
+                    + " downstream HTTPS calls may fail the handshake at runtime.", bundleName);
+            return null;
+        }
     }
 
     @Bean
@@ -81,6 +103,35 @@ public class LoadBalancedRestClientConfiguration {
             @Qualifier("healthCheckHttpConnectionManager") PoolingHttpClientConnectionManager healthCheckHttpConnectionManager) {
         return new PoolingHttpClientConnectionManagerMetricsBinder(healthCheckHttpConnectionManager, "healthCheckPool");
     }
+
+    /**
+     * <p>
+     *     Micrometer 的 http.client.requests（RestClient/RestTemplate 的 Observation）天然带 uri/status/outcome/host 标签，给你 per-下游 的延迟、错误率、QPS，不用碰连接池内部.
+     * </p>
+     *
+     * <p>
+     *     HttpClient5 的池不是按 host，而是按整个 HttpRoute 做 key。HttpRoute 的相等性包含：
+     *   <li>目标 HttpHost = scheme + hostName + port（port 是其中一部分）</li>
+     *   <li>本地绑定地址（local address）</li>
+     *   <li>代理链（proxy hops）</li>
+     *   <li>是否隧道（tunnelled）/ 是否分层加密（secure/layered）</li>
+     * </p>
+     *
+     * Per-route gauges for the business pool — the {@code total.*} binder above only shows aggregates.
+     * Concrete bean type (not {@code MeterBinder}) so the {@code @Scheduled} refresh method is detected.
+     */
+    /*@Bean
+    PerRoutePoolMetrics clusterPerRoutePoolMetrics(
+            @Qualifier("clusterHttpConnectionManager") PoolingHttpClientConnectionManager clusterHttpConnectionManager) {
+        return new PerRoutePoolMetrics(clusterHttpConnectionManager, "loadBalancedPool");
+    }*/
+
+    /** Per-route gauges for the health-check pool. */
+    /*@Bean
+    PerRoutePoolMetrics healthCheckPerRoutePoolMetrics(
+            @Qualifier("healthCheckHttpConnectionManager") PoolingHttpClientConnectionManager healthCheckHttpConnectionManager) {
+        return new PerRoutePoolMetrics(healthCheckHttpConnectionManager, "healthCheckPool");
+    }*/
 
     @Bean
     ClientHttpRequestFactory clusterRequestFactory(
@@ -112,8 +163,14 @@ public class LoadBalancedRestClientConfiguration {
      */
     @Bean
     @LoadBalanced
-    RestClient.Builder clusterRestClientBuilder(ClientHttpRequestFactory clusterRequestFactory) {
-        return RestClient.builder().requestFactory(clusterRequestFactory);
+    RestClient.Builder clusterRestClientBuilder(ClientHttpRequestFactory clusterRequestFactory,
+                                                ObservationRegistry observationRegistry) {
+        // Wire the ObservationRegistry so each call emits the `http.client.requests` Observation
+        // (tags: method/uri/status/outcome/client.name). A bare RestClient.builder() is NOT
+        // instrumented by Boot's auto-config — only the injected RestClient.Builder bean is.
+        return RestClient.builder()
+                .requestFactory(clusterRequestFactory)
+                .observationRegistry(observationRegistry);
     }
 
     /**
@@ -131,7 +188,11 @@ public class LoadBalancedRestClientConfiguration {
 
     @Bean
     RestClient healthCheckRestClient(
-            @Qualifier("healthCheckClientHttpRequestFactory") ClientHttpRequestFactory requestFactory) {
-        return RestClient.builder().requestFactory(requestFactory).build();
+            @Qualifier("healthCheckClientHttpRequestFactory") ClientHttpRequestFactory requestFactory,
+            ObservationRegistry observationRegistry) {
+        return RestClient.builder()
+                .requestFactory(requestFactory)
+                .observationRegistry(observationRegistry)
+                .build();
     }
 }

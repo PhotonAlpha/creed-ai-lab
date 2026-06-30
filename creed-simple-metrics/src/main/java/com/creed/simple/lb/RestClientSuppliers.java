@@ -17,18 +17,27 @@ import java.time.Duration;
 @UtilityClass
 public final class RestClientSuppliers {
 
+    /**
+     * Builds a pooled connection manager. When {@code bundle} is non-null the pool carries the bundle's
+     * mTLS material (client cert + CA truststore); when it is {@code null} no custom TLS strategy is
+     * installed, so HttpClient falls back to the JVM system-default SSLContext — the degraded, non-mTLS
+     * mode used when the client SSL bundle could not be loaded at startup. Downstream HTTPS calls to the
+     * Creed-CA-signed resource servers will then fail the handshake at runtime.
+     */
     public static PoolingHttpClientConnectionManager connectionManagerFrom(
             SslBundle bundle, int maxTotal, int maxPerRoute, Duration connectTimeout, Duration socketTimeout) {
         ConnectionConfig connectionConfig = ConnectionConfig.custom()
                 .setConnectTimeout(Timeout.ofMilliseconds(connectTimeout.toMillis()))
                 .setSocketTimeout(Timeout.ofMilliseconds(socketTimeout.toMillis()))
                 .build();
-        return PoolingHttpClientConnectionManagerBuilder.create()
-                .setTlsSocketStrategy(new DefaultClientTlsStrategy(bundle.createSslContext()))
+        PoolingHttpClientConnectionManagerBuilder builder = PoolingHttpClientConnectionManagerBuilder.create()
                 .setMaxConnTotal(maxTotal)
                 .setMaxConnPerRoute(maxPerRoute)
-                .setDefaultConnectionConfig(connectionConfig)
-                .build();
+                .setDefaultConnectionConfig(connectionConfig);
+        if (bundle != null) {
+            builder.setTlsSocketStrategy(new DefaultClientTlsStrategy(bundle.createSslContext()));
+        }
+        return builder.build();
     }
 
     public static HttpComponentsClientHttpRequestFactory requestFactoryFrom(

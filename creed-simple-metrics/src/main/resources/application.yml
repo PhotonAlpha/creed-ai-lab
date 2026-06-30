@@ -28,34 +28,12 @@ spring:
             order-resource:
               - uri: https://localhost:8091
               - uri: https://localhost:8092
-  ssl:
-    bundle:
-      jks:
-        # Inbound HTTPS listener identity (serverAuth cert).
-        creed-partner-server:
-          key:
-            alias: creed-gateway-partner
-          keystore:
-            location: "file:${creed.rootPath}/creed-gateway-partner-keystore.p12"
-            password: "${CREED_ORDER_KEYSTORE_PASSWORD:changeit}"
-            type: PKCS12
-          truststore:
-            location: "file:${creed.rootPath}/creed-gateway-partner-truststore.p12"
-            password: "${CREED_ORDER_TRUSTSTORE_PASSWORD:changeit}"
-            type: PKCS12
-        # Outbound identity for downstream resource-server calls (clientAuth -CLI cert);
-        # truststore trusts the Creed CA so the resource servers' certificates are accepted.
-        creed-partner-client:
-          key:
-            alias: creed-gateway-partner-cli
-          keystore:
-            location: "file:${creed.rootPath}/creed-gateway-partner-CLI-keystore.p12"
-            password: "${CREED_ORDER_KEYSTORE_PASSWORD:changeit}"
-            type: PKCS12
-          truststore:
-            location: "file:${creed.rootPath}/creed-gateway-partner-CLI-truststore.p12"
-            password: "${CREED_ORDER_TRUSTSTORE_PASSWORD:changeit}"
-            type: PKCS12
+  # NOTE: the two mTLS SSL bundles (creed-partner-server / creed-partner-client) are no longer declared
+  # here under spring.ssl.bundle.jks.*. They are registered PROGRAMMATICALLY in
+  # com.creed.simple.web.SslBundleConfiguration, which also validates the keystore/truststore passwords
+  # at startup (fail-fast) — property-defined bundles only load lazily on first use, hiding a bad password
+  # until the first handshake. Paths/passwords remain externalised via creed.rootPath and the
+  # CREED_ORDER_*_PASSWORD env vars.
 
 
 # Apache Camel (Spring Boot) configuration.
@@ -94,11 +72,16 @@ management:
       # buckets are on AND CamelRestObservationConvention gives them a real uri, they show up here too.
       percentiles-histogram:
         http.server.requests: true
+        # Outbound client latency (RestClient `http.client.requests`, emitted once the cluster/health
+        # RestClients are wired with the ObservationRegistry — see LoadBalancedRestClientConfiguration).
+        http.client.requests: true
       # Bound the bucket range so the histogram doesn't generate an excessive number of series.
       minimum-expected-value:
         http.server.requests: 1ms
+        http.client.requests: 5ms
       maximum-expected-value:
         http.server.requests: 10s
+        http.client.requests: 10s
 
 # TomcatHttpsConfiguration (creed.https.enabled=true by default) wires the embedded
 # HTTPS listener to the SSL bundle named by `creed.https.bundle`. Outside the `cloud`
