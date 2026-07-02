@@ -1,0 +1,6 @@
+spring:
+  config:
+    import:
+      - "file:${home.path}/configs/application/creed-resource-catalog/my-profile-catalog.yml"
+      - "file:${home.path}/configs/ssl/ssl-config.yml"
+      - "file:${home.path}/configs/ssl/ssl-config.properties"

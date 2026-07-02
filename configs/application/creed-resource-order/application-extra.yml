@@ -1,0 +1,6 @@
+spring:
+  config:
+    import:
+      - optional:file:${base.path}/config/application/creed-resource-order/my-profile-order.yml
+creed:
+  name: "my-profile-catalog-extra"

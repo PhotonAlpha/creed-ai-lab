@@ -2,7 +2,7 @@
   <configuration default="false" name="CreedReportApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
     <module name="creed-report" />
     <option name="SPRING_BOOT_MAIN_CLASS" value="com.creed.report.CreedReportApplication" />
-    <option name="VM_PARAMETERS" value="-Dspring.profiles.active=adc,jpa,global -Dspring.config.location=classpath:/,file:$PROJECT_DIR$/configs/global/,file:$PROJECT_DIR$/configs/application/,file:$PROJECT_DIR$/configs/application/creed-resource-catalog/ -Dspring.config.additional-location=file:$PROJECT_DIR$/configs/ssl/ssl-config.properties" />
+    <option name="VM_PARAMETERS" value="-Dspring.profiles.active=sit-order" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>

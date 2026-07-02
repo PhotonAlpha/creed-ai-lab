@@ -12,7 +12,32 @@ spring:
     encoding: UTF-8
     prefix: classpath:/templates/
     suffix: .html
+  profiles:
+    group:
+      "default":
+        - "adc"
+      "sit-order":
+        - "default"
+        - "global"
+        - "jpa"
+        - "order"
+        - "extra"
+      "sit-catalog":
+        - "global"
+        - "jpa"
+        - "catalog"
+        - "extra"
+    include:
+      - "sit-order2"
+  config:
+    import: "file:${home.path}/configs/application/creed-resource-catalog/"
 
+home:
+  path: "/Users/ethan/Desktop/workspace/sourcecode/github_space/creed-ai-lab"
+
+logging:
+  level:
+    org.springframework.boot.context.config.ConfigDataEnvironment: trace
 
 management:
   endpoints:
