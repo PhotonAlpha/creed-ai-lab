@@ -1,7 +1,6 @@
-package java.com.creed.auth;
+package com.creed.auth;
 
-import com.creed.auth.CreedAuthorServerApplication;
-import com.creed.auth.metrics.ActuatorMetricsLogger;
+import com.creed.metrics.ActuatorMetricsLogger;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
