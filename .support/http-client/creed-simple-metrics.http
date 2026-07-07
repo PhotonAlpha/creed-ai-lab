@@ -45,6 +45,7 @@ Accept: application/json
 POST https://localhost:8096/camel/api/fulfillment
 Content-Type: application/json
 Accept: application/json
+Cookie: WSASID=50001LFRzoLS8-SJqPsL1oryMt9daIPDZgppc4Y7
 
 {
   "failCatalog": false,
@@ -68,6 +69,18 @@ Accept: application/json
 {
   "failCatalog": true
 }
+
+### cookie-relay — reproduces the `$Path="/"; $Domain=...` Cookie-header corruption:
+# 1) POST <cluster>/session -> downstream sets JSESSIONID (Path only) + WSASID (Path/Domain/Max-Age, NO Expires)
+# 2) HttpCookie.parse() guesses WSASID version=1 -> HttpCookie.toString() emits name="value";$Path="/";$Domain="..."
+# 3) forwards the buggy header AND the fixed name=value join to <cluster>/echo.
+# Watch the org.apache.hc.client5.http.wire DEBUG lines for the two outgoing "Cookie:" headers.
+POST https://localhost:8096/camel/api/cookie-relay
+Accept: application/json
+
+### cookie-relay against the catalog cluster (8081/8082)
+POST https://localhost:8096/camel/api/cookie-relay?cluster=catalog
+Accept: application/json
 
 ### actuator: list metrics
 GET https://localhost:8096/actuator/metrics

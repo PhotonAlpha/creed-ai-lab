@@ -2,7 +2,9 @@ package com.creed.resource.catalog.api;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -11,6 +13,10 @@ import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -97,6 +103,65 @@ public class CatalogController {
                 "status", "UP",
                 "subject", subjectOf(jwt),
                 "time", Instant.now().toString());
+    }
+
+    /**
+     * Issues a demo "session": two hand-built Set-Cookie response headers. JSESSIONID carries only
+     * {@code Path} (a plain version-0 cookie); WSASID also carries {@code Domain} + {@code Max-Age}
+     * and deliberately <b>no</b> {@code Expires} — "Max-Age without Expires" is exactly what makes
+     * {@code java.net.HttpCookie.parse()} on the caller side guess cookie version 1 (RFC 2965), the
+     * trigger for the {@code $Path="/"; $Domain=...} corruption demonstrated by creed-simple-metrics
+     * {@code POST /camel/api/cookie-relay}.
+     *
+     * <p>The headers are built by hand (not with {@link org.springframework.http.ResponseCookie})
+     * on purpose: {@code ResponseCookie.toString()} always pairs {@code Max-Age} with an
+     * {@code Expires}, and an {@code Expires} makes {@code HttpCookie.parse()} guess version 0 —
+     * masking the very bug this endpoint reproduces. This mimics non-Spring downstreams (older
+     * servlet stacks, hand-rolled headers) that send {@code Max-Age} alone.
+     *
+     * @param domain the WSASID {@code Domain} attribute (defaults to the value seen in the production log)
+     */
+    @PostMapping("/session")
+    public ResponseEntity<Map<String, Object>> session(@RequestParam(defaultValue = "api.github.com") String domain) {
+        String sessionCookie = "JSESSIONID=" + token() + "; Path=/; HttpOnly";
+        String affinityCookie = "WSASID=" + token() + "; Path=/; Domain=" + domain + "; Max-Age=3600; HttpOnly";
+        log.info("session issued: [{}] [{}]", sessionCookie, affinityCookie);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, sessionCookie)
+                .header(HttpHeaders.SET_COOKIE, affinityCookie)
+                .body(Map.of(
+                        "service", "creed-resource-catalog",
+                        "setCookies", List.of(sessionCookie, affinityCookie),
+                        "time", Instant.now().toString()));
+    }
+
+    /**
+     * Echoes the request's Cookie header(s) both raw and as parsed by Tomcat's RFC 6265 cookie
+     * processor. When the caller forwards cookies serialized with {@code HttpCookie.toString()}
+     * (version 1), the parsed view shows the damage: {@code $Path} / {@code $Domain} come back as
+     * cookies of their own and the WSASID value keeps its surrounding quotes, so any lookup by
+     * cookie name/value on this side misses.
+     */
+    @PostMapping("/echo")
+    public Map<String, Object> echo(HttpServletRequest request,
+                                    @RequestBody(required = false) Map<String, Object> body) {
+        List<String> rawCookieHeaders = Collections.list(request.getHeaders(HttpHeaders.COOKIE));
+        List<String> parsedCookies = request.getCookies() == null ? List.of()
+                : Arrays.stream(request.getCookies()).map(c -> c.getName() + "=" + c.getValue()).toList();
+        log.info("echo rawCookieHeaders={} parsedCookies={}", rawCookieHeaders, parsedCookies);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("service", "creed-resource-catalog");
+        result.put("rawCookieHeaders", rawCookieHeaders);
+        result.put("parsedCookies", parsedCookies);
+        result.put("body", body);
+        result.put("time", Instant.now().toString());
+        return result;
+    }
+
+    private static String token() {
+        byte[] buf = new byte[24];
+        random.nextBytes(buf);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(buf);
     }
 
     /** List every product currently held in the store. */

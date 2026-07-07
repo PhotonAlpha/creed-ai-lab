@@ -15,6 +15,9 @@ spring:
     # (threadPool -> camelContext -> HealthCheckRegistry -> threadPool). Allow it to be broken.
     allow-circular-references: true
   cloud:
+    loadbalancer:
+      health-check:
+        interval: 5m
     # Static service registry backing Spring Cloud LoadBalancer (no Eureka/Consul). The
     # RemoteClusterProcessor calls https://<service-id>/... and the LB round-robins across these
     # healthy instances (all HTTPS with Creed-CA self-signed certs, trusted via the partner bundle).

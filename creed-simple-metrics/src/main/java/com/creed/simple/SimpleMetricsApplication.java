@@ -19,6 +19,7 @@ import org.springframework.context.annotation.ImportResource;
 @ImportResource("classpath:camel-context.xml")
 public class SimpleMetricsApplication {
     public static void main(String[] args) {
+
         SpringApplication.run(SimpleMetricsApplication.class, args);
     }
 }

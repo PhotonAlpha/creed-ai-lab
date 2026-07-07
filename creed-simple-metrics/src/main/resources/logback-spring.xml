@@ -82,6 +82,11 @@
         <appender-ref ref="BUSINESS"/>
     </logger>
 
+    <logger name="org.apache.hc.client5.http.wire" level="debug" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="BUSINESS"/>
+    </logger>
+
     <!-- 业务日志:控制台 + 业务文件 + OTLP -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>

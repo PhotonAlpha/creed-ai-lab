@@ -59,6 +59,11 @@
             <post path="/fulfillment" consumes="application/json" produces="application/json">
                 <to uri="direct:fulfillment"/>
             </post>
+            <!-- Cookie corruption repro: session + double echo against ?cluster=order|catalog.
+                 Watch org.apache.hc.client5.http.wire for the $Path="/"; $Domain=... Cookie header. -->
+            <post path="/cookie-relay" produces="application/json">
+                <to uri="direct:cookieRelay"/>
+            </post>
         </rest>
 
         <!-- ===== self-contained routes ===== -->
@@ -131,6 +136,15 @@
                 <constant>https://catalog-resource/api/catalog/items</constant>
             </setHeader>
             <process ref="remoteClusterProcessor"/>
+        </route>
+
+        <!-- Reproduces the "$Path"/"$Domain" Cookie-header corruption end-to-end: the processor logs in
+             against the chosen cluster, re-serializes the Set-Cookie headers via HttpCookie.toString()
+             (the bug) and via plain name=value (the fix), and forwards both to the cluster's /echo. -->
+        <route id="cookieRelay">
+            <from uri="direct:cookieRelay"/>
+            <log message="cookie-relay cluster=${header.cluster} on thread=${threadName}"/>
+            <process ref="cookieRelayProcessor"/>
         </route>
 
         <route id="fetch-order">
