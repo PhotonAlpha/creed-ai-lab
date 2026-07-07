@@ -93,6 +93,14 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+
+        <!-- Test only: JUnit 5 + Spring's MockHttpServletRequest/Response/MockFilterChain, used to
+             drive CookieSanitizingFilter end-to-end without an embedded container. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 </project>
