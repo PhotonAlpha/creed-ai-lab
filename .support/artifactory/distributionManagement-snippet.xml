@@ -1,0 +1,24 @@
+<!--
+  把这段贴进根 pom.xml (com.creed:spring-creed-auth-server) 的 <project> 下,
+  就能用 `mvn -s .support/artifactory/settings.xml deploy` 把构件推到 Artifactory。
+
+  当前工程版本是 1.0.0-SNAPSHOT,deploy 时 Maven 会:
+    - 因为版本带 -SNAPSHOT,走 <snapshotRepository>(libs-snapshot-local)
+    - 每次 deploy 生成带时间戳的唯一版本,如 1.0.0-20260710.153012-1
+    - maven-metadata.xml 记录 <latest>/<lastUpdated>,消费方靠它拉最新快照
+
+  把版本改成 1.0.0(去掉 -SNAPSHOT)再 deploy,则走 <repository>(libs-release-local),
+  同一版本重复 deploy 默认会被 release 仓库拒绝(可在仓库设置里改 handle policy)。
+-->
+<distributionManagement>
+    <repository>
+        <id>creed-artifactory-releases</id>
+        <name>Artifactory Releases</name>
+        <url>http://localhost:8082/artifactory/libs-release-local</url>
+    </repository>
+    <snapshotRepository>
+        <id>creed-artifactory-snapshots</id>
+        <name>Artifactory Snapshots</name>
+        <url>http://localhost:8082/artifactory/libs-snapshot-local</url>
+    </snapshotRepository>
+</distributionManagement>

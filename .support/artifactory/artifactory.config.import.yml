@@ -1,0 +1,40 @@
+# Artifactory OSS 引导配置(bootstrap config import)
+#
+# OSS 版没有创建仓库的 REST API(那是 Pro 功能),但支持把这个文件放进
+# $JFROG_HOME/var/etc/artifactory/artifactory.config.import.yml,启动时自动建仓。
+#
+# 加载方式(容器已在跑时):
+#   docker cp .support/artifactory/artifactory.config.import.yml \
+#     creed-artifactory:/opt/jfrog/artifactory/var/etc/artifactory/artifactory.config.import.yml
+#   docker exec -u root creed-artifactory chown artifactory:artifactory \
+#     /opt/jfrog/artifactory/var/etc/artifactory/artifactory.config.import.yml
+#   docker compose -f .support/artifactory/docker-compose.yml restart artifactory
+version: 1
+GENERAL_CONFIGURATION:
+  baseUrl: "http://localhost:8082"
+LOCAL_REPOSITORIES:
+  libs-snapshot-local:
+    type: maven
+    handleReleases: false
+    handleSnapshots: true
+    snapshotVersionBehavior: unique   # 每次 deploy 生成带时间戳的唯一版本
+    maxUniqueSnapshots: 10            # 只保留最近 10 个时间戳快照
+  libs-release-local:
+    type: maven
+    handleReleases: true
+    handleSnapshots: false
+REMOTE_REPOSITORIES:
+  maven-remote:
+    type: maven
+    url: "https://repo1.maven.org/maven2"
+VIRTUAL_REPOSITORIES:
+  libs-release:
+    type: maven
+    repositories:
+      - libs-release-local
+      - maven-remote
+  libs-snapshot:
+    type: maven
+    repositories:
+      - libs-snapshot-local
+      - maven-remote

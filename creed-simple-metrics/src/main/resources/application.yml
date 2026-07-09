@@ -3,6 +3,9 @@ server:
   tomcat:
     mbeanregistry:
       enabled: true
+    threads:
+      max: 50
+      min-spare: 10
 
 spring:
   config:

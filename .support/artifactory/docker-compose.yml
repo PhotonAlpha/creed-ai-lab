@@ -1,0 +1,69 @@
+# JFrog Artifactory OSS —— 本地测试 Maven SNAPSHOT 机制
+#
+# 启动:   docker compose -f .support/artifactory/docker-compose.yml up -d
+# 日志:   docker compose -f .support/artifactory/docker-compose.yml logs -f artifactory
+# 停止:   docker compose -f .support/artifactory/docker-compose.yml down
+# 清库:   docker compose -f .support/artifactory/docker-compose.yml down -v   (删掉命名卷,恢复空白状态)
+#
+# 注意:Artifactory 7.90+ 已移除内置 Derby,必须外接 PostgreSQL,所以这里带一个 postgres 服务。
+# 首次启动需 1~2 分钟做数据库初始化。就绪后访问 UI: http://localhost:8082/ui/
+# 默认账号: admin / password  (首登会强制改密码)
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: creed-artifactory-db
+    environment:
+      - POSTGRES_DB=artifactory
+      - POSTGRES_USER=artifactory
+      - POSTGRES_PASSWORD=artifactory_pw
+    volumes:
+      - artifactory_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artifactory -d artifactory"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  artifactory:
+    image: releases-docker.jfrog.io/jfrog/artifactory-oss:7.90.10
+    container_name: creed-artifactory
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # 8082 = 统一入口 (UI + REST 路由),Maven 客户端也走这个端口
+      - "8082:8082"
+      # 8081 = 直连 artifactory 微服务端口 (可选,老式 URL 用)
+      - "8081:8081"
+    environment:
+      - JF_SHARED_NODE_HAENABLED=false
+      # 外接 PostgreSQL(7.90+ 必须,不再支持内置 Derby)
+      - JF_SHARED_DATABASE_TYPE=postgresql
+      - JF_SHARED_DATABASE_DRIVER=org.postgresql.Driver
+      - JF_SHARED_DATABASE_URL=jdbc:postgresql://postgres:5432/artifactory
+      - JF_SHARED_DATABASE_USERNAME=artifactory
+      - JF_SHARED_DATABASE_PASSWORD=artifactory_pw
+      # 预置 master/join key(openssl rand -hex 32 / 16)。首次启动若让 access 服务临时生成,
+      # 在 Docker Desktop 资源受限时常常来不及,router 会在 5 分钟超时后 FATAL 退出。
+      # 直接注入就绕过这个竞态。仅本地测试用,别复用到生产。
+      - JF_SHARED_SECURITY_MASTERKEY=86147cfc46a0de7da5dd6089cdafc6846fac6e8093a4ab4c066f15979e3ab99f
+      - JF_SHARED_SECURITY_JOINKEY=eefd59d9a6a55d4a2b0c2e0f5f7e3a1c
+    volumes:
+      # 用命名卷,避免宿主机目录权限 (容器内以 uid 1030 运行) 踩坑
+      - artifactory_data:/var/opt/jfrog/artifactory
+    ulimits:
+      nofile:
+        soft: 32000
+        hard: 40000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/router/api/v1/system/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+volumes:
+  artifactory_data:
+  artifactory_pgdata:
