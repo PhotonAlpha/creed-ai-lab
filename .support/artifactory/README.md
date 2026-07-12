@@ -11,7 +11,7 @@ docker compose -f .support/artifactory/docker-compose.yml up -d
 docker compose -f .support/artifactory/docker-compose.yml logs -f artifactory
 ```
 
-就绪后打开 UI: <http://localhost:8082/ui/>,默认 `admin / Ethan@killua12`,首登强制改密码。
+就绪后打开 UI: <http://localhost:8082/ui/>,默认 `admin / xxx`,首登强制改密码。
 > 改了密码后,记得同步到 `.support/artifactory/settings.xml` 的 `<servers>` 里。
 
 ## 2. 准备仓库
@@ -38,6 +38,8 @@ OSS 版首登会有 Onboarding 向导,选 **Maven**,它会自动建好这几个�
 ```bash
 # -s 用本目录的 settings.xml,不污染全局 ~/.m2/settings.xml
 mvn -s .support/artifactory/settings.xml -DskipTests clean deploy
+
+rm -rf ~/.m2/repository/com/yourcompany/common-lib/3.0.1-SNAPSHOT
 ```
 
 成功后到 UI → Artifacts → `libs-snapshot-local` →
@@ -47,6 +49,8 @@ mvn -s .support/artifactory/settings.xml -DskipTests clean deploy
 spring-creed-auth-server-1.0.0-20260710.153012-1.pom
 maven-metadata.xml     <-- 记录 latest / lastUpdated,SNAPSHOT 机制核心
 ```
+
+[Spring Boot Artifactory](https://repo.spring.io/ui/repos/tree/General/libs-milestone)
 
 ## 5. 验证 SNAPSHOT 解析机制
 
