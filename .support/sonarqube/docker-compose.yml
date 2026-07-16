@@ -1,0 +1,74 @@
+# SonarQube Community —— 本地代码质量分析
+#
+# 启动:   docker compose -f .support/sonarqube/docker-compose.yml up -d
+# 日志:   docker compose -f .support/sonarqube/docker-compose.yml logs -f sonarqube
+# 停止:   docker compose -f .support/sonarqube/docker-compose.yml down
+# 清库:   docker compose -f .support/sonarqube/docker-compose.yml down -v   (删掉 sonarqube 命名卷;
+#         PostgreSQL 数据在宿主机 /Users/ethan/Desktop/workspace/database/sonarqube-postgresql,需手动删除才会清空)
+#
+# UI: http://localhost:9900/   (容器内 9000;宿主机 9000 被 creed-author-server 占用,故映射到 9900)
+# 默认账号: admin / admin  (首登会强制改密码)
+#
+# Maven 扫描示例(先在 UI: My Account -> Security 生成 token):
+#   mvn clean verify sonar:sonar -Dsonar.host.url=http://localhost:9900 -Dsonar.token=<token>
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: creed-sonarqube-db
+    environment:
+      - POSTGRES_DB=sonar
+      - POSTGRES_USER=sonar
+      - POSTGRES_PASSWORD=sonar_pw
+    ports:
+      # 宿主机 5432 被 Artifactory 的 PostgreSQL 占用,故映射到 5433:
+      #   psql -h localhost -p 5433 -U sonar   (密码 sonar_pw)
+      - "5433:5432"
+    volumes:
+      # DB 文件落在宿主机目录,与 artifactory/jenkins 的持久化约定一致
+      - /Users/ethan/Desktop/workspace/database/sonarqube-postgresql:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar -d sonar"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  sonarqube:
+    image: sonarqube:community
+    container_name: creed-sonarqube
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # 9900 = Web UI + API(容器内 9000)
+      - "9900:9000"
+    environment:
+      - SONAR_JDBC_URL=jdbc:postgresql://postgres:5432/sonar
+      - SONAR_JDBC_USERNAME=sonar
+      - SONAR_JDBC_PASSWORD=sonar_pw
+      # 跳过内置 Elasticsearch 的 bootstrap 检查(vm.max_map_count 等)。
+      # Docker Desktop 的 Linux VM 上该内核参数可能不满足 262144,禁用检查可直接启动。仅本地测试用。
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+    volumes:
+      # 用命名卷,避免宿主机目录权限踩坑(容器内以非 root uid 运行,且 ES 索引对 bind mount 敏感)
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+      nproc: 4096
+    restart: unless-stopped
+    healthcheck:
+      # 官方镜像自带 curl;GREEN 前 status 会经历 STARTING / DB_MIGRATION
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+volumes:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:

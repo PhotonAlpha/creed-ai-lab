@@ -3,7 +3,8 @@
 # 启动:   docker compose -f .support/artifactory/docker-compose.yml up -d
 # 日志:   docker compose -f .support/artifactory/docker-compose.yml logs -f artifactory
 # 停止:   docker compose -f .support/artifactory/docker-compose.yml down
-# 清库:   docker compose -f .support/artifactory/docker-compose.yml down -v   (删掉命名卷,恢复空白状态)
+# 清库:   docker compose -f .support/artifactory/docker-compose.yml down -v   (删掉 artifactory 命名卷;
+#         PostgreSQL 数据在宿主机 /Users/ethan/Desktop/workspace/database/postgresql,需手动删除才会清空)
 #
 # 注意:Artifactory 7.90+ 已移除内置 Derby,必须外接 PostgreSQL,所以这里带一个 postgres 服务。
 # 首次启动需 1~2 分钟做数据库初始化。就绪后访问 UI: http://localhost:8082/ui/
@@ -16,8 +17,14 @@ services:
       - POSTGRES_DB=artifactory
       - POSTGRES_USER=artifactory
       - POSTGRES_PASSWORD=artifactory_pw
+    ports:
+      # 对宿主机暴露 5432,方便直接 psql / 建自己的 database 或 schema:
+      #   psql -h localhost -U artifactory        (密码 artifactory_pw,该用户是超级用户)
+      #   CREATE DATABASE mydb;                    -- 建议独立 database,别混进 artifactory 库
+      - "5432:5432"
     volumes:
-      - artifactory_pgdata:/var/lib/postgresql/data
+      # DB 文件落在宿主机目录 (由原命名卷 artifactory_pgdata 迁移而来, 2026-07-14)
+      - /Users/ethan/Desktop/workspace/database/postgresql:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U artifactory -d artifactory"]
       interval: 10s
@@ -66,4 +73,3 @@ services:
 
 volumes:
   artifactory_data:
-  artifactory_pgdata:

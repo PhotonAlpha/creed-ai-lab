@@ -1,0 +1,37 @@
+# Jenkins LTS —— 本地 CI 测试
+#
+# 启动:   docker compose -f .support/jenkins/docker-compose.yml up -d
+# 日志:   docker compose -f .support/jenkins/docker-compose.yml logs -f jenkins
+# 停止:   docker compose -f .support/jenkins/docker-compose.yml down
+# 清库:   数据在宿主机 /Users/ethan/Desktop/workspace/database/jenkins,需手动删除才会清空
+#
+# UI: http://localhost:8180/   (容器内 8080;宿主机 8080 被 creed-gateway、8081/8082 被 Artifactory 占用,故映射到 8180)
+# 首次启动初始管理员密码:
+#   docker exec creed-jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+services:
+  jenkins:
+    image: jenkins/jenkins:lts-jdk21
+    container_name: creed-jenkins
+    ports:
+      # 8180 = Web UI
+      - "8180:8080"
+      # 50000 = inbound agent (JNLP) 端口,不接外部 agent 可以不管
+      - "50000:50000"
+    environment:
+      # 宿主机时区,保证构建时间戳正常
+      - TZ=Asia/Shanghai
+    volumes:
+      # JENKINS_HOME 落在宿主机目录(所有 job / 插件 / 凭据都在这里)。
+      # 官方镜像内 jenkins 用户是 uid 1000,macOS Docker Desktop 的 bind mount
+      # 会自动做 uid 映射,无需手动 chown。
+      - /Users/ethan/Desktop/workspace/database/jenkins:/var/jenkins_home
+      # 如需在 Pipeline 里调用宿主机 Docker(docker build/run),取消下面注释,
+      # 并在容器里装 docker CLI(或换 jenkins/jenkins 加装 docker 的自制镜像):
+      # - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/login"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s

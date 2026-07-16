@@ -12,3 +12,5 @@ logs
 creed-report/local-example.md
 .support/artifactory/.password.txt
 .support/artifactory/settings.xml
+.support/jenkins/.password.txt
+.support/sonarqube/.password.txt
