@@ -1,9 +1,15 @@
 # creed-simple-metrics
 
 Camel-on-Spring-Boot 演示模块（HTTPS 8096）。所有路由/REST/线程池都用**经典 `<camelContext>` Spring XML DSL**
-写在 `src/main/resources/camel-context.xml`，经 `@ImportResource` 加载。下游 resource server 调用走
-**Spring Cloud LoadBalancer**（在 `RemoteClusterProcessor` 里用 `@LoadBalanced` RestClient 调用），并由
-`LoadBalancerAuditInterceptor` 打印 LB 选中的真实实例。
+写在 `src/main/resources/camel-context.xml`，经 `@ImportResource` 加载。下游 resource server 调用两种方式并存：
+
+- `fetch-catalog` / `fetch-order`：**camel-http 端点直连逻辑服务名**（`https://catalog-resource/...`），由
+  `LoadBalancerRoutePlanner` 在 HttpClient 5 建连时经 Spring Cloud LoadBalancer 解析成健康实例——
+  ServiceCall EIP 移除后的替代方案，设计原理与踩坑见
+  **[docs/camel-http-loadbalancer.md](docs/camel-http-loadbalancer.md)**；
+- bulk 弹性拉取（fulfillment 管道）：仍在 `RemoteClusterProcessor` 里用 `@LoadBalanced` RestClient 调用
+  （捕获下游错误状态码进 `branchError`/`branchStatus`），并由 `LoadBalancerAuditInterceptor` 打印
+  LB 选中的真实实例。
 
 REST 走 camel-servlet，API 在 `https://localhost:8096/camel/api/*`（hello / time / echo / catalog /
 order / aggregate / aggregate-notify / **fulfillment**）。

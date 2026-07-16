@@ -29,11 +29,11 @@ spring:
         simple:
           instances:
             catalog-resource:
-              - uri: https://localhost:8081
-              - uri: https://localhost:8082
+              - uri: https://localhost:18081
+              - uri: https://localhost:18082
             order-resource:
-              - uri: https://localhost:8091
-              - uri: https://localhost:8092
+              - uri: https://localhost:18091
+              - uri: https://localhost:18092
   # NOTE: the two mTLS SSL bundles (creed-partner-server / creed-partner-client) are no longer declared
   # here under spring.ssl.bundle.jks.*. They are registered PROGRAMMATICALLY in
   # com.creed.simple.web.SslBundleConfiguration, which also validates the keystore/truststore passwords
