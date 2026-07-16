@@ -10,8 +10,8 @@ import org.springframework.context.annotation.ImportResource;
  * below) and served through the camel-servlet transport on the embedded Tomcat. A couple of routes are
  * self-contained ({@code /hello}, {@code /time}, {@code /echo}); {@code /catalog}, {@code /order},
  * {@code /aggregate} and {@code /aggregate-notify} call the downstream resource servers via the
- * camel-http component (mTLS connection manager wired in
- * {@link com.creed.simple.web.CamelHttpClientConfiguration}), round-robining across the two instances of
+ * camel-http component (mTLS connection manager + Spring Cloud LoadBalancer route planner wired in
+ * {@link com.creed.simple.config.CamelConfig}), round-robining across the health-checked instances of
  * each service. The aggregate-notify route runs its multicast on thread pool {@code aggregatePoolA} and
  * wire-taps a notification onto {@code notificationPoolB} (both declared inline as {@code <threadPool>}).
  */

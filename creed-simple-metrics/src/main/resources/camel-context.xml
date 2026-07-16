@@ -127,15 +127,22 @@
             <log message="notification sent for aggregate request on thread=${threadName}"/>
         </route>
 
-        <!-- ===== downstream cluster calls (Spring Cloud LoadBalancer, invoked in a Processor) =====
-             The instance is chosen by Spring Cloud LB resolving the https://<service-id> URL; the call
-             and JSON binding happen inside RemoteClusterProcessor (mTLS @LoadBalanced RestClient). -->
+        <!-- ===== downstream cluster calls (camel-http + Spring Cloud LoadBalancer route planner) =====
+             The endpoint URI keeps the LOGICAL service-id (the old ServiceCall/staticServiceDiscovery
+             style); the LoadBalancerRoutePlanner installed on the https component (CamelConfig) resolves
+             it at connect time to an instance that passed PartnerLoadBalancerConfiguration's health check.
+             This is a NEW outbound request, not a proxy/bridge: the inbound camel-servlet consumer left
+             CamelHttpUri/CamelHttpPath control headers on the exchange and HttpProducer would use them to
+             OVERRIDE the endpoint URI ("Invalid url: /camel/api/..."), so they are removed first.
+             skipRequestHeaders/skipResponseHeaders keep the inbound REST headers off the downstream
+             request and the downstream headers off our response (matching the former
+             RemoteClusterProcessor behaviour); the JSON unmarshal keeps handing the aggregation
+             strategies Maps/Lists. The BULK fetches below stay on the processor for resilient mode. -->
         <route id="fetch-catalog">
             <from uri="direct:fetch-catalog"/>
-            <setHeader name="clusterUrl">
-                <constant>https://catalog-resource/api/catalog/items</constant>
-            </setHeader>
-            <process ref="remoteClusterProcessor"/>
+            <removeHeaders pattern="CamelHttp*"/>
+            <to uri="https://catalog-resource/api/catalog/items?skipRequestHeaders=true&amp;skipResponseHeaders=true"/>
+            <unmarshal><json library="Jackson"/></unmarshal>
         </route>
 
         <!-- Reproduces the "$Path"/"$Domain" Cookie-header corruption end-to-end: the processor logs in
@@ -149,10 +156,9 @@
 
         <route id="fetch-order">
             <from uri="direct:fetch-order"/>
-            <setHeader name="clusterUrl">
-                <constant>https://order-resource/api/order/items</constant>
-            </setHeader>
-            <process ref="remoteClusterProcessor"/>
+            <removeHeaders pattern="CamelHttp*"/>
+            <to uri="https://order-resource/api/order/items?skipRequestHeaders=true&amp;skipResponseHeaders=true"/>
+            <unmarshal><json library="Jackson"/></unmarshal>
         </route>
 
         <!-- ============================================================================

@@ -58,6 +58,10 @@
             <groupId>org.apache.camel.springboot</groupId>
             <artifactId>camel-jackson-starter</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.apache.camel.springboot</groupId>
+            <artifactId>camel-http-starter</artifactId>
+        </dependency>
         <!-- Spring Cloud LoadBalancer: the downstream call now happens in a Camel Processor that uses
              a @LoadBalanced RestClient, so the instance is chosen by Spring Cloud LB (over the
              SimpleDiscoveryClient registry in application.yml) instead of Camel's loadBalance EIP. -->
