@@ -167,6 +167,52 @@ camel-servlet 入站 → direct:catalog → direct:fetch-catalog
 
 ---
 
+## 自定义 ServiceInstanceListSupplier：`get()` / `get(Request)` 的原理与注意点
+
+payment-resource 的 cookie 粘滞（`StickyMetadataServiceInstanceListSupplier`，经
+`@LoadBalancerClient(name="payment-resource", configuration=PaymentStickyLoadBalancerConfiguration.class)`
+只挂在该服务上）是一个覆写这两个方法的实例。写自定义 supplier 前先弄清它们在框架里的角色：
+
+### 原理
+
+- **接口契约**：`get()` 是抽象方法；`get(Request)` 是 default 方法，默认转调 `get()`（丢弃 request）。
+  `RoundRobinLoadBalancer.choose(request)` 真正调用的是 **`get(Request)`** —— 它才是官方的
+  "按请求上下文选实例"扩展点，框架自带的 `RequestBasedStickySessionServiceInstanceListSupplier` /
+  `HintBasedServiceInstanceListSupplier` 都覆写它。
+- **Request 里有没有东西取决于调用入口**：
+  - `@LoadBalanced` RestTemplate/RestClient 路径（`LoadBalancerInterceptor` →
+    `BlockingLoadBalancerClient.execute(serviceId, lbRequest)`）：框架把出站请求包成 `RequestData`
+    放进 `RequestDataContext`，`request.getContext()` 能读到 URL/headers；
+  - 本模块 `LoadBalancerRoutePlanner` 路径：直接 `choose(serviceId)`，内部构造
+    `DefaultRequest<DefaultRequestContext>`，**context 里只有 hint，没有任何请求数据**。
+    这就是粘滞值改走 `StickyContextHolder`（ThreadLocal）、两个方法共用同一实现的原因。
+
+### 注意点（按重要性排序）
+
+1. **两个方法成对覆写、语义一致。** 链上的包装层有的调 `get()`、有的调 `get(request)`；
+   只覆写其一，另一条路径会经 default 方法/delegate 绕过你的逻辑。
+2. **组装期 vs 发射期——ThreadLocal 只在前者可靠。** `get()` 方法体在 `choose()` 的调用线程上
+   同步执行（组装期）；返回的 Flux 里的 `map`/`filter` lambda 在发射期执行，发射线程不保证是
+   调用线程（health-check supplier 从自己的 Scheduler 发射、cache 回放可能换线程）。所以必须
+   **在方法体里把请求态捕获成不可变局部变量**再进算子链（见
+   `filteredByCurrentThreadStickyId()`）；写进 lambda 就是"平时能跑、并发才炸"的 bug。
+   并发隔离由 `StickySelectionThroughLoadBalancerTest` 的双线程用例锁定。
+3. **get() 里不做重活、不阻塞。** 每次 `choose()` 都会调它，只应在 delegate 的 Flux 上叠轻量算子；
+   IO/探活放链的内层并被 caching 包住。
+4. **链上位置决定正确性。** 请求相关的过滤必须在 `withCaching()` **之外**（每请求执行，缓存里
+   永远是全量存活列表）；放反了缓存会存住某个请求的过滤视图，污染后续请求直到 TTL 过期。
+   `PaymentStickyLoadBalancerConfiguration` 因此复用 `healthCheckedSupplier(...)`（discovery →
+   探活 → caching）后在**最外层**叠粘滞过滤。
+5. **想清楚空列表语义。** 过滤后为空,`choose()` 返回 `EmptyResponse`，本模块的 planner 会抛
+   "No alive instances"。是"钉不住就失败"还是"回退全量"要显式决策——本实现选回退 + WARN
+   （可用性优先于粘滞），框架的 `ZonePreferenceServiceInstanceListSupplier` 同策略。
+6. **supplier 是每服务单例，别放请求态字段。** 它活在对应服务的 LB 子上下文里被所有请求共享；
+   请求态只能经 Request 参数或线程上下文传入。另外 default 配置与 per-client 配置会同时注册进
+   子上下文：default 侧的 supplier bean 必须 `@ConditionalOnMissingBean(ServiceInstanceListSupplier.class)`
+   （见 `PartnerLoadBalancerConfiguration`），否则两个 supplier bean 冲突。
+
+---
+
 ## 配置项与观测
 
 | 配置 | 默认 | 说明 |

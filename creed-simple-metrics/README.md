@@ -24,7 +24,10 @@ camel-http 的 producer 与 `LoadBalancerRoutePlanner.choose()` 同线程执行�
 其余服务仍走默认 `PartnerLoadBalancerConfiguration`，后者的 supplier 加了 `@ConditionalOnMissingBean`
 避免子上下文 bean 冲突）在健康检查过的存活列表上按 `metadata.stickyId`（`application.yml` 注册表中
 每实例声明）过滤：命中→只连该实例；无 cookie→正常轮询；无匹配或钉住的实例探活失败→WARN 并回退全量
-存活列表（可用性优先于粘滞）。
+存活列表（可用性优先于粘滞）。自定义 supplier 时 `get()` / `get(Request)` 的原理与注意点
+（组装期捕获 ThreadLocal、过滤层放缓存外、空列表回退语义等）见
+[docs/camel-http-loadbalancer.md](docs/camel-http-loadbalancer.md) 的
+「自定义 ServiceInstanceListSupplier」一节。
 
 `POST /api/fulfillment`（请求体可选 `{"failCatalog":bool,"failOrder":bool}`）是一个复杂编排示例：
 1. **multicast** 并行拉取 catalog/order 的 **bulk** 大列表并聚合（`fulfillmentAggregateStrategy`）；

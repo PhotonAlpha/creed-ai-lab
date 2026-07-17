@@ -20,7 +20,7 @@ spring:
   cloud:
     loadbalancer:
       health-check:
-        interval: 5m
+        interval: 1m
     # Static service registry backing Spring Cloud LoadBalancer (no Eureka/Consul). The
     # RemoteClusterProcessor calls https://<service-id>/... and the LB round-robins across these
     # healthy instances (all HTTPS with Creed-CA self-signed certs, trusted via the partner bundle).
