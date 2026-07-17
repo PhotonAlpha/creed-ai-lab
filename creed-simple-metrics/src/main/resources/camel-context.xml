@@ -48,6 +48,9 @@
             <get path="/order" produces="application/json">
                 <to uri="direct:order"/>
             </get>
+            <get path="/payment" produces="application/json">
+                <to uri="direct:payment"/>
+            </get>
             <get path="/aggregate" produces="application/json">
                 <to uri="direct:aggregate"/>
             </get>
@@ -101,11 +104,21 @@
             </setHeader>
         </route>
 
+        <route id="payment">
+            <from uri="direct:payment"/>
+            <log message="payment branch on thread=${threadName}"/>
+            <to uri="direct:fetch-payment"/>
+            <setHeader name="source">
+                <constant>payment</constant>
+            </setHeader>
+        </route>
+
         <route id="aggregate">
             <from uri="direct:aggregate"/>
             <multicast aggregationStrategy="aggregateStrategy" parallelProcessing="true">
                 <to uri="direct:catalog"/>
                 <to uri="direct:order"/>
+                <to uri="direct:payment"/>
             </multicast>
         </route>
 
@@ -119,6 +132,7 @@
                        executorService="aggregatePoolA">
                 <to uri="direct:catalog"/>
                 <to uri="direct:order"/>
+                <to uri="direct:payment"/>
             </multicast>
         </route>
 
@@ -158,6 +172,19 @@
             <from uri="direct:fetch-order"/>
             <removeHeaders pattern="CamelHttp*"/>
             <to uri="https://order-resource/api/order/items?skipRequestHeaders=true&amp;skipResponseHeaders=true"/>
+            <unmarshal><json library="Jackson"/></unmarshal>
+        </route>
+
+        <!-- Payment has no /items sample endpoint; its list endpoint (GET /api/payment) is the
+             aggregation-friendly equivalent and returns the full payment list.
+             paymentStickyProcessor lifts the caller's stickyId cookie into StickyContextHolder BEFORE
+             the http producer runs: the payment-resource LB child context then pins the connection to
+             the alive instance whose registry metadata.stickyId matches (fallback: round-robin). -->
+        <route id="fetch-payment">
+            <from uri="direct:fetch-payment"/>
+            <process ref="paymentStickyProcessor"/>
+            <removeHeaders pattern="CamelHttp*"/>
+            <to uri="https://payment-resource/api/payment?skipRequestHeaders=true&amp;skipResponseHeaders=true"/>
             <unmarshal><json library="Jackson"/></unmarshal>
         </route>
 

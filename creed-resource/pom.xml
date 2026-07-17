@@ -18,5 +18,6 @@
     <modules>
         <module>creed-resource-catalog</module>
         <module>creed-resource-order</module>
+        <module>creed-resource-payment</module>
     </modules>
 </project>

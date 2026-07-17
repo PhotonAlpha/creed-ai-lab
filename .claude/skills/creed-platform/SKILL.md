@@ -5,7 +5,7 @@ description: Cross-cutting conventions and hard-won gotchas for the creed-ai-lab
 
 # creed-ai-lab platform conventions
 
-Multi-module Maven project. Root pom: `java.version=21` (but build JDK is 25), `spring-boot.version=3.5.14`, `spring-cloud.version=2025.0.2`. Modules: `creed-author-server`, `creed-gateway`, `creed-gateway-partner`, `creed-config-server`, `creed-report`, `creed-resource/{creed-resource-catalog,creed-resource-order}`.
+Multi-module Maven project. Root pom: `java.version=21` (but build JDK is 25), `spring-boot.version=3.5.14`, `spring-cloud.version=2025.0.2`. Modules: `creed-author-server`, `creed-gateway`, `creed-gateway-partner`, `creed-config-server`, `creed-report`, `creed-resource/{creed-resource-catalog,creed-resource-order,creed-resource-payment}`, `creed-simple-metrics`.
 
 ## Ports & identities
 
@@ -16,8 +16,10 @@ Multi-module Maven project. Root pom: `java.version=21` (but build JDK is 25), `
 | creed-gateway | 8080 | — | HTTPS, reactive (webflux) |
 | creed-gateway-partner | 8095 | — | HTTPS, servlet |
 | creed-report | 9100 | `/report` | HTTP |
-| creed-resource-catalog | 8081 (primary) / 8082 (secondary) | — | HTTPS |
-| creed-resource-order | 8091 (primary) / 8092 (secondary) | — | HTTPS |
+| creed-resource-catalog | 18081 (primary) / 18082 (secondary) | — | HTTPS |
+| creed-resource-order | 18091 (primary) / 18092 (secondary) | — | HTTPS |
+| creed-resource-payment | 18093 (primary) / 18094 (secondary) | — | HTTPS |
+| creed-simple-metrics | 8096 | `/camel/*` (Camel servlet) | HTTPS, Camel gateway → aggregates the three resource clusters |
 
 Resource & gateway services run profiles `primary`/`secondary` (local two-instance) or `cloud` (config-server driven). OIDC issuer everywhere: `${CREED_AUTH_ISSUER:http://127.0.0.1:9000/auth-server}` — must equal the auth server's `issuer` exactly (incl. context-path).
 

@@ -25,4 +25,4 @@ spring:
 creed:
   https:
     bundle: creed-order-server
-  rootPath: "/Users/ethan/Desktop/workspace/sourcecode/github_space/creed-ai-lab/.support/scripts/pki"
+  rootPath: ".support/scripts/pki" # relative to the repo root — the process working dir must be the repo root (-Dspring-boot.run.workingDirectory="$PWD" / IDE working dir)

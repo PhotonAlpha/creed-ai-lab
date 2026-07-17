@@ -2,6 +2,7 @@ package com.creed.simple.lb;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.loadbalancer.core.HealthCheckServiceInstanceListSupplier;
 import org.springframework.cloud.loadbalancer.core.ServiceInstanceListSupplier;
@@ -40,8 +41,24 @@ import java.util.function.BiFunction;
 @Slf4j
 public class PartnerLoadBalancerConfiguration {
 
+    /**
+     * Default supplier for every LB child context. {@code @ConditionalOnMissingBean} lets a per-client
+     * configuration (registered before this default one, e.g. {@code PaymentStickyLoadBalancerConfiguration}
+     * for {@code payment-resource}) define its own supplier without ending up with two competing beans
+     * in that child context — the standard Spring Cloud default-vs-specific configuration pattern.
+     */
     @Bean
+    @ConditionalOnMissingBean(ServiceInstanceListSupplier.class)
     ServiceInstanceListSupplier partnerServiceInstanceListSupplier(ConfigurableApplicationContext context) {
+        return healthCheckedSupplier(context);
+    }
+
+    /**
+     * Builds the shared {@code discovery → logging health check → caching} chain. Package-private so
+     * per-client configurations can reuse the exact same base and stack their extra selection layer
+     * (e.g. sticky-metadata filtering) on top of the cached alive list.
+     */
+    static ServiceInstanceListSupplier healthCheckedSupplier(ConfigurableApplicationContext context) {
         RestClient healthCheckRestClient = context.getBean("healthCheckRestClient", RestClient.class);
         return ServiceInstanceListSupplier.builder()
                 .withBlockingDiscoveryClient()
@@ -60,7 +77,7 @@ public class PartnerLoadBalancerConfiguration {
      * actual HTTP status of each {@code Mono.defer} probe, and any exception it would otherwise drop in
      * {@code catch (Exception ignored)}. Returns {@code true} only for {@code 200 OK}, matching upstream.
      */
-    private BiFunction<ServiceInstance, String, Mono<Boolean>> loggingAliveFunction(RestClient restClient) {
+    private static BiFunction<ServiceInstance, String, Mono<Boolean>> loggingAliveFunction(RestClient restClient) {
         return (serviceInstance, healthCheckPath) -> Mono.defer(() -> {
             URI uri = healthCheckUri(serviceInstance, healthCheckPath);
             StopWatch stopWatch = new StopWatch(healthCheckPath);

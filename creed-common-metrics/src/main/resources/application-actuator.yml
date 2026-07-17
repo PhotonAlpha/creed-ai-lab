@@ -3,14 +3,14 @@ server:
     mbeanregistry:
       enabled: true
 
-logging:
-  level:
+#logging:
+#  level:
     # OTel SDK exporter 的日志级别。SDK 内部用 JUL 写日志,Spring Boot 把它桥到 SLF4J:
     # JUL FINE -> SLF4J DEBUG,FINER/FINEST -> TRACE。成功批次基本都打在 FINE/FINER,
     # 失败才会到 WARNING/SEVERE,所以想看到每批推送的时机必须开到 TRACE。生产改回 INFO。
 #    io.opentelemetry.exporter: TRACE
 #    io.opentelemetry.sdk.trace.export: TRACE
-    io.opentelemetry.sdk.metrics.export: TRACE
+#    io.opentelemetry.sdk.metrics.export: TRACE
 #    io.opentelemetry.sdk.logs.export: TRACE
 
 management:

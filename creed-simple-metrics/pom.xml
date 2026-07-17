@@ -98,6 +98,15 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
+        <!-- Brings Nimbus JOSE (JWKSource built from the mTLS keystore, see
+             SslBundleConfiguration#jwkSource) plus the NimbusJwtEncoder/JwtDecoder that consume it.
+             Boot's BOM manages this starter but no longer pins nimbus-jose-jwt directly, so depending
+             on the raw Nimbus artifact would need an explicit version — this keeps versions aligned. -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
+        </dependency>
+
         <!-- Test only: JUnit 5 + Spring's MockHttpServletRequest/Response/MockFilterChain, used to
              drive CookieSanitizingFilter end-to-end without an embedded container. -->
         <dependency>

@@ -1,0 +1,5 @@
+server:
+  port: 18093
+spring:
+  application:
+    name: creed-resource-payment-primary

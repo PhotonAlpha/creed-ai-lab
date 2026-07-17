@@ -1,10 +1,17 @@
 package com.creed.simple.web;
 
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.jwk.JWK;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.proc.SecurityContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.ssl.SslBundleRegistrar;
 import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundleKey;
 import org.springframework.boot.ssl.SslBundleRegistry;
+import org.springframework.boot.ssl.SslBundles;
 import org.springframework.boot.ssl.SslStoreBundle;
 import org.springframework.boot.ssl.jks.JksSslStoreBundle;
 import org.springframework.boot.ssl.jks.JksSslStoreDetails;
@@ -12,6 +19,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.security.KeyStore;
+import java.security.KeyStoreException;
 
 /**
  * Registers this service's mTLS {@link SslBundle}s <em>programmatically</em> instead of declaring them
@@ -91,7 +101,41 @@ public class SslBundleConfiguration {
         };
     }
 
-    private SslBundle buildAndValidate(String name, String keyAlias, String keystoreFile, String truststoreFile) {
+    /**
+     * Exposes the inbound listener's RSA key pair as a Nimbus {@link JWKSource} so the same PKCS12
+     * material can also sign/verify JWTs (feed it to a {@code NimbusJwtEncoder}/{@code JwtDecoder}
+     * or serve its public part as a JWKS endpoint via {@code JWKSet#toPublicJWKSet()}).
+     *
+     * <p>Reuses the <em>strict</em> {@code creed-partner-server} bundle — injecting {@link SslBundles}
+     * (rather than reading the files again) guarantees the registrar above has run and the key
+     * material already passed startup validation. {@link JWK#load} recovers the private key and cert
+     * chain from the keystore: the resulting JWK carries the private key, the {@code x5c} chain, and
+     * the keystore alias as its {@code kid}.
+     */
+    @Bean
+    JWKSource<SecurityContext> jwkSource(SslBundles sslBundles) {
+        SslBundle bundle = sslBundles.getBundle("creed-partner-server");
+        SslBundleKey key = bundle.getKey();
+        try {
+            KeyStore keyStore = bundle.getStores().getKeyStore();
+            char[] keyPassword = key.getPassword() != null ? key.getPassword().toCharArray() : null;
+            JWK jwk = JWK.load(keyStore, key.getAlias(), keyPassword);
+            if (jwk == null) {
+                // JWK.load returns null (no exception) when the alias has no key entry.
+                throw new IllegalStateException(
+                        "SSL bundle 'creed-partner-server' keystore has no key entry for alias '"
+                                + key.getAlias() + "'");
+            }
+            return new ImmutableJWKSet<>(new JWKSet(jwk));
+        } catch (KeyStoreException | JOSEException ex) {
+            throw new IllegalStateException(
+                    "Cannot build JWKSource from SSL bundle 'creed-partner-server'"
+                            + " (key alias '" + key.getAlias() + "'): " + ex.getMessage(),
+                    ex);
+        }
+    }
+
+    protected SslBundle buildAndValidate(String name, String keyAlias, String keystoreFile, String truststoreFile) {
         JksSslStoreDetails keystore = new JksSslStoreDetails(
                 STORE_TYPE, null, "file:" + rootPath + "/" + keystoreFile, keystorePassword);
         JksSslStoreDetails truststore = new JksSslStoreDetails(

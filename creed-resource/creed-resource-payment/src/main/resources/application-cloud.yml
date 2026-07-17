@@ -1,0 +1,32 @@
+server:
+  port: 18083
+
+spring:
+  application:
+    name: creed-resource-payment
+  # Fetch this app's config (HTTPS SSL bundle + {cipher} keystore password) from
+  # creed-config-server. The connection to the config server is itself HTTPS; we trust
+  # its self-signed CA via the local PKCS12 truststore below (this is the only TLS material
+  # the client must ship locally — everything else is delivered by the config server).
+  config:
+    import: "${CREED_CONFIG_IMPORT:configserver:https://localhost:8443/config-server}"
+  cloud:
+    config:
+      username: ${CREED_CONFIG_USER:creed-config}
+      password: ${CREED_CONFIG_PASSWORD:configpass}
+      fail-fast: true
+      tls:
+        enabled: true
+        trust-store: classpath:certs/truststore.p12
+        trust-store-type: PKCS12
+        trust-store-password: ${CREED_CONFIG_TRUSTSTORE_PASSWORD:changeit}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Must equal the authorization server's issuer, which includes its /auth-server context-path.
+          issuer-uri: ${CREED_AUTH_ISSUER:http://127.0.0.1:9000/auth-server}
+
+creed:
+  oauth2:
+    jwk-set-cache-minutes: 10

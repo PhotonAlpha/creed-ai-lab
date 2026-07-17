@@ -1,6 +1,7 @@
 package com.creed.simple.web;
 
 import com.creed.simple.lb.PartnerLoadBalancerConfiguration;
+import com.creed.simple.lb.PaymentStickyLoadBalancerConfiguration;
 import com.creed.simple.lb.RestClientSuppliers;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
@@ -14,6 +15,7 @@ import org.springframework.boot.ssl.NoSuchSslBundleException;
 import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
+import org.springframework.cloud.loadbalancer.annotation.LoadBalancerClient;
 import org.springframework.cloud.loadbalancer.annotation.LoadBalancerClients;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -38,7 +40,13 @@ import java.time.Duration;
  * {@code creed.partner.client-bundle}, so the resource servers' self-signed HTTPS is accepted.
  */
 @Configuration(proxyBeanMethods = false)
-@LoadBalancerClients(defaultConfiguration = PartnerLoadBalancerConfiguration.class)
+// payment-resource gets the sticky-metadata supplier; every other service the default health-checked
+// one. The default's supplier is @ConditionalOnMissingBean, so the two configs never clash in the
+// payment child context.
+@LoadBalancerClients(
+        value = @LoadBalancerClient(name = "payment-resource",
+                configuration = PaymentStickyLoadBalancerConfiguration.class),
+        defaultConfiguration = PartnerLoadBalancerConfiguration.class)
 public class LoadBalancedRestClientConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(LoadBalancedRestClientConfiguration.class);

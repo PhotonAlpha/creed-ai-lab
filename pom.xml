@@ -6,12 +6,12 @@
 
     <!-- 企业构建 Parent：统一 pluginManagement / release 卡点 / 发布仓库，从 Artifactory 远程解析。
          依赖版本不走 spring-creed-dependencies BOM，本 pom 自行 import（见 dependencyManagement）。 -->
-    <parent>
+    <!--<parent>
         <groupId>com.ethan</groupId>
         <artifactId>spring-creed-parent</artifactId>
         <version>2026.07-SNAPSHOT</version>
         <relativePath/>
-    </parent>
+    </parent>-->
 
     <groupId>com.creed</groupId>
     <artifactId>spring-creed-auth-server</artifactId>
@@ -168,7 +168,7 @@
                 <plugin>
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
-                    <version>${jacoco.version}</version>
+                    <version>${jacoco-maven-plugin.version}</version>
                 </plugin>
             </plugins>
         </pluginManagement>

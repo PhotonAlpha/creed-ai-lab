@@ -10,7 +10,8 @@ set -euo pipefail
 #          ├─ creed-gateway            / creed-gateway-CLI
 #          ├─ creed-gateway-partner    / creed-gateway-partner-CLI
 #          ├─ creed-resource-catalog   / creed-resource-catalog-CLI
-#          └─ creed-resource-order     / creed-resource-order-CLI
+#          ├─ creed-resource-order     / creed-resource-order-CLI
+#          └─ creed-resource-payment   / creed-resource-payment-CLI
 #
 # Trust model:  every *-truststore.p12 = { root , intermediate }.
 # All leaf certs are signed by creed-CA-Public-RSA, so any service trusts any
@@ -114,7 +115,7 @@ make_truststore creed-CA-global-root
 make_truststore creed-CA-Public-RSA
 
 # ---- 2-5. service identities (server + CLI) --------------------------------
-SERVICES=(creed-gateway creed-gateway-partner creed-resource-catalog creed-resource-order)
+SERVICES=(creed-gateway creed-gateway-partner creed-resource-catalog creed-resource-order creed-resource-payment)
 for svc in "${SERVICES[@]}"; do
   make_keystore   "${svc}"      serverAuth
   make_truststore "${svc}"

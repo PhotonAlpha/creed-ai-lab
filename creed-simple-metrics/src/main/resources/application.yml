@@ -34,6 +34,13 @@ spring:
             order-resource:
               - uri: https://localhost:18091
               - uri: https://localhost:18092
+            payment-resource:
+              - uri: https://localhost:18093
+                metadata:
+                  stickyId: 27AE496060A84649E527E8533A185D1461286662457143FE306F422EF1FA2696
+              - uri: https://localhost:18094
+                metadata:
+                  stickyId: 844D8CF83FBB091AB9E7F13E53E211668A36FE9761F3D22F593102CDE267A255
   # NOTE: the two mTLS SSL bundles (creed-partner-server / creed-partner-client) are no longer declared
   # here under spring.ssl.bundle.jks.*. They are registered PROGRAMMATICALLY in
   # com.creed.simple.web.SslBundleConfiguration, which also validates the keystore/truststore passwords
@@ -100,4 +107,4 @@ creed:
     # SSL bundle whose client cert + CA truststore back the @LoadBalanced RestClient's mTLS request
     # factory (see LoadBalancedRestClientConfiguration) used by RemoteClusterProcessor.
     client-bundle: creed-partner-client
-  rootPath: "/Users/ethan/Desktop/workspace/sourcecode/github_space/creed-ai-lab/.support/scripts/pki"
+  rootPath: ".support/scripts/pki" # relative to the repo root — the process working dir must be the repo root (-Dspring-boot.run.workingDirectory="$PWD" / IDE working dir)

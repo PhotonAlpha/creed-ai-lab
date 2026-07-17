@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="CreedResourcePayment-Sec" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="creed-resource-payment" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.creed.resource.payment.CreedResourcePaymentApplication" />
+    <option name="VM_PARAMETERS" value="-Dspring.profiles.active=secondary" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

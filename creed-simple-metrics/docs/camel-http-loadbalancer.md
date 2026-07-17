@@ -162,7 +162,8 @@ camel-servlet 入站 → direct:catalog → direct:fetch-catalog
    常态剔除由健康检查完成（探活失败 → 列表移除 → `choose()` 不再返回；全挂时 planner 抛
    `HttpException: No alive instances`）。
 10. **本地验证的端口占用**：Artifactory 容器占 8081/8082,资源服务本地实例已整体迁移到
-    18081/18082（catalog）与 18091/18092（order）,`application.yml` 的 simple 注册表同步更新。
+    18081/18082（catalog）、18091/18092（order）与 18093/18094（payment）,`application.yml` 的
+    simple 注册表同步更新。
 
 ---
 
@@ -179,6 +180,6 @@ camel-servlet 入站 → direct:catalog → direct:fetch-catalog
 - 选点日志：`logging.level.com.creed.simple.lb=DEBUG` → `[LB-ROUTE] catalog-resource -> https://localhost:18081`；
   探活日志 `[LB-HEALTH] ...status=200 OK, alive=true`（探活失败连同被框架吞掉的异常一起打 WARN）。
 - 池指标：`httpcomponents_httpclient_pool_*{httpclient="camelHttpPool"}`（actuator/prometheus）。
-- 快速验证：起 catalog 18081/18082、order 18091/18092 后
+- 快速验证：起 catalog 18081/18082、order 18091/18092、payment 18093/18094 后
   `curl -sk https://localhost:8096/camel/api/aggregate`，连续调用观察 `[LB-ROUTE]` 轮询;停掉一个实例,
   下个探活周期后流量只走存活实例。

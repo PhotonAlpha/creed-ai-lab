@@ -21,20 +21,42 @@ Accept: application/json
   "n": 42
 }
 
-### catalog — mTLS passthrough, round-robin across the two catalog instances (8081/8082)
+### catalog — mTLS passthrough, round-robin across the two catalog instances (18081/18082)
 GET https://localhost:8096/camel/api/catalog
 Accept: application/json
 
-### order — mTLS passthrough, round-robin across the two order instances (8091/8092)
+### order — mTLS passthrough, round-robin across the two order instances (18091/18092)
 GET https://localhost:8096/camel/api/order
 Accept: application/json
 
-### aggregate — multicast to catalog + order, merged by AggregateStrategy
+### payment — mTLS passthrough, round-robin across the two payment instances (18093/18094);
+# proxies creed-resource-payment's list endpoint (GET /api/payment) via the payment-resource service-id
+GET https://localhost:8096/camel/api/payment
+Accept: application/json
+
+### payment sticky — stickyId cookie pins the call to the instance whose registry metadata.stickyId
+# matches (18093 here); PaymentStickyProcessor lifts the cookie, StickyMetadataServiceInstanceListSupplier
+# filters the health-checked alive list. Repeat the call: it never round-robins to 18094.
+GET https://localhost:8096/camel/api/payment
+Accept: application/json
+Cookie: stickyId=27AE496060A84649E527E8533A185D1461286662457143FE306F422EF1FA2696
+
+### payment sticky — the other stickyId pins to 18094 (works with other cookies present too)
+GET https://localhost:8096/camel/api/payment
+Accept: application/json
+Cookie: JSESSIONID=abc123; stickyId=844D8CF83FBB091AB9E7F13E53E211668A36FE9761F3D22F593102CDE267A255
+
+### payment sticky — unknown stickyId: no alive instance matches -> WARN + fallback to round-robin
+GET https://localhost:8096/camel/api/payment
+Accept: application/json
+Cookie: stickyId=DEADBEEF
+
+### aggregate — multicast to catalog + order + payment, merged by AggregateStrategy
 GET https://localhost:8096/camel/api/aggregate
 Accept: application/json
 
 ### aggregate-notify — multicast aggregates on thread pool A; wireTap fires a notification on pool B
-# Check the logs for thread names: catalog/order branches run on agg-poolA-*, notification on notify-poolB-*
+# Check the logs for thread names: catalog/order/payment branches run on agg-poolA-*, notification on notify-poolB-*
 GET https://localhost:8096/camel/api/aggregate-notify
 Accept: application/json
 
@@ -78,7 +100,7 @@ Accept: application/json
 POST https://localhost:8096/camel/api/cookie-relay
 Accept: application/json
 
-### cookie-relay against the catalog cluster (8081/8082)
+### cookie-relay against the catalog cluster (18081/18082)
 POST https://localhost:8096/camel/api/cookie-relay?cluster=catalog
 Accept: application/json
 

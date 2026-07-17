@@ -3,7 +3,7 @@
 Camel-on-Spring-Boot 演示模块（HTTPS 8096）。所有路由/REST/线程池都用**经典 `<camelContext>` Spring XML DSL**
 写在 `src/main/resources/camel-context.xml`，经 `@ImportResource` 加载。下游 resource server 调用两种方式并存：
 
-- `fetch-catalog` / `fetch-order`：**camel-http 端点直连逻辑服务名**（`https://catalog-resource/...`），由
+- `fetch-catalog` / `fetch-order` / `fetch-payment`：**camel-http 端点直连逻辑服务名**（`https://catalog-resource/...`），由
   `LoadBalancerRoutePlanner` 在 HttpClient 5 建连时经 Spring Cloud LoadBalancer 解析成健康实例——
   ServiceCall EIP 移除后的替代方案，设计原理与踩坑见
   **[docs/camel-http-loadbalancer.md](docs/camel-http-loadbalancer.md)**；
@@ -12,7 +12,19 @@ Camel-on-Spring-Boot 演示模块（HTTPS 8096）。所有路由/REST/线程池�
   LB 选中的真实实例。
 
 REST 走 camel-servlet，API 在 `https://localhost:8096/camel/api/*`（hello / time / echo / catalog /
-order / aggregate / aggregate-notify / **fulfillment**）。
+order / payment / aggregate / aggregate-notify / **fulfillment**）。`/aggregate` 与 `/aggregate-notify`
+的 multicast 现聚合三个下游集群：catalog（18081/18082）、order（18091/18092）、payment（18093/18094，
+`creed-resource-payment` 的列表端点 `GET /api/payment`），均经 `payment-resource` 等逻辑服务名由
+LoadBalancer 轮询健康实例。
+
+**payment 集群支持 cookie 粘滞（sticky session）**：请求带 `Cookie: stickyId=<value>` 时，
+`PaymentStickyProcessor`（`fetch-payment` 路由第一步）把值放进 `StickyContextHolder`（ThreadLocal，
+camel-http 的 producer 与 `LoadBalancerRoutePlanner.choose()` 同线程执行所以可见），`payment-resource`
+专属的 `PaymentStickyLoadBalancerConfiguration`（经 `@LoadBalancerClient(name="payment-resource")` 挂载，
+其余服务仍走默认 `PartnerLoadBalancerConfiguration`，后者的 supplier 加了 `@ConditionalOnMissingBean`
+避免子上下文 bean 冲突）在健康检查过的存活列表上按 `metadata.stickyId`（`application.yml` 注册表中
+每实例声明）过滤：命中→只连该实例；无 cookie→正常轮询；无匹配或钉住的实例探活失败→WARN 并回退全量
+存活列表（可用性优先于粘滞）。
 
 `POST /api/fulfillment`（请求体可选 `{"failCatalog":bool,"failOrder":bool}`）是一个复杂编排示例：
 1. **multicast** 并行拉取 catalog/order 的 **bulk** 大列表并聚合（`fulfillmentAggregateStrategy`）；
