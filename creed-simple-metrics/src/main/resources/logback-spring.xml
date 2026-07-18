@@ -22,8 +22,8 @@
     <!-- 日志根目录,可通过 logging.file.path 覆盖,默认写到 ./logs -->
     <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="./logs"/>
 
-    <property scope="context" name="log-pattern" value="%d{dd-MM-yyyy HH:mm:ss.SSS} ${LOG_LEVEL_PATTERN:-%5p} [%thread][${spring.application.name:-},%X{traceId:-},%X{spanId:-}] %-40.40logger{39}[%line] : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
-    <property scope="context" name="console-pattern" value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}) %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr([%thread][${spring.application.name:-},%X{traceId:-},%X{spanId:-}]) %clr(%-40.40logger{39}){cyan}[%line] %clr(:) %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
+    <property scope="context" name="log-pattern" value="%d{dd-MM-yyyy HH:mm:ss.SSS} ${LOG_LEVEL_PATTERN:-%5p} [${appName},%X{traceId:-},%X{spanId:-}] [%thread] %-40.40logger{39}[%line] : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
+    <property scope="context" name="console-pattern" value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}) %clr(${LOG_LEVEL_PATTERN:-%5p}) [${appName},%X{traceId:-},%X{spanId:-}] %clr(%-40.40logger{39}){cyan}[%line] %clr(:) %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
 
     <property name="BUSINESS_FILE" value="${LOG_PATH}/${appName}"/>
     <property name="METRICS_FILE" value="${LOG_PATH}/${appName}-metrics"/>
@@ -82,10 +82,10 @@
         <appender-ref ref="BUSINESS"/>
     </logger>
 
-    <logger name="org.apache.hc.client5.http.wire" level="debug" additivity="false">
-        <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="BUSINESS"/>
-    </logger>
+<!--    <logger name="org.apache.hc.client5.http.wire" level="debug" additivity="false">-->
+<!--        <appender-ref ref="CONSOLE"/>-->
+<!--        <appender-ref ref="BUSINESS"/>-->
+<!--    </logger>-->
 
     <!-- 业务日志:控制台 + 业务文件 + OTLP -->
     <root level="INFO">

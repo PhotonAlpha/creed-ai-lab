@@ -1,10 +1,16 @@
 package com.creed.simple.route;
 
 import com.creed.simple.lb.StickyContextHolder;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
+import org.apache.camel.ProducerTemplate;
+import org.apache.camel.http.common.HttpMethods;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Lifts the caller's {@code stickyId} cookie off the inbound exchange into {@link StickyContextHolder}
@@ -20,11 +26,22 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component("paymentStickyProcessor")
 public class PaymentStickyProcessor implements Processor {
+    @Resource
+    ProducerTemplate producerTemplate;
+
 
     static final String COOKIE_NAME = "stickyId";
 
     @Override
     public void process(Exchange exchange) {
+        Map<String, Object> headers = exchange.getMessage().copy().getHeaders();
+        headers.put(Exchange.HTTP_METHOD, HttpMethods.GET.name());
+        CompletableFuture<String> asyncResult = producerTemplate.asyncRequestBodyAndHeaders("direct:fetch-order", null, headers, String.class);
+        log.info("result:{}", asyncResult.join());
+
+//        String result = producerTemplate.requestBodyAndHeaders("direct:fetch-order", null, headers, String.class);
+//        String result = producerTemplate.requestBodyAndHeaders("https://order-resource/api/order/items?bridgeEndpoint=true", null, headers, String.class);
+//        log.info("result:{}", result);
         String cookieHeader = exchange.getIn().getHeader("Cookie", String.class);
         String stickyId = parseStickyId(cookieHeader);
         StickyContextHolder.set(stickyId);

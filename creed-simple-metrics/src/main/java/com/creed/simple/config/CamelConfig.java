@@ -87,7 +87,10 @@ public class CamelConfig {
         HttpComponent component = new HttpComponent();
         component.setClientConnectionManager(connectionManager);
         // HttpEndpoint applies the configurer after its own builder setup, so the planner is not overridden
-        component.setHttpClientConfigurer(builder -> builder.setRoutePlanner(routePlanner));
+        component.setHttpClientConfigurer(builder -> builder
+                .setRoutePlanner(routePlanner)
+                // innermost (inside retry): logs the instance the route planner picked, per attempt
+                .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler()));
         component.setConnectionRequestTimeout(connectionRequestTimeout.toMillis());
         component.setResponseTimeout(responseTimeout.toMillis());
         return component;

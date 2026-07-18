@@ -170,6 +170,7 @@
 
         <route id="fetch-order">
             <from uri="direct:fetch-order"/>
+            <log message="fetching order call" />
             <removeHeaders pattern="CamelHttp*"/>
             <to uri="https://order-resource/api/order/items?skipRequestHeaders=true&amp;skipResponseHeaders=true"/>
             <unmarshal><json library="Jackson"/></unmarshal>

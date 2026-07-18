@@ -1,5 +1,6 @@
 package com.creed.simple.web;
 
+import com.creed.simple.config.CamelLoadBalancerAuditExecHandler;
 import io.micrometer.observation.ObservationRegistry;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -51,6 +52,9 @@ public class CookieRelayRestClientConfiguration {
                 .setDefaultRequestConfig(requestConfig)
                 // The relay forwards the Cookie header BY HAND — that is the whole point of the demo.
                 .disableCookieManagement()
+                // Same downstream audit block as the camel-http component (headers/cookies/bodies);
+                // the wire here carries the hand-built Cookie header this demo is about.
+                .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler())
                 .build();
         return new HttpComponentsClientHttpRequestFactory(httpClient);
     }

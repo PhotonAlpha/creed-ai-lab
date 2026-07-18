@@ -63,7 +63,7 @@ public class LoadBalancerRoutePlanner implements HttpRoutePlanner {
         }
         HttpHost resolved = new HttpHost(instance.isSecure() ? "https" : "http",
                 instance.getHost(), instance.getPort());
-        log.debug("[LB-ROUTE] {} -> {} (instanceId={})", serviceId, resolved, instance.getInstanceId());
+        log.info("[LB-ROUTE] {} -> {} (instance={})", serviceId, resolved, instance);
         // the secure flag decides whether TLS is layered on the connection — HttpRoute(HttpHost) alone
         // defaults it to false, which would send https traffic in plaintext
         return new HttpRoute(resolved, null, "https".equalsIgnoreCase(resolved.getSchemeName()));
