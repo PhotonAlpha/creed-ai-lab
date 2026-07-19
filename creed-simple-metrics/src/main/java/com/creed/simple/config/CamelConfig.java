@@ -3,8 +3,11 @@ package com.creed.simple.config;
 import com.creed.simple.lb.LoadBalancerRoutePlanner;
 import com.creed.simple.lb.RestClientSuppliers;
 import io.micrometer.core.instrument.binder.MeterBinder;
+import io.micrometer.core.instrument.binder.httpcomponents.hc5.ObservationExecChainHandler;
 import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
+import io.micrometer.observation.ObservationRegistry;
 import org.apache.camel.component.http.HttpComponent;
+import org.apache.hc.client5.http.impl.ChainElement;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,6 +85,7 @@ public class CamelConfig {
     public HttpComponent httpComponent(
             @Qualifier("camelHttpConnectionManager") PoolingHttpClientConnectionManager connectionManager,
             LoadBalancerRoutePlanner routePlanner,
+            ObservationRegistry observationRegistry,
             @Value("${creed.camel.http.connection-request-timeout:3s}") Duration connectionRequestTimeout,
             @Value("${creed.camel.http.response-timeout:10s}") Duration responseTimeout) {
         HttpComponent component = new HttpComponent();
@@ -89,6 +93,11 @@ public class CamelConfig {
         // HttpEndpoint applies the configurer after its own builder setup, so the planner is not overridden
         component.setHttpClientConfigurer(builder -> builder
                 .setRoutePlanner(routePlanner)
+                // Micrometer's hc5 instrumentation: an `httpcomponents.httpclient.request` Observation
+                // (timer + trace propagation) per attempt — the camel-http twin of the RestClient's
+                // `http.client.requests`. Placed right inside RETRY per the Micrometer docs.
+                .addExecInterceptorAfter(ChainElement.RETRY.name(), "micrometer",
+                        new ObservationExecChainHandler(observationRegistry))
                 // innermost (inside retry): logs the instance the route planner picked, per attempt
                 .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler()));
         component.setConnectionRequestTimeout(connectionRequestTimeout.toMillis());
