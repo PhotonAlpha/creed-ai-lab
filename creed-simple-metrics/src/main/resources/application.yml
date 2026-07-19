@@ -96,6 +96,23 @@ management:
         http.server.requests: 10s
         http.client.requests: 10s
 
+# Zalando Logbook: request/response audit for BOTH directions — the auto-registered servlet
+# filter (inbound /camel/*, replaces the legacy AuditLoggingFilter) and the LogbookHttpExecHandler
+# on the two hc5 clients (downstream calls, see CamelConfig / CookieRelayRestClientConfiguration).
+# Lines go to the `org.zalando.logbook.Logbook` logger at TRACE (enabled in logback-spring.xml).
+logbook:
+  predicate:
+    exclude:
+      - path: /actuator/**   # keep scrape traffic out of the audit log
+  format:
+    style: http              # readable request/response blocks (alternatives: json, curl, splunk)
+  obfuscate:
+    headers:                 # same masking set as the legacy filter
+      - Authorization
+      - Proxy-Authorization
+  write:
+    max-body-size: 4096      # align with the legacy filter's MAX_PAYLOAD_BYTES
+
 # TomcatHttpsConfiguration (creed.https.enabled=true by default) wires the embedded
 # HTTPS listener to the SSL bundle named by `creed.https.bundle`. Outside the `cloud`
 # profile no bundle is delivered by the config server, so we define one locally here

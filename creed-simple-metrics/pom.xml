@@ -15,6 +15,7 @@
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <logbook.version>3.9.0</logbook.version>
     </properties>
 
     <dependencies>
@@ -28,6 +29,25 @@
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-config</artifactId>
+        </dependency>
+
+        <!-- ===== HTTP request/response audit (Zalando Logbook) =====
+             Replaces the hand-written audit block logging:
+             - the starter auto-registers a servlet LogbookFilter (inbound /camel/* audit,
+               formerly AuditLoggingFilter — kept behind creed.audit.legacy-filter.enabled);
+             - logbook-httpclient5 provides the hc5 exec-chain integration (downstream audit,
+               formerly the body/header part of CamelLoadBalancerAuditExecHandler).
+             Formatting/obfuscation/body-size live under the `logbook.*` keys in application.yml;
+             output goes to the `org.zalando.logbook` TRACE logger (enabled in logback-spring.xml). -->
+        <dependency>
+            <groupId>org.zalando</groupId>
+            <artifactId>logbook-spring-boot-starter</artifactId>
+            <version>${logbook.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.zalando</groupId>
+            <artifactId>logbook-httpclient5</artifactId>
+            <version>${logbook.version}</version>
         </dependency>
 
         <!-- ===== Apache Camel (Spring Boot) ===== -->
@@ -84,6 +104,13 @@
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-tracing-bridge-brave</artifactId>
+        </dependency>
+        <!-- ContextExecutorService/ContextSnapshot: carries the Observation scope (and with it the
+             Brave span + local baggage -> MDC) onto the ProducerTemplate async executor threads.
+             Already transitive via micrometer-tracing; declared because CamelConfig compiles against it. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>context-propagation</artifactId>
         </dependency>
 
         <!-- Apache HttpClient 5: backs the @LoadBalanced RestClient's mTLS request factory

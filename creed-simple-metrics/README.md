@@ -11,6 +11,14 @@ Camel-on-Spring-Boot 演示模块（HTTPS 8096）。所有路由/REST/线程池�
   （捕获下游错误状态码进 `branchError`/`branchStatus`），并由 `LoadBalancerAuditInterceptor` 打印
   LB 选中的真实实例。
 
+**审计与耗时观测采用三层设计**——REST 请求整体（`SynchronizationAdapter` + `RoutePolicyFactory`）、
+每次发送（`EventNotifier` → `*-metrics.log`）、每次 HTTP 往返（hc5 exec chain 上的
+Zalando Logbook 完整审计 + Micrometer `ObservationExecChainHandler` 指标/trace +
+`CamelLoadBalancerAuditExecHandler` 的 LB 实例一行日志）。拦截点选型（为什么不用
+`LoadBalancerLifecycle`/`InterceptStrategy`）、Logbook 配置与三个坑（TRACE 静默、predicate
+include 误杀出站、jackson 漏洞误报）、hc5 entity 一次性流的 `writeTo` 教训，见
+**[docs/camel-audit-observability.md](docs/camel-audit-observability.md)**。
+
 REST 走 camel-servlet，API 在 `https://localhost:8096/camel/api/*`（hello / time / echo / catalog /
 order / payment / aggregate / aggregate-notify / **fulfillment**）。`/aggregate` 与 `/aggregate-notify`
 的 multicast 现聚合三个下游集群：catalog（18081/18082）、order（18091/18092）、payment（18093/18094，

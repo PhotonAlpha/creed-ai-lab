@@ -15,6 +15,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
+import org.zalando.logbook.Logbook;
+import org.zalando.logbook.httpclient5.LogbookHttpExecHandler;
 
 import java.time.Duration;
 
@@ -40,6 +42,7 @@ public class CookieRelayRestClientConfiguration {
     @Bean
     ClientHttpRequestFactory cookieRelayRequestFactory(
             @Qualifier("clusterHttpConnectionManager") PoolingHttpClientConnectionManager clusterHttpConnectionManager,
+            Logbook logbook,
             @Value("${creed.partner.http.connection-request-timeout:3s}") Duration connectionRequestTimeout,
             @Value("${creed.partner.http.response-timeout:10s}") Duration responseTimeout) {
         RequestConfig requestConfig = RequestConfig.custom()
@@ -52,8 +55,9 @@ public class CookieRelayRestClientConfiguration {
                 .setDefaultRequestConfig(requestConfig)
                 // The relay forwards the Cookie header BY HAND — that is the whole point of the demo.
                 .disableCookieManagement()
-                // Same downstream audit block as the camel-http component (headers/cookies/bodies);
-                // the wire here carries the hand-built Cookie header this demo is about.
+                // Logbook audits the wire including the hand-built Cookie header this demo is about.
+                .addExecInterceptorFirst("logbook", new LogbookHttpExecHandler(logbook))
+                // One-line LB-resolved-instance log, same as the camel-http component.
                 .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler())
                 .build();
         return new HttpComponentsClientHttpRequestFactory(httpClient);

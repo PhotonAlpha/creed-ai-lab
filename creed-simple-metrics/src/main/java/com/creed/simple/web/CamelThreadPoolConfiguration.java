@@ -4,12 +4,12 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.jvm.ExecutorServiceMetrics;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskDecorator;
 import org.springframework.scheduling.concurrent.CustomizableThreadFactory;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Makes the Camel route thread pools observable.
@@ -35,23 +35,52 @@ import java.util.concurrent.TimeUnit;
 @Configuration(proxyBeanMethods = false)
 public class CamelThreadPoolConfiguration {
 
-    /** Pool A: branches of the aggregation multicasts run here (threads named agg-poolA-*). */
+    /**
+     * Pool A: branches of the aggregation multicasts run here (threads named agg-poolA-*).
+     */
     @Bean(destroyMethod = "shutdown")
-    ExecutorService aggregatePoolA(MeterRegistry meterRegistry) {
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(
-                8, 8, 0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<>(200),
-                new CustomizableThreadFactory("agg-poolA-"));
-        return ExecutorServiceMetrics.monitor(meterRegistry, executor, "aggregatePoolA");
+    ExecutorService aggregatePoolA(MeterRegistry meterRegistry, TaskDecorator taskDecorator) {
+//        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+//                8, 8, 0L, TimeUnit.MILLISECONDS,
+//                new LinkedBlockingQueue<>(200),
+//                new CustomizableThreadFactory("agg-poolA-"));
+//        return ExecutorServiceMetrics.monitor(meterRegistry, executor, "aggregatePoolA");
+        ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
+        taskExecutor.setCorePoolSize(8);
+        taskExecutor.setMaxPoolSize(8);
+        taskExecutor.setQueueCapacity(200);
+        taskExecutor.setKeepAliveSeconds(0);
+        taskExecutor.setThreadNamePrefix("agg-poolA-");
+
+        taskExecutor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        taskExecutor.setWaitForTasksToCompleteOnShutdown(true);
+        taskExecutor.setAwaitTerminationSeconds(60);
+        taskExecutor.setTaskDecorator(taskDecorator);
+        taskExecutor.initialize();
+        return ExecutorServiceMetrics.monitor(meterRegistry, taskExecutor.getThreadPoolExecutor(), "aggregatePoolA");
     }
 
     /** Pool B: the wire-tapped notification runs here (threads named notify-poolB-*). */
     @Bean(destroyMethod = "shutdown")
-    ExecutorService notificationPoolB(MeterRegistry meterRegistry) {
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(
-                4, 4, 0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<>(100),
-                new CustomizableThreadFactory("notify-poolB-"));
-        return ExecutorServiceMetrics.monitor(meterRegistry, executor, "notificationPoolB");
+    ExecutorService notificationPoolB(MeterRegistry meterRegistry, TaskDecorator taskDecorator) {
+//        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+//                4, 4, 0L, TimeUnit.MILLISECONDS,
+//                new LinkedBlockingQueue<>(100),
+//                new CustomizableThreadFactory("notify-poolB-"));
+//        return ExecutorServiceMetrics.monitor(meterRegistry, executor, "notificationPoolB");
+
+        ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
+        taskExecutor.setCorePoolSize(4);
+        taskExecutor.setMaxPoolSize(4);
+        taskExecutor.setQueueCapacity(100);
+        taskExecutor.setKeepAliveSeconds(0);
+        taskExecutor.setThreadNamePrefix("notify-poolB-");
+
+        taskExecutor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        taskExecutor.setWaitForTasksToCompleteOnShutdown(true);
+        taskExecutor.setAwaitTerminationSeconds(60);
+        taskExecutor.setTaskDecorator(taskDecorator);
+        taskExecutor.initialize();
+        return ExecutorServiceMetrics.monitor(meterRegistry, taskExecutor.getThreadPoolExecutor(), "notificationPoolB");
     }
 }

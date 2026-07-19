@@ -2,12 +2,16 @@ package com.creed.simple.config;
 
 import com.creed.simple.lb.LoadBalancerRoutePlanner;
 import com.creed.simple.lb.RestClientSuppliers;
+import com.creed.simple.lb.StickyContextThreadLocalAccessor;
+import io.micrometer.context.ContextExecutorService;
+import io.micrometer.context.ContextRegistry;
+import io.micrometer.context.ContextSnapshotFactory;
 import io.micrometer.core.instrument.binder.MeterBinder;
-import io.micrometer.core.instrument.binder.httpcomponents.hc5.ObservationExecChainHandler;
 import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
 import io.micrometer.observation.ObservationRegistry;
+import org.apache.camel.CamelContext;
+import org.apache.camel.ProducerTemplate;
 import org.apache.camel.component.http.HttpComponent;
-import org.apache.hc.client5.http.impl.ChainElement;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,8 +24,11 @@ import org.springframework.cloud.client.discovery.DiscoveryClient;
 import org.springframework.cloud.client.loadbalancer.LoadBalancerClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.zalando.logbook.Logbook;
+import org.zalando.logbook.httpclient5.LogbookHttpExecHandler;
 
 import java.time.Duration;
+import java.util.concurrent.ExecutorService;
 
 /**
  * camel-http components ({@code http} / {@code https}) with Spring Cloud LoadBalancer routing — the
@@ -45,6 +52,29 @@ import java.time.Duration;
 public class CamelConfig {
 
     private static final Logger log = LoggerFactory.getLogger(CamelConfig.class);
+
+    /**
+     * Replaces the camel-spring-boot auto-configured template so its async methods
+     * ({@code asyncRequestBody*}) run on a context-propagating executor: {@code captureAll()} snapshots
+     * the caller thread's ThreadLocals (the Micrometer Observation scope) at submit time and restores
+     * them on the pool thread, where reopening the Observation scope reopens the Brave span scope and
+     * the {@code MyMDCScopeDecorator} MDC keys. With {@code correlationTraceId} now a <em>local</em>
+     * baggage field it no longer rides on HTTP headers, so this in-process snapshot is the only way the
+     * pool thread inherits it. The raw pool is created through the {@link
+     * org.apache.camel.spi.ExecutorServiceManager} so Camel still owns its shutdown; only the wrapper is
+     * handed to the template.
+     */
+    @Bean
+    ProducerTemplate producerTemplate(CamelContext camelContext) {
+        ContextRegistry.getInstance()
+                .registerThreadLocalAccessor(new StickyContextThreadLocalAccessor());
+        ProducerTemplate template = camelContext.createProducerTemplate();
+        ExecutorService pool = camelContext.getExecutorServiceManager()
+                .newDefaultThreadPool(template, "ProducerTemplate");
+        ContextSnapshotFactory snapshotFactory = ContextSnapshotFactory.builder().build();
+        template.setExecutorService(ContextExecutorService.wrap(pool, snapshotFactory::captureAll));
+        return template;
+    }
 
     @Bean
     LoadBalancerRoutePlanner camelLoadBalancerRoutePlanner(
@@ -86,6 +116,7 @@ public class CamelConfig {
             @Qualifier("camelHttpConnectionManager") PoolingHttpClientConnectionManager connectionManager,
             LoadBalancerRoutePlanner routePlanner,
             ObservationRegistry observationRegistry,
+            Logbook logbook,
             @Value("${creed.camel.http.connection-request-timeout:3s}") Duration connectionRequestTimeout,
             @Value("${creed.camel.http.response-timeout:10s}") Duration responseTimeout) {
         HttpComponent component = new HttpComponent();
@@ -93,11 +124,16 @@ public class CamelConfig {
         // HttpEndpoint applies the configurer after its own builder setup, so the planner is not overridden
         component.setHttpClientConfigurer(builder -> builder
                 .setRoutePlanner(routePlanner)
+                // Zalando Logbook: the FULL request/response audit (headers/cookies/bodies with
+                // obfuscation, `logbook.*` config). First per the Logbook docs, so it sees the
+                // message before other interceptors touch it.
+                .addExecInterceptorFirst("logbook", new LogbookHttpExecHandler(logbook))
                 // Micrometer's hc5 instrumentation: an `httpcomponents.httpclient.request` Observation
                 // (timer + trace propagation) per attempt — the camel-http twin of the RestClient's
                 // `http.client.requests`. Placed right inside RETRY per the Micrometer docs.
-                .addExecInterceptorAfter(ChainElement.RETRY.name(), "micrometer",
-                        new ObservationExecChainHandler(observationRegistry))
+                // TODO check tracedId issue
+//                .addExecInterceptorAfter(ChainElement.RETRY.name(), "micrometer",
+//                        new ObservationExecChainHandler(observationRegistry))
                 // innermost (inside retry): logs the instance the route planner picked, per attempt
                 .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler()));
         component.setConnectionRequestTimeout(connectionRequestTimeout.toMillis());

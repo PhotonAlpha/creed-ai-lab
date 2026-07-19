@@ -23,7 +23,7 @@
     <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="./logs"/>
 
     <property scope="context" name="log-pattern" value="%d{dd-MM-yyyy HH:mm:ss.SSS} ${LOG_LEVEL_PATTERN:-%5p} [${appName},%X{traceId:-},%X{spanId:-}] [%thread] %-40.40logger{39}[%line] : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
-    <property scope="context" name="console-pattern" value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}) %clr(${LOG_LEVEL_PATTERN:-%5p}) [${appName},%X{traceId:-},%X{spanId:-}] %clr(%-40.40logger{39}){cyan}[%line] %clr(:) %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
+    <property scope="context" name="console-pattern" value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}) %clr(${LOG_LEVEL_PATTERN:-%5p}) [${appName},%X{traceId:-},%X{spanId:-}] [%thread] %clr(%-40.40logger{39}){cyan}[%line] %clr(:) %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
 
     <property name="BUSINESS_FILE" value="${LOG_PATH}/${appName}"/>
     <property name="METRICS_FILE" value="${LOG_PATH}/${appName}-metrics"/>
@@ -76,6 +76,10 @@
         <appender-ref ref="METRICS"/>
 <!--        <appender-ref ref="CONSOLE"/>-->
     </logger>
+
+    <!-- Zalando Logbook writes audit blocks at TRACE on this logger; without this line the
+         request/response audit (servlet filter + hc5 LogbookHttpExecHandler) is silently off. -->
+    <logger name="org.zalando.logbook" level="TRACE"/>
 
     <logger name="org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager" level="debug" additivity="false">
         <appender-ref ref="CONSOLE"/>

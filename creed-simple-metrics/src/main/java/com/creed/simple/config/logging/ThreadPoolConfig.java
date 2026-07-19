@@ -1,17 +1,11 @@
-package com.creed.simple.config;
+package com.creed.simple.config.logging;
 
-import com.creed.simple.config.logging.SpanTaskDecorator;
 import io.micrometer.tracing.Tracer;
 import jakarta.annotation.Resource;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.core.task.TaskDecorator;
 import org.springframework.core.task.support.CompositeTaskDecorator;
 import org.springframework.core.task.support.ContextPropagatingTaskDecorator;
-import org.springframework.scheduling.annotation.EnableAsync;
-import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.Arrays;
@@ -28,19 +22,18 @@ import java.util.concurrent.ThreadPoolExecutor;
  *   queue-capacity = maxSize * (2 ~10)
  *
  */
-@Configuration
-@EnableAsync
-@Slf4j
-@EnableScheduling
+//@Configuration
+//@EnableAsync
+//@Slf4j
+//@EnableScheduling
 public class ThreadPoolConfig {
 
-    public static final String TASK_EXECUTOR = "myTask";
+    public static final String TASK_EXECUTOR = "taskExecutor";
     @Resource
-    @Lazy
     Tracer tracer;
-
     @Bean
     public TaskDecorator taskDecorator() {
+        // return new ContextPropagatingTaskDecorator();
         return new CompositeTaskDecorator(Arrays.asList( new SpanTaskDecorator(tracer),
                 new ContextPropagatingTaskDecorator())); //也可以自己实现，这边使用框架解决
     }
@@ -48,8 +41,8 @@ public class ThreadPoolConfig {
     @Bean(name = TASK_EXECUTOR)
     public ThreadPoolTaskExecutor taskExecutor() {
         ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
-        taskExecutor.setCorePoolSize(20);
-        taskExecutor.setMaxPoolSize(80);
+        taskExecutor.setCorePoolSize(5);
+        taskExecutor.setMaxPoolSize(10);
         taskExecutor.setQueueCapacity(10);
         taskExecutor.setKeepAliveSeconds(2000);
         taskExecutor.setThreadNamePrefix("Asy-");
@@ -58,6 +51,9 @@ public class ThreadPoolConfig {
         taskExecutor.setAwaitTerminationSeconds(60);
         taskExecutor.setTaskDecorator(taskDecorator());
         taskExecutor.initialize();
+        // ContextSnapshot.captureAll()
+        // ContextExecutorService.wrap()
+        // ContextExecutorService.wrap(taskExecutor, ContextSnapshotFactory.builder().build()::captureAll)
         return taskExecutor;
     }
 }

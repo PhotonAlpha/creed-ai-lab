@@ -72,7 +72,7 @@ public class AuditLoggingFilter extends OncePerRequestFilter {
         } finally {
             long ms = (System.nanoTime() - startNanos) / 1_000_000;
             try {
-                log.info("\n{}", render(req, resp, ms));
+                log.info("AuditLoggingFilter \n{}", render(req, resp, ms));
             } catch (RuntimeException ex) {
                 // Auditing must never break the response — log and carry on to copyBodyToResponse().
                 log.warn("audit rendering failed: {}", ex.toString());
