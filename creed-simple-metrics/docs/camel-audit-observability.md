@@ -67,10 +67,14 @@ builder.addExecInterceptorAfter(ChainElement.RETRY.name(), "micrometer",
 - 顺带激活 **trace 传播**:camel-http 下游请求自动带 `traceparent` 头(此前只有 RestClient 链路有);
 - 已知局限:`uri` tag 是 `UNKNOWN`(hc5 层没有 URI 模板概念,默认约定防基数爆炸;要按路径分就自定义
   `ApacheHttpClientObservationConvention`,本模块 `target.port` 已够区分集群,未配);
-- 已知现象:`<multicast parallelProcessing>` 的个别分支线程 observation 上下文未接上时,该分支的
-  traceId 会另起一条(camel-observation 在异步 EIP 下的类知名问题,不影响指标)。同类断链在
-  ProducerTemplate `asyncRequestBody*` 上的完整分析与修复(context-propagating executor)见
-  [camel-producertemplate-context-propagation.md](camel-producertemplate-context-propagation.md)。
+- 这个 handler 本身**不打开任何 Observation/Brave scope**(反编译确认:只 `Observation.start()` →
+  `chain.proceed()` → `.stop()`),曾经怀疑过它导致 `correlationTraceId`(local baggage,见
+  `MyMDCScopeDecorator`)在 camel-http 调用里丢失,A/B 实测排除——真正的根因是当时还在用的
+  `camel-observation-starter`,已经移除;ProducerTemplate `asyncRequestBody*` 断链的完整分析
+  (context-propagating executor)见
+  [camel-producertemplate-context-propagation.md](camel-producertemplate-context-propagation.md),
+  camel-observation-starter 那次排查与移除的完整过程见
+  [camel-observation-baggage-loss.md](camel-observation-baggage-loss.md)。
 
 ## Zalando Logbook:完整审计的落点
 

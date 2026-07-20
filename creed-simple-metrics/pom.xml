@@ -89,14 +89,6 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-loadbalancer</artifactId>
         </dependency>
-        <!-- Bridges Camel routes to Micrometer Observation, so each route/processor and the
-             downstream call create spans and propagate the trace context (trace/span IDs then flow
-             through the routes and appear in the correlated logs). -->
-        <dependency>
-            <groupId>org.apache.camel.springboot</groupId>
-            <artifactId>camel-observation-starter</artifactId>
-        </dependency>
-
         <!-- ===== Distributed tracing (Micrometer Tracing + Brave) ===== -->
         <!-- Brave bridge: turns Micrometer Observations into Brave spans and populates the
              traceId/spanId MDC that Spring Boot's default log pattern (LOG_CORRELATION_PATTERN) shows.

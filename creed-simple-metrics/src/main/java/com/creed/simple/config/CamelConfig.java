@@ -7,11 +7,13 @@ import io.micrometer.context.ContextExecutorService;
 import io.micrometer.context.ContextRegistry;
 import io.micrometer.context.ContextSnapshotFactory;
 import io.micrometer.core.instrument.binder.MeterBinder;
+import io.micrometer.core.instrument.binder.httpcomponents.hc5.ObservationExecChainHandler;
 import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
 import io.micrometer.observation.ObservationRegistry;
 import org.apache.camel.CamelContext;
 import org.apache.camel.ProducerTemplate;
 import org.apache.camel.component.http.HttpComponent;
+import org.apache.hc.client5.http.impl.ChainElement;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -131,9 +133,8 @@ public class CamelConfig {
                 // Micrometer's hc5 instrumentation: an `httpcomponents.httpclient.request` Observation
                 // (timer + trace propagation) per attempt — the camel-http twin of the RestClient's
                 // `http.client.requests`. Placed right inside RETRY per the Micrometer docs.
-                // TODO check tracedId issue
-//                .addExecInterceptorAfter(ChainElement.RETRY.name(), "micrometer",
-//                        new ObservationExecChainHandler(observationRegistry))
+                .addExecInterceptorAfter(ChainElement.RETRY.name(), "micrometer",
+                        new ObservationExecChainHandler(observationRegistry))
                 // innermost (inside retry): logs the instance the route planner picked, per attempt
                 .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler()));
         component.setConnectionRequestTimeout(connectionRequestTimeout.toMillis());

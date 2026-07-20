@@ -55,7 +55,9 @@ restore Observation scope → tracing handler 重开 Brave scope → `Correlatio
 
 - **依赖入站请求带传播头**:从带 observation 的 RestClient/网关进来才接得上;curl 裸调时
   提取失败 → 另起新 root trace,日志"有 traceId"但与入站对不上;
-- **`<multicast parallelProcessing>` 分支断链**(camel-observation 异步 EIP 已知问题)同根因;
+- **`<multicast parallelProcessing>` 分支断链**(camel-observation 异步 EIP 已知问题)同根因——这个
+  根因后来证实不止影响异步分支,连最普通的单跳同步 `<to>` 调用也中招,完整分析与最终修复(移除
+  `camel-observation-starter`)见 [camel-observation-baggage-loss.md](camel-observation-baggage-loss.md);
 - 改成 `local` 后 headers 里不再有 baggage,这条链对 UUID 彻底失效。
 
 ## 4. 最终方案:context-propagating executor(`CamelConfig.producerTemplate`)
@@ -139,8 +141,9 @@ ContextRegistry.getInstance().registerThreadLocalAccessor(new StickyContextThrea
 | 5 | "看似接上了"的假象 | remote baggage + headers copy + camel-observation 提取;curl 裸调即穿帮 | 改 local 后以 executor 传播为准,不依赖入站头 |
 | 6 | `MDCContext.getValue` 的 MDC fallback | baggage 为空时读池线程残留 MDC,掩盖断链 | 建议移除 fallback,让断链显式暴露 |
 | 7 | `StickyContextHolder` 残留/不传播 | 普通 ThreadLocal,`captureAll()` 不认识 | 注册 `StickyContextThreadLocalAccessor`(§5) |
-| 8 | `<multicast parallelProcessing>` 分支断链 | 路由自有池,不在 template executor 覆盖范围 | 已知未修;需要时对 EIP 的 `executorServiceRef` 同法包装 |
+| 8 | `<multicast parallelProcessing>` 分支断链 | 路由自有池,不在 template executor 覆盖范围;同根因也曾在普通单跳 `<to>` 上复现,见 #10 | 需要时对 EIP 的 `executorServiceRef` 同法包装 |
 | 9 | executor 生命周期 | template 不关外部 executor;自 new 的池没人关 | 裸池走 `ExecutorServiceManager`,Camel 停机时关闭 |
+| 10 | 单跳同步 `<to>` 调用里 baggage 也会丢 | `camel-observation-starter` 给每个 endpoint 建的 producer/CLIENT span 用自己的 parent 查找(`ActiveSpanManager`/`ObservationRegistry.getCurrentObservation()`),不保证继承当前 Brave `TraceContext.extra` | 已修:移除 `camel-observation-starter` 依赖,详见 [camel-observation-baggage-loss.md](camel-observation-baggage-loss.md) |
 
 ## 7. 验证方法
 

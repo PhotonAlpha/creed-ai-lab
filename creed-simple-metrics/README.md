@@ -17,7 +17,10 @@ Zalando Logbook 完整审计 + Micrometer `ObservationExecChainHandler` 指标/t
 `CamelLoadBalancerAuditExecHandler` 的 LB 实例一行日志）。拦截点选型（为什么不用
 `LoadBalancerLifecycle`/`InterceptStrategy`）、Logbook 配置与三个坑（TRACE 静默、predicate
 include 误杀出站、jackson 漏洞误报）、hc5 entity 一次性流的 `writeTo` 教训，见
-**[docs/camel-audit-observability.md](docs/camel-audit-observability.md)**。
+**[docs/camel-audit-observability.md](docs/camel-audit-observability.md)**。local baggage 字段
+`correlationTraceId`（`MyMDCScopeDecorator`）在单跳同步 `<to>` 调用里丢失的排查过程，以及
+`camel-observation-starter` 依赖被整体移除的根因与代价，见
+**[docs/camel-observation-baggage-loss.md](docs/camel-observation-baggage-loss.md)**。
 
 REST 走 camel-servlet，API 在 `https://localhost:8096/camel/api/*`（hello / time / echo / catalog /
 order / payment / aggregate / aggregate-notify / **fulfillment**）。`/aggregate` 与 `/aggregate-notify`
@@ -103,7 +106,15 @@ camel:
 
 REST 传输 / JSON 绑定 / inlineRoutes 都在 XML 的 `<restConfiguration>` 里配，不在 `camel.rest.*`。
 
-# camel-observation 把 `<log>` 变成指标 → 基数爆炸
+# camel-observation 把 `<log>` 变成指标 → 基数爆炸（历史记录：`camel-observation-starter` 已移除）
+
+> **现状**：这一节记录的是 `camel-observation-starter` 还在依赖里时的踩坑。该依赖后来被证实是
+> `correlationTraceId`（local baggage，见 `MyMDCScopeDecorator`）在单跳同步 `<to>` 调用里丢失的根因，
+> 已整体从 `pom.xml` 移除（排查过程见
+> [docs/camel-observation-baggage-loss.md](docs/camel-observation-baggage-loss.md)）——本节描述的基数
+> 爆炸风险和下面 `fulfillment_seconds` 等 route 级指标，随依赖一起成为历史：风险不复存在，指标也不再产出。
+> 保留这份记录，是因为如果以后再用别的机制做 route/processor 级 Observation 埋点，同样的
+> 「动态消息文本变成指标名」陷阱还会复现。
 
 ## 现象
 
@@ -245,7 +256,10 @@ public class CamelRestObservationConvention extends DefaultServerRequestObservat
 - `http_server_requests_seconds_bucket` 出现，含每个 Camel 端点的桶 → `histogram_quantile(0.95/0.99, …)` 可用。
 - dashboard 的 **Request Latency** 面板已从 avg+max **恢复成 p95/p99**（spring-boot-statistics.json，面板 502）。
 
-> 两套指标互补：Spring 的 `http_server_requests_seconds`（按 HTTP 端点/uri）与 camel-observation 的 route timer `fulfillment_seconds`（按路由），别混用。
+> 曾经两套指标互补：Spring 的 `http_server_requests_seconds`（按 HTTP 端点/uri，仍然存在）与
+> camel-observation 的 route timer `fulfillment_seconds`（按路由）——后者随 `camel-observation-starter`
+> 移除已不再产出，见本文件开头的历史记录说明和
+> [docs/camel-observation-baggage-loss.md](docs/camel-observation-baggage-loss.md)。
 
 
 
