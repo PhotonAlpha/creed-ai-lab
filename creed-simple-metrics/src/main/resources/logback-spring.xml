@@ -27,6 +27,7 @@
 
     <property name="BUSINESS_FILE" value="${LOG_PATH}/${appName}"/>
     <property name="METRICS_FILE" value="${LOG_PATH}/${appName}-metrics"/>
+    <property name="LOGBOOK_FILE" value="${LOG_PATH}/${appName}-logbook"/>
 
     <!-- 指标日志使用纯净的时间戳格式,便于后续采集/解析 -->
     <property name="METRICS_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %msg%n"/>
@@ -77,9 +78,42 @@
 <!--        <appender-ref ref="CONSOLE"/>-->
     </logger>
 
+    <!-- ============ 文件:Logbook 审计日志 ============ -->
+    <appender name="LOGBOOK_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOGBOOK_FILE}.log</file>
+        <encoder>
+            <pattern>${log-pattern}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOGBOOK_FILE}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>15</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Logbook 审计量大、格式(splunk/json/http,见 application.yml logbook.format.style)与业务日志不同,
+         独立落盘 + 独立滚动策略,且不回流业务文件(additivity=false)。AsyncAppender 把落盘/控制台 I/O
+         摘出请求热路径——LogbookHttpExecHandler 在 hc5 exec chain 里同步调用 sink.write(),不异步化的话
+         这段 I/O 直接算在下游调用耗时里。neverBlock=true 保证队列打满时丢日志而不是阻塞调用线程;
+         discardingThreshold=0 关掉"队列超 80% 自动丢 TRACE/DEBUG/INFO"的默认行为——Logbook 全部走
+         TRACE,默认阈值会把审计日志整体误伤,只有 neverBlock 兜底的整队列丢弃才是我们想要的降级方式。 -->
+    <appender name="ASYNC_LOGBOOK" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>2048</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <appender-ref ref="LOGBOOK_FILE"/>
+        <appender-ref ref="CONSOLE"/>
+    </appender>
+
     <!-- Zalando Logbook writes audit blocks at TRACE on this logger; without this line the
          request/response audit (servlet filter + hc5 LogbookHttpExecHandler) is silently off. -->
-    <logger name="org.zalando.logbook" level="TRACE"/>
+    <logger name="org.zalando.logbook" level="TRACE" additivity="false">
+<!--        <appender-ref ref="ASYNC_LOGBOOK"/>-->
+        <appender-ref ref="BUSINESS"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
 
     <logger name="org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager" level="debug" additivity="false">
         <appender-ref ref="CONSOLE"/>

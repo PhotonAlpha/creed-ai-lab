@@ -112,34 +112,61 @@ jackson 由 Spring Boot dependencyManagement 统一锁版(当前 2.21.2,晚于�
 `dependency:tree` 里 Logbook 名下根本没有 jackson 分支——旧版从未落到 classpath。加 `<exclusions>`
 只是删一条本来就没生效的边,应用自身(spring-web/camel-jackson)照样需要 jackson,无需处理。
 
-### 生产环境推荐用法
+### 生产环境用法(已实施)
 
-当前配置是**调试形态**(多行 http 块 + 全量 body + 只遮两个 header);上生产主要收三个口子:
-格式、body 策略、脱敏。一句话原则:**默认一行 JSON 元数据,错误才带(脱敏后的)body,
-可用日志级别热开关**。
+> 完整的落地清单、每个 `creed.logbook.*` 开关、请求/响应内容类型过滤的**方向差异**、以及
+> 逐条验证方法,见专门的 [logbook-production-tuning.md](logbook-production-tuning.md)。本节保留
+> 三层审计设计视角下与本层相关的要点。
+
+最初这里只是一段建议;下面几点已经落到代码里(`application.yml` `logbook.*`/`creed.logbook.*` +
+`web/LogbookAuditConfiguration.java` + `web/ContentAwareBodyStrategy.java` + `logback-spring.xml`),
+不再是"建议"。一句话原则不变:**默认零缓冲成本,错误才带 body,格式/落盘与业务日志分离**。
 
 ```yaml
 logbook:
   predicate:
     exclude:
-      - path: /actuator/**            # 健康检查/抓取路径一并排除
+      - path: /actuator/**              # 健康检查/抓取路径一并排除
   format:
-    style: json                        # 单行结构化;http 多行块在 ELK/Loki 里切分是灾难
-  strategy: body-only-if-status-at-least   # 每次调用始终记一行,body 只在错误时记
-  minimum-status: 400
+    style: splunk                        # 单行 field=value;本项目选 splunk 不是 json(两者都比
+                                          # http 多行块在日志系统里好切分,按目标平台选一个就行)
   obfuscate:
-    headers: [Authorization, Proxy-Authorization, Cookie, Set-Cookie, X-Api-Key]
-    parameters: [access_token, password]
+    headers: [Authorization, Proxy-Authorization]
   write:
-    max-body-size: 4096
+    max-body-size: 4096                  # 只截断"写出"的内容,见下面 body 策略的说明
+creed:
+  logbook:
+    skip-paths: []                       # 按需加 Ant 模式,高流量/无意义路径整个跳过审计
+    body-on-error:
+      enabled: false                     # 生产建 true;测试/本地留 false 便于调试
+      minimum-status: 500
 ```
 
-- **body 策略**:`write.max-body-size` 只截断"写出"的内容,**body 仍会被完整缓冲进内存**——
-  大响应照样吃内存/延迟。高 QPS 只关心"谁何时调了什么、结果如何"时用 `strategy: without-body`
-  (完全不缓冲,开销最小),排障靠 trace/下游日志。
+- **body 策略,真正的零缓冲**:内置的 `strategy: body-only-if-status-at-least`(连同
+  `status-at-least`/`without-body`)全部只重写 `Strategy.write(...)`——那时两个 body 早经默认
+  `process()` 完整缓冲进内存了,`minimum-status` 只是决定要不要把已经缓冲好的内容写出去,
+  **省的是磁盘/网络 I/O,不是内存**。`ContentAwareBodyStrategy` 改在 `process(HttpRequest,
+  HttpResponse)` 里判断——这个钩子按 `Strategy` 契约在 response body 读取**之前**触发,
+  而 hc5 classic(`LogbookHttpExecHandler` 用的这条集成)在这一步 status line/headers 已经到手、
+  entity 还没消费,`response.getStatus()`/`getContentType()` 都可靠——所以正常响应的 body 真的
+  一次都不缓冲(请求体仍按默认策略缓冲,通常很小,错误时留着有用)。`creed.logbook.body-on-error.
+  enabled` 默认 `false`(本地/测试留全量 body 方便调试),生产打开。
+- **请求 vs 响应两侧的内容类型过滤**:`creed.logbook.allowed-content-types`(默认 `application/json`)
+  同时管两个方向,但生效点/效果不同——
+  - **请求侧**在 `LogbookAuditConfiguration#requestCondition`(替换 autoconfigure 默认的 `$ -> true`,
+    按 bean **名字** `requestCondition` 匹配)里,处于 `Logbook.condition()` 顶层:非白名单且有 body
+    的请求**整条审计**(请求+响应)都不记,连 body 缓冲入口都不碰;
+  - **响应侧**只能在 `ContentAwareBodyStrategy.process(request, response)` 里判断(`condition` 拿不到
+    响应),非白名单响应**只丢 body、留元数据行**(请求那时已写出,丢不掉)。这个方向差异是 Logbook
+    生命周期决定的,详见 [logbook-production-tuning.md](logbook-production-tuning.md)。
+
+  另外 `creed.logbook.skip-paths`(Ant 模式路径黑名单)也在 `requestCondition` 里叠加。Logbook 自身的
+  `logbook.predicate.include/exclude` 只支持 path/method 两个字段(反编译 `LogbookProperties.LogbookPredicate`
+  确认过),没有内容类型维度——这正是要另开 `creed.logbook.*` 而不是复用 `logbook.predicate.*` 的原因;
+  两者叠加生效,不是替代。
 - **body 级脱敏要写代码**(属性配置管不到 JSON 字段),注册 `BodyFilter` bean 即被
   autoconfigure 合并。payment 域这条**不是可选项**:PAN/CVV 进日志即 PCI-DSS 违规——
-  要么字段级打码,要么用 predicate 把支付路径排除出 body 记录:
+  要么字段级打码,要么用 predicate 把支付路径排除出 body 记录(尚未实施,仍是建议):
 
   ```java
   @Bean
@@ -154,10 +181,14 @@ logbook:
   actuator loggers 端点热开 TRACE,无需改配置重启。
 - **出站范围**:只给业务 hc5 client 挂 `LogbookHttpExecHandler`;health-check 独立池**不挂**,
   否则每轮探活都刷审计日志(业务/探活双池隔离正好方便这一点)。
-- **输出通道**:审计量大且价值周期短,给 `org.zalando.logbook.Logbook` 单配 rolling appender
-  (`additivity=false`,独立保留策略)+ 外套 `AsyncAppender` 把落盘 I/O 摘出请求热路径——
-  套路同 `*-metrics.log`。pattern 保留 `%X{traceId}`:Logbook 自身 correlation id 配对
-  request/response 两行,traceId 负责跨服务串联。
+- **输出通道,已接 AsyncAppender**:`logback-spring.xml` 给 `org.zalando.logbook` 单配了
+  `LOGBOOK_FILE`(独立文件 + 独立滚动策略,同 `*-metrics.log` 套路)+ `ASYNC_LOGBOOK` 包一层
+  `AsyncAppender`(`additivity=false`,不回流业务文件),控制台输出也走同一个 async appender。
+  `neverBlock=true` + `discardingThreshold=0`:前者保证队列打满时丢日志而不是阻塞
+  `LogbookHttpExecHandler` 所在的 hc5 调用线程(这段 I/O 本来是同步算进下游调用耗时的);后者关掉
+  "队列超 80% 自动丢 TRACE/DEBUG/INFO" 的默认行为——Logbook 全部走 TRACE,默认阈值会把审计日志
+  整体误伤,只有 `neverBlock` 兜底的整队列丢弃才是我们想要的降级方式。pattern 保留
+  `%X{traceId}`:Logbook 自身 correlation id 配对 request/response 两行,traceId 负责跨服务串联。
 - **审计"是谁"**:纯报文缺主体信息;注册 `AttributeExtractor`(如
   `JwtFirstMatchingClaimExtractor` 提取 JWT `sub`/`client_id`)让审计行直接回答
   "哪个客户端在何时调了什么"。

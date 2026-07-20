@@ -69,6 +69,27 @@ pitfalls, hc5 entity-is-a-one-shot-stream lesson). Summary:
 Both `EventNotifier`/`RoutePolicyFactory` need no manual wiring — the classic `<camelContext>` factory
 bean auto-discovers every such bean in the Spring registry.
 
+### Logbook production tuning (`web/LogbookAuditConfiguration` + `ContentAwareBodyStrategy`)
+
+The shared Logbook instance (inbound servlet filter + both hc5 exec handlers) is tuned for production via
+this module's own `creed.logbook.*` props, because Logbook's native property surface can't express any of
+it (its `logbook.predicate.*` only has path/method fields). Two extension beans hook Logbook's
+`@ConditionalOnMissingBean` points:
+- `requestCondition` (a `Predicate<HttpRequest>` — must keep that exact bean name) is the top-level
+  `Logbook.condition()`: `creed.logbook.skip-paths` (Ant patterns) + `creed.logbook.allowed-content-types`
+  (default `application/json`) gate the **request** before any body buffering — a non-matching request
+  drops the whole audit.
+- `logbookStrategy` (`ContentAwareBodyStrategy`) gates the **response body** in `process(request,response)`
+  — the only place the response content-type is visible (`condition` runs pre-request). Same
+  `allowed-content-types` list, but a non-matching response only drops its body (metadata line stays,
+  since the request was already emitted). Optional `creed.logbook.body-on-error.*` adds a status gate; the
+  decision is in `process(...)` so it's a genuine buffering skip, not a suppressed log line (unlike every
+  built-in Logbook strategy, which only overrides `write()` after both bodies are already buffered).
+
+Output goes to a dedicated `${appName}-logbook.log` behind an `AsyncAppender` (`neverBlock=true`,
+`discardingThreshold=0`) so audit I/O never blocks the synchronous hc5 call thread. Full knob list,
+verification steps, and the request-vs-response asymmetry rationale: `docs/logbook-production-tuning.md`.
+
 ## Tracing: local baggage, not header propagation — and its camel-observation trap
 
 `correlationTraceId` (`MyMDCScopeDecorator.CORRELATION_FIELD`, set by `TracingFilter` on every inbound

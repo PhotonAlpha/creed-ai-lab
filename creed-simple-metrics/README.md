@@ -17,7 +17,9 @@ Zalando Logbook 完整审计 + Micrometer `ObservationExecChainHandler` 指标/t
 `CamelLoadBalancerAuditExecHandler` 的 LB 实例一行日志）。拦截点选型（为什么不用
 `LoadBalancerLifecycle`/`InterceptStrategy`）、Logbook 配置与三个坑（TRACE 静默、predicate
 include 误杀出站、jackson 漏洞误报）、hc5 entity 一次性流的 `writeTo` 教训，见
-**[docs/camel-audit-observability.md](docs/camel-audit-observability.md)**。local baggage 字段
+**[docs/camel-audit-observability.md](docs/camel-audit-observability.md)**；把 Logbook 调到生产可用的
+完整清单（请求/响应内容类型过滤的方向差异、`body-on-error` 零缓冲策略、独立异步落盘）见
+**[docs/logbook-production-tuning.md](docs/logbook-production-tuning.md)**。local baggage 字段
 `correlationTraceId`（`MyMDCScopeDecorator`）在单跳同步 `<to>` 调用里丢失的排查过程，以及
 `camel-observation-starter` 依赖被整体移除的根因与代价，见
 **[docs/camel-observation-baggage-loss.md](docs/camel-observation-baggage-loss.md)**。
