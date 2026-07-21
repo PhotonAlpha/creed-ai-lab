@@ -1,4 +1,4 @@
-package com.creed.simple.web;
+package com.creed.simple.web.logbook;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

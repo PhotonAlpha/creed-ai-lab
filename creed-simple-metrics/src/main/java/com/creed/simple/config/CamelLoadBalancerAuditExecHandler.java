@@ -1,5 +1,6 @@
 package com.creed.simple.config;
 
+import com.creed.simple.lb.LoadBalancerAuditInterceptor;
 import org.apache.hc.client5.http.classic.ExecChain;
 import org.apache.hc.client5.http.classic.ExecChainHandler;
 import org.apache.hc.core5.http.ClassicHttpRequest;
@@ -12,7 +13,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 
 /**
- * hc5 counterpart of {@link com.creed.simple.web.LoadBalancerAuditInterceptor}: one line per network
+ * hc5 counterpart of {@link LoadBalancerAuditInterceptor}: one line per network
  * attempt with the <em>concrete instance</em> the {@link com.creed.simple.lb.LoadBalancerRoutePlanner}
  * (or the {@code @LoadBalanced} interceptor) resolved, plus latency and status.
  *

@@ -1,8 +1,5 @@
-package com.creed.simple.web;
+package com.creed.simple.lb;
 
-import com.creed.simple.lb.PartnerLoadBalancerConfiguration;
-import com.creed.simple.lb.PaymentStickyLoadBalancerConfiguration;
-import com.creed.simple.lb.RestClientSuppliers;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
 import io.micrometer.observation.ObservationRegistry;

@@ -1,4 +1,4 @@
-package com.creed.simple.web;
+package com.creed.simple.lb;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

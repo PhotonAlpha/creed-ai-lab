@@ -43,7 +43,7 @@ spring:
                   stickyId: 844D8CF83FBB091AB9E7F13E53E211668A36FE9761F3D22F593102CDE267A255
   # NOTE: the two mTLS SSL bundles (creed-partner-server / creed-partner-client) are no longer declared
   # here under spring.ssl.bundle.jks.*. They are registered PROGRAMMATICALLY in
-  # com.creed.simple.web.SslBundleConfiguration, which also validates the keystore/truststore passwords
+  # com.creed.simple.web.ssl.SslBundleConfiguration, which also validates the keystore/truststore passwords
   # at startup (fail-fast) — property-defined bundles only load lazily on first use, hiding a bad password
   # until the first handshake. Paths/passwords remain externalised via creed.rootPath and the
   # CREED_ORDER_*_PASSWORD env vars.

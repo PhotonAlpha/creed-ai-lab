@@ -1,4 +1,4 @@
-package com.creed.simple.web;
+package com.creed.simple.lb;
 
 import io.micrometer.observation.ObservationRegistry;
 import org.springframework.beans.factory.annotation.Qualifier;

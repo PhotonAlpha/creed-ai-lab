@@ -1,4 +1,4 @@
-package com.creed.simple.web;
+package com.creed.simple.web.ssl;
 
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.JWK;

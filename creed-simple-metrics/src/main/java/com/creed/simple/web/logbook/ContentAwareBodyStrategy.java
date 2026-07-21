@@ -1,4 +1,4 @@
-package com.creed.simple.web;
+package com.creed.simple.web.logbook;
 
 import org.zalando.logbook.HttpRequest;
 import org.zalando.logbook.HttpResponse;

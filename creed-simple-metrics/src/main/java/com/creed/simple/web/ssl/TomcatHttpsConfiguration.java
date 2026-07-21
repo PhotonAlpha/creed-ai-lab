@@ -1,4 +1,4 @@
-package com.creed.simple.web;
+package com.creed.simple.web.ssl;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.ssl.SslBundles;
