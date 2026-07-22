@@ -104,6 +104,20 @@ Accept: application/json
 POST https://localhost:8096/camel/api/cookie-relay?cluster=catalog
 Accept: application/json
 
+### LB health-check toggle — current state + LB child contexts created so far (lazy: a service
+# never called yet won't be listed; it picks up the current flag when first used)
+GET https://localhost:8096/admin/lb/health-check
+Accept: application/json
+
+### LB health-check OFF — probe loops stop immediately ([LB-HEALTH] "probe loop stopped" per service);
+# choose() switches to the raw discovery list at the next cache refresh (cache.ttl, default 35s)
+PUT https://localhost:8096/admin/lb/health-check?enabled=false
+Accept: application/json
+
+### LB health-check ON — resubscribes: initial-delay applies again before the first probe round
+PUT https://localhost:8096/admin/lb/health-check?enabled=true
+Accept: application/json
+
 ### actuator: list metrics
 GET https://localhost:8096/actuator/metrics
 Accept: application/json

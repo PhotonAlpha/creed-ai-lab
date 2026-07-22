@@ -1,6 +1,6 @@
 package com.creed.simple.web.filter;
 
-import com.creed.simple.web.cofig.AuditLoggingFilterConfiguration;
+import com.creed.simple.web.config.AuditLoggingFilterConfiguration;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.Cookie;

@@ -1,4 +1,4 @@
-package com.creed.simple.web.cofig;
+package com.creed.simple.web.config;
 
 import com.creed.simple.web.filter.AuditLoggingFilter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

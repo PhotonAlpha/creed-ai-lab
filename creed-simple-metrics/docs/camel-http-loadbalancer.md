@@ -221,7 +221,8 @@ payment-resource 的 cookie 粘滞（`StickyMetadataServiceInstanceListSupplier`
 | `creed.camel.http.connect-timeout` / `socket-timeout` | 5s / 10s | 建连 / 读超时（ConnectionConfig） |
 | `creed.camel.http.connection-request-timeout` / `response-timeout` | 3s / 10s | 租池 / 响应超时（组件级） |
 | `creed.partner.client-bundle` | creed-partner-server | 出站 mTLS bundle（与 RestClient 共用） |
-| `spring.cloud.loadbalancer.health-check.interval` | 5m（本模块） | 探活周期 |
+| `spring.cloud.loadbalancer.health-check.interval` | 1m（本模块） | 探活周期 |
+| `creed.lb.health-check.enabled` | true | 探活层初始开关（运行时可切，见下节） |
 
 - 选点日志：`logging.level.com.creed.simple.lb=DEBUG` → `[LB-ROUTE] catalog-resource -> https://localhost:18081`；
   探活日志 `[LB-HEALTH] ...status=200 OK, alive=true`（探活失败连同被框架吞掉的异常一起打 WARN）。
@@ -229,3 +230,61 @@ payment-resource 的 cookie 粘滞（`StickyMetadataServiceInstanceListSupplier`
 - 快速验证：起 catalog 18081/18082、order 18091/18092、payment 18093/18094 后
   `curl -sk https://localhost:8096/camel/api/aggregate`，连续调用观察 `[LB-ROUTE]` 轮询;停掉一个实例,
   下个探活周期后流量只走存活实例。
+
+---
+
+## 健康检查运行时开关（`/admin/lb/health-check`）
+
+Spring Cloud 没有为已装配的健康检查层提供 enabled 属性或运行时开关——链是在每个服务的 LB
+子上下文里一次性组装的。本模块自己实现了一个，链变为
+**discovery → logging health check（toggleable）→ caching**。
+
+### 为什么不能只切 `get()` 分支
+
+`HealthCheckServiceInstanceListSupplier` 的核心流水线：
+
+```java
+aliveInstancesFlux.delaySubscription(healthCheck.getInitialDelay())
+        .replay(1)
+        .refCount(1);
+```
+
+- `refCount(1)` 看似"没有订阅者探活循环就停"，但 `afterPropertiesSet()` 里有
+  `healthCheckDisposable = aliveInstancesReplay.subscribe()` —— 一个**常驻内部订阅**，让
+  refCount 永远 ≥1。所以探活循环与流量无关，每 `health-check.interval` 持续在跑；
+  只切换 `get()` 的返回分支并不能停掉它。
+- 因此开关必须两件事一起做（`ToggleableHealthCheckServiceInstanceListSupplier`）：
+  1. **列表来源**：`get()` 用 `Flux.defer` 按开关返回探活链或裸 discovery 列表；
+  2. **探活循环**：关 = 对内层 supplier 调 `destroy()`（dispose 内部订阅 → refCount 归零 →
+     interval 循环真正拆除）；开 = 重新调 `afterPropertiesSet()`（新订阅，重新经过
+     `initial-delay` 才开始第一轮探测）。
+
+### 组件
+
+| 类 | 位置 | 职责 |
+|---|---|---|
+| `HealthCheckToggle` | 主上下文（`@Component`，所有 LB 子上下文经父上下文共享） | `AtomicBoolean` + 已注册 supplier 列表；翻转时逐个启停探活循环 |
+| `ToggleableHealthCheckServiceInstanceListSupplier` | 每个 LB 子上下文，caching 之内、health check 之外 | 双分支 `get()` + 循环启停；启动时尊重初始开关（关则不起循环） |
+| `HealthCheckToggleController` | `/admin/lb/health-check`（Spring MVC，camel-servlet 只占 `/camel/*`） | GET 查询 / PUT 翻转 |
+
+`PaymentStickyLoadBalancerConfiguration` 复用 `healthCheckedSupplier(...)`，所以 payment 的
+sticky 链同样受开关控制。
+
+### 语义与生效时机
+
+- **探活循环立即启停**（翻转日志：`[LB-HEALTH] <service>: probe loop started/stopped`）。
+- **`choose()` 的可见性有延迟**：caching 层在开关之外，翻转要等下一次缓存过期
+  （`spring.cloud.loadbalancer.cache.ttl`，默认 35s）才体现——关掉后这段时间仍在用最后一份
+  探活结果，打开后第一轮探测完成前缓存回填会短暂等待首个 alive 列表发射。
+- LB 子上下文是懒加载的：某服务从未被调用过就不会出现在 `services` 里；它首次创建时直接读
+  当前开关状态。
+- 初始状态：`creed.lb.health-check.enabled`（默认 true），设为 false 则启动即不起探活循环。
+
+```bash
+# 查询
+curl -sk https://localhost:8096/admin/lb/health-check
+# 关闭（探活流量立停；choose() 下个缓存周期起用裸注册表列表）
+curl -sk -X PUT 'https://localhost:8096/admin/lb/health-check?enabled=false'
+# 打开（重新经过 initial-delay 后开始第一轮探测）
+curl -sk -X PUT 'https://localhost:8096/admin/lb/health-check?enabled=true'
+```

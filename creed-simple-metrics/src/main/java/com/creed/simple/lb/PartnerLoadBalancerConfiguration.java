@@ -54,19 +54,27 @@ public class PartnerLoadBalancerConfiguration {
     }
 
     /**
-     * Builds the shared {@code discovery → logging health check → caching} chain. Package-private so
-     * per-client configurations can reuse the exact same base and stack their extra selection layer
-     * (e.g. sticky-metadata filtering) on top of the cached alive list.
+     * Builds the shared {@code discovery → logging health check (toggleable) → caching} chain.
+     * Package-private so per-client configurations can reuse the exact same base and stack their extra
+     * selection layer (e.g. sticky-metadata filtering) on top of the cached alive list.
+     *
+     * <p>The health-check layer is wrapped in {@link ToggleableHealthCheckServiceInstanceListSupplier},
+     * switchable at runtime via {@code PUT /admin/lb/health-check?enabled=...} — the
+     * {@link HealthCheckToggle} bean lives in the main context and is shared by every LB child context.
      */
     static ServiceInstanceListSupplier healthCheckedSupplier(ConfigurableApplicationContext context) {
         RestClient healthCheckRestClient = context.getBean("healthCheckRestClient", RestClient.class);
+        HealthCheckToggle healthCheckToggle = context.getBean(HealthCheckToggle.class);
         return ServiceInstanceListSupplier.builder()
                 .withBlockingDiscoveryClient()
                 .with((ctx, delegate) -> {
                     LoadBalancerClientFactory loadBalancerClientFactory =
                             ctx.getBean(LoadBalancerClientFactory.class);
-                    return new LoggingHealthCheckServiceInstanceListSupplier(
-                            delegate, loadBalancerClientFactory, loggingAliveFunction(healthCheckRestClient));
+                    return new ToggleableHealthCheckServiceInstanceListSupplier(
+                            new LoggingHealthCheckServiceInstanceListSupplier(
+                                    delegate, loadBalancerClientFactory,
+                                    loggingAliveFunction(healthCheckRestClient)),
+                            delegate, healthCheckToggle);
                 })
                 .withCaching()
                 .build(context);

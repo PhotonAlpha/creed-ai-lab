@@ -1,4 +1,4 @@
-package com.creed.simple.web.cofig;
+package com.creed.simple.web.config;
 
 import com.creed.simple.web.filter.CookieSanitizingFilter;
 import com.creed.simple.web.filter.AuditLoggingFilter;

@@ -39,7 +39,12 @@ Both paths share one `SimpleDiscoveryClient` registry (`application.yml`
 `spring.cloud.discovery.client.simple.instances.{catalog-resource,order-resource,payment-resource}`)
 and one health-check chain (`PartnerLoadBalancerConfiguration`: discovery → logging health check
 (overrides `isAlive` to log what Spring Cloud's stock probe swallows in `catch (Exception ignored)`) →
-caching).
+caching). The health-check layer is runtime-toggleable (`ToggleableHealthCheckServiceInstanceListSupplier`
++ main-context `HealthCheckToggle`, API `GET/PUT /admin/lb/health-check`, initial state
+`creed.lb.health-check.enabled`): OFF must `destroy()` the inner supplier — its `afterPropertiesSet()`
+holds a permanent `aliveInstancesReplay.subscribe()` that keeps the `replay(1).refCount(1)` probe loop
+running regardless of traffic; `choose()` sees a flip only after the LB cache TTL (35s default). Design
+notes: `docs/camel-http-loadbalancer.md` 运行时开关 section.
 
 ## Sticky routing for `payment-resource`
 
