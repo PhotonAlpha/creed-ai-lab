@@ -104,6 +104,43 @@ Accept: application/json
 POST https://localhost:8096/camel/api/cookie-relay?cluster=catalog
 Accept: application/json
 
+### checkout — sequential full-chain POST: catalog /reserve (stock decrement + quote) ->
+# order /checkout (create, NEW) -> payment /checkout (create+authorize in ONE call, since separate
+# create/authorize would round-robin to different in-memory instances). Response aggregates all
+# three hops; watch three "LB resolved ->" lines, one per POST.
+POST https://localhost:8096/camel/api/checkout
+Content-Type: application/json
+Accept: application/json
+
+{
+  "sku": "CAT-1",
+  "quantity": 2,
+  "customer": "Ethan",
+  "method": "CARD",
+  "currency": "SGD"
+}
+
+### checkout — insufficient stock: catalog /reserve answers 409, gateway passes it through with
+# {"status":"FAILED","step":"catalog-reserve","downstreamBody":{...available...}}
+POST https://localhost:8096/camel/api/checkout
+Content-Type: application/json
+Accept: application/json
+
+{
+  "sku": "CAT-1",
+  "quantity": 100000,
+  "customer": "Ethan"
+}
+
+### checkout — gateway-side validation: missing sku -> 400 before any downstream call
+POST https://localhost:8096/camel/api/checkout
+Content-Type: application/json
+Accept: application/json
+
+{
+  "quantity": 1
+}
+
 ### LB health-check toggle — current state + LB child contexts created so far (lazy: a service
 # never called yet won't be listed; it picks up the current flag when first used)
 GET https://localhost:8096/admin/lb/health-check

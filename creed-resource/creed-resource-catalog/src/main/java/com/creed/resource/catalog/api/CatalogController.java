@@ -164,6 +164,54 @@ public class CatalogController {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(buf);
     }
 
+    /**
+     * Reserve (and atomically decrement) stock for a checkout — the first hop of creed-simple-metrics'
+     * {@code POST /camel/api/checkout} chain. Returns a price quote the caller feeds into the order
+     * step. 400 blank sku / non-positive quantity, 404 unknown sku, 409 insufficient stock (body
+     * reports the shortfall). Deliberately no compensation endpoint: if a later checkout step fails,
+     * the reservation stays — an acceptable simplification for this in-memory demo store.
+     */
+    @PostMapping("/reserve")
+    public ResponseEntity<Map<String, Object>> reserve(@RequestBody ReserveRequest request) throws JsonProcessingException {
+        log.info("reserve:{}", MAPPER.writeValueAsString(request));
+        if (request.sku() == null || request.sku().isBlank() || request.quantity() <= 0) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "reserve requires a non-blank 'sku' and a positive 'quantity'"));
+        }
+        // computeIfPresent is atomic per key, so check-and-decrement cannot interleave with another reserve
+        boolean[] insufficient = new boolean[1];
+        Product reserved = store.computeIfPresent(request.sku(), (sku, existing) -> {
+            if (existing.stock() < request.quantity()) {
+                insufficient[0] = true;
+                return existing;
+            }
+            return new Product(sku, existing.name(), existing.category(), existing.price(),
+                    existing.stock() - request.quantity(), existing.createdAt());
+        });
+        if (reserved == null) {
+            return ResponseEntity.notFound().build();
+        }
+        if (insufficient[0]) {
+            log.warn("reserve rejected: sku={} requested={} available={}",
+                    request.sku(), request.quantity(), reserved.stock());
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "insufficient stock",
+                    "sku", request.sku(),
+                    "requested", request.quantity(),
+                    "available", reserved.stock()));
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("service", "creed-resource-catalog");
+        result.put("sku", reserved.sku());
+        result.put("name", reserved.name());
+        result.put("quantity", request.quantity());
+        result.put("unitPrice", reserved.price());
+        result.put("total", reserved.price().multiply(BigDecimal.valueOf(request.quantity())));
+        result.put("remainingStock", reserved.stock());
+        result.put("reservedAt", Instant.now().toString());
+        return ResponseEntity.ok(result);
+    }
+
     /** List every product currently held in the store. */
     @GetMapping
     public List<Product> list() {
@@ -227,5 +275,9 @@ public class CatalogController {
 
     /** Request body for create/update — all fields optional so partial updates work. */
     public record ProductRequest(String name, String category, BigDecimal price, int stock) {
+    }
+
+    /** Request body for {@code POST /reserve}. */
+    public record ReserveRequest(String sku, int quantity) {
     }
 }

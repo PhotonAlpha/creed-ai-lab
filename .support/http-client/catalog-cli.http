@@ -10,6 +10,16 @@ GET https://localhost:8081/api/catalog/bulk?size=200
 ### bulk feed — fault injection (returns HTTP 500)
 GET https://localhost:8081/api/catalog/bulk?fail=true
 
+### reserve stock (checkout chain hop 1): atomic check-and-decrement + price quote.
+# 400 blank sku / qty<=0, 404 unknown sku, 409 insufficient stock (no decrement)
+POST https://localhost:8081/api/catalog/reserve
+Content-Type: application/json
+
+{
+  "sku": "CAT-1",
+  "quantity": 2
+}
+
 ### list all products
 GET https://localhost:8081/api/catalog
 

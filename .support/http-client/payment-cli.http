@@ -1,0 +1,47 @@
+# creed-resource-payment — direct instance calls (primary 18093 / secondary 18094), HTTPS with
+# Creed-CA self-signed certs: run with the `local` environment (verifyHostCertificate=false).
+# Lifecycle: PENDING -> AUTHORIZED -> CAPTURED -> REFUNDED, CANCELLED as a side exit; transition
+# endpoints return 409 when the payment is not in the required predecessor state.
+
+### ping / liveness (the LB health-check path)
+GET https://localhost:18093/api/payment/ping
+
+### list payments (optional filters: ?orderId=ORD-900 / ?status=PENDING)
+GET https://localhost:18093/api/payment
+
+### create — starts PENDING; 400 on missing/non-positive amount or unknown method
+POST https://localhost:18093/api/payment
+Content-Type: application/json
+
+{
+  "orderId": "ORD-900",
+  "customer": "Ethan",
+  "amount": 19.90,
+  "currency": "SGD",
+  "method": "CARD"
+}
+
+### checkout (checkout chain hop 3): create + authorize in ONE call — separate create/authorize
+# through the round-robin LB could land on different in-memory instances (404). Returns AUTHORIZED.
+POST https://localhost:18093/api/payment/checkout
+Content-Type: application/json
+
+{
+  "orderId": "ORD-900",
+  "customer": "Ethan",
+  "amount": 7.00,
+  "currency": "SGD",
+  "method": "CARD"
+}
+
+### authorize a PENDING payment (409 otherwise)
+POST https://localhost:18093/api/payment/PAY-700/authorize
+
+### capture an AUTHORIZED payment (409 otherwise)
+POST https://localhost:18093/api/payment/PAY-700/capture
+
+### refund a CAPTURED payment (409 otherwise)
+POST https://localhost:18093/api/payment/PAY-700/refund
+
+### cancel — PENDING/AUTHORIZED only; 409 once captured/refunded (use /refund instead)
+DELETE https://localhost:18093/api/payment/PAY-701

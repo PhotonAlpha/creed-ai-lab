@@ -10,6 +10,18 @@ GET https://localhost:8091/api/order/bulk?size=500&itemRange=250
 ### bulk feed — fault injection (returns HTTP 500)
 GET https://localhost:8091/api/order/bulk?fail=true
 
+### checkout-create (checkout chain hop 2): strict validation — 400 with an error body when
+# customer/item blank, quantity<=0 or total missing/negative; otherwise creates a NEW order (201)
+POST https://localhost:8091/api/order/checkout
+Content-Type: application/json
+
+{
+  "customer": "Ethan",
+  "item": "Notebook",
+  "quantity": 2,
+  "total": 7.00
+}
+
 ### list all orders
 GET https://localhost:8091/api/order
 

@@ -193,6 +193,27 @@ public class OrderController {
     }
 
     /**
+     * Checkout-create — the strict variant of {@link #create} used by creed-simple-metrics'
+     * {@code POST /camel/api/checkout} chain: 400 with an error body (instead of silently defaulting)
+     * when customer/item are blank, quantity is non-positive, or total is missing/negative. The order
+     * starts in {@code NEW} like every created order; payment is authorized by the chain's next hop.
+     */
+    @PostMapping("/checkout")
+    public ResponseEntity<?> checkout(@RequestBody OrderRequest request) throws JsonProcessingException {
+        log.info("checkout:{}", MAPPER.writeValueAsString(request));
+        if (request.customer() == null || request.customer().isBlank()
+                || request.item() == null || request.item().isBlank()
+                || request.quantity() <= 0
+                || request.total() == null || request.total().signum() < 0) {
+            return ResponseEntity.badRequest().body(Map.of("error",
+                    "checkout requires non-blank 'customer' and 'item', a positive 'quantity' and a non-negative 'total'"));
+        }
+        Order order = seed(request.customer(), request.item(), request.quantity(),
+                request.total().toPlainString(), "NEW");
+        return ResponseEntity.status(201).body(order);
+    }
+
+    /**
      * Replace an existing order's mutable fields; 404 when it does not exist.
      */
     @PutMapping("/{id}")

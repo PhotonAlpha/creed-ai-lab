@@ -121,6 +121,36 @@ public class PaymentController {
         return ResponseEntity.status(HttpStatus.CREATED).body(payment);
     }
 
+    /**
+     * Create <em>and authorize</em> a payment in ONE call — for creed-simple-metrics'
+     * {@code POST /camel/api/checkout} chain. The merge is deliberate, not convenience: each instance
+     * has its own in-memory store, so a separate create-then-authorize pair routed through the
+     * round-robin LB could land on different instances and 404. Same 400 validation as
+     * {@link #create}; the stored payment goes straight to {@code AUTHORIZED} (capture/refund/cancel
+     * then apply as usual).
+     */
+    @PostMapping("/checkout")
+    public ResponseEntity<Payment> checkout(@RequestBody PaymentRequest request) throws JsonProcessingException {
+        log.info("checkout:{}", MAPPER.writeValueAsString(request));
+        if (request.amount() == null || request.amount().signum() <= 0) {
+            return ResponseEntity.badRequest().build();
+        }
+        String method = request.method() != null ? request.method().toUpperCase() : "CARD";
+        if (!METHODS.contains(method)) {
+            return ResponseEntity.badRequest().build();
+        }
+        Payment payment = seed(
+                request.orderId(),
+                request.customer(),
+                request.amount().toPlainString(),
+                request.currency() != null ? request.currency() : "SGD",
+                method,
+                PENDING);
+        Payment authorized = payment.withStatus(AUTHORIZED);
+        store.put(authorized.id(), authorized);
+        return ResponseEntity.status(HttpStatus.CREATED).body(authorized);
+    }
+
     /** Replace an existing payment's mutable fields; 404 when it does not exist. */
     @PutMapping("/{id}")
     public ResponseEntity<Payment> update(@PathVariable String id, @RequestBody PaymentRequest request)

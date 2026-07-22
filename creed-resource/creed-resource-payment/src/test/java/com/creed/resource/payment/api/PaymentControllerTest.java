@@ -86,6 +86,40 @@ class PaymentControllerTest {
     }
 
     @Test
+    void checkoutCreatesPaymentAlreadyAuthorized() throws Exception {
+        mvc.perform(post("/api/payment/checkout").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"orderId\":\"ORD-42\",\"customer\":\"Dave\",\"amount\":7.00,"
+                                + "\"currency\":\"SGD\",\"method\":\"wallet\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("AUTHORIZED"))
+                .andExpect(jsonPath("$.method").value("WALLET"))
+                .andExpect(jsonPath("$.orderId").value("ORD-42"));
+    }
+
+    @Test
+    void checkoutValidatesLikeCreateAndFeedsTheNormalLifecycle() throws Exception {
+        mvc.perform(post("/api/payment/checkout").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"orderId\":\"ORD-42\",\"amount\":-1}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/payment/checkout").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"orderId\":\"ORD-42\",\"amount\":5,\"method\":\"IOU\"}"))
+                .andExpect(status().isBadRequest());
+
+        // AUTHORIZED from checkout is a first-class lifecycle state: capture works, re-authorize 409s
+        String body = mvc.perform(post("/api/payment/checkout").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"orderId\":\"ORD-43\",\"customer\":\"Eve\",\"amount\":3.30}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String id = com.fasterxml.jackson.databind.json.JsonMapper.builder().build()
+                .readTree(body).get("id").asText();
+        mvc.perform(post("/api/payment/" + id + "/authorize"))
+                .andExpect(status().isConflict());
+        mvc.perform(post("/api/payment/" + id + "/capture"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CAPTURED"));
+    }
+
+    @Test
     void createRejectsMissingAmountAndUnknownMethod() throws Exception {
         mvc.perform(post("/api/payment").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"orderId\":\"ORD-1\"}"))

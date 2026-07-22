@@ -67,6 +67,12 @@
             <post path="/cookie-relay" produces="application/json">
                 <to uri="direct:cookieRelay"/>
             </post>
+            <!-- Sequential full-chain checkout: three POST hops (catalog reserve -> order checkout ->
+                 payment checkout), each with a JSON payload, all through the LB route planner.
+                 Body: {"sku":"CAT-1","quantity":2,"customer":"Ethan","method":"CARD","currency":"SGD"} -->
+            <post path="/checkout" consumes="application/json" produces="application/json">
+                <to uri="direct:checkout"/>
+            </post>
         </rest>
 
         <!-- ===== self-contained routes ===== -->
@@ -187,6 +193,46 @@
             <removeHeaders pattern="CamelHttp*"/>
             <to uri="https://payment-resource/api/payment?skipRequestHeaders=true&amp;skipResponseHeaders=true"/>
             <unmarshal><json library="Jackson"/></unmarshal>
+        </route>
+
+        <!-- ============================================================================
+             Sequential checkout chain (POST /api/checkout): unlike the parallel multicast
+             pipelines above, each hop DEPENDS on the previous hop's response, so the calls run
+             in order on the servlet thread:
+               1. POST catalog-resource /api/catalog/reserve   — stock check/decrement + price quote
+               2. POST order-resource   /api/order/checkout    — create the order for the quoted total
+               3. POST payment-resource /api/payment/checkout  — create + authorize in ONE call
+                  (two calls would round-robin to different in-memory instances)
+             Per hop: CamelHttp* control headers removed (servlet-consumer trap), explicit
+             CamelHttpMethod=POST + Content-Type (the http producer reads both off the exchange even
+             with skipRequestHeaders=true), body set to a JSON string by checkoutProcessor.
+             Failures (downstream 4xx/5xx, gateway validation) land in doCatch -> failure envelope
+             naming the failed step; already-completed hops are NOT compensated.
+             ============================================================================ -->
+        <route id="checkout">
+            <from uri="direct:checkout"/>
+            <doTry>
+                <to uri="bean:checkoutProcessor?method=prepareReserve"/>
+                <removeHeaders pattern="CamelHttp*"/>
+                <setHeader name="CamelHttpMethod"><constant>POST</constant></setHeader>
+                <setHeader name="Content-Type"><constant>application/json</constant></setHeader>
+                <to uri="https://catalog-resource/api/catalog/reserve?skipRequestHeaders=true&amp;skipResponseHeaders=true"/>
+                <to uri="bean:checkoutProcessor?method=prepareOrder"/>
+                <removeHeaders pattern="CamelHttp*"/>
+                <setHeader name="CamelHttpMethod"><constant>POST</constant></setHeader>
+                <setHeader name="Content-Type"><constant>application/json</constant></setHeader>
+                <to uri="https://order-resource/api/order/checkout?skipRequestHeaders=true&amp;skipResponseHeaders=true"/>
+                <to uri="bean:checkoutProcessor?method=preparePayment"/>
+                <removeHeaders pattern="CamelHttp*"/>
+                <setHeader name="CamelHttpMethod"><constant>POST</constant></setHeader>
+                <setHeader name="Content-Type"><constant>application/json</constant></setHeader>
+                <to uri="https://payment-resource/api/payment/checkout?skipRequestHeaders=true&amp;skipResponseHeaders=true"/>
+                <to uri="bean:checkoutProcessor?method=assemble"/>
+                <doCatch>
+                    <exception>java.lang.Exception</exception>
+                    <to uri="bean:checkoutProcessor?method=failure"/>
+                </doCatch>
+            </doTry>
         </route>
 
         <!-- ============================================================================
