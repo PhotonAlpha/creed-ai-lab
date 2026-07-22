@@ -1,5 +1,6 @@
-package com.creed.simple.web;
+package com.creed.simple.web.cofig;
 
+import com.creed.simple.web.filter.AuditLoggingFilter;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.core.Ordered;

@@ -134,9 +134,7 @@ public class PartnerLoadBalancerConfiguration {
             return super.isAlive(serviceInstance)
                     .doOnNext(alive -> {
                         if (!alive) {
-                            log.warn("[LB-HEALTH] instance serviceId={} instanceId={} uri={} -> alive={}",
-                                    serviceInstance.getServiceId(), serviceInstance.getInstanceId(),
-                                    serviceInstance.getUri(), alive);
+                            log.warn("[LB-HEALTH] instance {} -> alive={}", serviceInstance, alive);
                         }
                     });
         }

@@ -57,8 +57,9 @@ public class CookieRelayRestClientConfiguration {
                 .disableCookieManagement()
                 // Logbook audits the wire including the hand-built Cookie header this demo is about.
                 .addExecInterceptorFirst("logbook", new LogbookHttpExecHandler(logbook))
-                // One-line LB-resolved-instance log, same as the camel-http component.
-                .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler())
+                // One-line LB-resolved-instance log, same as the camel-http component; pool stats
+                // reflect the shared clusterHttpConnectionManager this client rides on.
+                .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler(clusterHttpConnectionManager))
                 .build();
         return new HttpComponentsClientHttpRequestFactory(httpClient);
     }

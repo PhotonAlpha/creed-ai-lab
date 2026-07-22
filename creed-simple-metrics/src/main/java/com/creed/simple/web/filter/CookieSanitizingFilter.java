@@ -1,4 +1,4 @@
-package com.creed.simple.web;
+package com.creed.simple.web.filter;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

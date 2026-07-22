@@ -1,5 +1,6 @@
 package com.creed.simple.web;
 
+import com.creed.simple.web.filter.CookieSanitizingFilter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.Cookie;

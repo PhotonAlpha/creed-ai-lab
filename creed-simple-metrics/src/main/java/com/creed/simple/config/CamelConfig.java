@@ -135,8 +135,9 @@ public class CamelConfig {
                 // `http.client.requests`. Placed right inside RETRY per the Micrometer docs.
                 .addExecInterceptorAfter(ChainElement.RETRY.name(), "micrometer",
                         new ObservationExecChainHandler(observationRegistry))
-                // innermost (inside retry): logs the instance the route planner picked, per attempt
-                .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler()));
+                // innermost (inside retry): logs the instance the route planner picked, per attempt,
+                // plus route/total occupancy of this pool
+                .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler(connectionManager)));
         component.setConnectionRequestTimeout(connectionRequestTimeout.toMillis());
         component.setResponseTimeout(responseTimeout.toMillis());
         return component;

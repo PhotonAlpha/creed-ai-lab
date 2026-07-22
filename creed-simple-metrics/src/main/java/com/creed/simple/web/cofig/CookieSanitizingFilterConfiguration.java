@@ -1,5 +1,7 @@
-package com.creed.simple.web;
+package com.creed.simple.web.cofig;
 
+import com.creed.simple.web.filter.CookieSanitizingFilter;
+import com.creed.simple.web.filter.AuditLoggingFilter;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
