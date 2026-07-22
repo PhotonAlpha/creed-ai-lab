@@ -77,16 +77,17 @@ public class ReportController {
     }
 
     /**
-     * PDF twin of {@link #export()}: renders the print-oriented {@code report-pdf.html} (well-formed
-     * XHTML, paged-media CSS — NOT the Bootstrap view template) through openpdf-html. See
-     * {@link PdfExportService} for the template constraints and CJK font configuration.
+     * PDF twin of {@link #export()}: renders {@code report-export-pdf.html} — the PDF adaptation of
+     * {@code report-export.html}, same visual language rebuilt in paged-media CSS 2.1 (openpdf-html
+     * cannot render the Bootstrap template). See {@link PdfExportService} for the template
+     * constraints and CJK font configuration.
      */
     @GetMapping(value = "/export/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
     public ResponseEntity<byte[]> exportPdf() {
         LocalDateTime now = LocalDateTime.now();
         List<ServerInfo> servers = serverInfoService.listServers();
 
-        byte[] body = pdfExportService.renderTemplate("report-pdf", Map.of(
+        byte[] body = pdfExportService.renderTemplate("report-export-pdf", Map.of(
                 "servers", servers,
                 "total", servers.size(),
                 "generatedAt", now.format(TS)));

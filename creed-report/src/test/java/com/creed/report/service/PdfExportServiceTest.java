@@ -40,7 +40,7 @@ class PdfExportServiceTest {
                 new ServerInfo("creed-gw-02", "10.10.2.22", "creed-gateway",
                         "SG", "gateway", "staging", "ap-se-1a", "green"));
 
-        byte[] pdf = service.renderTemplate("report-pdf", Map.of(
+        byte[] pdf = service.renderTemplate("report-export-pdf", Map.of(
                 "servers", servers,
                 "total", servers.size(),
                 "generatedAt", "2026-07-22 12:00:00"));

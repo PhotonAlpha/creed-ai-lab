@@ -24,8 +24,9 @@ Accept: text/html
 GET http://localhost:48080/report/export
 Accept: text/html
 
-### server inventory report — PDF export (openpdf-html: Thymeleaf report-pdf.html -> A4 landscape
-# PDF with page counters; attachment creed-server-report-<ts>.pdf)
+### server inventory report — PDF export (openpdf-html: report-export-pdf.html, the paged-media
+# adaptation of report-export.html -> A4 landscape PDF with page counters;
+# attachment creed-server-report-<ts>.pdf)
 GET http://localhost:48080/report/export/pdf
 Accept: application/pdf
 

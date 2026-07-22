@@ -19,7 +19,7 @@ import java.util.Map;
  *
  * <p>Templates fed through here need print-oriented CSS 2.1 (Flying Saucer's engine is not a
  * browser: no flexbox/grid/JS, so the Bootstrap-based view templates cannot be reused — hence the
- * dedicated {@code *-pdf.html} variants, e.g. {@code report-pdf.html}). Markup parsing is lenient —
+ * dedicated {@code *-pdf.html} variants, e.g. {@code report-export-pdf.html}). Markup parsing is lenient —
  * openpdf-html bundles neko-htmlunit, which repairs sloppy HTML instead of failing like classic
  * Flying Saucer's XML parser — but keep the templates well-formed anyway: repair guesses can shift
  * layout. Paged-media CSS ({@code @page} size/margins, margin boxes with

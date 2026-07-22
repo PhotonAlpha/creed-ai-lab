@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<!-- PDF adaptation of report-export.html for openpdf-html (Flying Saucer). Same visual language
+     (brand header, card, env/slot/country badges, striped table) but rebuilt in CSS 2.1: the
+     renderer is not a browser, so no Bootstrap (CSS variables/flexbox), no JS, no linear-gradient
+     (solid #2b5876 + #4e4376 accent border instead), layout via floats. Paged-media extras the
+     HTML export doesn't have: @page margin boxes with page counters, thead repeated per page
+     (-fs-table-paginate), rows kept unsplit (page-break-inside). Same model as report-export
+     minus bootstrapCss/bootstrapJs: servers / total / generatedAt. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Creed Server Report (PDF)</title>
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 16mm 12mm 18mm 12mm;
+            @top-left {
+                content: "Creed - Server Inventory Report";
+                font-family: Helvetica, sans-serif;
+                font-size: 8pt;
+                color: #4e4376;
+            }
+            @bottom-right {
+                content: "Page " counter(page) " of " counter(pages);
+                font-family: Helvetica, sans-serif;
+                font-size: 8pt;
+                color: #6c757d;
+            }
+        }
+
+        body {
+            font-family: Helvetica, sans-serif;
+            font-size: 10pt;
+            color: #212529;
+            background-color: #ffffff;
+        }
+
+        /* navbar.report-header: linear-gradient(90deg, #2b5876, #4e4376) -> solid + accent border */
+        .report-header {
+            background-color: #2b5876;
+            border-bottom: 3px solid #4e4376;
+            color: #ffffff;
+            padding: 10px 14px;
+            margin-bottom: 14px;
+        }
+        .report-header .brand {
+            font-size: 14pt;
+            font-weight: bold;
+        }
+        .report-header .meta {
+            float: right;
+            font-size: 9pt;
+            color: #d8dee9;
+            padding-top: 3px;
+        }
+
+        /* "Server Topology" heading row with the Total badge floated right */
+        .topology-head { margin: 0 2px 10px 2px; }
+        .topology-head h2 {
+            font-size: 12pt;
+            margin: 0 0 3px 0;
+        }
+        .topology-head .columns {
+            font-size: 9pt;
+            color: #6c757d;
+            margin: 0;
+        }
+        .total-badge {
+            float: right;
+            background-color: #6c757d;
+            color: #ffffff;
+            font-size: 10pt;
+            padding: 3px 10px;
+            border-radius: 6px;
+        }
+
+        /* card shell around the table */
+        .card {
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 0;
+        }
+
+        table.servers {
+            width: 100%;
+            border-collapse: collapse;
+            -fs-table-paginate: paginate; /* Flying Saucer: repeat thead on every page */
+        }
+        table.servers thead th {
+            background-color: #212529; /* .table-dark */
+            color: #ffffff;
+            text-align: left;
+            padding: 5px 8px;
+            font-size: 9pt;
+            white-space: nowrap;
+        }
+        table.servers tbody th,
+        table.servers tbody td {
+            border-bottom: 1px solid #dee2e6;
+            padding: 4px 8px;
+            font-size: 9pt;
+            text-align: left;
+            font-weight: normal;
+        }
+        table.servers tbody th { font-weight: bold; } /* row number keeps the <th scope="row"> look */
+        table.servers tbody tr { page-break-inside: avoid; }
+        table.servers tbody tr.odd { background-color: #f5f7fa; } /* .table-striped */
+
+        code.ip { font-family: Courier, monospace; font-size: 8.5pt; }
+
+        .badge {
+            display: inline-block;
+            color: #ffffff;
+            font-size: 8pt;
+            padding: 1px 6px;
+            border-radius: 6px;
+        }
+        /* .badge.bg-light.text-dark.border (country) */
+        .badge-country {
+            background-color: #f8f9fa;
+            color: #212529;
+            border: 1px solid #dee2e6;
+        }
+        .badge-env-prod    { background-color: #198754; }
+        .badge-env-staging { background-color: #fd7e14; }
+        .badge-env-dev     { background-color: #0d6efd; }
+        .badge-slot-blue   { background-color: #0d6efd; }
+        .badge-slot-green  { background-color: #198754; }
+
+        .empty-row td {
+            text-align: center;
+            color: #6c757d;
+            padding: 16px 8px;
+        }
+
+        .footer-note {
+            margin: 10px 2px 0 2px;
+            font-size: 8pt;
+            color: #6c757d;
+        }
+
+        .clearfix { clear: both; }
+    </style>
+</head>
+<body>
+
+<div class="report-header">
+    <span class="meta">
+        Generated at <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
+        &#183; PDF snapshot
+    </span>
+    <span class="brand">Creed &#183; Server Inventory Report</span>
+    <div class="clearfix"></div>
+</div>
+
+<div class="topology-head">
+    <span class="total-badge">Total: <span th:text="${total}">0</span></span>
+    <h2>Server Topology</h2>
+    <p class="columns">Host / IP / App / Country / Service / Env / Zone / Slot</p>
+    <div class="clearfix"></div>
+</div>
+
+<div class="card">
+    <table class="servers">
+        <thead>
+        <tr>
+            <th>#</th>
+            <th>Host</th>
+            <th>IP</th>
+            <th>App</th>
+            <th>Country</th>
+            <th>Service</th>
+            <th>Env</th>
+            <th>Zone</th>
+            <th>Slot</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="s, iter : ${servers}" th:classappend="${iter.odd} ? 'odd'">
+            <th th:text="${iter.count}">1</th>
+            <td th:text="${s.host}">creed-host</td>
+            <td><code class="ip" th:text="${s.ip}">0.0.0.0</code></td>
+            <td th:text="${s.app}">creed-app</td>
+            <td><span class="badge badge-country" th:text="${s.country}">CN</span></td>
+            <td th:text="${s.service}">service</td>
+            <td>
+                <span class="badge" th:classappend="${'badge-env-' + s.env}" th:text="${s.env}">env</span>
+            </td>
+            <td th:text="${s.zone}">zone</td>
+            <td>
+                <span class="badge" th:classappend="${'badge-slot-' + s.slot}" th:text="${s.slot}">slot</span>
+            </td>
+        </tr>
+        <tr th:if="${#lists.isEmpty(servers)}" class="empty-row">
+            <td colspan="9">No server records.</td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+
+<p class="footer-note">
+    Powered by Spring Boot &#183; Thymeleaf &#183; openpdf-html &#183; PDF export
+</p>
+
+</body>
+</html>
