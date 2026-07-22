@@ -1,0 +1,65 @@
+# creed-report — standalone Spring MVC + Thymeleaf reporting app. Plain HTTP (no TLS/mTLS),
+# port 48080, context-path /report as declared in application.yml.
+# GOTCHA: application.yml also has spring.config.import pointing at the Environment-Inspector
+# demo config dir (configs/application/creed-resource-catalog/), which can override server.port
+# (e.g. to 48080) — check the "Tomcat started on port ..." startup log line if 48080 refuses.
+
+### commit diff viewer — home ("/" and "/commit" are the same page)
+GET http://localhost:48080/report/
+Accept: text/html
+
+### commit diff viewer — explicit path
+GET http://localhost:48080/report/commit
+Accept: text/html
+
+### commit diff — offline HTML export (self-contained: CSS/JS inlined, renders with no server)
+GET http://localhost:48080/report/export/commit
+Accept: text/html
+
+### server inventory report page
+GET http://localhost:48080/report/report
+Accept: text/html
+
+### server inventory report — offline HTML export (Bootstrap inlined via AssetService)
+GET http://localhost:48080/report/export
+Accept: text/html
+
+### server inventory report — PDF export (openpdf-html: Thymeleaf report-pdf.html -> A4 landscape
+# PDF with page counters; attachment creed-server-report-<ts>.pdf)
+GET http://localhost:48080/report/export/pdf
+Accept: application/pdf
+
+### environment inspector API — full snapshot with the built-in default launch arguments
+# (replays Spring Boot's config-loading pipeline standalone: profiles + config.location +
+# config.additional-location; no beans, no web server)
+GET http://localhost:48080/report/api/environment
+Accept: application/json
+
+### environment inspector API — override the launch arguments under inspection
+GET http://localhost:48080/report/api/environment?spring.profiles.active=adc,jpa,global
+Accept: application/json
+
+### environment inspector API — effective (active) properties only, rendered to .properties + YAML
+GET http://localhost:48080/report/api/environment/rendered
+Accept: application/json
+
+### environment inspector API — rendered view with overridden profiles
+GET http://localhost:48080/report/api/environment/rendered?spring.profiles.active=adc
+Accept: application/json
+
+### environment inspector — HTML page (launch arguments editable on the page)
+GET http://localhost:48080/report/environment
+Accept: text/html
+
+### environment inspector — rendered-properties HTML page
+GET http://localhost:48080/report/environment/rendered
+Accept: text/html
+
+### actuator — fully exposed (env/configprops with show-values: always; it's an introspection tool)
+GET http://localhost:48080/report/actuator
+Accept: application/json
+
+### actuator — resolved environment of the RUNNING app (contrast with /api/environment, which
+# inspects a hypothetical launch)
+GET http://localhost:48080/report/actuator/env
+Accept: application/json

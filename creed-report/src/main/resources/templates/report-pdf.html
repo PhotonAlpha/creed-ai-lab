@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<!-- PDF variant of report.html for openpdf-html (Flying Saucer): must stay WELL-FORMED XHTML with
+     print-oriented CSS 2.1 — no Bootstrap/flexbox/JS (the renderer is not a browser). Paged-media
+     features used below: @page size/margins, margin boxes with page counters, -fs-table-paginate
+     (Flying Saucer proprietary: repeats thead on every page). -->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Creed Server Report (PDF)</title>
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 18mm 14mm 18mm 14mm;
+            @top-left {
+                content: "Creed - Server Inventory Report";
+                font-family: Helvetica, sans-serif;
+                font-size: 8pt;
+                color: #4e4376;
+            }
+            @bottom-right {
+                content: "Page " counter(page) " of " counter(pages);
+                font-family: Helvetica, sans-serif;
+                font-size: 8pt;
+                color: #6c757d;
+            }
+        }
+        body { font-family: Helvetica, sans-serif; font-size: 10pt; color: #212529; }
+
+        .report-header {
+            background-color: #2b5876;
+            color: #ffffff;
+            padding: 10px 14px;
+            margin-bottom: 12px;
+        }
+        .report-header h1 { font-size: 15pt; margin: 0 0 4px 0; }
+        .report-header .meta { font-size: 9pt; color: #d8dee9; }
+
+        table.servers {
+            width: 100%;
+            border-collapse: collapse;
+            -fs-table-paginate: paginate;
+        }
+        table.servers thead th {
+            background-color: #212529;
+            color: #ffffff;
+            text-align: left;
+            padding: 5px 8px;
+            font-size: 9pt;
+            white-space: nowrap;
+        }
+        table.servers tbody td {
+            border-bottom: 1px solid #dee2e6;
+            padding: 4px 8px;
+            font-size: 9pt;
+        }
+        table.servers tbody tr { page-break-inside: avoid; }
+        table.servers tbody tr.odd { background-color: #f5f7fa; }
+
+        code.ip { font-family: Courier, monospace; font-size: 8.5pt; }
+
+        .badge {
+            display: inline-block;
+            color: #ffffff;
+            font-size: 8pt;
+            padding: 1px 6px;
+            border-radius: 6px;
+        }
+        .env-prod    { background-color: #198754; }
+        .env-staging { background-color: #fd7e14; }
+        .env-dev     { background-color: #0d6efd; }
+        .slot-blue   { background-color: #0d6efd; }
+        .slot-green  { background-color: #198754; }
+
+        .footnote { margin-top: 10px; font-size: 8pt; color: #6c757d; }
+    </style>
+</head>
+<body>
+
+<div class="report-header">
+    <h1>Creed &#183; Server Inventory Report</h1>
+    <div class="meta">
+        Generated at <span th:text="${generatedAt}">2026-01-01 00:00:00</span>
+        &#183; Total servers: <span th:text="${total}">0</span>
+        &#183; PDF snapshot
+    </div>
+</div>
+
+<table class="servers">
+    <thead>
+    <tr>
+        <th>#</th>
+        <th>Host</th>
+        <th>IP</th>
+        <th>App</th>
+        <th>Country</th>
+        <th>Service</th>
+        <th>Env</th>
+        <th>Zone</th>
+        <th>Slot</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="s, it : ${servers}" th:classappend="${it.odd} ? 'odd'">
+        <td th:text="${it.count}">1</td>
+        <td th:text="${s.host}">creed-auth-01</td>
+        <td><code class="ip" th:text="${s.ip}">10.10.1.11</code></td>
+        <td th:text="${s.app}">creed-author-server</td>
+        <td th:text="${s.country}">CN</td>
+        <td th:text="${s.service}">auth</td>
+        <td><span class="badge" th:classappend="'env-' + ${s.env}" th:text="${s.env}">prod</span></td>
+        <td th:text="${s.zone}">cn-east-1a</td>
+        <td><span class="badge" th:classappend="'slot-' + ${s.slot}" th:text="${s.slot}">blue</span></td>
+    </tr>
+    </tbody>
+</table>
+
+<p class="footnote">
+    Columns: Host / IP / App / Country / Service / Env / Zone / Slot &#8212; same inventory as the
+    HTML report page, laid out for print.
+</p>
+
+</body>
+</html>

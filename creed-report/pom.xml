@@ -18,6 +18,7 @@
         <webjars-bootstrap.version>5.3.3</webjars-bootstrap.version>
         <webjars-bootstrap-icons.version>1.11.3</webjars-bootstrap-icons.version>
         <webjars-locator.version>0.59</webjars-locator.version>
+        <openpdf-html.version>2.2.2</openpdf-html.version>
     </properties>
 
     <dependencies>
@@ -44,6 +45,13 @@
             <groupId>org.webjars</groupId>
             <artifactId>webjars-locator-core</artifactId>
             <version>${webjars-locator.version}</version>
+        </dependency>
+        <!-- HTML -> PDF: LibrePDF's Flying Saucer fork rendering onto OpenPDF (org.openpdf.* packages).
+             Used by PdfExportService to turn Thymeleaf-rendered XHTML into the /export/pdf download. -->
+        <dependency>
+            <groupId>com.github.librepdf</groupId>
+            <artifactId>openpdf-html</artifactId>
+            <version>${openpdf-html.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
