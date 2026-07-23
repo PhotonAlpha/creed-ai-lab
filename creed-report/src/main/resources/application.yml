@@ -12,6 +12,9 @@ spring:
     encoding: UTF-8
     prefix: classpath:/templates/
     suffix: .html
+  # No spring.messages.* here: com.creed.report.config.MessageSourceConfig defines the
+  # 'messageSource' bean (one per domain, chained), so MessageSourceAutoConfiguration backs off
+  # and these properties would be silently ignored. Basenames/encoding live in that class.
   profiles:
     group:
       "default":
@@ -34,6 +37,14 @@ spring:
 
 home:
   path: "/Users/ethan/Desktop/workspace/sourcecode/github_space/creed-ai-lab"
+
+creed:
+  report:
+    pdf:
+      # Fonts registered for PDF export (Spring resource patterns or plain file paths).
+      # Bundled: Noto Sans (Latin) + Noto Sans SC/TC (Chinese), picked per locale by the
+      # pdf.font.family message key. This matches the code default; listed here for visibility.
+      font-paths: "classpath:/fonts/*.ttf,classpath:/fonts/*.otf"
 
 logging:
   level:

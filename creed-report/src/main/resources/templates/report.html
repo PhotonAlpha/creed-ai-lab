@@ -1,10 +1,13 @@
 <!DOCTYPE html>
-<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<html lang="en" th:lang="${#locale.toLanguageTag()}" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
-    <title>Creed Server Report</title>
+    <title th:text="#{report.htmlTitle}">Creed Server Report</title>
     <link rel="stylesheet" th:href="@{/webjars/bootstrap/css/bootstrap.min.css}">
-    <style>
+    <style th:inline="css">
+        /* Overrides Bootstrap's body stack; browsers fall back per glyph, the locale just leads
+           with its preferred Noto face (installed locally or substituted by the system). */
+        body { font-family: [(#{html.font.family})]; }
         body { background-color: #f5f7fa; }
         .report-header { background: linear-gradient(90deg, #2b5876, #4e4376); color: #fff; }
         .badge-env-prod    { background-color: #198754; }
@@ -20,9 +23,20 @@
 
 <nav class="navbar navbar-dark report-header shadow-sm">
     <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Creed &middot; Server Inventory Report</span>
-        <span class="text-light small">
-            Generated at <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
+        <span class="navbar-brand mb-0 h1" th:text="#{report.brand}">Creed &middot; Server Inventory Report</span>
+        <span class="d-flex align-items-center gap-3">
+            <span class="btn-group btn-group-sm" role="group">
+                <a class="btn btn-outline-light" th:href="@{/report(lang='en')}"
+                   th:classappend="${#locale.language == 'en'} ? 'active'">EN</a>
+                <a class="btn btn-outline-light" th:href="@{/report(lang='zh-CN')}"
+                   th:classappend="${#locale.toLanguageTag() == 'zh-CN'} ? 'active'">简体</a>
+                <a class="btn btn-outline-light" th:href="@{/report(lang='zh-TW')}"
+                   th:classappend="${#locale.toLanguageTag() == 'zh-TW'} ? 'active'">繁體</a>
+            </span>
+            <span class="text-light small">
+                <span th:text="#{report.generatedAt}">Generated at</span>
+                <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
+            </span>
         </span>
     </div>
 </nav>
@@ -31,17 +45,22 @@
 
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
-            <h4 class="mb-1">Server Topology</h4>
-            <p class="text-muted mb-0">
+            <h4 class="mb-1" th:text="#{report.topology}">Server Topology</h4>
+            <p class="text-muted mb-0" th:text="#{report.columns}">
                 Host / IP / App / Country / Service / Env / Zone / Slot
             </p>
         </div>
         <div class="d-flex align-items-center gap-2">
             <span class="badge bg-secondary fs-6">
-                Total: <span th:text="${total}">0</span>
+                <span th:text="#{report.total}">Total</span>: <span th:text="${total}">0</span>
             </span>
-            <a class="btn btn-primary btn-sm" th:href="@{/export}" download>
+            <a class="btn btn-primary btn-sm" th:href="@{/export}" download
+               th:text="#{report.downloadOffline}">
                 Download offline HTML
+            </a>
+            <a class="btn btn-outline-primary btn-sm" th:href="@{/export/pdf}" download
+               th:text="#{report.downloadPdf}">
+                Download PDF
             </a>
         </div>
     </div>
@@ -53,14 +72,14 @@
                     <thead class="table-dark">
                     <tr>
                         <th scope="col">#</th>
-                        <th scope="col">Host</th>
-                        <th scope="col">IP</th>
-                        <th scope="col">App</th>
-                        <th scope="col">Country</th>
-                        <th scope="col">Service</th>
-                        <th scope="col">Env</th>
-                        <th scope="col">Zone</th>
-                        <th scope="col">Slot</th>
+                        <th scope="col" th:text="#{report.col.host}">Host</th>
+                        <th scope="col" th:text="#{report.col.ip}">IP</th>
+                        <th scope="col" th:text="#{report.col.app}">App</th>
+                        <th scope="col" th:text="#{report.col.country}">Country</th>
+                        <th scope="col" th:text="#{report.col.service}">Service</th>
+                        <th scope="col" th:text="#{report.col.env}">Env</th>
+                        <th scope="col" th:text="#{report.col.zone}">Zone</th>
+                        <th scope="col" th:text="#{report.col.slot}">Slot</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -86,7 +105,7 @@
                         </td>
                     </tr>
                     <tr th:if="${#lists.isEmpty(servers)}">
-                        <td colspan="9" class="text-center text-muted py-4">No server records.</td>
+                        <td colspan="9" class="text-center text-muted py-4" th:text="#{report.empty}">No server records.</td>
                     </tr>
                     </tbody>
                 </table>
@@ -94,7 +113,7 @@
         </div>
     </div>
 
-    <p class="text-muted small mt-3 mb-0">
+    <p class="text-muted small mt-3 mb-0" th:text="#{report.footerWeb}">
         Powered by Spring Boot &middot; Thymeleaf &middot; Bootstrap 5
     </p>
 </div>

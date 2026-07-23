@@ -1,10 +1,13 @@
 <!DOCTYPE html>
-<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<html lang="en" th:lang="${#locale.toLanguageTag()}" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
-    <title>Creed Server Report (Offline)</title>
+    <title th:text="#{report.offlineTitle}">Creed Server Report (Offline)</title>
     <style th:utext="${bootstrapCss}">/* bootstrap css inlined here */</style>
-    <style>
+    <style th:inline="css">
+        /* Self-contained export: fonts are NOT embedded (the Noto faces are tens of MB) — the
+           stack just prefers the locale's Noto face if the viewer has it, else system fonts. */
+        body { font-family: [(#{html.font.family})]; }
         body { background-color: #f5f7fa; }
         .report-header { background: linear-gradient(90deg, #2b5876, #4e4376); color: #fff; }
         .badge-env-prod    { background-color: #198754; }
@@ -24,10 +27,11 @@
 
 <nav class="navbar navbar-dark report-header shadow-sm">
     <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Creed &middot; Server Inventory Report</span>
+        <span class="navbar-brand mb-0 h1" th:text="#{report.brand}">Creed &middot; Server Inventory Report</span>
         <span class="text-light small">
-            Generated at <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
-            &middot; offline snapshot
+            <span th:text="#{report.generatedAt}">Generated at</span>
+            <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
+            &middot; <span th:text="#{report.offlineSnapshot}">offline snapshot</span>
         </span>
     </div>
 </nav>
@@ -36,14 +40,14 @@
 
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
-            <h4 class="mb-1">Server Topology</h4>
-            <p class="text-muted mb-0">
+            <h4 class="mb-1" th:text="#{report.topology}">Server Topology</h4>
+            <p class="text-muted mb-0" th:text="#{report.columns}">
                 Host / IP / App / Country / Service / Env / Zone / Slot
             </p>
         </div>
         <div>
             <span class="badge bg-secondary fs-6">
-                Total: <span th:text="${total}">0</span>
+                <span th:text="#{report.total}">Total</span>: <span th:text="${total}">0</span>
             </span>
         </div>
     </div>
@@ -55,14 +59,14 @@
                     <thead class="table-dark">
                     <tr>
                         <th scope="col">#</th>
-                        <th scope="col">Host</th>
-                        <th scope="col">IP</th>
-                        <th scope="col">App</th>
-                        <th scope="col">Country</th>
-                        <th scope="col">Service</th>
-                        <th scope="col">Env</th>
-                        <th scope="col">Zone</th>
-                        <th scope="col">Slot</th>
+                        <th scope="col" th:text="#{report.col.host}">Host</th>
+                        <th scope="col" th:text="#{report.col.ip}">IP</th>
+                        <th scope="col" th:text="#{report.col.app}">App</th>
+                        <th scope="col" th:text="#{report.col.country}">Country</th>
+                        <th scope="col" th:text="#{report.col.service}">Service</th>
+                        <th scope="col" th:text="#{report.col.env}">Env</th>
+                        <th scope="col" th:text="#{report.col.zone}">Zone</th>
+                        <th scope="col" th:text="#{report.col.slot}">Slot</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -88,7 +92,7 @@
                         </td>
                     </tr>
                     <tr th:if="${#lists.isEmpty(servers)}">
-                        <td colspan="9" class="text-center text-muted py-4">No server records.</td>
+                        <td colspan="9" class="text-center text-muted py-4" th:text="#{report.empty}">No server records.</td>
                     </tr>
                     </tbody>
                 </table>
@@ -96,7 +100,7 @@
         </div>
     </div>
 
-    <p class="text-muted small mt-3 mb-0">
+    <p class="text-muted small mt-3 mb-0" th:text="#{report.footerOffline}">
         Powered by Spring Boot &middot; Thymeleaf &middot; Bootstrap 5 &middot; offline export
     </p>
 </div>

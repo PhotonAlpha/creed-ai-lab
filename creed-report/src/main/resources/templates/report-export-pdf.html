@@ -5,31 +5,37 @@
      (solid #2b5876 + #4e4376 accent border instead), layout via floats. Paged-media extras the
      HTML export doesn't have: @page margin boxes with page counters, thead repeated per page
      (-fs-table-paginate), rows kept unsplit (page-break-inside). Same model as report-export
-     minus bootstrapCss/bootstrapJs: servers / total / generatedAt. -->
+     minus bootstrapCss/bootstrapJs: servers / total / generatedAt.
+
+     Localized: every display string comes from messages*.properties (#{...}), including the CSS
+     bits — th:inline="css" injects the per-locale font stack (pdf.font.family: Noto Sans /
+     Noto Sans SC / Noto Sans TC, registered by PdfExportService) and the @page margin-box
+     header/page-counter fragments. Flying Saucer has no per-glyph fallback, so each locale's
+     stack must lead with the face that covers its script. -->
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8"/>
-    <title>Creed Server Report (PDF)</title>
-    <style>
+    <title th:text="#{report.title}">Creed Server Report (PDF)</title>
+    <style th:inline="css">
         @page {
             size: A4 landscape;
             margin: 16mm 12mm 18mm 12mm;
             @top-left {
-                content: "Creed - Server Inventory Report";
-                font-family: Helvetica, sans-serif;
+                content: "[(#{pdf.page.header})]";
+                font-family: [(#{pdf.font.family})];
                 font-size: 8pt;
                 color: #4e4376;
             }
             @bottom-right {
-                content: "Page " counter(page) " of " counter(pages);
-                font-family: Helvetica, sans-serif;
+                content: "[(#{pdf.page.prefix})]" counter(page) "[(#{pdf.page.middle})]" counter(pages) "[(#{pdf.page.suffix})]";
+                font-family: [(#{pdf.font.family})];
                 font-size: 8pt;
                 color: #6c757d;
             }
         }
 
         body {
-            font-family: Helvetica, sans-serif;
+            font-family: [(#{pdf.font.family})];
             font-size: 10pt;
             color: #212529;
             background-color: #ffffff;
@@ -146,17 +152,18 @@
 
 <div class="report-header">
     <span class="meta">
-        Generated at <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
-        &#183; PDF snapshot
+        <span th:text="#{report.generatedAt}">Generated at</span>
+        <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
+        &#183; <span th:text="#{report.pdfSnapshot}">PDF snapshot</span>
     </span>
-    <span class="brand">Creed &#183; Server Inventory Report</span>
+    <span class="brand" th:text="#{report.brand}">Creed &#183; Server Inventory Report</span>
     <div class="clearfix"></div>
 </div>
 
 <div class="topology-head">
-    <span class="total-badge">Total: <span th:text="${total}">0</span></span>
-    <h2>Server Topology</h2>
-    <p class="columns">Host / IP / App / Country / Service / Env / Zone / Slot</p>
+    <span class="total-badge"><span th:text="#{report.total}">Total</span>: <span th:text="${total}">0</span></span>
+    <h2 th:text="#{report.topology}">Server Topology</h2>
+    <p class="columns" th:text="#{report.columns}">Host / IP / App / Country / Service / Env / Zone / Slot</p>
     <div class="clearfix"></div>
 </div>
 
@@ -165,14 +172,14 @@
         <thead>
         <tr>
             <th>#</th>
-            <th>Host</th>
-            <th>IP</th>
-            <th>App</th>
-            <th>Country</th>
-            <th>Service</th>
-            <th>Env</th>
-            <th>Zone</th>
-            <th>Slot</th>
+            <th th:text="#{report.col.host}">Host</th>
+            <th th:text="#{report.col.ip}">IP</th>
+            <th th:text="#{report.col.app}">App</th>
+            <th th:text="#{report.col.country}">Country</th>
+            <th th:text="#{report.col.service}">Service</th>
+            <th th:text="#{report.col.env}">Env</th>
+            <th th:text="#{report.col.zone}">Zone</th>
+            <th th:text="#{report.col.slot}">Slot</th>
         </tr>
         </thead>
         <tbody>
@@ -192,13 +199,13 @@
             </td>
         </tr>
         <tr th:if="${#lists.isEmpty(servers)}" class="empty-row">
-            <td colspan="9">No server records.</td>
+            <td colspan="9" th:text="#{report.empty}">No server records.</td>
         </tr>
         </tbody>
     </table>
 </div>
 
-<p class="footer-note">
+<p class="footer-note" th:text="#{report.footer}">
     Powered by Spring Boot &#183; Thymeleaf &#183; openpdf-html &#183; PDF export
 </p>
 

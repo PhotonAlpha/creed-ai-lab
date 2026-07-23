@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Controller
@@ -50,11 +51,11 @@ public class ReportController {
     }
 
     @GetMapping(value = "/export", produces = MediaType.TEXT_HTML_VALUE)
-    public ResponseEntity<byte[]> export() {
+    public ResponseEntity<byte[]> export(Locale locale) {
         LocalDateTime now = LocalDateTime.now();
         List<ServerInfo> servers = serverInfoService.listServers();
 
-        Context ctx = new Context();
+        Context ctx = new Context(locale);
         ctx.setVariable("servers", servers);
         ctx.setVariable("total", servers.size());
         ctx.setVariable("generatedAt", now.format(TS));
@@ -81,16 +82,20 @@ public class ReportController {
      * {@code report-export.html}, same visual language rebuilt in paged-media CSS 2.1 (openpdf-html
      * cannot render the Bootstrap template). See {@link PdfExportService} for the template
      * constraints and CJK font configuration.
+     *
+     * <p>Localized: the locale comes from {@link com.creed.report.config.LocaleConfig} —
+     * {@code ?lang=} (kept in a cookie) or {@code Accept-Language}; strings and the Noto font
+     * stack follow the locale via the {@code messages*.properties} bundles.
      */
     @GetMapping(value = "/export/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
-    public ResponseEntity<byte[]> exportPdf() {
+    public ResponseEntity<byte[]> exportPdf(Locale locale) {
         LocalDateTime now = LocalDateTime.now();
         List<ServerInfo> servers = serverInfoService.listServers();
 
         byte[] body = pdfExportService.renderTemplate("report-export-pdf", Map.of(
                 "servers", servers,
                 "total", servers.size(),
-                "generatedAt", now.format(TS)));
+                "generatedAt", now.format(TS)), locale);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_PDF);

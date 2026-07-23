@@ -1,0 +1,4 @@
+# Bundled Noto CJK fonts for PDF export are large (~35MB) and kept out of version control.
+# PdfExportService loads them from classpath:/fonts/ (creed.report.pdf.font-paths); provision
+# them locally / at build time. See the creed-report skill for how they're produced.
+src/main/resources/fonts/
