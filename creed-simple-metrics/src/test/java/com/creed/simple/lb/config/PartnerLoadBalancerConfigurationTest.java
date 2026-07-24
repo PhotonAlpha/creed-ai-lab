@@ -1,5 +1,6 @@
-package com.creed.simple.lb;
+package com.creed.simple.lb.config;
 
+import com.creed.simple.lb.HealthCheckServiceSupplier;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.springframework.cloud.loadbalancer.core.ServiceInstanceListSupplier;

@@ -1,5 +1,6 @@
-package com.creed.simple.lb;
+package com.creed.simple.lb.config;
 
+import com.creed.simple.lb.StickyMetadataServiceInstanceListSupplier;
 import org.springframework.cloud.loadbalancer.core.ServiceInstanceListSupplier;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;

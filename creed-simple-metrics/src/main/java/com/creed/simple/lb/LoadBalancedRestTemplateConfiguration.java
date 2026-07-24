@@ -1,11 +1,9 @@
 package com.creed.simple.lb;
 
 import io.micrometer.observation.ObservationRegistry;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cloud.client.loadbalancer.LoadBalancerInterceptor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
 import org.springframework.web.client.RestTemplate;
 
@@ -13,9 +11,9 @@ import java.util.List;
 
 /**
  * {@link RestTemplate} equivalent of {@link LoadBalancedRestClientConfiguration}'s two clients
- * ({@code clusterRestClient} / {@code healthCheckRestClient}). Reuses the very same beans — the mTLS
- * {@code ClientHttpRequestFactory}s ({@code clusterRequestFactory} / {@code healthCheckClientHttpRequestFactory},
- * both already wrapped in {@code BufferingClientHttpRequestFactory}) and the
+ * ({@code clusterRestClient} / {@code healthCheckRestClient}). Reuses the very same beans — the two mTLS
+ * {@link ManagedHttpClientPool}s ({@code clusterPool} / {@code healthCheckPool}, whose request factories
+ * are already wrapped in {@code BufferingClientHttpRequestFactory}) and the
  * {@link LoadBalancerAuditInterceptor} — so only the client objects differ.
  *
  * <p>Three things that are <em>not</em> a 1:1 copy of the RestClient version, because RestTemplate works
@@ -53,11 +51,11 @@ public class LoadBalancedRestTemplateConfiguration {
      */
     @Bean
     RestTemplate clusterRestTemplate(
-            @Qualifier("clusterRequestFactory") ClientHttpRequestFactory clusterRequestFactory,
+            ManagedHttpClientPool clusterPool,
             LoadBalancerInterceptor loadBalancerInterceptor,
             LoadBalancerAuditInterceptor auditInterceptor,
             ObservationRegistry observationRegistry) {
-        RestTemplate restTemplate = new RestTemplate(clusterRequestFactory);
+        RestTemplate restTemplate = new RestTemplate(clusterPool.requestFactory());
         // index 0 = outermost: LB rewrites the service-id to host:port, THEN audit sees the resolved host.
         restTemplate.setInterceptors(List.<ClientHttpRequestInterceptor>of(loadBalancerInterceptor, auditInterceptor));
         // Emit `http.client.requests` (a bare new RestTemplate is otherwise uninstrumented).
@@ -68,9 +66,9 @@ public class LoadBalancedRestTemplateConfiguration {
     /** Plain (non-load-balanced) health-check client over its own mTLS pool. */
     @Bean
     RestTemplate healthCheckRestTemplate(
-            @Qualifier("healthCheckClientHttpRequestFactory") ClientHttpRequestFactory healthCheckClientHttpRequestFactory,
+            ManagedHttpClientPool healthCheckPool,
             ObservationRegistry observationRegistry) {
-        RestTemplate restTemplate = new RestTemplate(healthCheckClientHttpRequestFactory);
+        RestTemplate restTemplate = new RestTemplate(healthCheckPool.requestFactory());
         restTemplate.setObservationRegistry(observationRegistry);
         return restTemplate;
     }

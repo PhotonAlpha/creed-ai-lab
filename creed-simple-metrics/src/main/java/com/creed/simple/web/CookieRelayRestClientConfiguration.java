@@ -1,6 +1,8 @@
 package com.creed.simple.web;
 
 import com.creed.simple.config.CamelLoadBalancerAuditExecHandler;
+import com.creed.simple.lb.ManagedHttpClientPool;
+import com.creed.simple.lb.PartnerProps;
 import io.micrometer.observation.ObservationRegistry;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -8,7 +10,6 @@ import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,8 +18,6 @@ import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.zalando.logbook.Logbook;
 import org.zalando.logbook.httpclient5.LogbookHttpExecHandler;
-
-import java.time.Duration;
 
 /**
  * Dedicated {@link RestClient} for the {@code POST /camel/api/cookie-relay} demo
@@ -41,13 +40,13 @@ public class CookieRelayRestClientConfiguration {
 
     @Bean
     ClientHttpRequestFactory cookieRelayRequestFactory(
-            @Qualifier("clusterHttpConnectionManager") PoolingHttpClientConnectionManager clusterHttpConnectionManager,
+            ManagedHttpClientPool clusterPool,
             Logbook logbook,
-            @Value("${creed.partner.http.connection-request-timeout:3s}") Duration connectionRequestTimeout,
-            @Value("${creed.partner.http.response-timeout:10s}") Duration responseTimeout) {
+            PartnerProps props) {
+        PoolingHttpClientConnectionManager clusterHttpConnectionManager = clusterPool.connectionManager();
         RequestConfig requestConfig = RequestConfig.custom()
-                .setConnectionRequestTimeout(Timeout.ofMilliseconds(connectionRequestTimeout.toMillis()))
-                .setResponseTimeout(Timeout.ofMilliseconds(responseTimeout.toMillis()))
+                .setConnectionRequestTimeout(Timeout.ofMilliseconds(props.http().connectionRequestTimeout().toMillis()))
+                .setResponseTimeout(Timeout.ofMilliseconds(props.http().responseTimeout().toMillis()))
                 .build();
         CloseableHttpClient httpClient = HttpClients.custom()
                 .setConnectionManager(clusterHttpConnectionManager)

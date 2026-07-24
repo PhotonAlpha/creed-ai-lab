@@ -1,5 +1,7 @@
-package com.creed.simple.lb;
+package com.creed.simple.lb.config;
 
+import com.creed.simple.lb.HealthCheckToggle;
+import com.creed.simple.lb.ToggleableHealthCheckServiceInstanceListSupplier;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;

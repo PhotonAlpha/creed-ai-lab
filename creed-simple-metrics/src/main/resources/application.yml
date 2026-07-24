@@ -159,4 +159,22 @@ creed:
     # SSL bundle whose client cert + CA truststore back the @LoadBalanced RestClient's mTLS request
     # factory (see LoadBalancedRestClientConfiguration) used by RemoteClusterProcessor.
     client-bundle: creed-partner-client
+    # Business/cluster HTTP pool (bound to HttpPoolProperties via PartnerProps). These mirror the former
+    # inline @Value defaults; override per-environment here rather than in code.
+    http:
+      max-total: 50
+      max-per-route: 20
+      connect-timeout: 5s
+      socket-timeout: 10s
+      connection-request-timeout: 3s
+      response-timeout: 10s
+    # Health-check HTTP pool — smaller and tighter than the business pool.
+    health-check:
+      http:
+        max-total: 10
+        max-per-route: 5
+        connect-timeout: 2s
+        socket-timeout: 2s
+        connection-request-timeout: 2s
+        response-timeout: 2s
   rootPath: ".support/scripts/pki" # relative to the repo root — the process working dir must be the repo root (-Dspring-boot.run.workingDirectory="$PWD" / IDE working dir)

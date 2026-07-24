@@ -1,8 +1,7 @@
 package com.creed.simple.lb;
 
-import io.micrometer.core.instrument.binder.MeterBinder;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,10 +21,10 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link LoadBalancedRestClientConfiguration}'s bean factory methods: the mTLS pool built
- * from a resolved SSL bundle, the graceful non-mTLS fallback when the bundle is missing
- * ({@code resolveClientBundleOrNull}), the pool meter binders, the buffering request factories, and the
- * assembled {@link RestClient}s.
+ * Unit tests for {@link LoadBalancedRestClientConfiguration}'s bean factory methods and the
+ * {@link ManagedHttpClientPool} template they build on: the mTLS pool from a resolved SSL bundle, the
+ * graceful non-mTLS fallback when the bundle is missing ({@code resolveClientBundleOrNull}), the pool
+ * meter binding, the buffering request factory, and the assembled {@link RestClient}s.
  */
 @ExtendWith(MockitoExtension.class)
 class LoadBalancedRestClientConfigurationTest {
@@ -37,78 +36,80 @@ class LoadBalancedRestClientConfigurationTest {
     @Mock
     private SslBundles sslBundles;
 
+    private static PartnerProps propsWithBundle(String bundleName) {
+        HttpPoolProperties business = new HttpPoolProperties(40, 10, T, T, T, T);
+        HttpPoolProperties health = new HttpPoolProperties(10, 5, T, T, T, T);
+        return new PartnerProps(bundleName, business, new PartnerProps.HealthCheck(health));
+    }
+
     @Test
-    void clusterConnectionManagerUsesTheResolvedMtlsBundle() throws Exception {
+    void clusterPoolUsesTheResolvedMtlsBundle() throws Exception {
         SslBundle bundle = org.mockito.Mockito.mock(SslBundle.class);
         lenient().when(bundle.createSslContext()).thenReturn(SSLContext.getDefault());
         when(sslBundles.getBundle("creed-partner-client")).thenReturn(bundle);
 
-        PoolingHttpClientConnectionManager cm =
-                config.clusterHttpConnectionManager(sslBundles, "creed-partner-client", 40, 10, T, T);
+        ManagedHttpClientPool pool = config.clusterPool(sslBundles, propsWithBundle("creed-partner-client"));
 
-        assertThat(cm).isNotNull();
-        assertThat(cm.getMaxTotal()).isEqualTo(40);
-        cm.close();
+        assertThat(pool).isNotNull();
+        assertThat(pool.connectionManager().getMaxTotal()).isEqualTo(40);
+        assertThat(pool.requestFactory()).isNotNull();
+        pool.close();
     }
 
     @Test
-    void clusterConnectionManagerFallsBackToNonMtlsWhenBundleMissing() {
+    void clusterPoolFallsBackToNonMtlsWhenBundleMissing() {
         // resolveClientBundleOrNull swallows NoSuchSslBundleException and builds a plain pool.
         when(sslBundles.getBundle("creed-partner-client"))
                 .thenThrow(new NoSuchSslBundleException("creed-partner-client", "missing"));
 
-        PoolingHttpClientConnectionManager cm =
-                config.clusterHttpConnectionManager(sslBundles, "creed-partner-client", 40, 10, T, T);
+        ManagedHttpClientPool pool = config.clusterPool(sslBundles, propsWithBundle("creed-partner-client"));
 
-        assertThat(cm).isNotNull();
-        cm.close();
+        assertThat(pool).isNotNull();
+        assertThat(pool.connectionManager()).isNotNull();
+        pool.close();
     }
 
     @Test
-    void healthCheckConnectionManagerIsBuilt() {
+    void healthCheckPoolIsBuilt() {
         when(sslBundles.getBundle("creed-partner-server"))
                 .thenThrow(new NoSuchSslBundleException("creed-partner-server", "missing"));
 
-        PoolingHttpClientConnectionManager cm =
-                config.healthCheckHttpConnectionManager(sslBundles, "creed-partner-server", 10, 5, T, T);
+        ManagedHttpClientPool pool = config.healthCheckPool(sslBundles, propsWithBundle("creed-partner-server"));
 
-        assertThat(cm).isNotNull();
-        assertThat(cm.getMaxTotal()).isEqualTo(10);
-        cm.close();
+        assertThat(pool).isNotNull();
+        assertThat(pool.connectionManager().getMaxTotal()).isEqualTo(10);
+        pool.close();
     }
 
     @Test
-    void poolMeterBindersRegisterAgainstAMeterRegistry() {
-        PoolingHttpClientConnectionManager pool =
+    void poolBindsItsMetersToARegistry() {
+        PoolingHttpClientConnectionManager cm =
                 RestClientSuppliers.connectionManagerFrom(null, 5, 5, T, T);
+        ManagedHttpClientPool pool = new ManagedHttpClientPool(cm,
+                RestClientSuppliers.requestFactoryFrom(cm, T, T), "testPool");
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
 
-        MeterBinder clusterBinder = config.clusterCheckHttpPoolMetrics(pool);
-        MeterBinder healthBinder = config.healthCheckHttpPoolMetrics(pool);
-        clusterBinder.bindTo(registry);
-        healthBinder.bindTo(registry);
+        pool.bindTo(registry);
 
         assertThat(registry.getMeters()).isNotEmpty();
         pool.close();
     }
 
     @Test
-    void requestFactoriesAndRestClientsAreAssembled() {
-        PoolingHttpClientConnectionManager pool =
+    void restClientsAreAssembledFromThePools() {
+        PoolingHttpClientConnectionManager cm =
                 RestClientSuppliers.connectionManagerFrom(null, 5, 5, T, T);
+        ClientHttpRequestFactory factory = RestClientSuppliers.requestFactoryFrom(cm, T, T);
+        ManagedHttpClientPool clusterPool = new ManagedHttpClientPool(cm, factory, "loadBalancedPool");
+        ManagedHttpClientPool healthCheckPool = new ManagedHttpClientPool(cm, factory, "healthCheckPool");
 
-        ClientHttpRequestFactory clusterFactory = config.clusterRequestFactory(pool, T, T);
-        ClientHttpRequestFactory healthFactory = config.healthCheckClientHttpRequestFactory(pool, T, T);
-        assertThat(clusterFactory).isNotNull();
-        assertThat(healthFactory).isNotNull();
-
-        RestClient.Builder builder = config.clusterRestClientBuilder(clusterFactory, ObservationRegistry.NOOP);
+        RestClient.Builder builder = config.clusterRestClientBuilder(clusterPool, ObservationRegistry.NOOP);
         RestClient clusterClient = config.clusterRestClient(builder, new LoadBalancerAuditInterceptor());
-        RestClient healthClient = config.healthCheckRestClient(healthFactory, ObservationRegistry.NOOP);
+        RestClient healthClient = config.healthCheckRestClient(healthCheckPool, ObservationRegistry.NOOP);
 
         assertThat(builder).isNotNull();
         assertThat(clusterClient).isNotNull();
         assertThat(healthClient).isNotNull();
-        pool.close();
+        cm.close();
     }
 }
