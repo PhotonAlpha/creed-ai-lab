@@ -1,0 +1,58 @@
+# Tests run fully self-contained: H2 instead of the Docker Postgres, Hibernate DDL instead of Flyway,
+# and no HTTPS listener (so no certificates need to exist on disk).
+#
+# Flyway is off because V1/V2 are PostgreSQL-specific (bigserial, timestamptz, `comment on`); the
+# entity's own mapping — including the ux_env_endpoint_dimensions unique constraint declared on
+# @Table — is what the tests exercise instead.
+spring:
+  config:
+    import: ""
+  # application.yml does `spring.profiles.include: actuator`, and a profile-specific file cannot
+  # un-include it — so the OpenTelemetry starter from creed-common-metrics is active here too. Its
+  # config interpolates ${spring.application.name} and ${server.port}, neither of which the test
+  # profile would otherwise define, and an unresolvable placeholder fails the whole context.
+  application:
+    name: creed-resource-env-matrix-test
+  # application.yml declares the `creed-env-matrix-server` SSL bundle, and Boot's SslMeterBinder
+  # (SslObservabilityAutoConfiguration, no property to disable it) eagerly opens EVERY declared
+  # bundle at startup to publish certificate-expiry gauges. Turning creed.https.enabled off is not
+  # enough — the bundle is still declared, so a missing keystore fails the whole context. Tests must
+  # not depend on .support/scripts/pki having been generated, hence the exclusion.
+  autoconfigure:
+    exclude: org.springframework.boot.actuate.autoconfigure.ssl.SslObservabilityAutoConfiguration
+  datasource:
+    url: "jdbc:h2:mem:env_matrix_test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL"
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+  flyway:
+    enabled: false
+
+server:
+  port: 0
+
+management:
+  health:
+    # Same reason as the SslObservability exclusion above: the SSL health indicator reads bundles.
+    ssl:
+      enabled: false
+
+creed:
+  https:
+    enabled: false
+
+# No telemetry from a test run: nothing should try to reach the local collector on :4318.
+otel:
+  sdk:
+    disabled: true
+
+env-matrix:
+  conflict:
+    scope: TIER_ENV
+  health:
+    mode: mock
+    mock-seed: 0

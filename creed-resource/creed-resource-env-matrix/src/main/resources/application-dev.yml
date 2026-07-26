@@ -1,0 +1,37 @@
+# Frontend integration profile.
+#
+# Serves plain HTTP on 3001 — the port `vite.config.ts` proxies /api to — so the Spring backend is a
+# drop-in replacement for `npm run mock` with no frontend change. HTTPS is switched off here on
+# purpose: the mesh's certificates are Creed-CA self-signed, and making the Vite proxy trust them
+# buys a frontend developer nothing.
+#
+#   mvn -pl creed-resource/creed-resource-env-matrix spring-boot:run -Dspring-boot.run.profiles=dev
+server:
+  port: 3001
+
+spring:
+  application:
+    name: creed-resource-env-matrix-dev
+  # application.yml declares the `creed-env-matrix-server` SSL bundle, and Boot's SslMeterBinder
+  # (SslObservabilityAutoConfiguration — there is no property to switch it off) eagerly opens EVERY
+  # declared bundle at startup to publish certificate-expiry gauges. Setting creed.https.enabled=false
+  # is not enough: the bundle is still declared, so an absent keystore fails startup. This profile
+  # exists so a frontend developer can run the backend without generating the mesh PKI at all, so the
+  # binder is excluded rather than fed a keystore.
+  autoconfigure:
+    exclude: org.springframework.boot.actuate.autoconfigure.ssl.SslObservabilityAutoConfiguration
+
+management:
+  health:
+    # Same reason: the SSL health indicator reads bundles too.
+    ssl:
+      enabled: false
+
+creed:
+  https:
+    enabled: false
+
+env-matrix:
+  cors:
+    # Only needed when the browser bypasses the Vite proxy and calls :3001 directly.
+    allowed-origins: "http://localhost:5173,http://127.0.0.1:5173"

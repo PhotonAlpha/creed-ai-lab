@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+
+# Vite / TS build caches
+.vite/
+*.tsbuildinfo
+
+# NOTE: server/mock.json is intentionally NOT ignored — it is the mock API's data source
+# ("single source of truth") and is meant to be committed. The mock server rewrites it in place
+# when the config page saves, so expect it to show up as a diff after using the UI in mock mode.

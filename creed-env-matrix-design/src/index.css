@@ -1,0 +1,45 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/*
+ * Matrix cell styling.
+ *
+ * Applied through `rowClassName`/`onCell` rather than by overriding `.ant-table-*` selectors: the
+ * colours come from antd design tokens exposed as CSS variables, so they follow the ConfigProvider
+ * theme instead of hard-coding hex values that would drift from it.
+ */
+.env-matrix-cell {
+  vertical-align: top;
+}
+
+.env-matrix-cell--conflict {
+  background-color: var(--env-matrix-conflict-bg);
+  box-shadow: inset 2px 0 0 var(--env-matrix-conflict-border);
+}
+
+.env-matrix-endpoint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  line-height: 20px;
+}
+
+.env-matrix-row-header {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Rows the config page has marked for deletion — struck through until the next save. */
+.env-matrix-row--deleted td {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.env-matrix-row--dirty td:first-child {
+  box-shadow: inset 2px 0 0 var(--env-matrix-dirty-border);
+}

@@ -1,0 +1,69 @@
+spring:
+  config:
+    import: "optional:configserver:"
+  profiles:
+    include: actuator
+
+  # The only resource module with a real database. Credentials default to the local
+  # creed-artifactory-db container (docker ps -> creed-artifactory-db, 127.0.0.1:5432);
+  # the `env_matrix` database must exist before first start:
+  #   docker exec creed-artifactory-db createdb -U artifactory env_matrix
+  datasource:
+    url: "${ENV_MATRIX_DB_URL:jdbc:postgresql://127.0.0.1:5432/env_matrix}"
+    username: "${ENV_MATRIX_DB_USER:artifactory}"
+    password: "${ENV_MATRIX_DB_PASSWORD:artifactory_pw}"
+    hikari:
+      pool-name: env-matrix-pool
+      maximum-pool-size: 10
+      connection-timeout: 5000
+
+  jpa:
+    # Flyway owns the schema; Hibernate must not touch it. Kept at `none` rather than `validate`
+    # because validate rejects harmless type differences (timestamptz vs Instant) and would turn a
+    # cosmetic mismatch into a failed startup.
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Lets the module adopt a database that already has unrelated tables in it.
+    baseline-on-migrate: true
+
+  ssl:
+    bundle:
+      jks:
+        creed-env-matrix-server:
+          key:
+            alias: creed-resource-env-matrix
+          keystore:
+            location: "file:${creed.rootPath}/creed-resource-env-matrix-keystore.p12"
+            password: "${CREED_ENV_MATRIX_KEYSTORE_PASSWORD:changeit}"
+            type: PKCS12
+          truststore:
+            location: "file:${creed.rootPath}/creed-resource-env-matrix-truststore.p12"
+            password: "${CREED_ENV_MATRIX_TRUSTSTORE_PASSWORD:changeit}"
+            type: PKCS12
+
+# TomcatHttpsConfiguration (creed.https.enabled=true by default) wires the embedded HTTPS listener to
+# the SSL bundle named by `creed.https.bundle`. The keystore is minted by
+# .support/scripts/CA-Generation.sh, which now includes this service's identity.
+creed:
+  https:
+    bundle: creed-env-matrix-server
+  rootPath: ".support/scripts/pki" # relative to the repo root — run with -Dspring-boot.run.workingDirectory="$PWD"
+
+env-matrix:
+  conflict:
+    # Where an address must be unique: TIER_ENV (default) | TIER | GLOBAL. See ConflictScope.
+    scope: TIER_ENV
+  health:
+    # mock (default) | real. `mock` derives a stable state from host:port and touches no network;
+    # `real` does a plain TCP connect to ip:port. The seeded matrix describes unreachable
+    # environments, so `real` would report a uniform wall of DOWN.
+    mode: mock
+    timeout-ms: 800
+    mock-seed: 0

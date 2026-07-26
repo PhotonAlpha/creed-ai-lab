@@ -1,0 +1,45 @@
+{
+  "name": "creed-env-matrix-viewer",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Env host/ip/port mapping matrix viewer — React + Ant Design Pro frontend for creed-resource-env-matrix",
+  "scripts": {
+    "dev": "vite",
+    "mock": "node server/index.js",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ant-design/icons": "5.6.1",
+    "@ant-design/pro-components": "2.8.10",
+    "@ant-design/v5-patch-for-react-19": "1.0.3",
+    "antd": "5.29.3",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router-dom": "7.18.1"
+  },
+  "//overrides": [
+    "@ant-design/pro-layout 7.22.7 pins path-to-regexp to exactly 8.2.0, which carries two high-severity",
+    "ReDoS advisories (GHSA-j3q9-mxjg-w52f, GHSA-27v5-c462-wpq7). 8.4.2 is the fixed release in the same",
+    "major, so the override patches it without downgrading pro-components."
+  ],
+  "//react-router": [
+    "react-router-dom stays on the latest 7.18.1. `npm audit` still reports GHSA-qwww-vcr4-c8h2",
+    "(RSC-mode CSRF) against it and there is no fixed 7.x yet, but this app is a plain BrowserRouter",
+    "SPA with no RSC mode and no server actions, so the vulnerable code path is not reachable.",
+    "Downgrading is NOT the answer: 7.11.0 and earlier carry 14 advisories that 7.18.0 fixed."
+  ],
+  "overrides": {
+    "path-to-regexp": "8.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.4",
+    "typescript": "5.9.3",
+    "vite": "8.1.5"
+  }
+}
