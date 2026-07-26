@@ -1,6 +1,6 @@
 ---
 name: creed-resource-order
-description: The creed-resource-order module — an OAuth2 resource server (Spring MVC, HTTPS) exposing /api/order/* CRUD endpoints, run as two instances (primary 8091 / secondary 8092) behind client-side load balancers, with a cached JWT decoder and config-server-driven cloud profile. Use when working on order endpoints, the resource-server JWT/security wiring, or its primary/secondary/cloud profiles.
+description: The creed-resource-order module — an OAuth2 resource server (Spring MVC, HTTPS) exposing /api/order/* CRUD endpoints, run as two instances (primary 18091 / secondary 18092) behind client-side load balancers, with a cached JWT decoder and config-server-driven cloud profile. Use when working on order endpoints, the resource-server JWT/security wiring, or its primary/secondary/cloud profiles.
 ---
 
 # creed-resource-order
@@ -8,7 +8,7 @@ description: The creed-resource-order module — an OAuth2 resource server (Spri
 OAuth2 **resource server** (Spring MVC, embedded HTTPS) serving orders. Symmetric twin of [[creed-resource-catalog]] (same structure; `order`↔`catalog`). A downstream of both gateways. See [[creed-platform]] for SSL bundles, the OIDC local-startup stub, and the HTTPS listener.
 
 ## Run topology — profiles
-- **`primary`** (port 8091, app name `creed-resource-order-primary`) and **`secondary`** (8092, `...-secondary`): the two LB instances the gateways round-robin.
+- **`primary`** (port 18091, app name `creed-resource-order-primary`) and **`secondary`** (18092, `...-secondary`): the two LB instances the gateways round-robin.
 - **`cloud`** (`application-cloud.yml`): config from [[creed-config-server]] over HTTPS + `jwt.issuer-uri=${CREED_AUTH_ISSUER:...}` (same wiring as the catalog twin).
 - **`actuator`** profile `include`d → OTel/metrics export (see [[creed-platform]] Observability).
 

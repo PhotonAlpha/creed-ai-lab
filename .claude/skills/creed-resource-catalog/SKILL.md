@@ -1,6 +1,6 @@
 ---
 name: creed-resource-catalog
-description: The creed-resource-catalog module — an OAuth2 resource server (Spring MVC, HTTPS) exposing /api/catalog/* product endpoints, run as two instances (primary 8081 / secondary 8082) behind client-side load balancers, with a cached JWT decoder and config-server-driven cloud profile. Use when working on catalog endpoints, the resource-server JWT/security wiring, or its primary/secondary/cloud profiles.
+description: The creed-resource-catalog module — an OAuth2 resource server (Spring MVC, HTTPS) exposing /api/catalog/* product endpoints, run as two instances (primary 18081 / secondary 18082) behind client-side load balancers, with a cached JWT decoder and config-server-driven cloud profile. Use when working on catalog endpoints, the resource-server JWT/security wiring, or its primary/secondary/cloud profiles.
 ---
 
 # creed-resource-catalog
@@ -8,7 +8,7 @@ description: The creed-resource-catalog module — an OAuth2 resource server (Sp
 OAuth2 **resource server** (Spring MVC, embedded HTTPS) serving the product catalog. Symmetric twin of [[creed-resource-order]] (same structure; `catalog`↔`order`, `/api/catalog`↔`/api/order`). A downstream of both gateways. See [[creed-platform]] for SSL bundles, the OIDC local-startup stub, and the HTTPS listener.
 
 ## Run topology — profiles
-- **`primary`** (port 8081, app name `creed-resource-catalog-primary`) and **`secondary`** (8082, `...-secondary`): the two LB instances the gateways round-robin. Started locally as two processes.
+- **`primary`** (port 18081, app name `creed-resource-catalog-primary`) and **`secondary`** (18082, `...-secondary`): the two LB instances the gateways round-robin. Started locally as two processes.
 - **`cloud`** (`application-cloud.yml`): pulls config (SSL bundle + `{cipher}` secrets) from [[creed-config-server]] over HTTPS (`spring.config.import=configserver:https://localhost:8443/config-server`, Basic auth, classpath `truststore.p12`), and sets `spring.security.oauth2.resourceserver.jwt.issuer-uri=${CREED_AUTH_ISSUER:...}`.
 - **`actuator`** profile `include`d → OTel/metrics export (see [[creed-platform]] Observability).
 

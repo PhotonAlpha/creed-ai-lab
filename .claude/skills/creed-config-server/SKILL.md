@@ -21,5 +21,5 @@ Spring Cloud **Config Server** serving the mesh's externalized config. HTTPS `84
 - `client/HttpClientsConfiguration` — outbound `RestTemplate`/`RestClient` over a chosen SSL bundle; `@ConfigurationProperties("creed.http-client")` (`enabled`, `ssl-bundle=creed-pem-client`, `connect-timeout`, `read-timeout`). See [[creed-platform]] HttpClient 5 conventions.
 
 ## Notes
-- Also carries a static `spring.cloud.discovery.client.simple.instances` registry (`catalog-cluster` 8081/8082, `order-cluster` 8091/8092, with `zone` metadata) — present for discovery/LB experiments.
+- Also carries a static `spring.cloud.discovery.client.simple.instances` registry (`catalog-cluster` 18081/18082, `order-cluster` 18091/18092, with `zone` metadata) — present for discovery/LB experiments.
 - SSL bundles here are **PEM** (`creed-pem-server`/`creed-pem-client`) shipped on the classpath, so it runs without `-Dspring-boot.run.workingDirectory` unlike the `file:${creed.rootPath}` modules.
