@@ -16,12 +16,16 @@ spring:
       client:
         simple:
           instances:
+            # Must match the resource servers' primary/secondary ports (see the root CLAUDE.md port
+            # table). These were left on the pre-migration 808x/809x values when the resource
+            # servers moved to 1808x/1809x, which silently broke every aggregation call — the LB had
+            # no reachable instance to choose.
             catalog-resource:
-              - uri: https://localhost:8081
-              - uri: https://localhost:8082
+              - uri: https://localhost:18081
+              - uri: https://localhost:18082
             order-resource:
-              - uri: https://localhost:8091
-              - uri: https://localhost:8092
+              - uri: https://localhost:18091
+              - uri: https://localhost:18092
     loadbalancer:
       # Requirement 2: only route to instances that pass a health check. The probe PATH now lives in
       # creed.partner.clusters.<name>.health-check.path (PartnerLoadBalancerConfiguration overrides the

@@ -1,5 +1,7 @@
 server:
-  port: 18095
+  # The cloud profile runs ONE instance per service on a contiguous range, separate from the
+  # primary/secondary pairs: catalog 18081, order 18082, payment 18083, env-matrix 18084.
+  port: 18084
 
 spring:
   application:

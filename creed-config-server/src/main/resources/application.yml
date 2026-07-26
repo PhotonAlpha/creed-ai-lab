@@ -21,18 +21,20 @@ spring:
       client:
         simple:
           instances:
+            # Ports must match the resource servers' primary/secondary (root CLAUDE.md port table);
+            # they were left on the pre-migration 808x/809x values when those moved to 1808x/1809x.
             catalog-cluster:
-              - uri: https://localhost:8081
+              - uri: https://localhost:18081
                 metadata:
                   zone: zone1
-              - uri: https://localhost:8082
+              - uri: https://localhost:18082
                 metadata:
                   zone: zone2
             order-cluster:
-              - uri: https://localhost:8091
+              - uri: https://localhost:18091
                 metadata:
                   zone: zone1
-              - uri: https://localhost:8092
+              - uri: https://localhost:18092
                 metadata:
                   zone: zone2
 

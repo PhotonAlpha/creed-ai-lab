@@ -47,15 +47,17 @@ spring:
             type: PKCS12
   cloud:
     # Static service registry backing Spring Cloud LoadBalancer (no Eureka/Consul needed).
-    # lb://catalog-resource -> https://localhost:8081, lb://order-resource -> https://localhost:8082.
+    # Targets the `cloud`-profile instances — one per service on a contiguous range:
+    # catalog 18081, order 18082, payment 18083, env-matrix 18084.
+    # (These were left on 8081/8082 when the resource servers moved to the 1808x range.)
     discovery:
       client:
         simple:
           instances:
             catalog-resource:
-              - uri: https://localhost:8081
+              - uri: https://localhost:18081
             order-resource:
-              - uri: https://localhost:8082
+              - uri: https://localhost:18082
     gateway:
       server:
         webflux:
