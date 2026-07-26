@@ -62,6 +62,26 @@
                th:text="#{report.downloadPdf}">
                 Download PDF
             </a>
+            <!-- Excel export. The split button downloads this page's report; the dropdown lists
+                 every registered export strategy (model attribute reportTypes), so ?type= picks
+                 which ExcelReportExporter runs. -->
+            <div class="btn-group btn-group-sm">
+                <a class="btn btn-success" th:href="@{/export/excel(type='server')}" download
+                   th:text="#{report.downloadExcel}">
+                    Download Excel
+                </a>
+                <button type="button" class="btn btn-success dropdown-toggle dropdown-toggle-split"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                    <span class="visually-hidden" th:text="#{report.downloadExcel}">Download Excel</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li th:each="rt : ${reportTypes}">
+                        <a class="dropdown-item" download
+                           th:href="@{/export/excel(type=${rt.code})}"
+                           th:text="#{${rt.titleKey}}">Report type</a>
+                    </li>
+                </ul>
+            </div>
         </div>
     </div>
 

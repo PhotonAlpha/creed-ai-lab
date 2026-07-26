@@ -19,6 +19,7 @@
         <webjars-bootstrap-icons.version>1.11.3</webjars-bootstrap-icons.version>
         <webjars-locator.version>0.59</webjars-locator.version>
         <openpdf-html.version>2.2.2</openpdf-html.version>
+        <poi.version>5.4.1</poi.version>
     </properties>
 
     <dependencies>
@@ -52,6 +53,14 @@
             <groupId>com.github.librepdf</groupId>
             <artifactId>openpdf-html</artifactId>
             <version>${openpdf-html.version}</version>
+        </dependency>
+        <!-- Excel (.xlsx) export: poi-ooxml pulls in poi + the OOXML schemas. Not managed by
+             spring-boot-dependencies, hence the explicit version. Used by the
+             com.creed.report.export strategies behind /export/excel. -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>${poi.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

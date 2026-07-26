@@ -11,7 +11,7 @@ import java.nio.charset.StandardCharsets;
  * One {@link MessageSource} bean per business domain, composed into a single lookup chain.
  *
  * <p>Bundles live in {@code classpath:/i18n/} as {@code <domain>-messages[_locale].properties}.
- * Each domain owns a key prefix ({@code report.*}/{@code pdf.*}/{@code html.*} vs
+ * Each domain owns a key prefix ({@code report.*}/{@code pdf.*}/{@code html.*}/{@code excel.*} vs
  * {@code payment.*}) so the domains can never shadow each other; the chain order below is only
  * the tie-breaker if they ever do.
  *
@@ -41,7 +41,7 @@ public class MessageSourceConfig {
     }
 
     /**
-     * Report domain ({@code report.*}, {@code pdf.*}, {@code html.*}) and head of the chain: it is
+     * Report domain ({@code report.*}, {@code pdf.*}, {@code html.*}, {@code excel.*}) and head of the chain: it is
      * the {@code messageSource} bean the container resolves everything through, falling back to
      * {@link #paymentMessageSource()}.
      */

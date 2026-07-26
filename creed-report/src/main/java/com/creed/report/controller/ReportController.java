@@ -1,5 +1,8 @@
 package com.creed.report.controller;
 
+import com.creed.report.export.ExcelExportRequest;
+import com.creed.report.export.ExcelExportService;
+import com.creed.report.export.ReportType;
 import com.creed.report.model.ServerInfo;
 import com.creed.report.service.AssetService;
 import com.creed.report.service.PdfExportService;
@@ -10,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
@@ -30,15 +34,18 @@ public class ReportController {
     private final AssetService assetService;
     private final TemplateEngine templateEngine;
     private final PdfExportService pdfExportService;
+    private final ExcelExportService excelExportService;
 
     public ReportController(ServerInfoService serverInfoService,
                             AssetService assetService,
                             TemplateEngine templateEngine,
-                            PdfExportService pdfExportService) {
+                            PdfExportService pdfExportService,
+                            ExcelExportService excelExportService) {
         this.serverInfoService = serverInfoService;
         this.assetService = assetService;
         this.templateEngine = templateEngine;
         this.pdfExportService = pdfExportService;
+        this.excelExportService = excelExportService;
     }
 
     @GetMapping({ "/report"})
@@ -47,6 +54,9 @@ public class ReportController {
         model.addAttribute("servers", servers);
         model.addAttribute("total", servers.size());
         model.addAttribute("generatedAt", LocalDateTime.now().format(TS));
+        // Drives the Excel dropdown: whatever export strategies are registered, nothing hard-coded
+        // in the template.
+        model.addAttribute("reportTypes", excelExportService.supportedTypes());
         return "report";
     }
 
@@ -78,7 +88,7 @@ public class ReportController {
     }
 
     /**
-     * PDF twin of {@link #export()}: renders {@code report-export-pdf.html} — the PDF adaptation of
+     * PDF twin of {@link #export(Locale)}: renders {@code report-export-pdf.html} — the PDF adaptation of
      * {@code report-export.html}, same visual language rebuilt in paged-media CSS 2.1 (openpdf-html
      * cannot render the Bootstrap template). See {@link PdfExportService} for the template
      * constraints and CJK font configuration.
@@ -101,6 +111,33 @@ public class ReportController {
         headers.setContentType(MediaType.APPLICATION_PDF);
         headers.setContentDispositionFormData("attachment",
                 "creed-server-report-" + now.format(FILE_TS) + ".pdf");
+        headers.setContentLength(body.length);
+
+        return ResponseEntity.ok().headers(headers).body(body);
+    }
+
+    /**
+     * Excel (.xlsx) export, dispatched by report type: {@code type} selects the
+     * {@link com.creed.report.export.ExcelReportExporter} strategy
+     * ({@code server} → the table of this page, {@code environment} → the Environment Inspector
+     * snapshot), and every other query parameter is handed to that strategy — which is how the
+     * environment report picks up {@code spring.profiles.active} &amp; friends from the URL.
+     *
+     * <p>Localized like the other exports (headers and sheet names come from the same bundles);
+     * an unsupported {@code type} answers 400 via
+     * {@link com.creed.report.export.UnknownReportTypeException}.
+     */
+    @GetMapping(value = "/export/excel", produces = ExcelExportService.CONTENT_TYPE)
+    public ResponseEntity<byte[]> exportExcel(@RequestParam(name = "type", defaultValue = "server") String type,
+                                              @RequestParam Map<String, String> parameters,
+                                              Locale locale) {
+        ExcelExportRequest request =
+                new ExcelExportRequest(ReportType.of(type), locale, parameters, LocalDateTime.now());
+        byte[] body = excelExportService.export(request);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(ExcelExportService.CONTENT_TYPE));
+        headers.setContentDispositionFormData("attachment", excelExportService.filename(request));
         headers.setContentLength(body.length);
 
         return ResponseEntity.ok().headers(headers).body(body);
