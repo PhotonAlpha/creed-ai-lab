@@ -133,6 +133,10 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.creed</groupId>
+            <artifactId>creed-common-metrics</artifactId>
+        </dependency>
     </dependencies>
 
 </project>

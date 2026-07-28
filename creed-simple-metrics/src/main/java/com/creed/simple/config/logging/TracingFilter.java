@@ -1,7 +1,7 @@
 package com.creed.simple.config.logging;
 
-import brave.Tracer;
 import brave.baggage.BaggageFields;
+import io.micrometer.tracing.Tracer;
 import jakarta.annotation.Resource;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -30,7 +30,7 @@ public class TracingFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
         String correlateId = UUID.randomUUID().toString();
-        var tracedId = tracer.currentSpan().context().traceIdString();
+        var tracedId = tracer.currentSpan().context().traceId();
         CORRELATION_FIELD.updateValue(correlateId);
         MDC.put(BaggageFields.TRACE_ID.name(), correlateId);
         // MDC.put(BRAVE_TRACE_ID, tracedId);

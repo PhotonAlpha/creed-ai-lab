@@ -8,6 +8,11 @@ server:
       min-spare: 10
 
 spring:
+  profiles:
+    group:
+      local: "prometheus"
+      metrics: "actuator"
+    active: local
   config:
     import: "optional:configserver:"
   application:

@@ -465,8 +465,33 @@
       "type": "timeseries"
     },
     {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "ESTIMATE — Tomcat exposes no accept-queue gauge, so backlog is derived as (connections.current - threads.busy), gated to only count while the connector is thread-starved (threads.busy >= threads.config.max); it reads 0 otherwise. Rationale: Tomcat can only queue once every worker thread is taken, and at that point every open connection beyond the busy threads has no thread to serve it. The gate is what makes this usable — ungated, idle keep-alive sockets read as phantom backlog. Do NOT subtract connections.keepalive.current here: Tomcat's NIO keepAliveCount counts poller-registered sockets including ones with a request in flight (measured: keepalive == current - 1 at full load), so subtracting it makes the estimate go NEGATIVE exactly when the connector is saturated. Caveats: counts sockets, not requests (HTTP/2 multiplexing and async/WebSocket upgrades skew it); the >= max gate is binary, so queueing that starts at busy = max-1 reads as 0. Companion series 'free threads' (threads.config.max - threads.busy) shows why: backlog can only be non-zero where it touches 0. Sustained backlog = raise server.tomcat.threads.max or fix the slow downstream.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*free threads" },
+            "properties": [
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 85 },
+      "id": 705,
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "clamp_min(sum by (name) (tomcat_connections_current{service_name=\"$service\", service_instance_id=\"$instance\"}) - sum by (name) (tomcat_threads_busy{service_name=\"$service\", service_instance_id=\"$instance\"}), 0) * on (name) group_left () (sum by (name) (tomcat_threads_busy{service_name=\"$service\", service_instance_id=\"$instance\"}) >= bool sum by (name) (tomcat_threads_config_max{service_name=\"$service\", service_instance_id=\"$instance\"}))", "legendFormat": "{{name}} est. queued", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "clamp_min(sum by (name) (tomcat_threads_config_max{service_name=\"$service\", service_instance_id=\"$instance\"}) - sum by (name) (tomcat_threads_busy{service_name=\"$service\", service_instance_id=\"$instance\"}), 0)", "legendFormat": "{{name}} free threads", "refId": "B" }
+      ],
+      "title": "Tomcat Estimated Request Backlog (waiting for a worker thread)",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 85 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 93 },
       "id": 800,
       "panels": [],
       "title": "Application Thread Pools (Executors)",
@@ -476,7 +501,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "description": "executor.active — current threads executing a task, per executor bean (name).",
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] } } },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 86 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 94 },
       "id": 808,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
       "pluginVersion": "10.0.0",
@@ -490,7 +515,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "description": "executor.pool.size — current live threads in the pool, per executor bean (name).",
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } } },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 86 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 94 },
       "id": 809,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
       "pluginVersion": "10.0.0",
@@ -504,7 +529,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "description": "executor.pool.core — configured core pool size, per executor bean (name).",
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "purple", "value": null } ] } } },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 86 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 94 },
       "id": 810,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
       "pluginVersion": "10.0.0",
@@ -518,7 +543,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "description": "executor.pool.max — configured max pool size, per executor bean (name). Unbounded pools report Integer.MAX_VALUE (2147483647); filtered out (< 100000) so only bounded pools show a value.",
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "orange", "value": null } ] } } },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 86 },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 94 },
       "id": 811,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
       "pluginVersion": "10.0.0",
@@ -532,7 +557,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "description": "executor.active — threads currently executing a task, per executor bean (name). Approaching the pool's max means the pool is busy.",
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 90 },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 98 },
       "id": 801,
       "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
@@ -545,7 +570,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "description": "executor.pool.size — threads currently alive in the pool, per executor bean (name). Grows from core toward max under load.",
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 90 },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 98 },
       "id": 802,
       "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
@@ -558,7 +583,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "description": "executor.pool.core — configured core pool size (always-kept threads), per executor bean (name).",
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 90 },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 98 },
       "id": 803,
       "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
@@ -571,7 +596,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "description": "executor.pool.max — configured maximum pool size, per executor bean (name). Unbounded pools report Integer.MAX_VALUE (2147483647); that sentinel is filtered out (< 100000) so the axis stays on the real range (such pools simply show no line).",
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 90 },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 98 },
       "id": 804,
       "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
@@ -584,7 +609,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "description": "executor.queued — tasks currently waiting in the executor's queue, per executor bean (name). Sustained > 0 means tasks are backing up behind busy threads.",
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 98 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 106 },
       "id": 805,
       "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
@@ -597,7 +622,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "description": "executor.queue.remaining — remaining queue capacity, per executor bean (name). Approaching 0 means the queue is about to reject (or fall back to CallerRunsPolicy). Unbounded queues report Integer.MAX_VALUE (2147483647); that sentinel is filtered out (< 100000) so the axis stays on the real range.",
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 98 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 106 },
       "id": 806,
       "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
@@ -610,7 +635,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "description": "Completed-task throughput per executor, derived from the executor.completed counter (executor_completed_tasks_total). This is the metric that stays null on the actuator endpoint when only the write-only OTel shim is present; it requires a client-readable registry (micrometer-registry-prometheus) to read back.",
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" } } },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 106 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 114 },
       "id": 807,
       "options": { "legend": { "calcs": ["lastNotNull", "mean", "max"], "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [

@@ -32,7 +32,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 @EnableAsync
 @Slf4j
 @EnableScheduling
-public class ThreadPoolConfig {
+public class SimpleThreadPoolConfig {
 
     public static final String TASK_EXECUTOR = "myTask";
     @Resource
@@ -45,7 +45,7 @@ public class ThreadPoolConfig {
                 new ContextPropagatingTaskDecorator())); //也可以自己实现，这边使用框架解决
     }
 
-    @Bean(name = TASK_EXECUTOR)
+//    @Bean(name = TASK_EXECUTOR)
     public ThreadPoolTaskExecutor taskExecutor() {
         ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
         taskExecutor.setCorePoolSize(20);

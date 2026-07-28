@@ -94,3 +94,8 @@ otel:
     export:
       interval: 10000
 
+spring:
+  autoconfigure:
+    exclude:
+    - org.springframework.boot.actuate.autoconfigure.tracing.BraveAutoConfiguration
+    - org.springframework.boot.actuate.autoconfigure.tracing.zipkin.ZipkinAutoConfiguration
