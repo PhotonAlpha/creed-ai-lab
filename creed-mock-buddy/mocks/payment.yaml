@@ -1,0 +1,80 @@
+name: payment
+prefix: /api/payment
+description: >
+  Mirrors creed-resource-payment (18093/18094), including its
+  PENDING -> AUTHORIZED -> CAPTURED -> REFUNDED lifecycle.
+
+# Module-level default; individual routes override it.
+delay: { min: 10, max: 60 }
+
+routes:
+  - id: payment-create
+    method: POST
+    path: /payments
+    summary: Create a payment in PENDING
+    response:
+      status: 201
+      headers:
+        x-mock-source: payment
+      body:
+        id: "{{uuid}}"
+        status: PENDING
+        amount: "{{body.amount}}"
+        currency: "{{body.currency}}"
+        createdAt: "{{now}}"
+
+  - id: payment-get
+    method: GET
+    path: /payments/:id
+    summary: Fetch a payment
+    response:
+      body:
+        id: "{{params.id}}"
+        status: "{{pick PENDING AUTHORIZED CAPTURED REFUNDED CANCELLED}}"
+        amount: "{{float 1 2000 2}}"
+        currency: EUR
+        checkedAt: "{{now}}"
+
+  - id: payment-authorize
+    method: POST
+    path: /payments/:id/authorize
+    summary: PENDING -> AUTHORIZED
+    response:
+      body: { id: "{{params.id}}", status: AUTHORIZED, authorizedAt: "{{now}}" }
+
+  - id: payment-capture
+    method: POST
+    path: /payments/:id/capture
+    summary: AUTHORIZED -> CAPTURED
+    response:
+      body: { id: "{{params.id}}", status: CAPTURED, capturedAt: "{{now}}" }
+
+  - id: payment-refund
+    method: POST
+    path: /payments/:id/refund
+    summary: CAPTURED -> REFUNDED
+    response:
+      body: { id: "{{params.id}}", status: REFUNDED, refundedAt: "{{now}}" }
+
+  # ---- scenario variants ---------------------------------------------------
+  - id: payment-authorize-declined
+    method: POST
+    path: /payments/:id/authorize
+    scenario: declined
+    summary: Issuer declines every authorization
+    response:
+      status: 402
+      body:
+        id: "{{params.id}}"
+        status: DECLINED
+        reason: INSUFFICIENT_FUNDS
+
+  - id: payment-create-outage
+    method: POST
+    path: /payments
+    scenario: outage
+    summary: PSP is unreachable
+    delay: 3000
+    response:
+      status: 504
+      body: { error: payment provider timeout }

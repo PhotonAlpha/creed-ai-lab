@@ -1,0 +1,10 @@
+{
+  "watch": ["src", "mocks", ".env"],
+  "ext": "ts,yaml,yml,json",
+  "ignore": ["src/**/*.test.ts", "tests/**", "dist/**"],
+  "exec": "tsx src/main.ts",
+  "delay": "150",
+  "env": {
+    "NODE_ENV": "development"
+  }
+}

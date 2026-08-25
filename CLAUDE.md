@@ -1,7 +1,7 @@
 # creed-ai-lab — project conventions
 
 Multi-module OAuth2 mesh: authorization server, two edge gateways (reactive + servlet), four resource
-servers, config server, Camel gateway, reporting app, one React frontend.
+servers, config server, Camel gateway, reporting app, one React frontend, one Node mock server.
 
 **Invariant conventions only** — this file loads in full every turn. Module-specific, changing, or
 narrative content belongs in a skill or a `HANDOFF.md` (§6).
@@ -15,6 +15,9 @@ Java **21** source/target, built with **JDK 25** · Spring Boot **3.5.14** · Sp
 
 Versions live in the root `pom.xml`. Only pin in a module pom when the BOM doesn't manage the
 artifact (e.g. POI in creed-report).
+
+Two modules are **Node, not Maven**, and are absent from the root `pom.xml`: `creed-env-matrix-design`
+(the frontend) and `creed-mock-buddy` (Fastify 5 + TS, Node ≥22). Both are driven with `npm`.
 
 ## 2. Build & run
 
@@ -49,6 +52,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
 | `creed-env-matrix-design` | 5173 | — | Vite, proxies `/api` → 3001 |
+| `creed-mock-buddy` | 18100 | — | HTTP, **Node/Fastify**; YAML mock server, standalone |
 | `creed-common-metrics` | — | — | library: `application-actuator.yml` + OTel helpers |
 
 Resource servers and gateways run `primary` / `secondary` (local two-instance) or `cloud`

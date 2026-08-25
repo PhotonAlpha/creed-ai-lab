@@ -1,0 +1,87 @@
+name: catalog
+prefix: /api/catalog
+description: Mirrors creed-resource-catalog (18081/18082) so a frontend can develop without the JDK.
+
+# Auto-generated CRUD. Each collection produces six routes:
+#   GET|POST  {path}          GET|PUT|PATCH|DELETE  {path}/:id
+collections:
+  - name: products
+    path: /products
+    idField: id
+    seed:
+      - { id: 1, sku: CRD-1001, name: Widget, price: 9.99, stock: 120, category: hardware }
+      - { id: 2, sku: CRD-1002, name: Gadget, price: 24.5, stock: 8, category: hardware }
+      - { id: 3, sku: CRD-2001, name: Support Plan, price: 199, stock: 999, category: service }
+
+routes:
+  # No templates anywhere in this body, so it is serialised once at load time and every request
+  # after that is a raw byte write. `GET /__admin/routes` reports it as precomputed: true.
+  - id: catalog-categories
+    method: GET
+    path: /categories
+    summary: Static category list
+    response:
+      body:
+        - { code: hardware, label: Hardware }
+        - { code: service, label: Service }
+
+  - id: catalog-search
+    method: GET
+    path: /search
+    summary: Templated search results
+    delay: { min: 5, max: 40 }
+    response:
+      headers:
+        x-mock-source: catalog
+      body:
+        query: "{{query.q}}"
+        generatedAt: "{{now}}"
+        # $repeat + $each expands into an array; each element sees its own index as {{seq}}.
+        items:
+          $repeat: { min: 2, max: 5 }
+          $each:
+            id: "{{uuid}}"
+            rank: "{{seq}}"
+            name: "Result {{seq}} for {{query.q}}"
+            price: "{{float 5 500 2}}"
+            availability: "{{pick IN_STOCK LOW_STOCK BACKORDER}}"
+
+  - id: catalog-product-detail
+    method: GET
+    path: /products/:id/detail
+    summary: Detail view built from the path parameter
+    response:
+      body:
+        id: "{{params.id}}"
+        description: "Full description for product {{params.id}}"
+        updatedAt: "{{now}}"
+        warehouses:
+          $repeat: 3
+          $each:
+            code: "WH-{{seq}}"
+            quantity: "{{int 0 500}}"
+
+  # ---- scenario variants ---------------------------------------------------
+  # Active only while `PUT /__admin/scenario {"name":"outage"}` is in force.
+  - id: catalog-search-outage
+    method: GET
+    path: /search
+    scenario: outage
+    summary: Catalog is down
+    response:
+      status: 503
+      body:
+        error: catalog unavailable
+        retryAfter: 30
+
+  - id: catalog-search-slow
+    method: GET
+    path: /search
+    scenario: slow
+    summary: Catalog is degraded but healthy
+    delay: { min: 800, max: 2500 }
+    response:
+      body:
+        query: "{{query.q}}"
+        items: []
+        degraded: true

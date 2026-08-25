@@ -14,3 +14,4 @@ creed-report/local-example.md
 .support/artifactory/settings.xml
 .support/jenkins/.password.txt
 .support/sonarqube/.password.txt
+*/.idea

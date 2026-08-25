@@ -1,0 +1,92 @@
+name: demo
+prefix: /demo
+description: Fixture used by the test suite. Kept deterministic — no random-only assertions.
+
+collections:
+  - name: widgets
+    path: /widgets
+    idField: id
+    seed:
+      - { id: 1, name: alpha, group: a }
+      - { id: 2, name: beta, group: b }
+      - { id: 3, name: gamma, group: a }
+
+routes:
+  - id: demo-static
+    method: GET
+    path: /static
+    summary: Fully static body — must be pre-serialised
+    response:
+      headers:
+        x-mock-flavour: static
+      body: { ok: true, items: [1, 2, 3] }
+
+  - id: demo-echo
+    method: POST
+    path: /echo/:id
+    summary: Echoes params, query and body
+    response:
+      status: 201
+      body:
+        id: "{{params.id}}"
+        q: "{{query.q}}"
+        nested: "{{body.a.b}}"
+        greeting: "hello {{params.id}}"
+
+  - id: demo-seq
+    method: GET
+    path: /seq
+    response:
+      body: { n: "{{seq}}" }
+
+  - id: demo-always-fails
+    method: GET
+    path: /flaky
+    fault:
+      rate: 1
+      status: 503
+      body: { error: down }
+    response:
+      body: { error: unreachable }
+
+  - id: demo-variant-base
+    method: GET
+    path: /variant
+    response:
+      body: { mode: default }
+
+  - id: demo-variant-outage
+    method: GET
+    path: /variant
+    scenario: outage
+    response:
+      status: 503
+      body: { mode: outage }
+
+  - id: demo-scenario-only
+    method: GET
+    path: /only-in-outage
+    scenario: outage
+    response:
+      body: { mode: outage }
+
+  - id: demo-headers
+    method: GET
+    path: /headers/:id
+    summary: Mixes static and templated response headers over a static body
+    response:
+      headers:
+        x-mock-flavour: static
+        x-entity-id: "{{params.id}}"
+        location: "/demo/headers/{{params.id}}"
+        x-missing: "{{query.absent}}"
+      body: { ok: true }
+
+  - id: demo-seq-header
+    method: GET
+    path: /seq-header
+    summary: Same seq value must reach both the header and the body
+    response:
+      headers:
+        x-seq: "{{seq}}"
+      body: { n: "{{seq}}" }

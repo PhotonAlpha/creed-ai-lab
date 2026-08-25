@@ -1,0 +1,57 @@
+name: order
+prefix: /api/order
+description: Mirrors creed-resource-order (18091/18092).
+
+collections:
+  - name: orders
+    path: /orders
+    idField: id
+    delay: { min: 2, max: 15 }
+    seed:
+      - { id: 1001, customer: acme, status: NEW, total: 34.49, currency: EUR }
+      - { id: 1002, customer: acme, status: SHIPPED, total: 199.0, currency: EUR }
+      - { id: 1003, customer: globex, status: CANCELLED, total: 9.99, currency: USD }
+
+routes:
+  - id: order-summary
+    method: GET
+    path: /summary
+    summary: Aggregate counters
+    response:
+      body:
+        generatedAt: "{{now}}"
+        open: "{{int 10 40}}"
+        shipped: "{{int 100 400}}"
+        cancelled: "{{int 0 12}}"
+
+  - id: order-submit
+    method: POST
+    path: /orders/:id/submit
+    summary: Submit an order — echoes the request body back
+    response:
+      status: 202
+      headers:
+        location: "/api/order/orders/{{params.id}}"
+      body:
+        id: "{{params.id}}"
+        status: SUBMITTED
+        acceptedAt: "{{now}}"
+        requestId: "{{requestId}}"
+        echo: "{{body.lines}}"
+
+  # 15% of calls fail. Useful for exercising retry/circuit-breaker code in the caller.
+  - id: order-flaky-export
+    method: POST
+    path: /export
+    summary: Intermittently failing export
+    fault:
+      rate: 0.15
+      status: 502
+      body:
+        error: export worker unreachable
+        requestId: "{{requestId}}"
+    response:
+      status: 201
+      body:
+        exportId: "{{uuid}}"
+        rows: "{{int 50 5000}}"
