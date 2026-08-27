@@ -27,19 +27,20 @@ Complete and verified in a browser against the real backend.
   conflict highlighting with a badge, conflicts-only toggle, health summary + re-check, conflict
   panel listing each colliding address.
 - **Topology (`/topology`)** — the same filtered slice as a graph (`@antv/g6`): one card per
-  endpoint, boxed by app system, with **declared** arrows between systems (from `env_app_link`) and
-  derived lines for same-host / same-IP / conflicting addresses. **Tier is a required filter** — the
-  wiring is declared per tier. Two layouts, click for details, hover to highlight.
+  endpoint, boxed by **participant** (an environment slice: app system + country + env instance),
+  with **declared** arrows between participants and derived lines for same-host / same-IP /
+  conflicting addresses. **A release is the required scope**, not a tier. Two layouts, click for
+  details, hover to highlight.
   Verified in a browser against `npm run mock`; not yet exercised against the Postgres `dev` profile.
 - **Config (`/config`)** — two tabs. *Endpoints*: the full table, add/edit/delete via one
-  page-level modal, save-back-to-database. *Topology links*: the app-system wiring for one tier,
-  same editing model, saved with a per-tier authoritative batch write.
+  page-level modal, save-back-to-database. *Release topology*: a release list, its participants and
+  its connections, saved with one authoritative batch write per release.
 - **i18n** en / zh-CN throughout, including the antd locale bundle; persisted in `localStorage`.
 - `antd lint src` → 0 issues. `tsc -b` and `vite build` clean.
 
 ## Landmines
 
-Eleven bugs were found and fixed here in browser testing. **Don't reintroduce them:**
+Twelve bugs were found and fixed here in browser testing. **Don't reintroduce them:**
 
 1. **Stale-response race** — StrictMode's double mount fires an unfiltered request that can resolve
    *after* a filtered one and overwrite the grid. `pages/Matrix/index.tsx` guards with a request-id
@@ -75,7 +76,10 @@ G6-specific, all four from `pages/Topology/TopologyGraph.tsx`:
 10. **`npm run typecheck` used to check nothing.** The root `tsconfig.json` is solution-style
    (`files: []` + project references) and `tsc --noEmit` does not follow references — it exited 0 on
    a file full of type errors. The script is now `tsc -b --force`; use that, never bare `--noEmit`.
-11. **ProComponents does not read antd's `locale`.** Its built-in strings (form placeholders,
+11. **A hidden tab panel is still in the accessibility tree.** The endpoints editor is kept mounted
+    behind `display: none` (unmounting would refetch 1200+ rows and discard unsaved edits), which
+    left the page exposing two "Save to database" buttons. `inert` on the hidden subtree fixes it.
+12. **ProComponents does not read antd's `locale`.** Its built-in strings (form placeholders,
     pagination, column settings) stayed Chinese with the UI in English until `main.tsx` wrapped the
     tree in `ProConfigProvider` with the matching `enUSIntl` / `zhCNIntl`.
 
@@ -90,12 +94,19 @@ Other constraints:
   G6 has no React peer dependency at all.
 - **The topology graph runs no G6 layout.** `pages/Topology/buildGraph.ts` positions every node.
   `combo-combined` overlaps the group boxes, and no built-in layout knows the declared ranking.
-- **App-system ranks come from the links, not from a constant.** `rankAppSystems` is a longest-path
-  layering over the stored `sourceApp -> targetApp` orientation, ignoring an edge that closes a
-  cycle. `direction` never enters the ranking: counting a `BIDIRECTIONAL` link both ways makes every
-  such pair a two-cycle.
-- **The topology page requires a tier and passes it to `/links` alone.** Narrowing to one country
-  filters the *endpoints*, never the wiring — a link must not disappear because of a country filter.
+- **Participant ranks come from the links, not from a constant.** `rankParticipants` is a
+  longest-path layering over the stored `source -> target` orientation, ignoring an edge that closes
+  a cycle. `direction` never enters the ranking: counting a `BIDIRECTIONAL` link both ways makes
+  every such pair a two-cycle.
+- **The topology page requires a release and fetches `/releases/{id}/topology` by id alone.**
+  Narrowing by country filters the *endpoints*, never the wiring — a connection must not disappear
+  because of a country filter.
+- **An endpoint is claimed by the first participant whose slice matches, specific before wildcard.**
+  A release may declare both `CCS/SG/SIT3` and `CCS/'*'/SIT3`; without the specific-first sort the
+  wildcard swallows every region and the specific box renders empty.
+- **The editor's `_key` becomes the payload's `ref`.** A participant added in the browser has no id,
+  and the connection rows have to name it before the save assigns one — `toTopologyRequest` is the
+  only place that translation happens, and it is the easiest thing here to break.
 - `server/mock.json` is **rewritten in place** when the config page saves in mock mode; expect a git
   diff after using the UI that way.
 - The mock server ports Java's exact `String.hashCode` so mocked health matches the Spring backend.
@@ -103,10 +114,13 @@ Other constraints:
 
 ## Open items
 
-- **The arrows are app-system level, by design.** `env_app_link` declares which systems talk;
-  nothing records which *instance* calls which, and drawing an endpoint-to-endpoint arrow would
-  assert something the data cannot support. If per-endpoint call edges are ever wanted they need
-  their own table — `buildGraph` would gain one more edge kind and nothing else here would change.
+- **The arrows are participant level, by design.** A release declares which slices talk; nothing
+  records which *endpoint* calls which, and drawing an endpoint-to-endpoint arrow would assert
+  something the data cannot support. If per-endpoint call edges are ever wanted they need their own
+  table — `buildGraph` would gain one more edge kind and nothing else here would change.
+- **Cross-release occupancy conflicts are not implemented.** Two ACTIVE releases both claiming SIT3
+  is a scheduling clash and arguably the strongest argument for this model, but it was deliberately
+  left for a later round.
 - **A circular layout was tried and dropped.** Nodes are 196px cards, so a ring of one environment's
   forty endpoints is ~3000px across and fit-to-view shrinks the labels out of legibility. It would
   need a second, dot-sized node type to be worth having.

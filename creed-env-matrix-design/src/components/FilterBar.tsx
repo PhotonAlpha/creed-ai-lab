@@ -21,14 +21,6 @@ interface FilterBarProps {
   value: EndpointFilter;
   onChange: (next: EndpointFilter) => void;
   loading?: boolean;
-  /**
-   * Dimensions that must always carry exactly one value.
-   *
-   * A required dimension renders as a single-select with no clear button, and **Reset** keeps its
-   * current value instead of wiping it. The topology page requires `tier`: the declared wiring is
-   * per tier, so an unscoped graph would overlay four environments' topologies on top of each other.
-   */
-  required?: readonly MultiDimension[];
 }
 
 /**
@@ -39,36 +31,16 @@ interface FilterBarProps {
  * because it only ever has three meaningful states (all / http / https) — that is the
  * "filter out the protocol you don't care about" control from the requirements.
  */
-export function FilterBar({
-  dimensions,
-  value,
-  onChange,
-  loading,
-  required = [],
-}: FilterBarProps) {
+export function FilterBar({ dimensions, value, onChange, loading }: FilterBarProps) {
   const { t } = useI18n();
 
-  const isRequired = (key: MultiDimension) => required.includes(key);
-
-  // A required dimension is always set, so counting it as an "active filter" would just report a
-  // baseline the user cannot turn off.
   const activeCount =
-    MULTI_DIMENSIONS.reduce(
-      (sum, key) => sum + (!isRequired(key) && value[key]?.length ? 1 : 0),
-      0,
-    ) +
+    MULTI_DIMENSIONS.reduce((sum, key) => sum + (value[key]?.length ? 1 : 0), 0) +
     (value.scheme?.length ? 1 : 0) +
     (value.keyword ? 1 : 0);
 
   const setDimension = (key: MultiDimension, next: string[]) =>
     onChange({ ...value, [key]: next.length ? next : undefined });
-
-  const reset = () =>
-    onChange(
-      Object.fromEntries(
-        required.filter((key) => value[key]?.length).map((key) => [key, value[key]]),
-      ) as EndpointFilter,
-    );
 
   // Segmented needs a single value; the wire format is still a list so the backend stays uniform.
   const schemeValue = value.scheme?.length === 1 ? value.scheme[0] : 'all';
@@ -80,33 +52,20 @@ export function FilterBar({
           <Col key={key} xs={24} sm={12} md={8} lg={4}>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {t(`filter.${key}` as MessageKey)}
-              {isRequired(key) && <span style={{ color: 'inherit' }}> *</span>}
             </Typography.Text>
-            {isRequired(key) ? (
-              <Select
-                loading={loading}
-                style={{ width: '100%' }}
-                placeholder={t('filter.placeholder')}
-                value={value[key]?.[0]}
-                onChange={(next: string) => setDimension(key, [next])}
-                options={dimensions[key].map((option) => ({ label: option, value: option }))}
-                popupMatchSelectWidth={false}
-              />
-            ) : (
-              <Select
-                mode="multiple"
-                allowClear
-                loading={loading}
-                style={{ width: '100%' }}
-                placeholder={t('filter.placeholder')}
-                value={value[key] ?? []}
-                onChange={(next: string[]) => setDimension(key, next)}
-                options={dimensions[key].map((option) => ({ label: option, value: option }))}
-                maxTagCount="responsive"
-                // Wider dropdown than the (narrow) control, so long service names stay readable.
-                popupMatchSelectWidth={false}
-              />
-            )}
+            <Select
+              mode="multiple"
+              allowClear
+              loading={loading}
+              style={{ width: '100%' }}
+              placeholder={t('filter.placeholder')}
+              value={value[key] ?? []}
+              onChange={(next: string[]) => setDimension(key, next)}
+              options={dimensions[key].map((option) => ({ label: option, value: option }))}
+              maxTagCount="responsive"
+              // Wider dropdown than the (narrow) control, so long service names stay readable.
+              popupMatchSelectWidth={false}
+            />
           </Col>
         ))}
       </Row>
@@ -145,7 +104,7 @@ export function FilterBar({
 
         <Col xs={24} md={6}>
           <Space>
-            <Button icon={<ClearOutlined />} onClick={reset} disabled={!activeCount}>
+            <Button icon={<ClearOutlined />} onClick={() => onChange({})} disabled={!activeCount}>
               {t('filter.reset')}
             </Button>
             {activeCount > 0 && (

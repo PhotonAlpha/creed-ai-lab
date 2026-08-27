@@ -1,7 +1,7 @@
 package com.creed.resource.envmatrix.api;
 
-import com.creed.resource.envmatrix.service.AppLinkService;
 import com.creed.resource.envmatrix.service.EnvMatrixService;
+import com.creed.resource.envmatrix.service.ReleaseService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
@@ -35,19 +35,14 @@ public class EnvMatrixExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(body("duplicate_endpoint", e.getMessage(), null));
     }
 
-    @ExceptionHandler(AppLinkService.LinkNotFoundException.class)
-    ResponseEntity<Map<String, Object>> linkNotFound(AppLinkService.LinkNotFoundException e) {
+    @ExceptionHandler(ReleaseService.ReleaseNotFoundException.class)
+    ResponseEntity<Map<String, Object>> releaseNotFound(ReleaseService.ReleaseNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body("not_found", e.getMessage(), null));
     }
 
-    @ExceptionHandler(AppLinkService.DuplicateLinkException.class)
-    ResponseEntity<Map<String, Object>> duplicateLink(AppLinkService.DuplicateLinkException e) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(body("duplicate_link", e.getMessage(), null));
-    }
-
-    @ExceptionHandler(AppLinkService.SelfLinkException.class)
-    ResponseEntity<Map<String, Object>> selfLink(AppLinkService.SelfLinkException e) {
-        return ResponseEntity.badRequest().body(body("invalid_link", e.getMessage(), null));
+    @ExceptionHandler(ReleaseService.DuplicateReleaseException.class)
+    ResponseEntity<Map<String, Object>> duplicateRelease(ReleaseService.DuplicateReleaseException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body("duplicate_release", e.getMessage(), null));
     }
 
     /** Someone else saved the same row first; the config page should reload and retry. */

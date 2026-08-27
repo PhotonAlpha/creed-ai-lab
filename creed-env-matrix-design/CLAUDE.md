@@ -32,10 +32,16 @@
 > 维度取值以纯文本存储、不使用枚举；`GET /api/env-matrix/dimensions` 从实际数据推导过滤选项，
 > 因此新增取值只需插入数据，无需改代码（但仍需按第 7 节约定同步本表）。
 
-**应用系统之间的连接关系（拓扑）** 是另一张表 `env_app_link`，由
-`(tier, sourceApp, targetApp)` 唯一标识，带 `direction`（`ONE_WAY` / `BIDIRECTIONAL`）和 `note`。
-按**环境层级**划分：SIT1 与 SIT2 是同一套接线的两个实例。它与 endpoint 之间没有外键 —— 连接可以
-指向尚未录入任何 endpoint 的应用系统，这个缺口正是本工具要暴露的。
+**拓扑关系**由三张表承载：`env_release`（一个被命名的 release）、`env_release_node`（**参与者**，
+即一个环境切面 `(应用系统, 国家/地区, 环境实例)`）、`env_release_link`（两个参与者之间的连接，带
+`direction`）。
+
+节点是切面而不是应用系统，因为同一个应用系统可以在一条链里出现两次：
+`SG CCS SIT3 → Global-CCS SIT2 → CN CCS SIT5`。release 负责说明哪些切面属于一起 —— 这也让
+envInstance / country / service / instance 保持互不关联，只作为数据存在。
+
+`country = '*'` 表示不区分国家。与 endpoint 之间**没有外键** —— 参与者可以指向尚未录入任何
+endpoint 的切面，这个缺口正是本工具要暴露的。
 
 - **冲突（conflict）**：在应当唯一的范围内，两个 endpoint 解析到相同 `host:port` 或 `ip:port`。
   「应当唯一的范围」由 `env-matrix.conflict.scope` 显式配置：`TIER_ENV`（默认，单个环境实例内唯一）/
@@ -72,14 +78,14 @@
 - 高亮存在冲突的单元格。
 
 ### 5.2 矩阵拓扑图（`/topology`）
-- 把当前过滤切面画成图：一个 endpoint 一个节点，按 App system 分组（G6 combo）。
-- **环境层级（Tier）为必选过滤条件** —— 连接关系按层级声明，不限定层级会把四套环境的拓扑叠在一起。
-- **应用系统之间的连接关系存放在数据库表 `env_app_link` 中**，在「配置编辑 → 拓扑连接」页维护，
-  由 `GET/POST/PUT/DELETE /api/env-matrix/links` 提供增删改查。`env_endpoint` 只记录地址，
-  没有任何一列表达调用关系，因此这层关系必须单独声明。
-- 依赖箭头画在应用系统分组之间，不画在 endpoint 之间。连接中出现但当前视图内没有 endpoint 的应用
-  系统，画成虚线占位节点。
-- 列的顺序（层级）由连接关系推导，不再写死常量：按存储的 `source -> target` 方向做最长路径分层。
+- 把当前过滤切面画成图：一个 endpoint 一个节点，按**参与者**分组（G6 combo）。
+- **必须选定一个 release**（不是 Tier）。参与者与连接存在数据库中，在「配置编辑 → Release 拓扑」页
+  维护，由 `/api/env-matrix/releases*` 提供增删改查。`env_endpoint` 只记录地址，没有任何一列表达
+  调用关系，因此这层关系必须单独声明。
+- 依赖箭头画在参与者分组之间，不画在 endpoint 之间。没有匹配 endpoint 的参与者画成虚线占位节点；
+  不属于任何参与者的 endpoint 以横幅计数提示。
+- 按国家/地区、环境实例收窄只过滤框内的 endpoint，**绝不过滤连接关系**。
+- 列的顺序（层级）由连接关系推导：按存储的 `source -> target` 方向做最长路径分层。
 - 其余连线全部由现有数据推导：同 `host`（同机）、同 `ip` 不同 `host`（DNS 别名）、以及
   `/conflicts` 返回的地址冲突。
 - 图库为 `@antv/g6` 5.x；两种布局的坐标均由 `buildGraph.ts` 自行计算，不使用 G6 内置布局。

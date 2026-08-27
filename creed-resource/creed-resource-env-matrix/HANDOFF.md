@@ -32,37 +32,54 @@ payment 18083, env-matrix 18084) — this module originally used 18095 there, br
 
 ## Current state
 
-Complete and verified end to end against real PostgreSQL. **32 tests pass.**
+Complete and verified end to end against real PostgreSQL. **34 tests pass.**
 
 - Flyway `V1` creates `env_endpoint` (7 dimension columns + host/ip/port, unique index on the
   dimension tuple, indexes for the conflict scan); `V2` seeds **1235 rows** including **4 deliberate
   conflicts** (see the `note` column) so a fresh database is not empty.
-- Flyway `V3` creates `env_app_link` and seeds the declared topology for all four tiers.
+- Flyway `V3` created `env_app_link`; **`V4` drops it** and creates the release topology —
+  `env_release` / `env_release_node` / `env_release_link` — seeding one baseline release per tier
+  plus a cross-country example.
 - `/api/env-matrix`: endpoint CRUD, batch save, `/matrix`, `/conflicts`, `/dimensions`, `/health`,
-  `/health/recheck`, plus **link CRUD** (`/links`, `/links/{id}`) and a per-tier link batch save.
-  Errors use one envelope `{error, message, fields?, time}`.
+  `/health/recheck`, plus **release CRUD** (`/releases`, `/releases/{id}`) and the topology pair
+  `GET|PUT /releases/{id}/topology`. Errors use one envelope `{error, message, fields?, time}`.
 - `ConflictDetector` groups on `host:port` **and** `ip:port` inside a bucket set by
   `env-matrix.conflict.scope` (`TIER_ENV` default).
 - `HealthProbeService` is **mock by default** (no network); `real` does a plain TCP connect.
 - Batch save writes the whole table in one transaction, skipping rows that did not change.
-- `AppLinkService` owns the declared app-system topology — the graph's edges. It shares nothing with
-  endpoints (no conflicts, no health, no seven-dimension identity), which is why it is a separate
-  service rather than more methods on `EnvMatrixService`.
+- `ReleaseService` owns the declared topology — the graph's nodes *and* edges. It shares nothing
+  with endpoints (no conflicts, no health, no seven-dimension identity), which is why it is a
+  separate service rather than more methods on `EnvMatrixService`.
 
 ## Landmines
 
-- **`env_app_link` is scoped to the TIER, not the environment instance.** SIT1 and SIT2 are two
-  instances of one wiring; per-instance declarations drift. The link batch save is therefore
-  authoritative for exactly one tier — `PUT /links` deletes only what is missing *from that tier* —
-  which is what lets the editor work on SIT without holding UAT's rows. Do not "improve" it into a
-  whole-table save; that is a constraint the endpoint editor has and this one deliberately avoids.
-- **`direction` decides arrowheads only.** The stored `sourceApp -> targetApp` orientation is what
-  the frontend's layered view ranks on, so a `BIDIRECTIONAL` link still has a defined upstream end.
+- **A topology node is a slice, not an app system.** `env_app_link` keyed a connection on
+  `(tier, sourceApp, targetApp)` and so could not hold `SG CCS SIT3 -> Global-CCS SIT2 -> CN CCS
+  SIT5`, where CCS appears twice. `env_release_node` is `(appSystem, country, envInstance)` and a
+  release names a set of them. Do not "simplify" the link back to app systems.
+- **`country = '*'` means "not country-specific", and is not NULL on purpose.** Postgres lets
+  several NULLs through a unique index, so the identity would need a `coalesce()` expression index —
+  which `@UniqueConstraint` cannot express, leaving the H2 test schema without the constraint.
+- **`env_release_link.release_id` is redundant but load-bearing.** It is derivable from the two
+  nodes; it is kept because the identity index needs it, and because it is what the service checks
+  both ends against. Without that check a link could quietly stitch two releases together.
+- **`release.tier` is a label, never validated against the participants.** A promotion chain
+  legitimately spans tiers; the UI warns, the API does not reject.
+- **`direction` decides arrowheads only.** The stored `source -> target` orientation is what the
+  frontend's layered view ranks on, so a `BIDIRECTIONAL` link still has a defined upstream end.
   Treating a two-way link as an edge in both directions would make every such pair a cycle with no
   defined layering.
-- **A link may name an app system that has no endpoints.** That is legal on purpose — the frontend
-  draws it as a placeholder, and the gap between "wired into the topology" and "recorded in the
-  matrix" is exactly what the viewer exists to surface. Do not add a foreign key.
+- **A participant may name a slice with no endpoints.** Legal on purpose — the frontend draws it as
+  a placeholder, and the gap between "wired into the topology" and "recorded in the matrix" is
+  exactly what the viewer exists to surface. Do not add a foreign key to `env_endpoint`.
+- **`PUT /releases/{id}/topology` saves participants and links together**, and a link may point at a
+  participant created in the same payload via `{"ref": "..."}`. They are one graph: a link cannot
+  exist without its ends, and "add a participant and connect it" is the commonest edit. Splitting
+  this into per-row routes would need two round trips and would leave an orphan participant in the
+  database in between.
+- **Children are deleted explicitly, not by the FK cascade.** The entities map the relationship as a
+  plain id column, so the H2 schema the tests run against has no foreign key at all; doing it in the
+  service keeps the behaviour identical in both.
 - **`dev` and `test` exclude `SslObservabilityAutoConfiguration`** and disable the SSL health
   indicator. Boot's `SslMeterBinder` eagerly opens **every declared SSL bundle** at startup and has
   **no disable property**, so `creed.https.enabled=false` alone is not enough — a missing keystore

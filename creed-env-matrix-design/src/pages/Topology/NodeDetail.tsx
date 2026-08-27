@@ -2,6 +2,7 @@ import { Alert, Descriptions, Empty, Space, Tag, Typography } from 'antd';
 import { HealthTag } from '../../components/HealthTag';
 import { useI18n } from '../../locales';
 import type { MessageKey } from '../../locales';
+import { ANY_COUNTRY } from '../../api/types';
 import type { EdgeKind, TopoEdge, TopologyModel } from './buildGraph';
 
 interface NodeDetailProps {
@@ -33,9 +34,14 @@ export function NodeDetail({ model, selectedId, kindColors }: NodeDetailProps) {
     return (
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Typography.Title level={5} style={{ margin: 0 }}>
-          {combo.appSystem}
+          {combo.title}
         </Typography.Title>
         <Descriptions column={1} size="small" colon={false}>
+          <Descriptions.Item label={t('column.appSystem')}>{combo.appSystem}</Descriptions.Item>
+          <Descriptions.Item label={t('column.country')}>
+            {combo.country === ANY_COUNTRY ? t('links.anyCountry') : combo.country}
+          </Descriptions.Item>
+          <Descriptions.Item label={t('column.envInstance')}>{combo.envInstance}</Descriptions.Item>
           <Descriptions.Item label={t('topology.stats.nodes')}>{combo.count}</Descriptions.Item>
           <Descriptions.Item label={t('topology.detail.layer')}>
             {combo.layer + 1} / {layerCount}
@@ -58,7 +64,7 @@ export function NodeDetail({ model, selectedId, kindColors }: NodeDetailProps) {
     return (
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Typography.Title level={5} style={{ margin: 0 }}>
-          {node.appSystem}
+          {model.combos.find((c) => c.id === node.comboId)?.title ?? ''}
         </Typography.Title>
         <Alert type="warning" showIcon message={t('topology.detail.placeholder')} />
         <LinkList
@@ -135,7 +141,7 @@ function LinkList({
 
   const nameOf = (id: string) =>
     model.nodeById.get(id)?.endpoint?.service ??
-    model.combos.find((combo) => combo.id === id)?.appSystem ??
+    model.combos.find((combo) => combo.id === id)?.title ??
     id;
 
   return (

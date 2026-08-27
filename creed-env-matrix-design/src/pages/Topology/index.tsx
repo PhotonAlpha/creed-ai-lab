@@ -13,12 +13,20 @@ import {
   theme,
 } from 'antd';
 import { CompressOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Select } from 'antd';
 import { FilterBar } from '../../components/FilterBar';
 import { useDimensions } from '../../hooks/useDimensions';
 import { envMatrixApi } from '../../api/envMatrix';
 import { useI18n } from '../../locales';
 import type { MessageKey } from '../../locales';
-import type { AppLink, ConflictGroup, Endpoint, EndpointFilter } from '../../api/types';
+import type {
+  ConflictGroup,
+  Endpoint,
+  EndpointFilter,
+  Release,
+  ReleaseLink,
+  ReleaseNode,
+} from '../../api/types';
 import { EDGE_KINDS, buildTopology } from './buildGraph';
 import type { EdgeKind, TopologyLayout } from './buildGraph';
 import { edgeColors } from './palette';
@@ -43,7 +51,10 @@ export function TopologyPage() {
   const [filterInitialised, setFilterInitialised] = useState(false);
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [conflicts, setConflicts] = useState<ConflictGroup[]>([]);
-  const [links, setLinks] = useState<AppLink[]>([]);
+  const [releases, setReleases] = useState<Release[]>([]);
+  const [releaseId, setReleaseId] = useState<number>();
+  const [participants, setParticipants] = useState<ReleaseNode[]>([]);
+  const [releaseLinks, setReleaseLinks] = useState<ReleaseLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,46 +64,63 @@ export function TopologyPage() {
   const [fitSignal, setFitSignal] = useState(0);
 
   /**
-   * Seeds the filter: a tier is **required**, an environment instance and a country are defaults.
+   * Releases, and the one the graph is scoped to.
    *
-   * The tier is mandatory because the wiring is declared per tier — without one the graph would
-   * overlay four environments' topologies on top of each other, which is the opposite of the point.
-   * The other two are merely defaults, clearable like any filter: the matrix page can afford to show
-   * a whole environment because a cell stacks its endpoints vertically, but a graph cannot, and six
-   * countries of one environment is roughly 180 boxes.
+   * A release is required — it is what says which environment slices belong together, and without
+   * one there is no graph to draw. Archived releases are still selectable but sort last.
+   */
+  useEffect(() => {
+    void (async () => {
+      try {
+        const rows = await envMatrixApi.releases();
+        setReleases(rows);
+        setReleaseId((current) =>
+          current && rows.some((r) => r.id === current)
+            ? current
+            : (rows.find((r) => r.status === 'ACTIVE') ?? rows[0])?.id,
+        );
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    })();
+  }, []);
+
+  /**
+   * Seeds the endpoint filter with one environment instance and one country.
+   *
+   * Only defaults, clearable like any filter — and they narrow what is *inside* the participant
+   * boxes, never the wiring. The matrix page can afford to show a whole environment because a cell
+   * stacks its endpoints vertically; a graph cannot, and six countries of one environment is roughly
+   * 180 boxes.
    */
   useEffect(() => {
     if (filterInitialised) return;
-    if (dimensions.tier.length === 0) return;
+    if (dimensions.envInstance.length === 0) return;
     setFilter({
-      tier: [dimensions.tier[0]],
-      ...(dimensions.envInstance.length > 0 ? { envInstance: [dimensions.envInstance[0]] } : {}),
+      envInstance: [dimensions.envInstance[0]],
       ...(dimensions.country.length > 0 ? { country: [dimensions.country[0]] } : {}),
     });
     setFilterInitialised(true);
-  }, [dimensions.tier, dimensions.envInstance, dimensions.country, filterInitialised]);
+  }, [dimensions.envInstance, dimensions.country, filterInitialised]);
 
-  /**
-   * The tier the graph is scoped to. Always present once the filter is seeded; the FilterBar's
-   * `required` mode makes it impossible to clear.
-   */
-  const tier = filter.tier?.[0];
-
-  const load = useCallback(async (current: EndpointFilter) => {
+  const load = useCallback(async (current: EndpointFilter, release: number | undefined) => {
+    if (!release) return;
     const requestId = (requestIdRef.current += 1);
     setLoading(true);
     try {
-      // `/links` takes the tier alone: the wiring is declared per tier, so narrowing to one country
-      // must not hide a connection. It is the endpoints that get filtered, never the topology.
-      const [endpointList, conflictGroups, linkRows] = await Promise.all([
+      // The release topology is fetched by release id alone. The endpoint filter narrows what shows
+      // up inside the participant boxes; it must never narrow the wiring, or a connection would
+      // disappear because of a country filter.
+      const [endpointList, conflictGroups, topology] = await Promise.all([
         envMatrixApi.endpoints(current),
         envMatrixApi.conflicts(current),
-        envMatrixApi.links(current.tier?.[0]),
+        envMatrixApi.releaseTopology(release),
       ]);
       if (requestId !== requestIdRef.current) return;
       setEndpoints(endpointList);
       setConflicts(conflictGroups);
-      setLinks(linkRows);
+      setParticipants(topology.nodes);
+      setReleaseLinks(topology.links);
       setError(null);
     } catch (e) {
       if (requestId !== requestIdRef.current) return;
@@ -104,14 +132,12 @@ export function TopologyPage() {
 
   useEffect(() => {
     if (dimensionsLoading) return;
-    // Nothing can be drawn before a tier is chosen, and the seeding effect above is one render away.
-    if (!tier) return;
-    void load(filter);
-  }, [filter, tier, dimensionsLoading, load]);
+    void load(filter, releaseId);
+  }, [filter, releaseId, dimensionsLoading, load]);
 
   const model = useMemo(
-    () => buildTopology(endpoints, conflicts, links),
-    [endpoints, conflicts, links],
+    () => buildTopology(endpoints, conflicts, participants, releaseLinks),
+    [endpoints, conflicts, participants, releaseLinks],
   );
   const kindColors = useMemo(() => edgeColors(token), [token]);
 
@@ -125,6 +151,8 @@ export function TopologyPage() {
   }, [model]);
 
 
+  const selectedRelease = releases.find((release) => release.id === releaseId);
+
   return (
     <PageContainer
       title={t('topology.title')}
@@ -136,7 +164,7 @@ export function TopologyPage() {
           loading={loading}
           onClick={() => {
             void reloadDimensions();
-            void load(filter);
+            void load(filter, releaseId);
           }}
         >
           {t('common.reload')}
@@ -151,12 +179,35 @@ export function TopologyPage() {
             message={t('common.error')}
             description={error}
             action={
-              <Button size="small" onClick={() => void load(filter)}>
+              <Button size="small" onClick={() => void load(filter, releaseId)}>
                 {t('common.retry')}
               </Button>
             }
           />
         )}
+
+        <ProCard size="small" bordered>
+          <Space size="middle" wrap>
+            <Typography.Text type="secondary">{t('topology.release')} *</Typography.Text>
+            <Select<number>
+              style={{ minWidth: 260 }}
+              value={releaseId}
+              onChange={setReleaseId}
+              placeholder={t('topology.releasePlaceholder')}
+              options={releases.map((release) => ({
+                value: release.id,
+                label: `${release.name} · ${release.tier} · ${release.nodeCount}/${release.linkCount}`,
+              }))}
+              showSearch
+              optionFilterProp="label"
+            />
+            {selectedRelease?.note && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {selectedRelease.note}
+              </Typography.Text>
+            )}
+          </Space>
+        </ProCard>
 
         <ProCard title={t('filter.title')} size="small" bordered>
           <FilterBar
@@ -164,7 +215,6 @@ export function TopologyPage() {
             value={filter}
             onChange={setFilter}
             loading={dimensionsLoading}
-            required={['tier']}
           />
         </ProCard>
 
@@ -213,7 +263,10 @@ export function TopologyPage() {
         <Alert
           type="info"
           showIcon
-          message={t('topology.hierarchy', { tier: tier ?? '—', count: model.counts.dep })}
+          message={t('topology.hierarchy', {
+            release: selectedRelease?.name ?? '—',
+            count: model.counts.dep,
+          })}
           description={t('topology.hierarchyNotice')}
         />
 
@@ -230,6 +283,14 @@ export function TopologyPage() {
             type="warning"
             showIcon
             message={t('topology.unlinked', { apps: model.unlinked.join(', ') })}
+          />
+        )}
+
+        {model.unclaimed > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message={t('topology.unclaimed', { count: model.unclaimed })}
           />
         )}
 

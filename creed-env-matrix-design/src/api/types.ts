@@ -87,46 +87,119 @@ export interface HealthReport {
  * Whether traffic on a declared link flows one way or both.
  *
  * Purely presentational — it decides the arrowheads. Layering always follows the stored
- * `sourceApp -> targetApp` orientation, so a two-way link still has a defined upstream end.
+ * `source -> target` orientation, so a two-way link still has a defined upstream end.
  */
 export type LinkDirection = 'ONE_WAY' | 'BIDIRECTIONAL';
 
+export type ReleaseStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+
 /**
- * A declared connection between two app systems — the topology graph's edges.
+ * A named set of environment slices and the links between them — the topology graph's scope.
  *
- * These are the one thing the endpoint table cannot tell you: it records addresses, and no amount
- * of derivation from a host/port invents "A calls B". Scope is the **tier**, not the environment
- * instance — SIT1 and SIT2 are two instances of the same wiring.
+ * A connection cannot be keyed on app systems: the chain
+ * `SG CCS SIT3 -> Global-CCS SIT2 -> CN CCS SIT5` has CCS in it twice. So a topology node is a
+ * slice, and a release is what says which slices belong together. That is also what keeps the other
+ * dimensions orthogonal — country, envInstance, service and instance stay plain data.
  */
-export interface AppLink {
+export interface Release {
   id: number;
+  name: string;
+  /** A label, not a constraint: participants may name instances from another tier. */
   tier: string;
-  sourceApp: string;
-  targetApp: string;
-  direction: LinkDirection;
+  status: ReleaseStatus;
   note: string | null;
+  nodeCount: number;
+  linkCount: number;
   createdAt: string;
   updatedAt: string;
   version: number;
 }
 
-/** Create/update payload for a link. `id` present ⇒ update that row, absent ⇒ insert. */
-export interface AppLinkRequest {
-  id?: number;
-  tier: string;
-  sourceApp: string;
-  targetApp: string;
+/** One participant: an environment slice. `country` is `'*'` when it is not country-specific. */
+export interface ReleaseNode {
+  id: number;
+  appSystem: string;
+  country: string;
+  envInstance: string;
+  label: string | null;
+  note: string | null;
+}
+
+/** One connection. Both ends are participant ids within the same release. */
+export interface ReleaseLink {
+  id: number;
+  sourceNodeId: number;
+  targetNodeId: number;
   direction: LinkDirection;
+  note: string | null;
+}
+
+export interface ReleaseTopology {
+  release: Release;
+  nodes: ReleaseNode[];
+  links: ReleaseLink[];
+}
+
+export interface ReleaseRequest {
+  name: string;
+  tier: string;
+  status: ReleaseStatus;
   note?: string | null;
 }
 
-export interface LinkBatchSaveResponse {
-  success: boolean;
-  inserted: number;
-  updated: number;
-  deleted: number;
-  issues: BatchSaveIssue[];
+/**
+ * Points at an existing participant by `id`, or at one created in the same payload by `ref`.
+ *
+ * This is the one awkward corner of the contract, and it exists because the commonest edit is "add
+ * a participant and connect it" — the new participant has no database id yet, so the link has to
+ * name it some other way.
+ */
+export interface NodeRef {
+  id?: number;
+  ref?: string;
 }
+
+export interface ReleaseTopologyRequest {
+  nodes: Array<{
+    id?: number;
+    ref?: string;
+    appSystem: string;
+    country: string;
+    envInstance: string;
+    label?: string | null;
+    note?: string | null;
+  }>;
+  links: Array<{
+    id?: number;
+    source: NodeRef;
+    target: NodeRef;
+    direction: LinkDirection;
+    note?: string | null;
+  }>;
+}
+
+/** @param section which list `index` refers to — `nodes` or `links`. */
+export interface ReleaseTopologyIssue {
+  section: 'nodes' | 'links';
+  index: number;
+  id: number | null;
+  field: string;
+  message: string;
+}
+
+export interface ReleaseTopologySaveResponse {
+  success: boolean;
+  nodesInserted: number;
+  nodesUpdated: number;
+  nodesDeleted: number;
+  linksInserted: number;
+  linksUpdated: number;
+  linksDeleted: number;
+  issues: ReleaseTopologyIssue[];
+}
+
+/** `'*'` in a participant's `country` — the slice is not country-specific. */
+export const ANY_COUNTRY = '*';
 
 /** Create/update payload. `id` present ⇒ update that row, absent ⇒ insert. */
 export interface EndpointRequest {

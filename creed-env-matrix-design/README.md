@@ -164,38 +164,42 @@ Four kinds of line, each toggleable from the toolbar:
 | Red dashes | the same `host:port` or `ip:port` is claimed twice | `/conflicts` |
 
 **The arrows are declared data, not observed.** `env_endpoint` records addresses; no column anywhere
-says "A calls B". The wiring is its own table, `env_app_link`, edited on the **Configuration →
-Topology links** tab:
+says "A calls B". The wiring lives in its own tables, edited on the **Configuration → Release
+topology** tab.
 
-| Column | Meaning |
+A **release** is a named set of environment slices and the connections between them:
+
+| Table | What it holds |
 |---|---|
-| `tier` | which environment tier this wiring applies to |
-| `sourceApp` / `targetApp` | the two app systems |
-| `direction` | `ONE_WAY` or `BIDIRECTIONAL` — arrowheads only |
-| `note` | what the connection carries |
+| `env_release` | name, tier (a label), status (`DRAFT`/`ACTIVE`/`ARCHIVED`) |
+| `env_release_node` | a **participant** — `(appSystem, country, envInstance)` |
+| `env_release_link` | a connection between two participants, plus `direction` |
 
-**Tier is a required filter on this page.** Links are declared per tier, so an unscoped graph would
-overlay four environments' topologies on top of each other. Narrowing by country or environment
-instance filters the *endpoints* — never the wiring, which would make a connection vanish for the
-wrong reason.
+**A release is the required scope on this page.** The reason a connection cannot simply name two app
+systems is that one app system can appear twice in a single chain:
 
-Arrows are drawn between app-system boxes, never between two endpoints: an endpoint-level arrow
-would assert which instance calls which, and nothing in the data supports that. An app system named
-in the links with no endpoint in view is drawn as a **dashed placeholder** — that gap between "wired
-into the topology" and "recorded in the matrix" is exactly what this viewer is for.
+```
+SG CCS SIT3  →  Global-CCS SIT2  →  CN CCS SIT5
+```
 
-Column order comes from the links themselves: `rankAppSystems` is a longest-path layering over the
-stored `source -> target` orientation, so the x axis *is* the hierarchy. `direction` never enters the
-ranking — counting a two-way link both ways would make every such pair a cycle. Two layouts:
-**Layered** and **By app system**, both positioned by `pages/Topology/buildGraph.ts` rather than by a
-G6 layout.
+So a topology node is a *slice*, and a release is what says which slices belong together. That is
+also what keeps the other dimensions orthogonal — country, envInstance, service and instance stay
+plain data, tied together only by a release.
 
-Click a node for its details and its links; hover to highlight its one-degree neighbourhood. Drag to
-pan, **Ctrl + scroll** to zoom (a plain wheel scrolls the page), **Fit** to re-frame.
+Each participant collects the endpoints matching its slice; `country = '*'` means "not
+country-specific" and matches every region. A participant with no matching endpoints is drawn as a
+**dashed placeholder** — that gap between "wired into the topology" and "recorded in the matrix" is
+exactly what this viewer is for. Endpoints in view that no participant claims are counted in a
+banner rather than drawn.
 
-On load the view defaults to the first environment instance *and* the first country — a graph cannot
-stack endpoints inside a cell the way the matrix grid can, and six countries of one environment is
-roughly 180 boxes.
+Narrowing by country or environment instance filters the *endpoints inside the boxes*, never the
+wiring — a connection must not vanish because of a country filter.
+
+Column order comes from the connections themselves: `rankParticipants` is a longest-path layering
+over the stored `source -> target` orientation, so the x axis *is* the hierarchy. `direction` never
+enters the ranking — counting a two-way link both ways would make every such pair a cycle. Two
+layouts: **Layered** and **By app system**, both positioned by `pages/Topology/buildGraph.ts` rather
+than by a G6 layout.
 
 ### Configuration (`/config`)
 
@@ -211,14 +215,15 @@ nor written, so a one-field edit reports "1 updated", not "1235 updated".
 Validation failures come back as `422` with per-row issues and **nothing is written** — the whole
 save is one transaction.
 
-**Topology links** — the app-system wiring the topology graph draws its arrows from, edited one tier
-at a time. Saving is authoritative for that tier only: links removed here are deleted, and other
-tiers are never touched. That is why this editor does not need the whole table loaded the way the
-endpoint one does.
+**Release topology** — a release list on the left, the selected release's participants and
+connections on the right, one save. Saving is authoritative for that release only: rows removed here
+are deleted, and other releases are never touched.
 
-Both app-system fields accept a name that has no endpoints yet — the graph shows it as a placeholder
-until endpoints are recorded for it. Declaring both `A → B` and `B → A` is rejected; that is what
-`BIDIRECTIONAL` is for.
+Participants are edited with free-text fields (a slice with no endpoints yet is legal and shows as a
+placeholder); connections pick both ends from the release's own participants, so a participant has
+to exist before it can be connected. A participant added but not yet saved is still selectable —
+the editor sends it as a `ref` that the save resolves to the new row's id. Declaring both `A → B`
+and `B → A` is rejected; that is what `BIDIRECTIONAL` is for.
 
 ---
 
@@ -237,12 +242,13 @@ Base path `/api/env-matrix`. Filters are repeated query parameters —
 | `PUT` | `/endpoints/{id}` | Update |
 | `DELETE` | `/endpoints/{id}` | Delete → `204` |
 | `PUT` | `/endpoints` | Batch save the whole table → `200`, or `422` with issues |
-| `GET` | `/links` | Declared app-system links; `?tier=` scopes them |
-| `GET` | `/links/{id}` | One link |
-| `POST` | `/links` | Create → `201`, `409` on duplicate, `400` on a self-link |
-| `PUT` | `/links/{id}` | Update |
-| `DELETE` | `/links/{id}` | Delete → `204` |
-| `PUT` | `/links` | Replace one tier's wiring → `200`, or `422` with issues |
+| `GET` | `/releases` | Releases; `?tier=` and `?status=` scope them |
+| `GET` | `/releases/{id}` | One release |
+| `POST` | `/releases` | Create → `201`, `409` on a duplicate name |
+| `PUT` | `/releases/{id}` | Update |
+| `DELETE` | `/releases/{id}` | Delete → `204`, taking its participants and connections |
+| `GET` | `/releases/{id}/topology` | `{release, nodes[], links[]}` — the graph's data source |
+| `PUT` | `/releases/{id}/topology` | Replace one release's topology → `200`, or `422` with issues |
 | `GET` | `/matrix` | `service × country` grid + conflicts |
 | `GET` | `/conflicts` | Conflict groups only |
 | `GET` | `/health` | Per-endpoint states + summary + probe mode |

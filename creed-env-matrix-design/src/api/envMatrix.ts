@@ -1,7 +1,5 @@
 import { request, requestAllowing422, toQuery } from './client';
 import type {
-  AppLink,
-  AppLinkRequest,
   BatchSaveResponse,
   ConflictGroup,
   Dimensions,
@@ -9,8 +7,13 @@ import type {
   EndpointFilter,
   EndpointRequest,
   HealthReport,
-  LinkBatchSaveResponse,
   MatrixResponse,
+  Release,
+  ReleaseRequest,
+  ReleaseStatus,
+  ReleaseTopology,
+  ReleaseTopologyRequest,
+  ReleaseTopologySaveResponse,
 } from './types';
 
 /** Every read route takes the same filter, so it is serialised in one place. */
@@ -50,32 +53,37 @@ export const envMatrixApi = {
       method: 'POST',
     }),
 
-  /**
-   * Declared app-system links. `tier` is optional on the wire so the config editor can load
-   * everything, but the topology page always passes one — the wiring is declared per tier, and an
-   * unscoped graph would overlay four environments' topologies on top of each other.
-   */
-  links: (tier?: string) => request<AppLink[]>(`/links${tier ? toQuery({ tier }) : ''}`),
+  /** Releases — the named sets of environment slices the topology graph is scoped to. */
+  releases: (filter: { tier?: string; status?: ReleaseStatus } = {}) =>
+    request<Release[]>(`/releases${toQuery({ tier: filter.tier, status: filter.status })}`),
 
-  createLink: (payload: AppLinkRequest) =>
-    request<AppLink>('/links', { method: 'POST', body: JSON.stringify(payload) }),
+  createRelease: (payload: ReleaseRequest) =>
+    request<Release>('/releases', { method: 'POST', body: JSON.stringify(payload) }),
 
-  updateLink: (id: number, payload: AppLinkRequest) =>
-    request<AppLink>(`/links/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  updateRelease: (id: number, payload: ReleaseRequest) =>
+    request<Release>(`/releases/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
 
-  removeLink: (id: number) => request<void>(`/links/${id}`, { method: 'DELETE' }),
+  /** Takes the release's participants and links with it. */
+  removeRelease: (id: number) => request<void>(`/releases/${id}`, { method: 'DELETE' }),
 
   /**
-   * Replaces one tier's wiring in a single transaction.
+   * Participants and links in one response.
    *
-   * Unlike the endpoint batch save this is always authoritative, but only for the named tier: links
-   * in *other* tiers are never touched. That is why the link editor can work on one tier at a time
-   * while the endpoint editor has to hold the whole table.
+   * Fetched together because a link is meaningless without its two ends — two requests would let
+   * the graph render half-built while the second is still in flight.
    */
-  batchSaveLinks: (tier: string, links: AppLinkRequest[]) =>
-    requestAllowing422<LinkBatchSaveResponse>('/links', {
+  releaseTopology: (id: number) => request<ReleaseTopology>(`/releases/${id}/topology`),
+
+  /**
+   * Replaces one release's topology in a single transaction.
+   *
+   * Authoritative for that release only: anything absent is deleted, no other release is touched.
+   * A link may point at a participant created in the same payload via `{ ref }` — see `NodeRef`.
+   */
+  saveReleaseTopology: (id: number, payload: ReleaseTopologyRequest) =>
+    requestAllowing422<ReleaseTopologySaveResponse>(`/releases/${id}/topology`, {
       method: 'PUT',
-      body: JSON.stringify({ tier, links }),
+      body: JSON.stringify(payload),
     }),
 
   create: (payload: EndpointRequest) =>

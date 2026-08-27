@@ -36,68 +36,185 @@ const DIMENSIONS = [
 // ---------------------------------------------------------------- data access
 
 let endpoints = [];
-let links = [];
+let releases = [];
+let releaseNodes = [];
+let releaseLinks = [];
 let nextId = 1;
+let nextReleaseId = 1;
+let nextNodeId = 1;
 let nextLinkId = 1;
 let mockSeed = 0;
+
+const maxId = (rows) => rows.reduce((max, r) => Math.max(max, r.id), 0) + 1;
 
 function loadData() {
   const parsed = JSON.parse(readFileSync(DATA_FILE, 'utf8'));
   endpoints = parsed.endpoints ?? [];
-  // Declared app-system topology. Absent from an older mock.json simply means "no wiring declared
-  // yet"; the topology page renders an empty graph rather than failing.
-  links = parsed.links ?? [];
-  nextId = endpoints.reduce((max, e) => Math.max(max, e.id), 0) + 1;
-  nextLinkId = links.reduce((max, l) => Math.max(max, l.id), 0) + 1;
-  console.log(`[mock] loaded ${endpoints.length} endpoints and ${links.length} links from ${DATA_FILE}`);
+  // Release topology. Absent from an older mock.json just means "nothing declared yet".
+  releases = parsed.releases ?? [];
+  releaseNodes = parsed.releaseNodes ?? [];
+  releaseLinks = parsed.releaseLinks ?? [];
+  nextId = maxId(endpoints);
+  nextReleaseId = maxId(releases);
+  nextNodeId = maxId(releaseNodes);
+  nextLinkId = maxId(releaseLinks);
+  console.log(
+    `[mock] loaded ${endpoints.length} endpoints, ${releases.length} releases ` +
+      `(${releaseNodes.length} participants / ${releaseLinks.length} links) from ${DATA_FILE}`,
+  );
 }
 
 function persist() {
-  writeFileSync(DATA_FILE, `${JSON.stringify({ endpoints, links }, null, 2)}\n`);
+  writeFileSync(
+    DATA_FILE,
+    `${JSON.stringify({ endpoints, releases, releaseNodes, releaseLinks }, null, 2)}\n`,
+  );
 }
 
-// -------------------------------------------------------------------- links
+// ------------------------------------------------------------- release topology
 
+const RELEASE_STATUSES = ['DRAFT', 'ACTIVE', 'ARCHIVED'];
 const LINK_DIRECTIONS = ['ONE_WAY', 'BIDIRECTIONAL'];
 
-/** Mirrors AppLinkRequest's bean validation, field for field. */
-function validateLink(payload) {
-  for (const field of ['tier', 'sourceApp', 'targetApp']) {
+/** Mirrors ReleaseRequest's bean validation, field for field. */
+function validateRelease(payload) {
+  for (const field of ['name', 'tier']) {
     if (!payload[field] || String(payload[field]).trim() === '') {
       return { field, message: 'must not be blank' };
     }
   }
-  if (!LINK_DIRECTIONS.includes(payload.direction)) {
-    return { field: 'direction', message: `must be one of ${LINK_DIRECTIONS.join(', ')}` };
-  }
-  if (payload.sourceApp === payload.targetApp) {
-    return { field: 'targetApp', message: 'a link cannot start and end at the same app system' };
+  if (!RELEASE_STATUSES.includes(payload.status)) {
+    return { field: 'status', message: `must be one of ${RELEASE_STATUSES.join(', ')}` };
   }
   return null;
 }
 
-const linkIdentity = (l) => `${l.tier}|${l.sourceApp}|${l.targetApp}`;
+const nodesOf = (releaseId) =>
+  releaseNodes
+    .filter((n) => n.releaseId === releaseId)
+    .sort(
+      (a, b) =>
+        a.appSystem.localeCompare(b.appSystem) ||
+        a.country.localeCompare(b.country) ||
+        a.envInstance.localeCompare(b.envInstance),
+    );
 
-function applyLinkPayload(target, payload) {
-  target.tier = payload.tier;
-  target.sourceApp = payload.sourceApp;
-  target.targetApp = payload.targetApp;
-  target.direction = payload.direction;
-  target.note = payload.note?.trim() ? payload.note : null;
-  target.updatedAt = new Date().toISOString();
-  return target;
+const linksOf = (releaseId) =>
+  releaseLinks.filter((l) => l.releaseId === releaseId).sort((a, b) => a.id - b.id);
+
+function releaseDto(release) {
+  return {
+    ...release,
+    nodeCount: nodesOf(release.id).length,
+    linkCount: linksOf(release.id).length,
+  };
 }
 
-function linkDiffers(stored, payload) {
-  return (
-    stored.tier !== payload.tier ||
-    stored.sourceApp !== payload.sourceApp ||
-    stored.targetApp !== payload.targetApp ||
-    stored.direction !== payload.direction ||
-    (stored.note ?? null) !== (payload.note?.trim() ? payload.note : null)
-  );
+const nodeDto = ({ id, appSystem, country, envInstance, label, note }) => ({
+  id,
+  appSystem,
+  country,
+  envInstance,
+  label: label ?? null,
+  note: note ?? null,
+});
+
+const linkDto = ({ id, sourceNodeId, targetNodeId, direction, note }) => ({
+  id,
+  sourceNodeId,
+  targetNodeId,
+  direction,
+  note: note ?? null,
+});
+
+/** Canonical key for a link end, or null when it resolves to nothing in the payload. */
+function endOf(ref, payloadIds, refs) {
+  if (!ref || (ref.id == null && !ref.ref)) return null;
+  if (ref.id != null) return payloadIds.has(ref.id) ? `id:${ref.id}` : null;
+  return refs.has(ref.ref) ? `ref:${ref.ref}` : null;
 }
 
+const describeRef = (ref) => (ref?.id != null ? `id:${ref.id}` : `ref:${ref?.ref}`);
+
+/** Port of ReleaseService.validate — same rules, same issue shape, same ordering. */
+function validateTopology(releaseId, nodes, links) {
+  const issues = [];
+  const knownNodeIds = new Set(nodesOf(releaseId).map((n) => n.id));
+  const knownLinkIds = new Set(linksOf(releaseId).map((l) => l.id));
+  const identities = new Set();
+  const refs = new Set();
+  const payloadIds = new Set();
+
+  nodes.forEach((row, index) => {
+    if (row.id != null && !knownNodeIds.has(row.id)) {
+      issues.push({ section: 'nodes', index, id: row.id, field: 'id',
+        message: `participant ${row.id} does not belong to this release` });
+      return;
+    }
+    if (row.id != null) payloadIds.add(row.id);
+    for (const field of ['appSystem', 'country', 'envInstance']) {
+      if (!row[field] || String(row[field]).trim() === '') {
+        issues.push({ section: 'nodes', index, id: row.id ?? null, field,
+          message: 'must not be blank' });
+        return;
+      }
+    }
+    const identity = `${row.appSystem}|${row.country}|${row.envInstance}`;
+    if (identities.has(identity)) {
+      issues.push({ section: 'nodes', index, id: row.id ?? null, field: 'appSystem',
+        message: `duplicate participant ${identity.replaceAll('|', ' ')}` });
+    }
+    identities.add(identity);
+    if (row.ref) {
+      if (refs.has(row.ref)) {
+        issues.push({ section: 'nodes', index, id: row.id ?? null, field: 'ref',
+          message: `duplicate ref ${row.ref}` });
+      }
+      refs.add(row.ref);
+    }
+  });
+
+  const pairs = new Set();
+  links.forEach((row, index) => {
+    if (row.id != null && !knownLinkIds.has(row.id)) {
+      issues.push({ section: 'links', index, id: row.id, field: 'id',
+        message: `link ${row.id} does not belong to this release` });
+      return;
+    }
+    if (!LINK_DIRECTIONS.includes(row.direction)) {
+      issues.push({ section: 'links', index, id: row.id ?? null, field: 'direction',
+        message: `must be one of ${LINK_DIRECTIONS.join(', ')}` });
+      return;
+    }
+    const source = endOf(row.source, payloadIds, refs);
+    const target = endOf(row.target, payloadIds, refs);
+    if (!source) {
+      issues.push({ section: 'links', index, id: row.id ?? null, field: 'source',
+        message: `no participant in this payload matches ${describeRef(row.source)}` });
+      return;
+    }
+    if (!target) {
+      issues.push({ section: 'links', index, id: row.id ?? null, field: 'target',
+        message: `no participant in this payload matches ${describeRef(row.target)}` });
+      return;
+    }
+    if (source === target) {
+      issues.push({ section: 'links', index, id: row.id ?? null, field: 'target',
+        message: 'a link cannot start and end at the same participant' });
+      return;
+    }
+    if (pairs.has(`${source}>${target}`) || pairs.has(`${target}>${source}`)) {
+      issues.push({ section: 'links', index, id: row.id ?? null, field: 'target',
+        message: 'these two participants are already connected' });
+      return;
+    }
+    pairs.add(`${source}>${target}`);
+  });
+
+  return issues;
+}
+
+// ------------------------------------------------------------------ filtering
 // ------------------------------------------------------------------ filtering
 
 function matchesFilter(endpoint, params) {
@@ -420,144 +537,227 @@ const server = createServer(async (req, res) => {
       });
     }
 
-    // ---- app links (topology edges) ----
-    if (req.method === 'GET' && path === '/links') {
+    // ---- release topology ----
+    if (req.method === 'GET' && path === '/releases') {
       const tier = params.get('tier');
-      const rows = tier ? links.filter((l) => l.tier === tier) : links;
+      const status = params.get('status');
       return json(
         res,
         200,
-        [...rows].sort(
-          (a, b) =>
-            a.tier.localeCompare(b.tier) ||
-            a.sourceApp.localeCompare(b.sourceApp) ||
-            a.targetApp.localeCompare(b.targetApp),
-        ),
+        releases
+          .filter((r) => (!tier || r.tier === tier) && (!status || r.status === status))
+          .sort((a, b) => a.tier.localeCompare(b.tier) || a.name.localeCompare(b.name))
+          .map(releaseDto),
       );
     }
 
-    const linkById = path.match(/^\/links\/(\d+)$/);
-    if (linkById) {
-      const id = Number(linkById[1]);
-      const existing = links.find((l) => l.id === id);
-      if (!existing) return fail(res, 404, 'not_found', `no app link with id ${id}`);
+    if (req.method === 'POST' && path === '/releases') {
+      const payload = await readBody(req);
+      const invalid = validateRelease(payload);
+      if (invalid) {
+        return json(res, 400, {
+          error: 'validation_failed',
+          message: invalid.message,
+          fields: [invalid],
+          time: new Date().toISOString(),
+        });
+      }
+      const clash = releases.find((r) => r.name === payload.name);
+      if (clash) {
+        return fail(res, 409, 'duplicate_release',
+          `release '${payload.name}' already exists (id ${clash.id})`);
+      }
+      const now = new Date().toISOString();
+      const created = {
+        id: nextReleaseId++,
+        name: payload.name,
+        tier: payload.tier,
+        status: payload.status,
+        note: payload.note?.trim() ? payload.note : null,
+        createdAt: now,
+        updatedAt: now,
+        version: 0,
+      };
+      releases.push(created);
+      persist();
+      return json(res, 201, releaseDto(created));
+    }
+
+    const releaseTopologyPath = path.match(/^\/releases\/(\d+)\/topology$/);
+    if (releaseTopologyPath) {
+      const id = Number(releaseTopologyPath[1]);
+      const release = releases.find((r) => r.id === id);
+      if (!release) return fail(res, 404, 'not_found', `no release with id ${id}`);
 
       if (req.method === 'GET') {
-        return json(res, 200, existing);
+        return json(res, 200, {
+          release: releaseDto(release),
+          nodes: nodesOf(id).map(nodeDto),
+          links: linksOf(id).map(linkDto),
+        });
+      }
+
+      if (req.method === 'PUT') {
+        const { nodes = [], links = [] } = await readBody(req);
+        const issues = validateTopology(id, nodes, links);
+        if (issues.length) {
+          return json(res, 422, {
+            success: false,
+            nodesInserted: 0, nodesUpdated: 0, nodesDeleted: 0,
+            linksInserted: 0, linksUpdated: 0, linksDeleted: 0,
+            issues,
+          });
+        }
+
+        const now = new Date().toISOString();
+        let nodesInserted = 0;
+        let nodesUpdated = 0;
+        const keptNodeIds = [];
+        // Payload-local ref -> the id the row actually got, so a link created in the same request
+        // can point at a participant that had no id when the request was built.
+        const refToId = new Map();
+
+        for (const row of nodes) {
+          let entity;
+          if (row.id == null) {
+            entity = {
+              id: nextNodeId++,
+              releaseId: id,
+              appSystem: row.appSystem,
+              country: row.country,
+              envInstance: row.envInstance,
+              label: row.label?.trim() ? row.label : null,
+              note: row.note?.trim() ? row.note : null,
+              createdAt: now,
+              updatedAt: now,
+              version: 0,
+            };
+            releaseNodes.push(entity);
+            nodesInserted += 1;
+          } else {
+            entity = releaseNodes.find((n) => n.id === row.id);
+            const next = {
+              appSystem: row.appSystem,
+              country: row.country,
+              envInstance: row.envInstance,
+              label: row.label?.trim() ? row.label : null,
+              note: row.note?.trim() ? row.note : null,
+            };
+            if (Object.entries(next).some(([k, v]) => (entity[k] ?? null) !== v)) {
+              Object.assign(entity, next, { updatedAt: now, version: (entity.version ?? 0) + 1 });
+              nodesUpdated += 1;
+            }
+          }
+          keptNodeIds.push(entity.id);
+          if (row.ref) refToId.set(row.ref, entity.id);
+        }
+
+        const resolve = (ref) => (ref.id != null ? ref.id : refToId.get(ref.ref));
+        let linksInserted = 0;
+        let linksUpdated = 0;
+        const keptLinkIds = [];
+
+        for (const row of links) {
+          const sourceNodeId = resolve(row.source);
+          const targetNodeId = resolve(row.target);
+          if (row.id == null) {
+            releaseLinks.push({
+              id: nextLinkId++,
+              releaseId: id,
+              sourceNodeId,
+              targetNodeId,
+              direction: row.direction,
+              note: row.note?.trim() ? row.note : null,
+              createdAt: now,
+              updatedAt: now,
+              version: 0,
+            });
+            keptLinkIds.push(nextLinkId - 1);
+            linksInserted += 1;
+          } else {
+            const entity = releaseLinks.find((l) => l.id === row.id);
+            const next = {
+              sourceNodeId,
+              targetNodeId,
+              direction: row.direction,
+              note: row.note?.trim() ? row.note : null,
+            };
+            if (Object.entries(next).some(([k, v]) => (entity[k] ?? null) !== v)) {
+              Object.assign(entity, next, { updatedAt: now, version: (entity.version ?? 0) + 1 });
+              linksUpdated += 1;
+            }
+            keptLinkIds.push(row.id);
+          }
+        }
+
+        // Links first, so nothing is ever left pointing at a deleted participant.
+        const linksBefore = releaseLinks.length;
+        releaseLinks = releaseLinks.filter((l) => l.releaseId !== id || keptLinkIds.includes(l.id));
+        const nodesBefore = releaseNodes.length;
+        releaseNodes = releaseNodes.filter((n) => n.releaseId !== id || keptNodeIds.includes(n.id));
+        persist();
+
+        return json(res, 200, {
+          success: true,
+          nodesInserted,
+          nodesUpdated,
+          nodesDeleted: nodesBefore - releaseNodes.length,
+          linksInserted,
+          linksUpdated,
+          linksDeleted: linksBefore - releaseLinks.length,
+          issues: [],
+        });
+      }
+    }
+
+    const releaseById = path.match(/^\/releases\/(\d+)$/);
+    if (releaseById) {
+      const id = Number(releaseById[1]);
+      const existing = releases.find((r) => r.id === id);
+      if (!existing) return fail(res, 404, 'not_found', `no release with id ${id}`);
+
+      if (req.method === 'GET') {
+        return json(res, 200, releaseDto(existing));
       }
       if (req.method === 'PUT') {
         const payload = await readBody(req);
-        const invalid = validateLink(payload);
+        const invalid = validateRelease(payload);
         if (invalid) {
           return json(res, 400, {
-            error: invalid.field === 'targetApp' && payload.sourceApp === payload.targetApp
-              ? 'invalid_link'
-              : 'validation_failed',
+            error: 'validation_failed',
             message: invalid.message,
             fields: [invalid],
             time: new Date().toISOString(),
           });
         }
-        const clash = links.find((l) => l.id !== id && linkIdentity(l) === linkIdentity(payload));
+        const clash = releases.find((r) => r.id !== id && r.name === payload.name);
         if (clash) {
-          return fail(res, 409, 'duplicate_link',
-            `link ${payload.tier} ${payload.sourceApp} -> ${payload.targetApp} already exists (id ${clash.id})`);
+          return fail(res, 409, 'duplicate_release',
+            `release '${payload.name}' already exists (id ${clash.id})`);
         }
-        applyLinkPayload(existing, payload);
-        existing.version = (existing.version ?? 0) + 1;
+        Object.assign(existing, {
+          name: payload.name,
+          tier: payload.tier,
+          status: payload.status,
+          note: payload.note?.trim() ? payload.note : null,
+          updatedAt: new Date().toISOString(),
+          version: (existing.version ?? 0) + 1,
+        });
         persist();
-        return json(res, 200, existing);
+        return json(res, 200, releaseDto(existing));
       }
       if (req.method === 'DELETE') {
-        links = links.filter((l) => l.id !== id);
+        // Explicit, same as the service: the children go with the release.
+        releaseLinks = releaseLinks.filter((l) => l.releaseId !== id);
+        releaseNodes = releaseNodes.filter((n) => n.releaseId !== id);
+        releases = releases.filter((r) => r.id !== id);
         persist();
         res.writeHead(204);
         return res.end();
       }
     }
 
-    if (req.method === 'POST' && path === '/links') {
-      const payload = await readBody(req);
-      const invalid = validateLink(payload);
-      if (invalid) {
-        const selfLink = payload.sourceApp && payload.sourceApp === payload.targetApp;
-        return json(res, 400, {
-          error: selfLink ? 'invalid_link' : 'validation_failed',
-          message: invalid.message,
-          fields: [invalid],
-          time: new Date().toISOString(),
-        });
-      }
-      const clash = links.find((l) => linkIdentity(l) === linkIdentity(payload));
-      if (clash) {
-        return fail(res, 409, 'duplicate_link',
-          `link ${payload.tier} ${payload.sourceApp} -> ${payload.targetApp} already exists (id ${clash.id})`);
-      }
-      const created = applyLinkPayload({ id: nextLinkId++, version: 0 }, payload);
-      created.createdAt = created.updatedAt;
-      links.push(created);
-      persist();
-      return json(res, 201, created);
-    }
-
-    // Replaces one tier's wiring. Scoped to that tier, so editing SIT never touches UAT.
-    if (req.method === 'PUT' && path === '/links') {
-      const { tier, links: rows = [] } = await readBody(req);
-      if (!tier) return fail(res, 400, 'validation_failed', 'tier is required');
-
-      const issues = [];
-      const seen = new Set();
-      rows.forEach((row, index) => {
-        if (row.tier !== tier) {
-          issues.push({ index, id: row.id ?? null, field: 'tier',
-            message: `row belongs to tier ${row.tier} but the save targets ${tier}` });
-          return;
-        }
-        const invalid = validateLink(row);
-        if (invalid) {
-          issues.push({ index, id: row.id ?? null, field: invalid.field, message: invalid.message });
-          return;
-        }
-        if (seen.has(linkIdentity(row))) {
-          issues.push({ index, id: row.id ?? null, field: 'targetApp',
-            message: `duplicate link ${tier} ${row.sourceApp} -> ${row.targetApp}` });
-          return;
-        }
-        seen.add(linkIdentity(row));
-      });
-      if (issues.length) {
-        return json(res, 422, { success: false, inserted: 0, updated: 0, deleted: 0, issues });
-      }
-
-      let inserted = 0;
-      let updated = 0;
-      const keptIds = [];
-      for (const row of rows) {
-        if (row.id == null) {
-          const created = applyLinkPayload({ id: nextLinkId++, version: 0 }, row);
-          created.createdAt = created.updatedAt;
-          links.push(created);
-          keptIds.push(created.id);
-          inserted += 1;
-        } else {
-          const existing = links.find((l) => l.id === row.id);
-          if (!existing) return fail(res, 404, 'not_found', `no app link with id ${row.id}`);
-          if (linkDiffers(existing, row)) {
-            applyLinkPayload(existing, row);
-            existing.version = (existing.version ?? 0) + 1;
-            updated += 1;
-          }
-          keptIds.push(row.id);
-        }
-      }
-
-      const before = links.length;
-      links = links.filter((l) => l.tier !== tier || keptIds.includes(l.id));
-      const deleted = before - links.length;
-      persist();
-      return json(res, 200, { success: true, inserted, updated, deleted, issues: [] });
-    }
-
+    // ---- single-row CRUD ----
     // ---- single-row CRUD ----
     const byId = path.match(/^\/endpoints\/(\d+)$/);
     if (byId) {

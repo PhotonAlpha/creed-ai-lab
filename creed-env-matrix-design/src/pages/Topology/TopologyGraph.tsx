@@ -100,7 +100,7 @@ export function TopologyGraph({
             lineWidth: 1,
             lineDash: [5, 4],
             accentFill: token.colorTextQuaternary,
-            titleText: node.appSystem,
+            titleText: model.combos.find((c) => c.id === node.comboId)?.title ?? '',
             titleFill: token.colorTextSecondary,
             subText: placeholderText,
             subFill: token.colorTextTertiary,
@@ -145,7 +145,7 @@ export function TopologyGraph({
       }));
 
     const combos: ComboData[] = model.combos.map((combo) => {
-          const color = comboColor(token, combo.appSystem);
+          const color = comboColor(token, combo.title);
           return {
             id: combo.id,
             style: {
@@ -158,7 +158,7 @@ export function TopologyGraph({
               strokeOpacity: COMBO_STROKE_OPACITY,
               lineWidth: 1,
               lineDash: [4, 4],
-              labelText: combo.appSystem,
+              labelText: combo.title,
               labelPlacement: 'top',
               labelFill: color,
               labelFontSize: 12,

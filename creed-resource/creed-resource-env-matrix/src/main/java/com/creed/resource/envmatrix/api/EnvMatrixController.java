@@ -1,7 +1,5 @@
 package com.creed.resource.envmatrix.api;
 
-import com.creed.resource.envmatrix.api.dto.AppLinkDto;
-import com.creed.resource.envmatrix.api.dto.AppLinkRequest;
 import com.creed.resource.envmatrix.api.dto.BatchSaveRequest;
 import com.creed.resource.envmatrix.api.dto.BatchSaveResponse;
 import com.creed.resource.envmatrix.api.dto.ConflictGroup;
@@ -9,12 +7,16 @@ import com.creed.resource.envmatrix.api.dto.DimensionsResponse;
 import com.creed.resource.envmatrix.api.dto.EndpointDto;
 import com.creed.resource.envmatrix.api.dto.EndpointFilter;
 import com.creed.resource.envmatrix.api.dto.EndpointRequest;
-import com.creed.resource.envmatrix.api.dto.LinkBatchSaveRequest;
-import com.creed.resource.envmatrix.api.dto.LinkBatchSaveResponse;
 import com.creed.resource.envmatrix.api.dto.MatrixResponse;
-import com.creed.resource.envmatrix.service.AppLinkService;
+import com.creed.resource.envmatrix.api.dto.ReleaseDto;
+import com.creed.resource.envmatrix.api.dto.ReleaseRequest;
+import com.creed.resource.envmatrix.api.dto.ReleaseStatus;
+import com.creed.resource.envmatrix.api.dto.ReleaseTopologyDto;
+import com.creed.resource.envmatrix.api.dto.ReleaseTopologyRequest;
+import com.creed.resource.envmatrix.api.dto.ReleaseTopologySaveResponse;
 import com.creed.resource.envmatrix.service.EnvMatrixService;
 import com.creed.resource.envmatrix.service.HealthProbeService;
+import com.creed.resource.envmatrix.service.ReleaseService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,7 +54,7 @@ public class EnvMatrixController {
 
     private final EnvMatrixService service;
     private final HealthProbeService healthProbeService;
-    private final AppLinkService appLinkService;
+    private final ReleaseService releaseService;
 
     /** Liveness/echo, mirroring the other resource modules' {@code /ping}. */
     @GetMapping("/ping")
@@ -110,51 +112,62 @@ public class EnvMatrixController {
     }
 
     /** {@code service × country} grid with conflict highlighting — the home page. */
-    // ------------------------------------------------------------ app links (topology edges)
+    // ------------------------------------------------------------ release topology
 
     /**
-     * Declared app-system links for one tier — the topology graph's edges.
+     * Releases — the named sets of environment slices the topology graph is scoped to.
      *
-     * <p>{@code tier} is optional here so the config editor can load everything at once, but the
-     * topology page always passes one: the wiring is declared per tier, and an unscoped graph would
-     * overlay four environments' topologies on top of each other.
+     * <p>A connection cannot be keyed on app systems: the chain
+     * {@code SG CCS SIT3 -> Global-CCS SIT2 -> CN CCS SIT5} has CCS in it twice. So a topology node
+     * is a slice, and a release is what says which slices belong together.
      */
-    @GetMapping("/links")
-    public List<AppLinkDto> links(@RequestParam(required = false) String tier) {
-        return appLinkService.list(tier);
+    @GetMapping("/releases")
+    public List<ReleaseDto> releases(@RequestParam(required = false) String tier,
+                                     @RequestParam(required = false) ReleaseStatus status) {
+        return releaseService.list(tier, status);
     }
 
-    @GetMapping("/links/{id}")
-    public AppLinkDto link(@PathVariable Long id) {
-        return appLinkService.get(id);
+    @GetMapping("/releases/{id}")
+    public ReleaseDto release(@PathVariable Long id) {
+        return releaseService.get(id);
     }
 
-    @PostMapping("/links")
-    public ResponseEntity<AppLinkDto> createLink(@Valid @RequestBody AppLinkRequest request) {
-        return ResponseEntity.status(201).body(appLinkService.create(request));
+    @PostMapping("/releases")
+    public ResponseEntity<ReleaseDto> createRelease(@Valid @RequestBody ReleaseRequest request) {
+        return ResponseEntity.status(201).body(releaseService.create(request));
     }
 
-    @PutMapping("/links/{id}")
-    public AppLinkDto updateLink(@PathVariable Long id, @Valid @RequestBody AppLinkRequest request) {
-        return appLinkService.update(id, request);
+    @PutMapping("/releases/{id}")
+    public ReleaseDto updateRelease(@PathVariable Long id, @Valid @RequestBody ReleaseRequest request) {
+        return releaseService.update(id, request);
     }
 
-    @DeleteMapping("/links/{id}")
-    public ResponseEntity<Void> deleteLink(@PathVariable Long id) {
-        appLinkService.delete(id);
+    /** Deletes the release and everything in it. */
+    @DeleteMapping("/releases/{id}")
+    public ResponseEntity<Void> deleteRelease(@PathVariable Long id) {
+        releaseService.delete(id);
         return ResponseEntity.noContent().build();
     }
 
+    /** Participants and connections in one response — the graph's data source. */
+    @GetMapping("/releases/{id}/topology")
+    public ReleaseTopologyDto releaseTopology(@PathVariable Long id) {
+        return releaseService.topology(id);
+    }
+
     /**
-     * Replaces one tier's wiring — the config page's link editor save.
+     * Replaces one release's topology — the config page's save.
      *
      * <p>Answers {@code 422} with per-row {@code issues} when the payload is rejected, matching the
      * endpoint batch save so the UI can treat both the same way.
      */
-    @PutMapping("/links")
-    public ResponseEntity<LinkBatchSaveResponse> batchSaveLinks(@Valid @RequestBody LinkBatchSaveRequest request) {
-        LinkBatchSaveResponse response = appLinkService.batchSave(request);
-        return response.success() ? ResponseEntity.ok(response) : ResponseEntity.unprocessableEntity().body(response);
+    @PutMapping("/releases/{id}/topology")
+    public ResponseEntity<ReleaseTopologySaveResponse> saveReleaseTopology(
+            @PathVariable Long id, @Valid @RequestBody ReleaseTopologyRequest request) {
+        ReleaseTopologySaveResponse response = releaseService.saveTopology(id, request);
+        return response.success()
+                ? ResponseEntity.ok(response)
+                : ResponseEntity.unprocessableEntity().body(response);
     }
 
     @GetMapping("/matrix")

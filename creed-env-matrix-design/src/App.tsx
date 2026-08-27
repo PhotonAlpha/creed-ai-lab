@@ -22,6 +22,7 @@ export function App() {
     '--env-matrix-conflict-bg': token.colorErrorBg,
     '--env-matrix-conflict-border': token.colorError,
     '--env-matrix-dirty-border': token.colorWarning,
+    '--env-matrix-selected-bg': token.controlItemBgActive,
   } as CSSProperties;
 
   return (

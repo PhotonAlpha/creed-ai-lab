@@ -18,7 +18,7 @@ import { envMatrixApi } from '../../api/envMatrix';
 import { useI18n } from '../../locales';
 import type { BatchSaveIssue, EndpointFilter } from '../../api/types';
 import { EndpointFormModal } from './EndpointFormModal';
-import { LinksPanel } from './LinksPanel';
+import { ReleasePanel } from './ReleasePanel';
 import type { EndpointFormValues } from './EndpointFormModal';
 import type { ConfigRow } from './types';
 import { toConfigRow, toRequest } from './types';
@@ -273,11 +273,18 @@ export function ConfigPage() {
       tabActiveKey={tab}
       onTabChange={(key) => setTab(key as 'endpoints' | 'links')}
     >
-      {tab === 'links' && <LinksPanel dimensions={dimensions} />}
+      {tab === 'links' && <ReleasePanel dimensions={dimensions} />}
 
+      {/*
+        * Hidden rather than unmounted: this editor holds the whole table plus any unsaved edits, and
+        * remounting on every tab switch would both refetch 1200+ rows and silently discard them.
+        * `inert` is what keeps the hidden subtree out of the tab order and the accessibility tree —
+        * without it the page exposes two "Save to database" buttons.
+        */}
       <Space
         direction="vertical"
         size="middle"
+        inert={tab !== 'endpoints'}
         style={{ width: '100%', display: tab === 'endpoints' ? undefined : 'none' }}
       >
         <Alert type="info" showIcon message={t('config.saveHint')} />

@@ -20,26 +20,50 @@ See [[creed-platform]] for SSL bundles, the HTTPS listener and build/run basics.
 - Dimension values are **plain text, not enums**. `GET /dimensions` derives the UI's filter options from values actually present, so a new country or `UAT6` extends the dropdowns with no code change. Adding values still requires syncing §2 of `creed-env-matrix-design/CLAUDE.md` (that file's own rule).
 - `@Version` optimistic lock — the config page saves whole rows.
 
-## Declared topology (`env_app_link`, `service/AppLinkService`)
+## Release topology (`env_release*`, `service/ReleaseService`)
 
-The **second** table, and the only relationship data in the module. `env_endpoint` records addresses;
-nothing in it says "A calls B", and nothing derived from a host/port ever can. So the wiring is an
-operator-maintained fact of its own: `(tier, sourceApp, targetApp)` + `direction` + `note`, full CRUD
-at `/links` plus a per-tier batch save, edited from the frontend's config page.
+The **second half of the module**, and the only relationship data in it. `env_endpoint` records
+addresses; nothing in it says "A calls B", and nothing derived from a host/port ever can.
 
-- **Scope is the TIER, not the env instance.** SIT1 and SIT2 are two instances of one wiring, and
-  re-declaring an unchanged topology per instance is how it drifts. This is why the topology page
-  makes `tier` a required filter, and why `PUT /links` deletes only what is missing *from that tier*
-  — which in turn is why the link editor never has to hold the whole table the way the endpoint one
-  does. Don't "improve" it into a whole-table save.
+**A topology node is a slice, not an app system.** This was learned the expensive way: the first
+attempt keyed a connection on `(tier, sourceApp, targetApp)` and could not hold
+
+```
+SG CCS SIT3  ->  Global-CCS SIT2  ->  CN CCS SIT5
+```
+
+because CCS appears twice. So:
+
+| Table | Holds |
+|---|---|
+| `env_release` | name (unique), tier, status `DRAFT`/`ACTIVE`/`ARCHIVED` |
+| `env_release_node` | a **participant** — `(appSystem, country, envInstance)` within one release |
+| `env_release_link` | a connection between two participants, plus `direction` |
+
+A release is what says which slices belong together, which is also what keeps every other dimension
+orthogonal — country, envInstance, service and instance stay plain data.
+
+- **`country = '*'` means "not country-specific", and is NOT NULL on purpose.** Postgres lets
+  several NULLs through a unique index, so the identity would need a `coalesce()` expression index —
+  and `@UniqueConstraint` cannot express one, leaving the H2 test schema without the constraint.
+- **`release.tier` is a label, never validated against the participants.** A promotion chain
+  legitimately spans tiers; the UI warns, the API does not reject.
+- **`env_release_link.release_id` is redundant but load-bearing** — the identity index needs it, and
+  it is what the service checks both ends against so a link cannot stitch two releases together.
 - **`direction` decides arrowheads only.** The stored `source -> target` orientation is what the
-  frontend's layered view ranks on. Counting a `BIDIRECTIONAL` link as an edge both ways makes every
-  such pair a two-cycle with no defined layering.
-- **No foreign key to `env_endpoint`, deliberately.** A link may name an app system with no
-  endpoints; the graph draws it as a placeholder, and that gap between "wired into the topology" and
-  "recorded in the matrix" is exactly what the viewer exists to surface.
-- Rejections mirror the endpoint side: `409` duplicate identity, `400` self-link, `422` with per-row
-  `issues` for a batch — validated in full before anything is written.
+  layered view ranks on; counting a `BIDIRECTIONAL` link both ways makes every such pair a cycle.
+- **No foreign key to `env_endpoint`, deliberately.** A participant may name a slice with no
+  endpoints; the graph draws it as a placeholder, and that gap is what the viewer exists to surface.
+- **`GET|PUT /releases/{id}/topology` saves participants and links together**, authoritative for
+  that release only. A link may point at a participant created in the same payload with
+  `{"ref": "..."}` — they are one graph, a link cannot exist without its ends, and "add a participant
+  and connect it" is the commonest edit. Per-row routes would need two round trips and leave an
+  orphan participant in between.
+- **Children are deleted explicitly, not by the FK cascade** — the entities map the relationship as
+  a plain id column, so the H2 test schema has no foreign key at all.
+- Rejections mirror the endpoint side: `409` duplicate release name, `422` with per-row `issues`
+  (each tagged `section: nodes|links`) for a topology save — validated in full before anything is
+  written.
 
 ## Conflict detection (`service/ConflictDetector`)
 
@@ -121,19 +145,24 @@ in an app that already carries one React-19 compat shim. G6 declares no React pe
 
 | Kind | Where from |
 |---|---|
-| `dep` | **Declared** — one `env_app_link` row, fetched from `/links?tier=` |
+| `dep` | **Declared** — one `env_release_link` row, from `/releases/{id}/topology` |
 | `colo` / `alias` / `clash` | **Derived** from `/endpoints` (same `host`, same `ip`) and `/conflicts` |
 
-Declared arrows are drawn **combo to combo**: an endpoint-level arrow would assert which instance
-calls which, and nothing in the data supports that. An app system named in the links with no
-endpoint in view gets a dashed **placeholder node** so the link still has something to attach to.
-`/links` is asked for the tier alone — narrowing by country filters endpoints, never wiring.
+The graph is scoped to a **release**, and the group box is a **participant**, not an app system.
+Declared arrows are drawn combo to combo: an endpoint-level arrow would assert which endpoint calls
+which, and nothing in the data supports that. The topology is fetched by release id alone —
+narrowing by country filters the endpoints inside the boxes, never the wiring.
+
+An endpoint is claimed by the **first participant whose slice matches, specific before wildcard**: a
+release may declare `CCS/SG/SIT3` alongside `CCS/'*'/SIT3`, and without that ordering the wildcard
+swallows every region. A participant with no matching endpoints gets a dashed **placeholder node**;
+endpoints no participant claims are counted in a banner rather than drawn.
 
 Derived edges **chain** rather than clique — five endpoints on one host is one fact, not ten lines.
 
-**Column order is derived from the links, not declared in code.** `rankAppSystems` is a longest-path
-layering over the stored `source -> target` orientation, ignoring an edge that closes back onto the
-current path so a user-created cycle cannot hang the walk.
+**Column order is derived from the links, not declared in code.** `rankParticipants` is a
+longest-path layering over the stored `source -> target` orientation, ignoring an edge that closes
+back onto the current path so a user-created cycle cannot hang the walk.
 
 **The graph runs no G6 layout at all.** `buildGraph.ts` assigns every node an x/y for both layouts
 (`layered` = one column per rank, groups wrapping into sub-columns past `MAX_ROWS`; `cluster` = the
@@ -173,4 +202,4 @@ in the other direction.
 
 ## Mock API (`server/index.js`)
 
-Dependency-free node, same contract on the same port, `mock.json` as the committed source of truth — now `{ endpoints, links }`, both rewritten in place on save (expect a diff after using the UI in mock mode). It ports **Java's exact `String.hashCode`**, so mocked health matches the Spring backend endpoint-for-endpoint at the same seed. Verified identical for dimensions/conflicts/matrix/health. Keep the two in step when changing the contract.
+Dependency-free node, same contract on the same port, `mock.json` as the committed source of truth — `{ endpoints, releases, releaseNodes, releaseLinks }`, all rewritten in place on save (expect a diff after using the UI in mock mode). It ports **Java's exact `String.hashCode`**, so mocked health matches the Spring backend endpoint-for-endpoint at the same seed. Verified identical for dimensions/conflicts/matrix/health. Keep the two in step when changing the contract.
