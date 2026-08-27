@@ -2,10 +2,11 @@ import type { CSSProperties } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { ProLayout } from '@ant-design/pro-components';
 import { Button, theme } from 'antd';
-import { GlobalOutlined, SettingOutlined, TableOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, GlobalOutlined, SettingOutlined, TableOutlined } from '@ant-design/icons';
 import { useI18n } from './locales';
 import { MatrixPage } from './pages/Matrix';
 import { ConfigPage } from './pages/Config';
+import { TopologyPage } from './pages/Topology';
 
 export function App() {
   const { t, toggleLang } = useI18n();
@@ -36,6 +37,7 @@ export function App() {
           path: '/',
           routes: [
             { path: '/', name: t('nav.matrix'), icon: <TableOutlined /> },
+            { path: '/topology', name: t('nav.topology'), icon: <ApartmentOutlined /> },
             { path: '/config', name: t('nav.config'), icon: <SettingOutlined /> },
           ],
         }}
@@ -50,6 +52,7 @@ export function App() {
       >
         <Routes>
           <Route path="/" element={<MatrixPage />} />
+          <Route path="/topology" element={<TopologyPage />} />
           <Route path="/config" element={<ConfigPage />} />
         </Routes>
       </ProLayout>

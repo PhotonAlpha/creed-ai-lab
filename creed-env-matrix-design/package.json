@@ -9,17 +9,23 @@
     "mock": "node server/index.js",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc -b --force"
   },
   "dependencies": {
     "@ant-design/icons": "5.6.1",
     "@ant-design/pro-components": "2.8.10",
     "@ant-design/v5-patch-for-react-19": "1.0.3",
+    "@antv/g6": "5.1.1",
     "antd": "5.29.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router-dom": "7.18.1"
   },
+  "//typecheck": [
+    "`tsc --noEmit` against the root tsconfig checks NOTHING: it is a solution-style file with",
+    "`files: []` and only project references, and --noEmit does not follow references. It exits 0 on",
+    "a codebase full of type errors. Use `tsc -b`, which is what `npm run build` has always done."
+  ],
   "//overrides": [
     "@ant-design/pro-layout 7.22.7 pins path-to-regexp to exactly 8.2.0, which carries two high-severity",
     "ReDoS advisories (GHSA-j3q9-mxjg-w52f, GHSA-27v5-c462-wpq7). 8.4.2 is the fixed release in the same",

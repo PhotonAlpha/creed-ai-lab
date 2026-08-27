@@ -32,6 +32,11 @@
 > 维度取值以纯文本存储、不使用枚举；`GET /api/env-matrix/dimensions` 从实际数据推导过滤选项，
 > 因此新增取值只需插入数据，无需改代码（但仍需按第 7 节约定同步本表）。
 
+**应用系统之间的连接关系（拓扑）** 是另一张表 `env_app_link`，由
+`(tier, sourceApp, targetApp)` 唯一标识，带 `direction`（`ONE_WAY` / `BIDIRECTIONAL`）和 `note`。
+按**环境层级**划分：SIT1 与 SIT2 是同一套接线的两个实例。它与 endpoint 之间没有外键 —— 连接可以
+指向尚未录入任何 endpoint 的应用系统，这个缺口正是本工具要暴露的。
+
 - **冲突（conflict）**：在应当唯一的范围内，两个 endpoint 解析到相同 `host:port` 或 `ip:port`。
   「应当唯一的范围」由 `env-matrix.conflict.scope` 显式配置：`TIER_ENV`（默认，单个环境实例内唯一）/
   `TIER`（整个层级内唯一）/ `GLOBAL`（全局唯一）。默认不把「同一地址在两个不同环境中复用」判为冲突。
@@ -50,6 +55,7 @@
 ├── src/                 # React 前端
 │   ├── pages/
 │   │   ├── Matrix       # 矩阵视图（首页 /）
+│   │   ├── Topology     # 矩阵拓扑图（/topology）
 │   │   └── Config       # CRUD 编辑页（/config）
 │   └── api/             # 前端 API 封装
 ├── server/
@@ -65,7 +71,20 @@
 - 以 **service × country** 聚合展示单元格；支持按 App system / Tier / Env instance 过滤。
 - 高亮存在冲突的单元格。
 
-### 5.2 配置编辑页（`/config`）
+### 5.2 矩阵拓扑图（`/topology`）
+- 把当前过滤切面画成图：一个 endpoint 一个节点，按 App system 分组（G6 combo）。
+- **环境层级（Tier）为必选过滤条件** —— 连接关系按层级声明，不限定层级会把四套环境的拓扑叠在一起。
+- **应用系统之间的连接关系存放在数据库表 `env_app_link` 中**，在「配置编辑 → 拓扑连接」页维护，
+  由 `GET/POST/PUT/DELETE /api/env-matrix/links` 提供增删改查。`env_endpoint` 只记录地址，
+  没有任何一列表达调用关系，因此这层关系必须单独声明。
+- 依赖箭头画在应用系统分组之间，不画在 endpoint 之间。连接中出现但当前视图内没有 endpoint 的应用
+  系统，画成虚线占位节点。
+- 列的顺序（层级）由连接关系推导，不再写死常量：按存储的 `source -> target` 方向做最长路径分层。
+- 其余连线全部由现有数据推导：同 `host`（同机）、同 `ip` 不同 `host`（DNS 别名）、以及
+  `/conflicts` 返回的地址冲突。
+- 图库为 `@antv/g6` 5.x；两种布局的坐标均由 `buildGraph.ts` 自行计算，不使用 G6 内置布局。
+
+### 5.3 配置编辑页（`/config`）
 - 表格化展示全部 endpoint，支持增、删、改。
 - 「保存到文件」按钮：校验后通过 写回 数据库。
 
@@ -78,6 +97,7 @@ npm run dev    # 启动 UI（:5173）
 ```
 
 - 矩阵视图：`http://localhost:5173/`
+- 拓扑图：`http://localhost:5173/topology`
 
 ## 7. 约定（给 Claude 的工作准则）
 
@@ -85,3 +105,5 @@ npm run dev    # 启动 UI（:5173）
 - 前端文案保持中英文一致风格创建中英文的文档。
 - 每次代码调整完成之后，将文案文档做出相应的更新
 - 新增维度取值时，同步更新本文件第 2 节的数据模型表。
+- 类型检查用 `npm run typecheck`（即 `tsc -b`）。**不要用 `tsc --noEmit`** —— 根 `tsconfig.json`
+  是 solution 形式，`--noEmit` 不跟随 project references，满是错误也会返回 0。

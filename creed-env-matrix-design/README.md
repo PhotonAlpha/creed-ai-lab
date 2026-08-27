@@ -149,9 +149,59 @@ On load the view defaults to the first environment instance. Unfiltered, every c
 endpoints of all environments and the grid would be unreadable. The default is a visible, clearable
 filter value rather than a hidden query parameter.
 
+### Topology (`/topology`)
+
+The same filtered slice as a graph. One card per endpoint — service name, `ip:port`, instance,
+scheme, and a health stripe down the left edge — grouped into a dashed box per app system.
+
+Four kinds of line, each toggleable from the toolbar:
+
+| Line | Meaning | Source |
+|---|---|---|
+| Solid arrow | declared dependency, app system → app system | `pages/Topology/topology.config.ts` |
+| Grey dashes | two endpoints answer on the same `host` | derived from `/endpoints` |
+| Blue dots | two hostnames resolve to the same `ip` | derived from `/endpoints` |
+| Red dashes | the same `host:port` or `ip:port` is claimed twice | `/conflicts` |
+
+**The arrows are declared data, not observed.** `env_endpoint` records addresses; no column anywhere
+says "A calls B". The wiring is its own table, `env_app_link`, edited on the **Configuration →
+Topology links** tab:
+
+| Column | Meaning |
+|---|---|
+| `tier` | which environment tier this wiring applies to |
+| `sourceApp` / `targetApp` | the two app systems |
+| `direction` | `ONE_WAY` or `BIDIRECTIONAL` — arrowheads only |
+| `note` | what the connection carries |
+
+**Tier is a required filter on this page.** Links are declared per tier, so an unscoped graph would
+overlay four environments' topologies on top of each other. Narrowing by country or environment
+instance filters the *endpoints* — never the wiring, which would make a connection vanish for the
+wrong reason.
+
+Arrows are drawn between app-system boxes, never between two endpoints: an endpoint-level arrow
+would assert which instance calls which, and nothing in the data supports that. An app system named
+in the links with no endpoint in view is drawn as a **dashed placeholder** — that gap between "wired
+into the topology" and "recorded in the matrix" is exactly what this viewer is for.
+
+Column order comes from the links themselves: `rankAppSystems` is a longest-path layering over the
+stored `source -> target` orientation, so the x axis *is* the hierarchy. `direction` never enters the
+ranking — counting a two-way link both ways would make every such pair a cycle. Two layouts:
+**Layered** and **By app system**, both positioned by `pages/Topology/buildGraph.ts` rather than by a
+G6 layout.
+
+Click a node for its details and its links; hover to highlight its one-degree neighbourhood. Drag to
+pan, **Ctrl + scroll** to zoom (a plain wheel scrolls the page), **Fit** to re-frame.
+
+On load the view defaults to the first environment instance *and* the first country — a graph cannot
+stack endpoints inside a cell the way the matrix grid can, and six countries of one environment is
+roughly 180 boxes.
+
 ### Configuration (`/config`)
 
-The full endpoint table with add / edit / delete, then **Save to database**.
+Two tabs.
+
+**Endpoints** — the full endpoint table with add / edit / delete, then **Save to database**.
 
 Saving writes the **whole table**: rows removed in the UI are deleted in the database. The page
 therefore always loads the complete, unfiltered set and narrows client-side — sending a filtered
@@ -160,6 +210,15 @@ nor written, so a one-field edit reports "1 updated", not "1235 updated".
 
 Validation failures come back as `422` with per-row issues and **nothing is written** — the whole
 save is one transaction.
+
+**Topology links** — the app-system wiring the topology graph draws its arrows from, edited one tier
+at a time. Saving is authoritative for that tier only: links removed here are deleted, and other
+tiers are never touched. That is why this editor does not need the whole table loaded the way the
+endpoint one does.
+
+Both app-system fields accept a name that has no endpoints yet — the graph shows it as a placeholder
+until endpoints are recorded for it. Declaring both `A → B` and `B → A` is rejected; that is what
+`BIDIRECTIONAL` is for.
 
 ---
 
@@ -178,6 +237,12 @@ Base path `/api/env-matrix`. Filters are repeated query parameters —
 | `PUT` | `/endpoints/{id}` | Update |
 | `DELETE` | `/endpoints/{id}` | Delete → `204` |
 | `PUT` | `/endpoints` | Batch save the whole table → `200`, or `422` with issues |
+| `GET` | `/links` | Declared app-system links; `?tier=` scopes them |
+| `GET` | `/links/{id}` | One link |
+| `POST` | `/links` | Create → `201`, `409` on duplicate, `400` on a self-link |
+| `PUT` | `/links/{id}` | Update |
+| `DELETE` | `/links/{id}` | Delete → `204` |
+| `PUT` | `/links` | Replace one tier's wiring → `200`, or `422` with issues |
 | `GET` | `/matrix` | `service × country` grid + conflicts |
 | `GET` | `/conflicts` | Conflict groups only |
 | `GET` | `/health` | Per-endpoint states + summary + probe mode |
@@ -201,6 +266,8 @@ so conflicts are reported, never rejected. Only duplicate *identities* are rejec
 │   ├── locales/        # en-US / zh-CN + provider
 │   └── pages/
 │       ├── Matrix/     # matrix view (/)
+│       ├── Topology/   # topology graph (/topology)
+│       │                # buildGraph.ts is pure: endpoints + conflicts + links -> nodes/edges
 │       └── Config/     # CRUD editor (/config)
 ├── server/
 │   ├── index.js        # mock API — same contract, no dependencies
@@ -234,6 +301,12 @@ error, not a silent fallback. **When you change UI copy, update both files.**
 - **`path-to-regexp` override.** `@ant-design/pro-layout` pins it to exactly `8.2.0`, which carries
   two high-severity ReDoS advisories; the `overrides` entry moves it to the fixed `8.4.2` without
   downgrading Pro.
+- **`npm run typecheck` runs `tsc -b`, not `tsc --noEmit`.** The root `tsconfig.json` is
+  solution-style, and `--noEmit` does not follow project references — it exits 0 on a codebase full
+  of type errors.
+- **`@antv/g6` alone, not `@ant-design/graphs`.** The React wrapper pulls in `styled-components@6`
+  and `@antv/graphin` to save a thin `Graph` wrapper; this app already carries one React-19 compat
+  shim and does not need another moving part. G6 itself declares no React peer dependency.
 - **`react-router-dom` 7.18.1** still trips `GHSA-qwww-vcr4-c8h2` (RSC-mode CSRF) in `npm audit`.
   This is a plain `BrowserRouter` SPA with no RSC mode and no server actions, so the path is not
   reachable, and there is no fixed 7.x yet. Do **not** downgrade: 7.11.0 and earlier carry 14

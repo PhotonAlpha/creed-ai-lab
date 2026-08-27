@@ -10,8 +10,8 @@ narrative content belongs in a skill or a `HANDOFF.md` (§6).
 
 Java **21** source/target, built with **JDK 25** · Spring Boot **3.5.14** · Spring Cloud **2025.0.2**
 · Camel 4.18.2 (simple-metrics only) · Maven 3.9.16, local repo **`/Users/ethan/Desktop/workspace/repos`**
-(not `~/.m2`) · frontend React 19 + TS + Vite 8 + **antd 5** + Ant Design Pro 2 · PostgreSQL on the
-`creed-artifactory-db` container (env-matrix only; everything else is in-memory).
+(not `~/.m2`) · frontend React 19 + TS + Vite 8 + **antd 5** + Ant Design Pro 2 + AntV G6 5 ·
+PostgreSQL on the `creed-artifactory-db` container (env-matrix only; everything else is in-memory).
 
 Versions live in the root `pom.xml`. Only pin in a module pom when the BOM doesn't manage the
 artifact (e.g. POI in creed-report).
@@ -51,7 +51,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-order` | 18091 / 18092 | `/api/order` | primary / secondary |
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
-| `creed-env-matrix-design` | 5173 | — | Vite, proxies `/api` → 3001 |
+| `creed-env-matrix-design` | 5173 | — | Vite, proxies `/api` → 3001 (target from `.env`) |
 | `creed-mock-buddy` | 18100 | — | HTTP, **Node/Fastify**; YAML mock server, standalone |
 | `creed-common-metrics` | — | — | library: `application-actuator.yml` + OTel helpers |
 

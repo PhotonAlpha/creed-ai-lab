@@ -36,18 +36,66 @@ const DIMENSIONS = [
 // ---------------------------------------------------------------- data access
 
 let endpoints = [];
+let links = [];
 let nextId = 1;
+let nextLinkId = 1;
 let mockSeed = 0;
 
 function loadData() {
   const parsed = JSON.parse(readFileSync(DATA_FILE, 'utf8'));
   endpoints = parsed.endpoints ?? [];
+  // Declared app-system topology. Absent from an older mock.json simply means "no wiring declared
+  // yet"; the topology page renders an empty graph rather than failing.
+  links = parsed.links ?? [];
   nextId = endpoints.reduce((max, e) => Math.max(max, e.id), 0) + 1;
-  console.log(`[mock] loaded ${endpoints.length} endpoints from ${DATA_FILE}`);
+  nextLinkId = links.reduce((max, l) => Math.max(max, l.id), 0) + 1;
+  console.log(`[mock] loaded ${endpoints.length} endpoints and ${links.length} links from ${DATA_FILE}`);
 }
 
 function persist() {
-  writeFileSync(DATA_FILE, `${JSON.stringify({ endpoints }, null, 2)}\n`);
+  writeFileSync(DATA_FILE, `${JSON.stringify({ endpoints, links }, null, 2)}\n`);
+}
+
+// -------------------------------------------------------------------- links
+
+const LINK_DIRECTIONS = ['ONE_WAY', 'BIDIRECTIONAL'];
+
+/** Mirrors AppLinkRequest's bean validation, field for field. */
+function validateLink(payload) {
+  for (const field of ['tier', 'sourceApp', 'targetApp']) {
+    if (!payload[field] || String(payload[field]).trim() === '') {
+      return { field, message: 'must not be blank' };
+    }
+  }
+  if (!LINK_DIRECTIONS.includes(payload.direction)) {
+    return { field: 'direction', message: `must be one of ${LINK_DIRECTIONS.join(', ')}` };
+  }
+  if (payload.sourceApp === payload.targetApp) {
+    return { field: 'targetApp', message: 'a link cannot start and end at the same app system' };
+  }
+  return null;
+}
+
+const linkIdentity = (l) => `${l.tier}|${l.sourceApp}|${l.targetApp}`;
+
+function applyLinkPayload(target, payload) {
+  target.tier = payload.tier;
+  target.sourceApp = payload.sourceApp;
+  target.targetApp = payload.targetApp;
+  target.direction = payload.direction;
+  target.note = payload.note?.trim() ? payload.note : null;
+  target.updatedAt = new Date().toISOString();
+  return target;
+}
+
+function linkDiffers(stored, payload) {
+  return (
+    stored.tier !== payload.tier ||
+    stored.sourceApp !== payload.sourceApp ||
+    stored.targetApp !== payload.targetApp ||
+    stored.direction !== payload.direction ||
+    (stored.note ?? null) !== (payload.note?.trim() ? payload.note : null)
+  );
 }
 
 // ------------------------------------------------------------------ filtering
@@ -370,6 +418,144 @@ const server = createServer(async (req, res) => {
         seed: mockSeed,
         checkedAt: new Date().toISOString(),
       });
+    }
+
+    // ---- app links (topology edges) ----
+    if (req.method === 'GET' && path === '/links') {
+      const tier = params.get('tier');
+      const rows = tier ? links.filter((l) => l.tier === tier) : links;
+      return json(
+        res,
+        200,
+        [...rows].sort(
+          (a, b) =>
+            a.tier.localeCompare(b.tier) ||
+            a.sourceApp.localeCompare(b.sourceApp) ||
+            a.targetApp.localeCompare(b.targetApp),
+        ),
+      );
+    }
+
+    const linkById = path.match(/^\/links\/(\d+)$/);
+    if (linkById) {
+      const id = Number(linkById[1]);
+      const existing = links.find((l) => l.id === id);
+      if (!existing) return fail(res, 404, 'not_found', `no app link with id ${id}`);
+
+      if (req.method === 'GET') {
+        return json(res, 200, existing);
+      }
+      if (req.method === 'PUT') {
+        const payload = await readBody(req);
+        const invalid = validateLink(payload);
+        if (invalid) {
+          return json(res, 400, {
+            error: invalid.field === 'targetApp' && payload.sourceApp === payload.targetApp
+              ? 'invalid_link'
+              : 'validation_failed',
+            message: invalid.message,
+            fields: [invalid],
+            time: new Date().toISOString(),
+          });
+        }
+        const clash = links.find((l) => l.id !== id && linkIdentity(l) === linkIdentity(payload));
+        if (clash) {
+          return fail(res, 409, 'duplicate_link',
+            `link ${payload.tier} ${payload.sourceApp} -> ${payload.targetApp} already exists (id ${clash.id})`);
+        }
+        applyLinkPayload(existing, payload);
+        existing.version = (existing.version ?? 0) + 1;
+        persist();
+        return json(res, 200, existing);
+      }
+      if (req.method === 'DELETE') {
+        links = links.filter((l) => l.id !== id);
+        persist();
+        res.writeHead(204);
+        return res.end();
+      }
+    }
+
+    if (req.method === 'POST' && path === '/links') {
+      const payload = await readBody(req);
+      const invalid = validateLink(payload);
+      if (invalid) {
+        const selfLink = payload.sourceApp && payload.sourceApp === payload.targetApp;
+        return json(res, 400, {
+          error: selfLink ? 'invalid_link' : 'validation_failed',
+          message: invalid.message,
+          fields: [invalid],
+          time: new Date().toISOString(),
+        });
+      }
+      const clash = links.find((l) => linkIdentity(l) === linkIdentity(payload));
+      if (clash) {
+        return fail(res, 409, 'duplicate_link',
+          `link ${payload.tier} ${payload.sourceApp} -> ${payload.targetApp} already exists (id ${clash.id})`);
+      }
+      const created = applyLinkPayload({ id: nextLinkId++, version: 0 }, payload);
+      created.createdAt = created.updatedAt;
+      links.push(created);
+      persist();
+      return json(res, 201, created);
+    }
+
+    // Replaces one tier's wiring. Scoped to that tier, so editing SIT never touches UAT.
+    if (req.method === 'PUT' && path === '/links') {
+      const { tier, links: rows = [] } = await readBody(req);
+      if (!tier) return fail(res, 400, 'validation_failed', 'tier is required');
+
+      const issues = [];
+      const seen = new Set();
+      rows.forEach((row, index) => {
+        if (row.tier !== tier) {
+          issues.push({ index, id: row.id ?? null, field: 'tier',
+            message: `row belongs to tier ${row.tier} but the save targets ${tier}` });
+          return;
+        }
+        const invalid = validateLink(row);
+        if (invalid) {
+          issues.push({ index, id: row.id ?? null, field: invalid.field, message: invalid.message });
+          return;
+        }
+        if (seen.has(linkIdentity(row))) {
+          issues.push({ index, id: row.id ?? null, field: 'targetApp',
+            message: `duplicate link ${tier} ${row.sourceApp} -> ${row.targetApp}` });
+          return;
+        }
+        seen.add(linkIdentity(row));
+      });
+      if (issues.length) {
+        return json(res, 422, { success: false, inserted: 0, updated: 0, deleted: 0, issues });
+      }
+
+      let inserted = 0;
+      let updated = 0;
+      const keptIds = [];
+      for (const row of rows) {
+        if (row.id == null) {
+          const created = applyLinkPayload({ id: nextLinkId++, version: 0 }, row);
+          created.createdAt = created.updatedAt;
+          links.push(created);
+          keptIds.push(created.id);
+          inserted += 1;
+        } else {
+          const existing = links.find((l) => l.id === row.id);
+          if (!existing) return fail(res, 404, 'not_found', `no app link with id ${row.id}`);
+          if (linkDiffers(existing, row)) {
+            applyLinkPayload(existing, row);
+            existing.version = (existing.version ?? 0) + 1;
+            updated += 1;
+          }
+          keptIds.push(row.id);
+        }
+      }
+
+      const before = links.length;
+      links = links.filter((l) => l.tier !== tier || keptIds.includes(l.id));
+      const deleted = before - links.length;
+      persist();
+      return json(res, 200, { success: true, inserted, updated, deleted, issues: [] });
     }
 
     // ---- single-row CRUD ----

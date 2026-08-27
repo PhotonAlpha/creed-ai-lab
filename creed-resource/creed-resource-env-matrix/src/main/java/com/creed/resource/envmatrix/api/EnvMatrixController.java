@@ -1,5 +1,7 @@
 package com.creed.resource.envmatrix.api;
 
+import com.creed.resource.envmatrix.api.dto.AppLinkDto;
+import com.creed.resource.envmatrix.api.dto.AppLinkRequest;
 import com.creed.resource.envmatrix.api.dto.BatchSaveRequest;
 import com.creed.resource.envmatrix.api.dto.BatchSaveResponse;
 import com.creed.resource.envmatrix.api.dto.ConflictGroup;
@@ -7,7 +9,10 @@ import com.creed.resource.envmatrix.api.dto.DimensionsResponse;
 import com.creed.resource.envmatrix.api.dto.EndpointDto;
 import com.creed.resource.envmatrix.api.dto.EndpointFilter;
 import com.creed.resource.envmatrix.api.dto.EndpointRequest;
+import com.creed.resource.envmatrix.api.dto.LinkBatchSaveRequest;
+import com.creed.resource.envmatrix.api.dto.LinkBatchSaveResponse;
 import com.creed.resource.envmatrix.api.dto.MatrixResponse;
+import com.creed.resource.envmatrix.service.AppLinkService;
 import com.creed.resource.envmatrix.service.EnvMatrixService;
 import com.creed.resource.envmatrix.service.HealthProbeService;
 import jakarta.validation.Valid;
@@ -21,6 +26,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -46,6 +52,7 @@ public class EnvMatrixController {
 
     private final EnvMatrixService service;
     private final HealthProbeService healthProbeService;
+    private final AppLinkService appLinkService;
 
     /** Liveness/echo, mirroring the other resource modules' {@code /ping}. */
     @GetMapping("/ping")
@@ -103,6 +110,53 @@ public class EnvMatrixController {
     }
 
     /** {@code service × country} grid with conflict highlighting — the home page. */
+    // ------------------------------------------------------------ app links (topology edges)
+
+    /**
+     * Declared app-system links for one tier — the topology graph's edges.
+     *
+     * <p>{@code tier} is optional here so the config editor can load everything at once, but the
+     * topology page always passes one: the wiring is declared per tier, and an unscoped graph would
+     * overlay four environments' topologies on top of each other.
+     */
+    @GetMapping("/links")
+    public List<AppLinkDto> links(@RequestParam(required = false) String tier) {
+        return appLinkService.list(tier);
+    }
+
+    @GetMapping("/links/{id}")
+    public AppLinkDto link(@PathVariable Long id) {
+        return appLinkService.get(id);
+    }
+
+    @PostMapping("/links")
+    public ResponseEntity<AppLinkDto> createLink(@Valid @RequestBody AppLinkRequest request) {
+        return ResponseEntity.status(201).body(appLinkService.create(request));
+    }
+
+    @PutMapping("/links/{id}")
+    public AppLinkDto updateLink(@PathVariable Long id, @Valid @RequestBody AppLinkRequest request) {
+        return appLinkService.update(id, request);
+    }
+
+    @DeleteMapping("/links/{id}")
+    public ResponseEntity<Void> deleteLink(@PathVariable Long id) {
+        appLinkService.delete(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Replaces one tier's wiring — the config page's link editor save.
+     *
+     * <p>Answers {@code 422} with per-row {@code issues} when the payload is rejected, matching the
+     * endpoint batch save so the UI can treat both the same way.
+     */
+    @PutMapping("/links")
+    public ResponseEntity<LinkBatchSaveResponse> batchSaveLinks(@Valid @RequestBody LinkBatchSaveRequest request) {
+        LinkBatchSaveResponse response = appLinkService.batchSave(request);
+        return response.success() ? ResponseEntity.ok(response) : ResponseEntity.unprocessableEntity().body(response);
+    }
+
     @GetMapping("/matrix")
     public MatrixResponse matrix(@ModelAttribute EndpointFilter filter) {
         return service.matrix(filter);

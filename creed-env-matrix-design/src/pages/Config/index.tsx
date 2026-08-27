@@ -18,6 +18,7 @@ import { envMatrixApi } from '../../api/envMatrix';
 import { useI18n } from '../../locales';
 import type { BatchSaveIssue, EndpointFilter } from '../../api/types';
 import { EndpointFormModal } from './EndpointFormModal';
+import { LinksPanel } from './LinksPanel';
 import type { EndpointFormValues } from './EndpointFormModal';
 import type { ConfigRow } from './types';
 import { toConfigRow, toRequest } from './types';
@@ -34,6 +35,8 @@ export function ConfigPage() {
   const [saving, setSaving] = useState(false);
   const [issues, setIssues] = useState<BatchSaveIssue[]>([]);
   const [filter, setFilter] = useState<EndpointFilter>({});
+  /** Which editor is on screen. The two tables share nothing but this page's chrome. */
+  const [tab, setTab] = useState<'endpoints' | 'links'>('endpoints');
   /**
    * Which row the single page-level dialog is editing: `null` = closed, `{row: undefined}` = add.
    * One dialog for the whole page rather than one per table row.
@@ -260,8 +263,23 @@ export function ConfigPage() {
   ];
 
   return (
-    <PageContainer title={t('config.title')} subTitle={t('config.subtitle')}>
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <PageContainer
+      title={t('config.title')}
+      subTitle={tab === 'links' ? t('links.subtitle') : t('config.subtitle')}
+      tabList={[
+        { tab: t('links.tab.endpoints'), key: 'endpoints' },
+        { tab: t('links.tab.links'), key: 'links' },
+      ]}
+      tabActiveKey={tab}
+      onTabChange={(key) => setTab(key as 'endpoints' | 'links')}
+    >
+      {tab === 'links' && <LinksPanel dimensions={dimensions} />}
+
+      <Space
+        direction="vertical"
+        size="middle"
+        style={{ width: '100%', display: tab === 'endpoints' ? undefined : 'none' }}
+      >
         <Alert type="info" showIcon message={t('config.saveHint')} />
 
         {issues.length > 0 && (

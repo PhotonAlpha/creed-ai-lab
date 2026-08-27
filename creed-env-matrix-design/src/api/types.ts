@@ -83,6 +83,51 @@ export interface HealthReport {
   checkedAt: string;
 }
 
+/**
+ * Whether traffic on a declared link flows one way or both.
+ *
+ * Purely presentational — it decides the arrowheads. Layering always follows the stored
+ * `sourceApp -> targetApp` orientation, so a two-way link still has a defined upstream end.
+ */
+export type LinkDirection = 'ONE_WAY' | 'BIDIRECTIONAL';
+
+/**
+ * A declared connection between two app systems — the topology graph's edges.
+ *
+ * These are the one thing the endpoint table cannot tell you: it records addresses, and no amount
+ * of derivation from a host/port invents "A calls B". Scope is the **tier**, not the environment
+ * instance — SIT1 and SIT2 are two instances of the same wiring.
+ */
+export interface AppLink {
+  id: number;
+  tier: string;
+  sourceApp: string;
+  targetApp: string;
+  direction: LinkDirection;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+/** Create/update payload for a link. `id` present ⇒ update that row, absent ⇒ insert. */
+export interface AppLinkRequest {
+  id?: number;
+  tier: string;
+  sourceApp: string;
+  targetApp: string;
+  direction: LinkDirection;
+  note?: string | null;
+}
+
+export interface LinkBatchSaveResponse {
+  success: boolean;
+  inserted: number;
+  updated: number;
+  deleted: number;
+  issues: BatchSaveIssue[];
+}
+
 /** Create/update payload. `id` present ⇒ update that row, absent ⇒ insert. */
 export interface EndpointRequest {
   id?: number;

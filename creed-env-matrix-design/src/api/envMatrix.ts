@@ -1,5 +1,7 @@
 import { request, requestAllowing422, toQuery } from './client';
 import type {
+  AppLink,
+  AppLinkRequest,
   BatchSaveResponse,
   ConflictGroup,
   Dimensions,
@@ -7,6 +9,7 @@ import type {
   EndpointFilter,
   EndpointRequest,
   HealthReport,
+  LinkBatchSaveResponse,
   MatrixResponse,
 } from './types';
 
@@ -45,6 +48,34 @@ export const envMatrixApi = {
   recheckHealth: () =>
     request<{ mode: string; mocked: boolean; seed: number; checkedAt: string }>('/health/recheck', {
       method: 'POST',
+    }),
+
+  /**
+   * Declared app-system links. `tier` is optional on the wire so the config editor can load
+   * everything, but the topology page always passes one — the wiring is declared per tier, and an
+   * unscoped graph would overlay four environments' topologies on top of each other.
+   */
+  links: (tier?: string) => request<AppLink[]>(`/links${tier ? toQuery({ tier }) : ''}`),
+
+  createLink: (payload: AppLinkRequest) =>
+    request<AppLink>('/links', { method: 'POST', body: JSON.stringify(payload) }),
+
+  updateLink: (id: number, payload: AppLinkRequest) =>
+    request<AppLink>(`/links/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+
+  removeLink: (id: number) => request<void>(`/links/${id}`, { method: 'DELETE' }),
+
+  /**
+   * Replaces one tier's wiring in a single transaction.
+   *
+   * Unlike the endpoint batch save this is always authoritative, but only for the named tier: links
+   * in *other* tiers are never touched. That is why the link editor can work on one tier at a time
+   * while the endpoint editor has to hold the whole table.
+   */
+  batchSaveLinks: (tier: string, links: AppLinkRequest[]) =>
+    requestAllowing422<LinkBatchSaveResponse>('/links', {
+      method: 'PUT',
+      body: JSON.stringify({ tier, links }),
     }),
 
   create: (payload: EndpointRequest) =>

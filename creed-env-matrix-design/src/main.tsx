@@ -7,6 +7,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App as AntdApp, ConfigProvider } from 'antd';
+import { ProConfigProvider, enUSIntl, zhCNIntl } from '@ant-design/pro-components';
 import { I18nProvider, useI18n } from './locales';
 import { App } from './App';
 import './index.css';
@@ -17,7 +18,7 @@ import './index.css';
  * antd's detached static methods — which would ignore the theme and warn in the console.
  */
 function Root() {
-  const { antdLocale } = useI18n();
+  const { lang, antdLocale } = useI18n();
   return (
     <ConfigProvider
       locale={antdLocale}
@@ -35,9 +36,16 @@ function Root() {
         },
       }}
     >
-      <AntdApp>
-        <App />
-      </AntdApp>
+      {/*
+        * ProComponents keeps its own message catalogue and does NOT read antd's `locale`, so
+        * without this its built-in strings — form placeholders, pagination, the table's column
+        * settings — stayed Chinese with the UI in English.
+        */}
+      <ProConfigProvider intl={lang === 'zh-CN' ? zhCNIntl : enUSIntl}>
+        <AntdApp>
+          <App />
+        </AntdApp>
+      </ProConfigProvider>
     </ConfigProvider>
   );
 }

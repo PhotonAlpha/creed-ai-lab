@@ -8,6 +8,7 @@ const enUS = {
 
   'nav.matrix': 'Matrix',
   'nav.config': 'Configuration',
+  'nav.topology': 'Topology',
   'nav.lang': '中文',
 
   'filter.title': 'Filters',
@@ -57,6 +58,40 @@ const enUS = {
   'conflict.kind.IP_PORT': 'ip:port',
   'conflict.members': '{count} endpoints',
 
+  'topology.title': 'Topology',
+  'topology.subtitle':
+    'Who shares a box, whose addresses collide, and how the app systems stack up.',
+  'topology.fit': 'Fit',
+  'topology.layout': 'Layout',
+  'topology.layout.layered': 'Layered',
+  'topology.layout.cluster': 'By app system',
+  'topology.links': 'Links',
+  'topology.link.dep': 'Declared dependency',
+  'topology.link.colo': 'Same host',
+  'topology.link.alias': 'Same IP',
+  'topology.link.clash': 'Address conflict',
+  'topology.hierarchy': 'Declared topology · {tier} · {count} link(s)',
+  'topology.hierarchyNotice':
+    'The arrows are declared data, not derived: env_endpoint records addresses and no column in it says "A calls B". Links live in env_app_link, are scoped to a tier — which is why the tier filter is required — and are edited on the Configuration page. They are drawn between app systems, never between endpoints.',
+  'topology.placeholders':
+    '{apps} is wired into the topology but has no endpoint in this view. It is drawn as a dashed placeholder.',
+  'topology.unlinked':
+    '{apps} has endpoints but no declared link in this tier. Add one on the Configuration page.',
+  'topology.placeholderNode': 'no endpoints recorded',
+  'topology.empty': 'No endpoints match the current filters.',
+  'topology.hint': 'Click a node for details · hover to highlight neighbours · drag to pan, Ctrl + scroll to zoom',
+  'topology.stats.nodes': 'Endpoints',
+  'topology.stats.systems': 'App systems',
+  'topology.stats.links': 'Links',
+  'topology.detail.title': 'Details',
+  'topology.detail.empty': 'Select a node or an app system on the graph.',
+  'topology.detail.links': 'Links',
+  'topology.detail.noLinks': 'No links in the current view.',
+  'topology.detail.url': 'URL',
+  'topology.detail.layer': 'Layer',
+  'topology.detail.placeholder':
+    'Declared in the topology, but no endpoint is recorded for this app system in the current view.',
+
   'matrix.title': 'Matrix',
   'matrix.subtitle': 'Service × country. Cells with an address clash are highlighted.',
   'matrix.service': 'Service',
@@ -65,6 +100,33 @@ const enUS = {
   'matrix.legendOk': 'Clean cell',
   'matrix.cellEndpoints': '{count} endpoints',
   'matrix.tooltipConflict': 'Conflicts on',
+
+  'links.tab.endpoints': 'Endpoints',
+  'links.tab.links': 'Topology links',
+  'links.title': 'Topology links',
+  'links.subtitle':
+    'Declare which app system talks to which. Scoped to one tier — saving replaces that tier and never touches the others.',
+  'links.tier': 'Tier',
+  'links.add': 'Add link',
+  'links.save': 'Save to database',
+  'links.reload': 'Reload',
+  'links.empty': 'No links declared for this tier yet.',
+  'links.saveHint':
+    'Saving replaces this tier\u2019s wiring: links removed here are deleted in the database. Other tiers are untouched.',
+  'links.sourceApp': 'From',
+  'links.targetApp': 'To',
+  'links.direction': 'Direction',
+  'links.direction.ONE_WAY': 'One way',
+  'links.direction.BIDIRECTIONAL': 'Both ways',
+  'links.note': 'Note',
+  'links.newLink': 'New link',
+  'links.editLink': 'Edit link',
+  'links.deleteConfirm': 'Remove this link? It is deleted from the database when you save.',
+  'links.duplicate': 'This tier already has a link from {source} to {target}.',
+  'links.selfLink': 'A link cannot start and end at the same app system.',
+  'links.appPlaceholder': 'Pick or type an app system',
+  'links.appHint':
+    'App systems come from the endpoints already recorded. Typing a new name is allowed — it appears on the graph as a placeholder until endpoints are added for it.',
 
   'config.title': 'Configuration',
   'config.subtitle':
