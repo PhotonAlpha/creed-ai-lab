@@ -33,8 +33,11 @@
 > 因此新增取值只需插入数据，无需改代码（但仍需按第 7 节约定同步本表）。
 
 **拓扑关系**由三张表承载：`env_release`（一个被命名的 release）、`env_release_node`（**参与者**，
-即一个环境切面 `(应用系统, 国家/地区, 环境实例)`）、`env_release_link`（两个参与者之间的连接，带
-`direction`）。
+即一个环境切面 `(应用系统, 国家/地区, 环境实例)`，外加画在哪里的 `layer` / `sort_order`）、
+`env_release_link`（两个参与者之间的连接，带 `direction`）。
+
+`layer` 可空：`null` 表示「按连接关系推导」，不能用 `0` 表达（`0` 是第 0 列）；`sort_order` 非空，
+默认 0。两者由拓扑图的「层级与顺序」对话框写入，随 `PUT /releases/{id}/topology` 一起保存。
 
 节点是切面而不是应用系统，因为同一个应用系统可以在一条链里出现两次：
 `SG CCS SIT3 → Global-CCS SIT2 → CN CCS SIT5`。release 负责说明哪些切面属于一起 —— 这也让
@@ -52,7 +55,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 
 - 前端：React + TypeScript + Vite + Ant Design Pro。
 - 后端：[creed-resource](../creed-resource)下创建新的resource
-- 联调：Vite 将 `/api` 代理到 `http://localhost:3001`。
+- 联调：Vite 把 `/api` 代理到 `VITE_API_TARGET`（`.env` 里是 `https://localhost:18095`）；
+  连 mock 或 `dev` profile 需要 `VITE_API_TARGET=http://localhost:3001`。
 
 ## 4. 目录结构（目标）
 
@@ -88,6 +92,16 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 列的顺序（层级）由连接关系推导：按存储的 `source -> target` 方向做最长路径分层。
 - 其余连线全部由现有数据推导：同 `host`（同机）、同 `ip` 不同 `host`（DNS 别名）、以及
   `/conflicts` 返回的地址冲突。
+- **topology 与 endpoint 的推导关系是单向的**：参与者按 `(应用系统, 国家/地区, 环境实例)` 认领
+  endpoint（`country='*'` 匹配所有，具体切面优先于通配切面，第一个匹配者胜出）；endpoint 不会反过来
+  产生参与者或连接。完整说明见 `README.md` / `README.zh-CN.md` 的「topology 与 endpoint 之间的
+  推导关系」一节 —— 改动这层关系时必须同步该节。
+- 参与者分组再按 **应用系统** 聚类成外层分组框（G6 嵌套 combo）；分层视图里外框按
+  *(应用系统, 层级)* 划分，因为同一应用系统可以出现在多个层级上。
+- 分层方向可切换 `→ ← ↓ ↑`；「层级与顺序」可把参与者钉到指定层级或调整顺序，写入
+  `env_release_node.layer` / `.sort_order`（暂存后一次保存，走 `PUT /releases/{id}/topology`）。
+  只有布局/方向/分组这类**不改变图的含义**的偏好留在 `localStorage`。
+- 配置编辑页的参与者表单不编辑这两个字段，但保存时必须原样带上 —— 该保存对整个 release 具有权威性。
 - 图库为 `@antv/g6` 5.x；两种布局的坐标均由 `buildGraph.ts` 自行计算，不使用 G6 内置布局。
 
 ### 5.3 配置编辑页（`/config`）
@@ -99,11 +113,17 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 
 ```bash
 npm install
-npm run dev    # 启动 UI（:5173）
+npm run dev                                        # 启动 UI（:5173），后端取自 .env
+npm run mock                                       # 无需数据库的 mock API（:3001）
+VITE_API_TARGET=http://localhost:3001 npm run dev  # 让 UI 连 mock 或 dev profile
 ```
 
 - 矩阵视图：`http://localhost:5173/`
 - 拓扑图：`http://localhost:5173/topology`
+
+**`npm run dev` 默认连的不是 mock。** 提交在仓库里的 `.env` 是
+`VITE_API_TARGET=https://localhost:18095`，即该模块常规的 HTTPS 实例。后果是：只要那个实例在跑，
+界面就有数据，一个没重启的旧后端看起来和前端坏掉完全一样 —— 排查问题前先确认代理指向。
 
 ## 7. 约定（给 Claude 的工作准则）
 

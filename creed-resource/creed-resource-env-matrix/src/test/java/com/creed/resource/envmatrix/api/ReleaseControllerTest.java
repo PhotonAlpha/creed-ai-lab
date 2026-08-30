@@ -211,6 +211,78 @@ class ReleaseControllerTest {
     }
 
     @Test
+    @DisplayName("PUT topology stores layer and sortOrder, and reads them back")
+    void savesLayout() throws Exception {
+        mockMvc.perform(put("/api/env-matrix/releases/" + releaseId + "/topology")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(map(
+                                "nodes", List.of(
+                                        map("id", sgCcs, "appSystem", "CCS", "country", "SG",
+                                                "envInstance", "SIT3", "layer", 3, "sortOrder", -2),
+                                        // No layer at all: the graph derives this one from the links.
+                                        map("id", globalCcs, "appSystem", "Global-CCS", "country", "*",
+                                                "envInstance", "SIT2")),
+                                "links", List.of(
+                                        map("id", linkRepository.findByReleaseIdOrderByIdAsc(releaseId).get(0).getId(),
+                                                "source", map("id", sgCcs), "target", map("id", globalCcs),
+                                                "direction", "ONE_WAY"))))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nodesUpdated").value(1));
+
+        mockMvc.perform(get("/api/env-matrix/releases/" + releaseId + "/topology"))
+                .andExpect(status().isOk())
+                // Ordered by app system, so CCS/SG is first and Global-CCS second.
+                .andExpect(jsonPath("$.nodes[0].layer").value(3))
+                .andExpect(jsonPath("$.nodes[0].sortOrder").value(-2))
+                // Never pinned, so the reader gets an explicit null rather than a made-up 0.
+                .andExpect(jsonPath("$.nodes[1].layer").doesNotExist())
+                .andExpect(jsonPath("$.nodes[1].sortOrder").value(0));
+    }
+
+    @Test
+    @DisplayName("PUT topology: clearing a pinned layer hands the participant back to the links")
+    void clearsLayer() throws Exception {
+        EnvReleaseNode pinned = nodeRepository.findById(sgCcs).orElseThrow();
+        pinned.setLayer(4);
+        nodeRepository.save(pinned);
+
+        mockMvc.perform(put("/api/env-matrix/releases/" + releaseId + "/topology")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(map(
+                                "nodes", List.of(
+                                        map("id", sgCcs, "appSystem", "CCS", "country", "SG",
+                                                "envInstance", "SIT3", "layer", null),
+                                        map("id", globalCcs, "appSystem", "Global-CCS", "country", "*",
+                                                "envInstance", "SIT2")),
+                                "links", List.of(
+                                        map("id", linkRepository.findByReleaseIdOrderByIdAsc(releaseId).get(0).getId(),
+                                                "source", map("id", sgCcs), "target", map("id", globalCcs),
+                                                "direction", "ONE_WAY"))))))
+                .andExpect(status().isOk());
+
+        assertThat(nodeRepository.findById(sgCcs).orElseThrow().getLayer()).isNull();
+    }
+
+    @Test
+    @DisplayName("PUT topology rejects a layer outside the drawable range, writing nothing")
+    void rejectsOutOfRangeLayer() throws Exception {
+        mockMvc.perform(put("/api/env-matrix/releases/" + releaseId + "/topology")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(map(
+                                "nodes", List.of(
+                                        map("id", sgCcs, "appSystem", "CCS", "country", "SG",
+                                                "envInstance", "SIT3", "layer", 400)),
+                                "links", List.of()))))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.issues", hasSize(1)))
+                .andExpect(jsonPath("$.issues[0].section").value("nodes"))
+                .andExpect(jsonPath("$.issues[0].field").value("layer"));
+
+        // The rejection is total: the participant the payload would have deleted is still there.
+        assertThat(nodeRepository.findByReleaseIdOrderByAppSystemAscCountryAscEnvInstanceAsc(releaseId)).hasSize(2);
+    }
+
+    @Test
     @DisplayName("PUT topology deletes what the payload omits, and only inside this release")
     void saveIsAuthoritativeForOneRelease() throws Exception {
         mockMvc.perform(put("/api/env-matrix/releases/" + releaseId + "/topology")

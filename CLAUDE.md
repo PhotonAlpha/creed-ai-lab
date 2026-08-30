@@ -51,7 +51,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-order` | 18091 / 18092 | `/api/order` | primary / secondary |
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
-| `creed-env-matrix-design` | 5173 | — | Vite, proxies `/api` → 3001 (target from `.env`) |
+| `creed-env-matrix-design` | 5173 | — | Vite, proxies `/api` → `VITE_API_TARGET` (`.env`: 18095) |
 | `creed-mock-buddy` | 18100 | — | HTTP, **Node/Fastify**; YAML mock server, standalone |
 | `creed-common-metrics` | — | — | library: `application-actuator.yml` + OTel helpers |
 

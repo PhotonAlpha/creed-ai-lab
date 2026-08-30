@@ -29,6 +29,56 @@ export function NodeDetail({ model, selectedId, kindColors }: NodeDetailProps) {
 
   const layerCount = Math.max(...model.combos.map((c) => c.layer), 0) + 1;
 
+  /*
+   * An app-system box, in either layout.
+   *
+   * Both lists are searched because the two layouts key their boxes differently — `app:CCS@2` in
+   * the layered view, `app:CCS` in the clustered one — and the ids cannot collide, so the panel
+   * does not need to know which layout is on screen.
+   */
+  const group =
+    model.appGroups.find((g) => g.id === selectedId) ??
+    model.clusterGroups.find((g) => g.id === selectedId);
+  if (group) {
+    const members = model.combos.filter((combo) => group.comboIds.includes(combo.id));
+    return (
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Typography.Title level={5} style={{ margin: 0 }}>
+          {group.appSystem}
+        </Typography.Title>
+        <Descriptions column={1} size="small" colon={false}>
+          <Descriptions.Item label={t('topology.detail.participants')}>
+            {members.length}
+          </Descriptions.Item>
+          <Descriptions.Item label={t('topology.stats.nodes')}>{group.count}</Descriptions.Item>
+          {group.layer !== null && (
+            <Descriptions.Item label={t('topology.detail.layer')}>
+              {group.layer + 1} / {layerCount}
+            </Descriptions.Item>
+          )}
+        </Descriptions>
+        <Space size={4} wrap>
+          {members.map((member) => (
+            <Tag key={member.id} bordered={false}>
+              {member.title}
+            </Tag>
+          ))}
+        </Space>
+        {/* The box itself has no edges — the arrows belong to the participants inside it. */}
+        <LinkList
+          links={model.edges.filter(
+            (edge) =>
+              group.comboIds.includes(edge.source) || group.comboIds.includes(edge.target),
+          )}
+          selectedId={selectedId}
+          ownIds={group.comboIds}
+          model={model}
+          kindColors={kindColors}
+        />
+      </Space>
+    );
+  }
+
   const combo = model.combos.find((c) => c.id === selectedId);
   if (combo) {
     return (
@@ -45,6 +95,13 @@ export function NodeDetail({ model, selectedId, kindColors }: NodeDetailProps) {
           <Descriptions.Item label={t('topology.stats.nodes')}>{combo.count}</Descriptions.Item>
           <Descriptions.Item label={t('topology.detail.layer')}>
             {combo.layer + 1} / {layerCount}
+            {/* A pinned participant is not where the links put it, and the panel is the only place
+                that difference is visible once the box has moved. */}
+            {combo.pinned && (
+              <Typography.Text type="warning" style={{ fontSize: 12, marginInlineStart: 6 }}>
+                {t('topology.detail.pinned', { derived: combo.derivedLayer + 1 })}
+              </Typography.Text>
+            )}
           </Descriptions.Item>
         </Descriptions>
         <LinkList links={links} selectedId={selectedId} model={model} kindColors={kindColors} />
@@ -129,15 +186,24 @@ export function NodeDetail({ model, selectedId, kindColors }: NodeDetailProps) {
 function LinkList({
   links,
   selectedId,
+  ownIds,
   model,
   kindColors,
 }: {
   links: TopoEdge[];
   selectedId: string;
+  /**
+   * Ids that count as "this side" of a link besides `selectedId`.
+   *
+   * An app-system box is never itself an end of an arrow — its participants are — so without this
+   * the list would name the participant the reader already selected instead of the far end.
+   */
+  ownIds?: string[];
   model: TopologyModel;
   kindColors: Record<EdgeKind, string>;
 }) {
   const { t } = useI18n();
+  const isOwn = (id: string) => id === selectedId || (ownIds?.includes(id) ?? false);
 
   const nameOf = (id: string) =>
     model.nodeById.get(id)?.endpoint?.service ??
@@ -173,7 +239,7 @@ function LinkList({
                   {t(`topology.link.${link.kind}` as MessageKey)}
                 </Tag>
                 <Typography.Text strong style={{ fontSize: 12 }}>
-                  {nameOf(link.source === selectedId ? link.target : link.source)}
+                  {nameOf(isOwn(link.source) ? link.target : link.source)}
                 </Typography.Text>
               </Space>
               {/* The reason is a full host or `ip:port`, far too long to sit on the same line as the

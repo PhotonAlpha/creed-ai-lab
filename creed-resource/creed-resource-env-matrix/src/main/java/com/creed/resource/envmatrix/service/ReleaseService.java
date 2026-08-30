@@ -41,6 +41,16 @@ import java.util.Set;
 @Slf4j
 public class ReleaseService {
 
+    /**
+     * Bounds for a pinned layer and a sort order, mirroring the check constraints in {@code V5}.
+     *
+     * <p>The graph draws one column per layer, so a layer of 400 is 400 columns of empty canvas
+     * between the rest of the release and the one pinned box — an accident every time, never an
+     * intention.
+     */
+    private static final int MAX_LAYER = 99;
+    private static final int MAX_SORT_ORDER = 999;
+
     private final EnvReleaseRepository releaseRepository;
     private final EnvReleaseNodeRepository nodeRepository;
     private final EnvReleaseLinkRepository linkRepository;
@@ -230,6 +240,18 @@ public class ReleaseService {
             if (row.id() != null) {
                 payloadNodeIds.add(row.id());
             }
+            // Kept in step with ck_env_release_node_layer / _sort_order. Reported per row rather than
+            // by bean validation so a stray number names its participant instead of 400-ing the
+            // whole release, which is the same bargain the endpoint batch save makes.
+            if (row.layer() != null && (row.layer() < 0 || row.layer() > MAX_LAYER)) {
+                issues.add(issue("nodes", index, row.id(), "layer",
+                        "layer must be between 0 and " + MAX_LAYER));
+            }
+            if (row.sortOrder() != null
+                    && (row.sortOrder() < -MAX_SORT_ORDER || row.sortOrder() > MAX_SORT_ORDER)) {
+                issues.add(issue("nodes", index, row.id(), "sortOrder",
+                        "sortOrder must be between -" + MAX_SORT_ORDER + " and " + MAX_SORT_ORDER));
+            }
             String identity = row.appSystem() + "|" + row.country() + "|" + row.envInstance();
             if (!identities.add(identity)) {
                 issues.add(issue("nodes", index, row.id(), "appSystem",
@@ -325,7 +347,17 @@ public class ReleaseService {
         node.setEnvInstance(row.envInstance());
         node.setLabel(blankToNull(row.label()));
         node.setNote(blankToNull(row.note()));
+        // A missing layer is "derive it from the links" and stays null; a missing sortOrder is the
+        // default position. Both are absent from any client that predates them, and this is a full
+        // replace — reading them as "unset" is what keeps such a client from being a destructive one.
+        node.setLayer(row.layer());
+        node.setSortOrder(sortOrderOf(row));
         return node;
+    }
+
+    /** {@code null} means "not reordered", which the whole stack spells 0. */
+    private static int sortOrderOf(ReleaseTopologyRequest.Node row) {
+        return row.sortOrder() == null ? 0 : row.sortOrder();
     }
 
     private static EnvReleaseLink apply(EnvReleaseLink link, Long releaseId,
@@ -343,7 +375,10 @@ public class ReleaseService {
                 || !Objects.equals(stored.getCountry(), row.country())
                 || !Objects.equals(stored.getEnvInstance(), row.envInstance())
                 || !Objects.equals(stored.getLabel(), blankToNull(row.label()))
-                || !Objects.equals(stored.getNote(), blankToNull(row.note()));
+                || !Objects.equals(stored.getNote(), blankToNull(row.note()))
+                || !Objects.equals(stored.getLayer(), row.layer())
+                || !Objects.equals(
+                        stored.getSortOrder() == null ? 0 : stored.getSortOrder(), sortOrderOf(row));
     }
 
     private static boolean differs(EnvReleaseLink stored, ReleaseTopologyRequest.Link row,

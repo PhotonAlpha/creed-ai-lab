@@ -173,6 +173,9 @@ export function ReleasePanel({ dimensions }: ReleasePanelProps) {
           appSystem: values.appSystem,
           country: values.country,
           envInstance: values.envInstance,
+          // Unpinned: the graph derives its layer from the links until someone says otherwise.
+          layer: null,
+          sortOrder: 0,
         },
       ]);
     }

@@ -115,7 +115,14 @@ export interface Release {
   version: number;
 }
 
-/** One participant: an environment slice. `country` is `'*'` when it is not country-specific. */
+/**
+ * One participant: an environment slice. `country` is `'*'` when it is not country-specific.
+ *
+ * `layer` and `sortOrder` are where it is *drawn*, as opposed to what it is connected to. The graph
+ * ranks participants by a longest path over the links; `layer` overrides that ranking for this
+ * participant alone, and `null` — the state every participant starts in — means "derive it". They
+ * live on the release rather than in the browser so that everyone opening it sees the same picture.
+ */
 export interface ReleaseNode {
   id: number;
   appSystem: string;
@@ -123,6 +130,10 @@ export interface ReleaseNode {
   envInstance: string;
   label: string | null;
   note: string | null;
+  /** Pinned layer, or `null` to derive it from the links. */
+  layer: number | null;
+  /** Position within the layer; `0` is the default order. */
+  sortOrder: number;
 }
 
 /** One connection. Both ends are participant ids within the same release. */
@@ -168,6 +179,9 @@ export interface ReleaseTopologyRequest {
     envInstance: string;
     label?: string | null;
     note?: string | null;
+    /** `null` clears the pin and hands the participant back to the derived layering. */
+    layer?: number | null;
+    sortOrder?: number;
   }>;
   links: Array<{
     id?: number;

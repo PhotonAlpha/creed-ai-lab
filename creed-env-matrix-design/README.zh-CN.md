@@ -21,9 +21,11 @@
 
 ```bash
 npm install
-npm run mock     # 终端 1 —— Mock API 运行在 :3001，数据来自 server/mock.json
-npm run dev      # 终端 2 —— UI 运行在 :5173
+npm run mock                                        # 终端 1 —— Mock API 运行在 :3001
+VITE_API_TARGET=http://localhost:3001 npm run dev   # 终端 2 —— UI 运行在 :5173
 ```
+
+（这个环境变量不是可选的 —— 见下面的《`npm run dev` 实际连的是哪个后端》。）
 
 ### 方式 B —— 真实后端（PostgreSQL）
 
@@ -35,24 +37,37 @@ docker exec creed-artifactory-db createdb -U artifactory env_matrix
 cd .. && mvn -pl creed-resource/creed-resource-env-matrix spring-boot:run \
   -Dspring-boot.run.profiles=dev -Dspring-boot.run.workingDirectory="$PWD"
 
-# 3. 启动 UI
-npm run dev
+# 3. 启动 UI，并把代理指向 :3001
+VITE_API_TARGET=http://localhost:3001 npm run dev
 ```
 
 浏览器打开 <http://localhost:5173/>。
 
-两种方式都在 `3001` 端口提供完全相同的契约，因此前端无需任何改动即可切换。若要改为访问该模块常规的
-HTTPS 配置：
+### `npm run dev` 实际连的是哪个后端
+
+**仓库里提交的 `.env` 指向的是 HTTPS 配置，不是 mock：**
+
+```
+VITE_API_TARGET=https://localhost:18095
+```
+
+因此直接 `npm run dev` 会把 `/api` 代理到 **:18095** 上的 `creed-resource-env-matrix`
+（`primary` / `secondary` / `cloud`；`vite.config.ts` 里的 `secure: false` 才让 Creed-CA 自签证书
+可用）。上面 A、B 两种方式都监听 **:3001**，需要把目标改回去：
 
 ```bash
-VITE_API_TARGET=https://localhost:18095 npm run dev
+VITE_API_TARGET=http://localhost:3001 npm run dev
 ```
+
+排查「改了没生效」之前值得先确认这一点：只要 HTTPS 后端在跑，无论有没有启动 `npm run mock`，界面都
+会正常显示数据 —— 于是一个没重启的旧后端，看起来和前端坏掉一模一样。shell 里导出的
+`VITE_API_TARGET` 优先于 `.env`，两者都由 `vite.config.ts` 中的 `loadEnv` 读取。
 
 ### 脚本
 
 | 脚本 | 作用 |
 |---|---|
-| `npm run dev` | Vite 开发服务器（`:5173`），将 `/api` 代理到 `:3001` |
+| `npm run dev` | Vite 开发服务器（`:5173`），将 `/api` 代理到 `VITE_API_TARGET`（`.env`：`https://localhost:18095`） |
 | `npm run mock` | Node Mock API（`:3001`，可用 `PORT=…` 修改） |
 | `npm run build` | 类型检查并产出 `dist/` |
 | `npm run typecheck` | 仅做类型检查 |
@@ -142,13 +157,13 @@ Mock 服务器移植了 Java 的 `String.hashCode` 实现，因此在相同种�
 ### 拓扑图（`/topology`）
 
 把当前过滤出的切面画成图。每个 endpoint 一张卡片——服务名、`ip:port`、实例、协议,左侧色条表示健康
-状态——按应用系统装进虚线分组框。
+状态——先按参与者装进虚线分组框,这些分组框再按应用系统装进外层分组框。
 
 四种连线,工具栏可逐个开关:
 
 | 连线 | 含义 | 来源 |
 |---|---|---|
-| 实线箭头 | 声明的依赖,应用系统 → 应用系统 | `pages/Topology/topology.config.ts` |
+| 实线箭头 | 声明的依赖,参与者 → 参与者 | 一行 `env_release_link` |
 | 灰虚线 | 两个 endpoint 落在同一个 `host` 上 | 由 `/endpoints` 推导 |
 | 蓝点线 | 两个主机名解析到同一个 `ip` | 由 `/endpoints` 推导 |
 | 红虚线 | 同一个 `host:port` 或 `ip:port` 被占用两次 | `/conflicts` |
@@ -161,7 +176,7 @@ Mock 服务器移植了 Java 的 `String.hashCode` 实现，因此在相同种�
 | 表 | 内容 |
 |---|---|
 | `env_release` | 名称、环境层级(仅作标签)、状态(`DRAFT`/`ACTIVE`/`ARCHIVED`) |
-| `env_release_node` | 一个 **参与者** —— `(应用系统, 国家/地区, 环境实例)` |
+| `env_release_node` | 一个 **参与者** —— `(应用系统, 国家/地区, 环境实例)`,以及画在哪里(`layer`、`sort_order`) |
 | `env_release_link` | 两个参与者之间的连接,以及 `direction` |
 
 **本页必须选定一个 release。** 连接之所以不能只写两个应用系统,是因为同一个应用系统可以在一条链里
@@ -182,8 +197,91 @@ SG CCS SIT3  →  Global-CCS SIT2  →  CN CCS SIT5
 条件而消失。
 
 列的顺序由连接本身推导:`rankParticipants` 按存储的 `source -> target` 方向做最长路径分层,所以
-x 轴本身就是层级关系。`direction` 不参与分层 —— 把双向连接当成两条边会让每一对都成为环。两种布局:
+流向轴本身就是层级关系。`direction` 不参与分层 —— 把双向连接当成两条边会让每一对都成为环。两种布局:
 **分层** 与 **按系统聚类**,坐标都由 `pages/Topology/buildGraph.ts` 计算,不走 G6 布局。
+
+#### topology 与 endpoint 之间的推导关系
+
+本模块的两半记录的是两类不同的事实,而图是二者的连接(join)。`env_endpoint` 说明的是**某个东西在
+哪里应答**;它里面没有任何一列、也没有任何可以从 host / port 算出来的东西,能说明「A 调用 B」。
+`env_release_node` / `env_release_link` 说明的是**谁与谁通信**,而它们完全不知道地址。两张表之间
+**故意不设外键**。
+
+图上的每一样东西,要么直接来自其中一张表,要么来自作用在其上的一条规则:
+
+| 图上元素 | 来源 | 规则 |
+|---|---|---|
+| Endpoint 卡片 | 过滤结果中的一行 `env_endpoint` | 只有被某个参与者认领时才画出来 |
+| 虚线占位节点 | 一行 `env_release_node` | 该参与者没有匹配到任何 endpoint |
+| 参与者分组框 | 一行 `env_release_node` | 无论有没有 endpoint 都会画 |
+| 分组框画在哪 | `env_release_node.layer` / `.sort_order` | 覆盖该参与者由连接推导出的层级 |
+| 应用系统分组框 | 参与者分组框 | 按 `appSystem` 聚类 —— 仅是展示层 |
+| 实线箭头 | 一行 `env_release_link` | 画在分组框之间,绝不画在卡片之间 |
+| 灰虚线 | endpoint | 同 `host`,按端口串成链 |
+| 蓝点线 | endpoint | 同 `ip` 不同 `host`,每个主机名取一张代表卡片 |
+| 红虚线 | `GET /conflicts` | 冲突由后端判定,图只负责画 |
+| 层级(列 / 行) | 连接关系 | 按 `source -> target` 做最长路径,见下 |
+| Endpoint 计数、「未认领」横幅 | endpoint | 没有被任何参与者认领 |
+
+**认领规则**就是这个 join 的全部,而且只有一个方向 —— 由参与者去认领 endpoint:
+
+```
+参与者(应用系统, 国家/地区, 环境实例)  ⟕  endpoint(应用系统, 国家/地区, 环境实例)
+
+参与者的 country = '*' 匹配所有国家/地区
+第一个匹配上的参与者胜出;排序时具体切面排在通配切面之前
+```
+
+读图之前值得先知道由此带来的三个后果:
+
+- **没有被任何参与者认领的 endpoint 不会出现在画布上**,而是记入横幅计数 —— 这说明的是 release
+  没有覆盖到它,而不是这个 endpoint 有问题。
+- **没有匹配到 endpoint 的参与者仍然会出现在画布上**,画成虚线占位节点。「已接入拓扑」与「已录入
+  矩阵」之间的这个缺口,正是这个工具要暴露的东西。
+- **endpoint 过滤条件永远不影响连线。** 它改变的是分组框里有哪些卡片;分组框、箭头和分层只按
+  release id 拉取。
+
+**分层**只由连接关系推导,不看别的:
+
+```
+layer(p) = 0                          若没有任何声明的连接指向 p
+         = max(layer(source)) + 1     对每条 source -> p 的连接取最大值
+         (回到当前路径上的边会被跳过,因此用户声明出来的环不会让遍历挂死)
+```
+
+`direction` 不参与:它只决定箭头样式,而把 `BIDIRECTIONAL` 当成两条边会让每一对都变成二元环,分层
+也就无从谈起。
+
+在此基础上,参与者可以被**钉住**:`env_release_node.layer` 替换该参与者的层号,其下游仍留在连接关系
+给出的位置上。`null`(每个参与者的初始状态)表示「按连接推导」,而且不能用 `0` 表达 —— `0` 是「第 0
+列」。`sort_order` 对另一条轴做同样的事,应用系统整体移动(一个聚类取其成员中最小的 sort_order)。
+两者都在图上的 **层级与顺序** 对话框里编辑。
+
+反方向的推导一概不存在:新增 endpoint 不会产生参与者或箭头,新增连接也不会产生 endpoint。图上关于
+「谁调用谁」的一切,都是有人在 **配置编辑 → Release 拓扑** 页里录进去的。
+
+#### 读图控件
+
+| 控件 | 作用 | 保存在 |
+|---|---|---|
+| **分层 / 按系统聚类** | 沿一个轴展开层级,或每个应用系统一块 | 当前浏览器 |
+| **→ ← ↓ ↑** | 分层视图的流向;第 0 层位于箭头的尾端 | 当前浏览器 |
+| **按应用系统分组** | 为同一应用系统的参与者画一个外框,并把它们排在一起 | 当前浏览器 |
+| **层级与顺序** | 把参与者钉到指定层级,或调整应用系统在垂直轴上的先后顺序 | release |
+
+这里的分界是「读图的人怎么看」与「这张图说了什么」。方向与应用系统外框属于阅读习惯,保存在
+`localStorage`,换 release 也保留;而钉住的层级是对这套环境的一个判断 ——「不管连接怎么画,这个切面
+就是独立的一步」—— 所以它属于 release 本身,存在 `env_release_node.layer` / `.sort_order`,下一个
+打开这个 release 的人看到的是同一张图。
+
+**层级与顺序**对话框把改动暂存,由一次 **保存** 一起写入;在保存落地之前,后面的图不会动。写入走的是
+配置编辑页同一个具有权威性的 `PUT /releases/{id}/topology`,因此它会把该 release 的整份拓扑原样重发,
+只替换这两个字段。清空单元格(`自动`)即把该参与者交还给推导出的分层,**全部重置**则交还整个
+release —— 两者都仍需保存。
+
+由于同一个应用系统完全可能出现在多个层级上,分层视图里的应用系统分组框是按 *(应用系统, 层级)* 来
+分的:第 0 列的 `SG CCS SIT3` 和第 2 列的 `CN CCS SIT5` 是两个框,而不是一个横跨中间所有内容的
+大框。
 
 ### 配置编辑（`/config`）
 
@@ -201,7 +299,9 @@ x 轴本身就是层级关系。`direction` 不参与分层 —— 把双向连�
 release 具有权威性：在此删除的行会从数据库中删除，其他 release 完全不受影响。
 
 参与者用自由输入编辑（尚无 endpoint 的切面是合法的，会显示为占位节点）；连接的两端从本 release 的
-参与者中选取，所以必须先有参与者才能连线。刚添加、尚未保存的参与者同样可选 —— 编辑器会把它作为
+参与者中选取，所以必须先有参与者才能连线。`layer` 与 `sort_order` 在这里不可编辑 —— 层级只有放在周围
+的分组框旁边才有意义，所以它在图上设置 —— 但这一页保存时会原样带上它们：保存对整个 release 具有权威性，
+漏掉这两个字段就等于清掉别人排好的层级。刚添加、尚未保存的参与者同样可选 —— 编辑器会把它作为
 `ref` 提交，由保存时解析成新行的 id。同时声明 `A → B` 和 `B → A` 会被拒绝，双向连接请用
 `BIDIRECTIONAL`。
 

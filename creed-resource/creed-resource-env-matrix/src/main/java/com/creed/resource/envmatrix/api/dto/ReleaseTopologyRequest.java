@@ -35,7 +35,19 @@ public record ReleaseTopologyRequest(
             @NotBlank @Size(max = 32) String envInstance,
 
             @Size(max = 64) String label,
-            @Size(max = 512) String note) {
+            @Size(max = 512) String note,
+
+            /**
+             * Layer to draw this participant in, or {@code null} to derive it from the links.
+             *
+             * <p>Range-checked in {@code ReleaseService.validate} rather than with {@code @Min} /
+             * {@code @Max}: bean validation fails the whole request with a 400, and this contract
+             * answers a bad row with a 422 naming the row and the field.
+             */
+            Integer layer,
+
+            /** Position within the layer; {@code null} is read as {@code 0}, the default order. */
+            Integer sortOrder) {
     }
 
     /** A connection. Both ends are {@link NodeRef}s resolved against {@code nodes}. */

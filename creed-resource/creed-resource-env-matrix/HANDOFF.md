@@ -32,14 +32,28 @@ payment 18083, env-matrix 18084) — this module originally used 18095 there, br
 
 ## Current state
 
-Complete and verified end to end against real PostgreSQL. **34 tests pass.**
+Complete and verified end to end against real PostgreSQL. **37 tests pass.**
+
+`V5` has been applied to the live `env_matrix` database and exercised from the frontend: pinning a
+participant and reordering an app system wrote `layer` / `sort_order` (and bumped the version) on
+**only** the two changed rows, a reload drew the stored layout, and the editor's *Reset all* put
+every row back to `null` / `0`.
 
 - Flyway `V1` creates `env_endpoint` (7 dimension columns + host/ip/port, unique index on the
   dimension tuple, indexes for the conflict scan); `V2` seeds **1235 rows** including **4 deliberate
   conflicts** (see the `note` column) so a fresh database is not empty.
 - Flyway `V3` created `env_app_link`; **`V4` drops it** and creates the release topology —
   `env_release` / `env_release_node` / `env_release_link` — seeding one baseline release per tier
-  plus a cross-country example.
+  plus a cross-country example. **`V5` adds `env_release_node.layer` / `.sort_order`**: where the
+  graph draws a participant, as opposed to what it is connected to.
+- **`layer` is nullable and `null` means "derive it from the links"** — the frontend ranks
+  participants by a longest path over `env_release_link`, and a number here overrides that ranking
+  for that participant only. `0` could not be the unset value: it means "column 0", so a link added
+  later that ought to push the box right would silently disagree with a number nobody chose.
+  `sort_order` is NOT NULL default 0, so a release nobody has arranged looks exactly as it did
+  before the columns existed. Both are range-checked twice — `ck_env_release_node_layer` /
+  `_sort_order` in `V5`, and per row in `ReleaseService.validate` so a stray number comes back as a
+  422 naming the participant rather than a 400 for the whole release.
 - `/api/env-matrix`: endpoint CRUD, batch save, `/matrix`, `/conflicts`, `/dimensions`, `/health`,
   `/health/recheck`, plus **release CRUD** (`/releases`, `/releases/{id}`) and the topology pair
   `GET|PUT /releases/{id}/topology`. Errors use one envelope `{error, message, fields?, time}`.
@@ -72,6 +86,10 @@ Complete and verified end to end against real PostgreSQL. **34 tests pass.**
 - **A participant may name a slice with no endpoints.** Legal on purpose — the frontend draws it as
   a placeholder, and the gap between "wired into the topology" and "recorded in the matrix" is
   exactly what the viewer exists to surface. Do not add a foreign key to `env_endpoint`.
+- **Any client of `PUT /releases/{id}/topology` must resend `layer` and `sortOrder`.** The save
+  replaces the release's whole topology, and a missing `layer` is read as "unpinned" — which is what
+  makes a client that predates the columns harmless, and what makes one that simply forgot them
+  destructive. The frontend's configuration page carries both fields through untouched.
 - **`PUT /releases/{id}/topology` saves participants and links together**, and a link may point at a
   participant created in the same payload via `{"ref": "..."}`. They are one graph: a link cannot
   exist without its ends, and "add a participant and connect it" is the commonest edit. Splitting

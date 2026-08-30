@@ -64,6 +64,26 @@ public class EnvReleaseNode {
     @Column(name = "label", length = 64)
     private String label;
 
+    /**
+     * The layer to draw this participant in, or {@code null} to derive it from the links.
+     *
+     * <p>Nullable on purpose. The graph ranks participants by a longest path over
+     * {@code env_release_link}; a number here overrides that ranking for this participant only and
+     * leaves everything downstream of it where the links put it. {@code 0} would not do as the
+     * "unset" value — it means "column 0", and a link added later that ought to push the box right
+     * would then silently disagree with a number nobody chose.
+     */
+    @Column(name = "layer")
+    private Integer layer;
+
+    /**
+     * Position along the cross axis within a layer; {@code 0} is "wherever the default order puts
+     * it". Never null, so a release nobody has reordered sorts exactly as it did before the column
+     * existed. App systems move as blocks: a cluster takes the lowest sort order of its members.
+     */
+    @Column(name = "sort_order", nullable = false)
+    private Integer sortOrder = 0;
+
     @Column(name = "note", length = 512)
     private String note;
 

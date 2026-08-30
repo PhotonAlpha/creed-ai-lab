@@ -7,13 +7,17 @@ import type {
 } from '../../api/types';
 import { ANY_COUNTRY } from '../../api/types';
 import {
+  APP_GROUP_GAP,
+  CLUSTER_BLOCKS_PER_ROW,
   CLUSTER_GAP,
   CLUSTER_MAX_COLS,
   COL_GAP,
   GROUP_GAP,
+  MAX_LANE_NODES_VERTICAL,
   MAX_ROWS,
   NODE_H,
   NODE_W,
+  ROW_BAND_GAP,
   ROW_GAP,
   SUB_COL_GAP,
 } from './topology.config';
@@ -46,6 +50,38 @@ export const EDGE_KINDS: readonly EdgeKind[] = ['dep', 'colo', 'alias', 'clash']
  */
 export type TopologyLayout = 'layered' | 'cluster';
 
+/**
+ * Which way the declared hierarchy runs across the canvas.
+ *
+ * `LR` is the default and the one the ranking was written for: layer 0 on the left, arrows pointing
+ * right. The other three are the same layering read along a different axis — the maths works in
+ * (rank, cross) space and only the final mapping to x/y differs — because "upstream" is a direction
+ * people argue about: a release chain reads left-to-right on a slide and top-to-bottom in a runbook.
+ */
+export type Orientation = 'LR' | 'RL' | 'TB' | 'BT';
+
+export const ORIENTATIONS: readonly Orientation[] = ['LR', 'RL', 'TB', 'BT'];
+
+/**
+ * How to draw the graph. Everything that is *what the release says* comes in as data instead.
+ *
+ * The hand-placed hierarchy used to live here as a set of overrides read from `localStorage`; it is
+ * now `env_release_node.layer` / `.sort_order`, saved with the rest of the topology. A layer pin is
+ * a statement about the estate — "this slice is a step of its own" — and the one reader who worked
+ * that out is exactly the person whose colleagues need to see it. What stays a browser preference is
+ * only what does not change the picture's meaning: orientation and the app-system boxes.
+ */
+export interface TopologyOptions {
+  orientation: Orientation;
+  /** Draw (and pack) participants of one app system inside a shared box. */
+  groupByApp: boolean;
+}
+
+export const DEFAULT_OPTIONS: TopologyOptions = {
+  orientation: 'LR',
+  groupByApp: true,
+};
+
 export interface TopoNode {
   id: string;
   comboId: string;
@@ -75,7 +111,37 @@ export interface TopoCombo {
   envInstance: string;
   /** `CCS · SG · SIT3`, or the participant's own label when it has one. */
   title: string;
+  /** The layer actually drawn: the pinned one when there is one, otherwise {@link derivedLayer}. */
   layer: number;
+  /** What the links alone say, kept so the UI can show "derived 1 · pinned 3". */
+  derivedLayer: number;
+  /** Whether {@link layer} came from an override rather than from the links. */
+  pinned: boolean;
+  /** `env_release_node.sort_order`; `0` when nobody has reordered this release. */
+  order: number;
+  /** The app-system box this participant sits in, in the `layered` layout. */
+  appGroupId: string;
+  /** The app-system box this participant sits in, in the `cluster` layout. */
+  clusterGroupId: string;
+  count: number;
+}
+
+/**
+ * One app-system cluster: the box drawn around every participant of the same app system.
+ *
+ * This is a **presentation** grouping and nothing more. A topology node is still a slice, for the
+ * reason it always was — CCS can appear twice in one chain — so in the layered view the cluster is
+ * per *(app system, layer)*: `SG CCS SIT3` in column 0 and `CN CCS SIT5` in column 2 are two boxes,
+ * not one box stretched across the graph and over everything between them.
+ */
+export interface TopoAppGroup {
+  id: string;
+  appSystem: string;
+  /** The band this cluster sits in; `null` in the `cluster` layout, which has no bands. */
+  layer: number | null;
+  /** Participant combo ids inside the box, in drawing order. */
+  comboIds: string[];
+  /** Real endpoints inside the box — placeholders excluded, as in {@link TopoCombo.count}. */
   count: number;
 }
 
@@ -93,6 +159,10 @@ export interface TopoEdge {
 export interface TopologyModel {
   nodes: TopoNode[];
   combos: TopoCombo[];
+  /** App-system boxes for the `layered` layout — one per app system *per layer*. */
+  appGroups: TopoAppGroup[];
+  /** App-system boxes for the `cluster` layout — one per app system. */
+  clusterGroups: TopoAppGroup[];
   edges: TopoEdge[];
   nodeById: Map<string, TopoNode>;
   counts: Record<EdgeKind, number>;
@@ -106,6 +176,9 @@ export interface TopologyModel {
 
 export const nodeIdOf = (endpoint: Endpoint) => `e:${endpoint.id}`;
 export const comboIdOf = (participantId: number) => `p:${participantId}`;
+/** Layered: one box per app system *and layer*; cluster: one per app system. See {@link TopoAppGroup}. */
+export const appGroupIdOf = (appSystem: string, layer: number | null) =>
+  layer === null ? `app:${appSystem}` : `app:${appSystem}@${layer}`;
 const placeholderIdOf = (participantId: number) => `ghost:${participantId}`;
 
 /** `CCS · SG · SIT3`; a country-agnostic slice drops the middle segment. */
@@ -176,8 +249,26 @@ export function buildTopology(
   conflicts: ConflictGroup[],
   participants: ReleaseNode[],
   releaseLinks: ReleaseLink[],
+  options: TopologyOptions = DEFAULT_OPTIONS,
 ): TopologyModel {
-  const ranks = rankParticipants(participants, releaseLinks);
+  const { orientation, groupByApp } = options;
+  const derived = rankParticipants(participants, releaseLinks);
+
+  /*
+   * A stored `layer` replaces one participant's rank and nothing else — the participants downstream
+   * of it keep the layer the links gave them.
+   *
+   * Re-deriving the whole graph from a pin is the obvious alternative and it is worse: moving one
+   * box one column to the right would shunt half the picture with it, and whoever pinned it was
+   * saying "the longest path got *this one* wrong", not "re-rank everything". `null` is the unpinned
+   * state and cannot be spelt `0`, which means "column 0".
+   */
+  const pinnedBy = new Map(participants.map((participant) => [participant.id, participant.layer]));
+  const layerOf = (participantId: number) =>
+    pinnedBy.get(participantId) ?? derived.get(participantId) ?? 0;
+  const orderBy = new Map(participants.map((participant) => [participant.id, participant.sortOrder ?? 0]));
+  const orderOf = (participantId: number) => orderBy.get(participantId) ?? 0;
+  const ranks = new Map(participants.map((participant) => [participant.id, layerOf(participant.id)]));
 
   /*
    * An endpoint is claimed by the first participant whose slice matches it.
@@ -241,6 +332,19 @@ export function buildTopology(
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
 
+  /*
+   * An app system's place along the cross axis is the *lowest* order key any of its participants
+   * carries. Ordering is declared per participant — that is the row the viewer has in front of them
+   * in the layer editor — but the app systems have to move as blocks, or reordering one slice
+   * would tear its own cluster in half and the box around it would have to span the gap.
+   */
+  const appOrder = new Map<string, number>();
+  for (const participant of participants) {
+    const key = orderOf(participant.id);
+    const current = appOrder.get(participant.appSystem);
+    if (current === undefined || key < current) appOrder.set(participant.appSystem, key);
+  }
+
   const combos: TopoCombo[] = participants
     .map((participant) => ({
       id: comboIdOf(participant.id),
@@ -250,9 +354,26 @@ export function buildTopology(
       envInstance: participant.envInstance,
       title: titleOf(participant),
       layer: ranks.get(participant.id) ?? 0,
+      derivedLayer: derived.get(participant.id) ?? 0,
+      pinned: participant.layer != null,
+      order: orderOf(participant.id),
+      appGroupId: appGroupIdOf(participant.appSystem, layerOf(participant.id)),
+      clusterGroupId: appGroupIdOf(participant.appSystem, null),
       count: (membersOf.get(participant.id) ?? []).filter((m) => m.endpoint !== null).length,
     }))
-    .sort((a, b) => a.layer - b.layer || a.title.localeCompare(b.title));
+    // This order *is* the drawing order: the layouts walk the list as it comes, so app systems have
+    // to be contiguous here or their boxes would have to enclose a neighbour's participants.
+    .sort(
+      (a, b) =>
+        a.layer - b.layer ||
+        (appOrder.get(a.appSystem) ?? 0) - (appOrder.get(b.appSystem) ?? 0) ||
+        a.appSystem.localeCompare(b.appSystem) ||
+        a.order - b.order ||
+        a.title.localeCompare(b.title),
+    );
+
+  const appGroups = collectAppGroups(combos, (combo) => combo.appGroupId, true);
+  const clusterGroups = collectAppGroups(combos, (combo) => combo.clusterGroupId, false);
 
   const placeholders = combos.filter((combo) => combo.count === 0).map((combo) => combo.title);
   const linked = new Set(releaseLinks.flatMap((link) => [link.sourceNodeId, link.targetNodeId]));
@@ -268,14 +389,14 @@ export function buildTopology(
     if (bucket) bucket.push(node);
     else byCombo.set(node.comboId, [node]);
   }
-  const columns = new Map<number, TopoCombo[]>();
+  const bands = new Map<number, TopoCombo[]>();
   for (const combo of combos) {
-    const bucket = columns.get(combo.layer);
+    const bucket = bands.get(combo.layer);
     if (bucket) bucket.push(combo);
-    else columns.set(combo.layer, [combo]);
+    else bands.set(combo.layer, [combo]);
   }
-  layOutColumns(columns, byCombo);
-  layOutClusters(combos, byCombo);
+  layOutLayered(bands, byCombo, orientation, groupByApp);
+  layOutClusters(clusterGroups, byCombo, groupByApp);
 
   // ---- edges ----
   const edges: TopoEdge[] = [];
@@ -344,7 +465,44 @@ export function buildTopology(
     {} as Record<EdgeKind, number>,
   );
 
-  return { nodes, combos, edges, nodeById, counts, unlinked, placeholders, unclaimed };
+  return {
+    nodes,
+    combos,
+    appGroups,
+    clusterGroups,
+    edges,
+    nodeById,
+    counts,
+    unlinked,
+    placeholders,
+    unclaimed,
+  };
+}
+
+/** Collapses the already-ordered combo list into app-system boxes, preserving that order. */
+function collectAppGroups(
+  combos: TopoCombo[],
+  idOf: (combo: TopoCombo) => string,
+  layered: boolean,
+): TopoAppGroup[] {
+  const groups = new Map<string, TopoAppGroup>();
+  for (const combo of combos) {
+    const id = idOf(combo);
+    const group = groups.get(id);
+    if (group) {
+      group.comboIds.push(combo.id);
+      group.count += combo.count;
+    } else {
+      groups.set(id, {
+        id,
+        appSystem: combo.appSystem,
+        layer: layered ? combo.layer : null,
+        comboIds: [combo.id],
+        count: combo.count,
+      });
+    }
+  }
+  return [...groups.values()];
 }
 
 /**
@@ -391,91 +549,200 @@ function rankParticipants(participants: ReleaseNode[], links: ReleaseLink[]): Ma
 /**
  * Places every node for the `layered` layout.
  *
- * One column per declared layer, participants stacked inside their column. A group taller than
- * {@link MAX_ROWS} wraps into sub-columns instead of growing downwards: an environment with a dozen
- * endpoints per system is otherwise a single 1500px-tall ribbon, and fitting that into the viewport
- * shrinks the cards until nothing on them is readable. Wrapping trades unused horizontal space —
- * which a three-column graph has plenty of — for a shape that fits.
+ * The maths runs in **(rank, cross)** space and only the last step knows about x and y: `rank` is
+ * the hierarchy axis — one band per declared layer — and `cross` is the axis participants stack
+ * along inside a band. `LR` maps rank to x, `TB` maps it to y, and the two reversed orientations
+ * negate it. Writing the four orientations as four layouts was the alternative and it duplicates
+ * every gap, wrap and centring decision four times over.
  *
- * Columns are laid out left to right by declared layer, so the x axis *is* the hierarchy.
+ * The card is 196 × 52, so which axis a group grows along matters: a band wraps into another *lane*
+ * (offset along rank) once a participant reaches {@link MAX_ROWS} cards vertically or
+ * {@link MAX_LANE_NODES_VERTICAL} horizontally. Without the wrap, an environment with a dozen
+ * endpoints per system is a single 1500px ribbon and fitting it into the viewport shrinks the cards
+ * until nothing on them is readable — unused space on the other axis is the cheaper thing to spend.
+ *
+ * Participants of one app system are adjacent (the combo list is already sorted that way) and get
+ * the ordinary {@link GROUP_GAP} between them; a different app system starts after the wider
+ * {@link APP_GROUP_GAP}, which is what leaves room for the box drawn around the cluster.
  */
-function layOutColumns(columns: Map<number, TopoCombo[]>, byCombo: Map<string, TopoNode[]>): void {
-  const ordered = [...columns.keys()].sort((a, b) => a - b);
-  let x = 0;
+function layOutLayered(
+  bands: Map<number, TopoCombo[]>,
+  byCombo: Map<string, TopoNode[]>,
+  orientation: Orientation,
+  groupByApp: boolean,
+): void {
+  const horizontal = orientation === 'LR' || orientation === 'RL';
+  // Along `rank` a card takes its width when the flow is horizontal, its height when it is vertical.
+  const rankSize = horizontal ? NODE_W : NODE_H;
+  const crossSize = horizontal ? NODE_H : NODE_W;
+  const crossGap = horizontal ? ROW_GAP : SUB_COL_GAP;
+  const bandGap = horizontal ? COL_GAP : ROW_BAND_GAP;
+  const perLane = horizontal ? MAX_ROWS : MAX_LANE_NODES_VERTICAL;
+  const clusterGap = groupByApp ? APP_GROUP_GAP : GROUP_GAP;
 
-  for (const layer of ordered) {
-    const members = columns.get(layer) ?? [];
+  let rankStart = 0;
+  for (const layer of [...bands.keys()].sort((a, b) => a - b)) {
+    const members = bands.get(layer) ?? [];
     const blocks = members.map((combo) => {
       const nodes = (byCombo.get(combo.id) ?? []).slice().sort(compareEndpoints);
-      const subColumns = Math.max(1, Math.ceil(nodes.length / MAX_ROWS));
-      const rows = Math.ceil(nodes.length / subColumns);
+      const lanes = Math.max(1, Math.ceil(nodes.length / perLane));
+      const perLaneCount = Math.max(1, Math.ceil(nodes.length / lanes));
+      return {
+        combo,
+        nodes,
+        perLaneCount,
+        rankExtent: lanes * (rankSize + SUB_COL_GAP) - SUB_COL_GAP,
+        crossExtent: perLaneCount * (crossSize + crossGap) - crossGap,
+      };
+    });
+
+    // Gap *before* each block after the first: same app system ⇒ tight, new one ⇒ a cluster gutter.
+    const gaps = blocks
+      .slice(1)
+      .map((block, index) =>
+        block.combo.appSystem === blocks[index].combo.appSystem ? GROUP_GAP : clusterGap,
+      );
+    const crossTotal =
+      blocks.reduce((sum, block) => sum + block.crossExtent, 0) +
+      gaps.reduce((sum, gap) => sum + gap, 0);
+
+    let cross = -crossTotal / 2;
+    blocks.forEach((block, index) => {
+      if (index > 0) cross += gaps[index - 1];
+      block.nodes.forEach((node, position) => {
+        const lane = Math.floor(position / block.perLaneCount);
+        const slot = position % block.perLaneCount;
+        place(
+          node,
+          orientation,
+          rankStart + lane * (rankSize + SUB_COL_GAP) + rankSize / 2,
+          cross + slot * (crossSize + crossGap) + crossSize / 2,
+        );
+      });
+      cross += block.crossExtent;
+    });
+
+    rankStart += Math.max(...blocks.map((block) => block.rankExtent), rankSize) + bandGap;
+  }
+}
+
+/** The one place that turns (rank, cross) into a canvas position. */
+function place(node: TopoNode, orientation: Orientation, rank: number, cross: number): void {
+  switch (orientation) {
+    case 'LR':
+      node.x = rank;
+      node.y = cross;
+      break;
+    case 'RL':
+      node.x = -rank;
+      node.y = cross;
+      break;
+    case 'TB':
+      node.x = cross;
+      node.y = rank;
+      break;
+    default:
+      node.x = cross;
+      node.y = -rank;
+      break;
+  }
+}
+
+/**
+ * Places every node for the `cluster` layout: one **app system** per block, shelf-packed into a
+ * roughly landscape sheet.
+ *
+ * Two levels, and both of them exist to keep a cluster a rectangle. Inside a cluster the
+ * participants are packed in rows of {@link CLUSTER_BLOCKS_PER_ROW}; the clusters themselves are
+ * then laid left to right and wrapped onto a new shelf once the row reaches the target width.
+ *
+ * Packing the *participants* freely — which is what this used to do — put one app system's slices
+ * in two different rows with a stranger between them, and the box drawn around that cluster then
+ * had to reach across the stranger and overlap it. Stacking the clusters in a single column instead
+ * is just as correct and unreadable: eight one-participant systems make a 1300 × 230 ribbon, and
+ * fit-to-view shrinks the cards to nothing. The shelf gives back an aspect ratio the canvas can
+ * actually show.
+ */
+function layOutClusters(
+  groups: TopoAppGroup[],
+  byCombo: Map<string, TopoNode[]>,
+  groupByApp: boolean,
+): void {
+  const gap = groupByApp ? APP_GROUP_GAP : CLUSTER_GAP;
+
+  // Phase one: lay each cluster out around its own origin and measure it.
+  const laid = groups.map((group) => {
+    const blocks = group.comboIds.map((comboId) => {
+      const nodes = (byCombo.get(comboId) ?? []).slice().sort(compareEndpoints);
+      const columns = Math.min(CLUSTER_MAX_COLS, Math.max(1, Math.ceil(Math.sqrt(nodes.length))));
+      const rows = Math.ceil(nodes.length / columns);
       return {
         nodes,
-        subColumns,
-        rows,
-        width: subColumns * (NODE_W + SUB_COL_GAP) - SUB_COL_GAP,
+        columns,
+        width: columns * (NODE_W + SUB_COL_GAP) - SUB_COL_GAP,
         height: rows * (NODE_H + ROW_GAP) - ROW_GAP,
       };
     });
 
-    const columnWidth = Math.max(...blocks.map((block) => block.width), NODE_W);
-    const columnHeight =
-      blocks.reduce((sum, block) => sum + block.height, 0) + (blocks.length - 1) * GROUP_GAP;
-
-    let y = -columnHeight / 2;
-    for (const block of blocks) {
-      block.nodes.forEach((node, index) => {
-        const subColumn = Math.floor(index / block.rows);
-        const row = index % block.rows;
-        node.x = x + subColumn * (NODE_W + SUB_COL_GAP) + NODE_W / 2;
-        node.y = y + row * (NODE_H + ROW_GAP) + NODE_H / 2;
-      });
-      y += block.height + GROUP_GAP;
+    let width = 0;
+    let height = 0;
+    for (let start = 0; start < blocks.length; start += CLUSTER_BLOCKS_PER_ROW) {
+      const row = blocks.slice(start, start + CLUSTER_BLOCKS_PER_ROW);
+      let x = 0;
+      for (const block of row) {
+        const top = height;
+        block.nodes.forEach((node, index) => {
+          node.clusterX = x + (index % block.columns) * (NODE_W + SUB_COL_GAP) + NODE_W / 2;
+          node.clusterY = top + Math.floor(index / block.columns) * (NODE_H + ROW_GAP) + NODE_H / 2;
+        });
+        x += block.width + CLUSTER_GAP;
+      }
+      width = Math.max(width, x - CLUSTER_GAP);
+      height += Math.max(...row.map((block) => block.height)) + CLUSTER_GAP;
     }
 
-    x += columnWidth + COL_GAP;
-  }
-}
-
-
-/**
- * Places every node for the `cluster` layout: each participant becomes a compact block, and the
- * blocks are packed into a rough square.
- *
- * Blocks are laid out in declared-hierarchy order and packed row by row, so a participant keeps
- * roughly the same neighbours as you switch between this and the layered view. Rows are top-aligned and
- * column positions come from the widest block in that column, which keeps the combo boxes from
- * touching — the failure mode that made G6's own `combo-combined` layout unusable here.
- */
-function layOutClusters(combos: TopoCombo[], byCombo: Map<string, TopoNode[]>): void {
-  const blocks = combos.map((combo) => {
-    const nodes = (byCombo.get(combo.id) ?? []).slice().sort(compareEndpoints);
-    const columns = Math.min(CLUSTER_MAX_COLS, Math.max(1, Math.ceil(Math.sqrt(nodes.length))));
-    const rows = Math.ceil(nodes.length / columns);
-    return {
-      nodes,
-      columns,
-      rows,
-      width: columns * (NODE_W + SUB_COL_GAP) - SUB_COL_GAP,
-      height: rows * (NODE_H + ROW_GAP) - ROW_GAP,
-    };
+    return { blocks, width, height: Math.max(0, height - CLUSTER_GAP) };
   });
-  if (blocks.length === 0) return;
 
-  const perRow = Math.ceil(Math.sqrt(blocks.length));
+  /*
+   * A target row width rather than a fixed number of clusters per row: the clusters here differ by
+   * an order of magnitude — one placeholder against a six-endpoint system — and "three per row"
+   * leaves either a row of stubs or one that runs off the canvas. The square root of the total area
+   * is the width a perfect square would have; the 1.6 leans it landscape, which is the shape of the
+   * canvas it has to fit into.
+   *
+   * The gutter counts as part of a cluster's footprint. Without it a sheet of one-participant
+   * systems measures as almost no area at all — they are 230 × 52 cards separated by 130px of air —
+   * and the target comes out narrower than a single row of them, so every cluster lands on its own
+   * shelf and the whole thing is a column again.
+   */
+  const area = laid.reduce(
+    (sum, group) => sum + (group.width + gap) * (group.height + gap),
+    0,
+  );
+  const target = Math.max(
+    Math.max(...laid.map((group) => group.width), 0),
+    Math.sqrt(Math.max(area, 1)) * 1.6,
+  );
+
+  // Phase two: shelf-pack the measured clusters, shifting each one's nodes onto its shelf.
+  let x = 0;
   let y = 0;
-
-  for (let start = 0; start < blocks.length; start += perRow) {
-    const row = blocks.slice(start, start + perRow);
-    let x = 0;
-    for (const block of row) {
-      block.nodes.forEach((node, index) => {
-        node.clusterX = x + (index % block.columns) * (NODE_W + SUB_COL_GAP) + NODE_W / 2;
-        node.clusterY = y + Math.floor(index / block.columns) * (NODE_H + ROW_GAP) + NODE_H / 2;
-      });
-      x += block.width + CLUSTER_GAP;
+  let shelfHeight = 0;
+  for (const group of laid) {
+    if (x > 0 && x + group.width > target) {
+      x = 0;
+      y += shelfHeight + gap;
+      shelfHeight = 0;
     }
-    y += Math.max(...row.map((block) => block.height)) + CLUSTER_GAP;
+    for (const block of group.blocks) {
+      for (const node of block.nodes) {
+        node.clusterX += x;
+        node.clusterY += y;
+      }
+    }
+    x += group.width + gap;
+    shelfHeight = Math.max(shelfHeight, group.height);
   }
 }
 

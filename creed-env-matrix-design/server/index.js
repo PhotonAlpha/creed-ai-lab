@@ -110,13 +110,17 @@ function releaseDto(release) {
   };
 }
 
-const nodeDto = ({ id, appSystem, country, envInstance, label, note }) => ({
+const nodeDto = ({ id, appSystem, country, envInstance, label, note, layer, sortOrder }) => ({
   id,
   appSystem,
   country,
   envInstance,
   label: label ?? null,
   note: note ?? null,
+  // `layer` stays null when nobody pinned it — that is the graph's "derive it from the links", and
+  // a 0 here would read as "column 0". `sortOrder` always has a number; 0 is the default order.
+  layer: layer ?? null,
+  sortOrder: sortOrder ?? 0,
 });
 
 const linkDto = ({ id, sourceNodeId, targetNodeId, direction, note }) => ({
@@ -135,6 +139,10 @@ function endOf(ref, payloadIds, refs) {
 }
 
 const describeRef = (ref) => (ref?.id != null ? `id:${ref.id}` : `ref:${ref?.ref}`);
+
+/** Bounds for a pinned layer and a sort order — ReleaseService.MAX_LAYER / MAX_SORT_ORDER, and V5. */
+const MAX_LAYER = 99;
+const MAX_SORT_ORDER = 999;
 
 /** Port of ReleaseService.validate — same rules, same issue shape, same ordering. */
 function validateTopology(releaseId, nodes, links) {
@@ -158,6 +166,16 @@ function validateTopology(releaseId, nodes, links) {
           message: 'must not be blank' });
         return;
       }
+    }
+    if (row.layer != null && (!Number.isInteger(row.layer) || row.layer < 0 || row.layer > MAX_LAYER)) {
+      issues.push({ section: 'nodes', index, id: row.id ?? null, field: 'layer',
+        message: `layer must be between 0 and ${MAX_LAYER}` });
+    }
+    if (row.sortOrder != null
+        && (!Number.isInteger(row.sortOrder)
+            || row.sortOrder < -MAX_SORT_ORDER || row.sortOrder > MAX_SORT_ORDER)) {
+      issues.push({ section: 'nodes', index, id: row.id ?? null, field: 'sortOrder',
+        message: `sortOrder must be between -${MAX_SORT_ORDER} and ${MAX_SORT_ORDER}` });
     }
     const identity = `${row.appSystem}|${row.country}|${row.envInstance}`;
     if (identities.has(identity)) {
@@ -628,6 +646,8 @@ const server = createServer(async (req, res) => {
               envInstance: row.envInstance,
               label: row.label?.trim() ? row.label : null,
               note: row.note?.trim() ? row.note : null,
+              layer: row.layer ?? null,
+              sortOrder: row.sortOrder ?? 0,
               createdAt: now,
               updatedAt: now,
               version: 0,
@@ -642,6 +662,8 @@ const server = createServer(async (req, res) => {
               envInstance: row.envInstance,
               label: row.label?.trim() ? row.label : null,
               note: row.note?.trim() ? row.note : null,
+              layer: row.layer ?? null,
+              sortOrder: row.sortOrder ?? 0,
             };
             if (Object.entries(next).some(([k, v]) => (entity[k] ?? null) !== v)) {
               Object.assign(entity, next, { updatedAt: now, version: (entity.version ?? 0) + 1 });

@@ -17352,6 +17352,8 @@
       "envInstance": "SIT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17364,6 +17366,8 @@
       "envInstance": "SIT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17376,6 +17380,8 @@
       "envInstance": "SIT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17388,6 +17394,8 @@
       "envInstance": "SIT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17400,6 +17408,8 @@
       "envInstance": "SIT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17412,6 +17422,8 @@
       "envInstance": "SIT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17424,6 +17436,8 @@
       "envInstance": "SIT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17436,6 +17450,8 @@
       "envInstance": "SIT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17448,6 +17464,8 @@
       "envInstance": "UAT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17460,6 +17478,8 @@
       "envInstance": "UAT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17472,6 +17492,8 @@
       "envInstance": "UAT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17484,6 +17506,8 @@
       "envInstance": "UAT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17496,6 +17520,8 @@
       "envInstance": "UAT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17508,6 +17534,8 @@
       "envInstance": "UAT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17520,6 +17548,8 @@
       "envInstance": "UAT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17532,6 +17562,8 @@
       "envInstance": "UAT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17544,6 +17576,8 @@
       "envInstance": "NFT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17556,6 +17590,8 @@
       "envInstance": "NFT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17568,6 +17604,8 @@
       "envInstance": "NFT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17580,6 +17618,8 @@
       "envInstance": "NFT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17592,6 +17632,8 @@
       "envInstance": "NFT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17604,6 +17646,8 @@
       "envInstance": "NFT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17616,6 +17660,8 @@
       "envInstance": "NFT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17628,6 +17674,8 @@
       "envInstance": "NFT1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17640,6 +17688,8 @@
       "envInstance": "PROD1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17652,6 +17702,8 @@
       "envInstance": "PROD1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17664,6 +17716,8 @@
       "envInstance": "PROD1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17676,6 +17730,8 @@
       "envInstance": "PROD1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17688,6 +17744,8 @@
       "envInstance": "PROD1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17700,6 +17758,8 @@
       "envInstance": "PROD1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17712,6 +17772,8 @@
       "envInstance": "PROD1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17724,6 +17786,8 @@
       "envInstance": "PROD1",
       "label": null,
       "note": null,
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17736,6 +17800,8 @@
       "envInstance": "SIT3",
       "label": null,
       "note": "no endpoints recorded for this slice yet",
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17748,6 +17814,8 @@
       "envInstance": "SIT2",
       "label": null,
       "note": "no endpoints recorded for this slice yet",
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0
@@ -17760,6 +17828,8 @@
       "envInstance": "SIT5",
       "label": null,
       "note": "no endpoints recorded for this slice yet",
+      "layer": null,
+      "sortOrder": 0,
       "createdAt": "2026-08-27T00:00:00.000Z",
       "updatedAt": "2026-08-27T00:00:00.000Z",
       "version": 0

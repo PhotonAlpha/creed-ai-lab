@@ -17,6 +17,15 @@ export interface ParticipantRow {
   envInstance: string;
   label: string | null;
   note: string | null;
+  /**
+   * Where the topology graph draws this participant. Carried through this editor untouched.
+   *
+   * Not editable here on purpose — a layer only means something next to the boxes around it, so it
+   * is set on the graph itself. It still has to travel with the row: the save is authoritative for
+   * the whole release, so a payload that omits these two clears the layering somebody arranged.
+   */
+  layer: number | null;
+  sortOrder: number;
 }
 
 export interface ConnectionRow {
@@ -44,6 +53,8 @@ export function toParticipantRow(node: ReleaseNode): ParticipantRow {
     envInstance: node.envInstance,
     label: node.label,
     note: node.note,
+    layer: node.layer,
+    sortOrder: node.sortOrder,
   };
 }
 
@@ -87,6 +98,9 @@ export function toTopologyRequest(participants: ParticipantRow[], connections: C
       envInstance: row.envInstance,
       label: row.label,
       note: row.note,
+      // Read-only here, and resent for exactly that reason — see ParticipantRow.layer.
+      layer: row.layer,
+      sortOrder: row.sortOrder,
     })),
     links: connections.map((row) => ({
       ...(row.id != null ? { id: row.id } : {}),

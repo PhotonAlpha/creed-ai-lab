@@ -4,7 +4,7 @@ import type { ComboData, EdgeData, GraphData, ID, IPointerEvent, NodeData } from
 import { Empty, Spin, theme } from 'antd';
 import { ENDPOINT_NODE_TYPE } from './EndpointNode';
 import { comboColor, edgeColors, healthColors } from './palette';
-import { NODE_H, NODE_W } from './topology.config';
+import { APP_GROUP_PADDING, NODE_H, NODE_W } from './topology.config';
 
 /**
  * Canvas height. Deep enough that a six-row app-system group — the tallest a layout will build
@@ -31,6 +31,8 @@ import type { EdgeKind, TopoEdge, TopologyLayout, TopologyModel } from './buildG
 interface TopologyGraphProps {
   model: TopologyModel;
   layout: TopologyLayout;
+  /** Draw a box around every participant of one app system, nesting the participant boxes inside. */
+  groupByApp: boolean;
   visibleKinds: Record<EdgeKind, boolean>;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
@@ -45,6 +47,7 @@ interface TopologyGraphProps {
 export function TopologyGraph({
   model,
   layout,
+  groupByApp,
   visibleKinds,
   selectedId,
   onSelect,
@@ -144,31 +147,73 @@ export function TopologyGraph({
         },
       }));
 
-    const combos: ComboData[] = model.combos.map((combo) => {
-          const color = comboColor(token, combo.title);
+    /*
+     * App-system boxes first, then the participant boxes that name them as a parent.
+     *
+     * Both are plain combos — G6 nests a combo by its `combo` field exactly as it nests a node — and
+     * both are drawn with the *same* fill and stroke opacity even though they look different. That
+     * is not cosmetic: the hover states below set `fillOpacity`/`strokeOpacity` to fixed values, so
+     * an element whose base value differs can never be put back (see NORMAL). The two levels are
+     * told apart by a solid vs dashed stroke and the label size instead.
+     */
+    const groups = layout === 'layered' ? model.appGroups : model.clusterGroups;
+    const parents: ComboData[] = groupByApp
+      ? groups.map((group) => {
+          const color = comboColor(token, group.appSystem);
           return {
-            id: combo.id,
+            id: group.id,
             style: {
               type: 'rect',
-              padding: 18,
-              radius: 12,
+              padding: APP_GROUP_PADDING,
+              radius: 16,
               fill: color,
               fillOpacity: COMBO_FILL_OPACITY,
               stroke: color,
               strokeOpacity: COMBO_STROKE_OPACITY,
-              lineWidth: 1,
-              lineDash: [4, 4],
-              labelText: combo.title,
+              lineWidth: 1.5,
+              labelText: group.appSystem,
               labelPlacement: 'top',
               labelFill: color,
-              labelFontSize: 12,
-              labelFontWeight: 600,
+              labelFontSize: 13,
+              labelFontWeight: 700,
             },
-      };
-    });
+          };
+        })
+      : [];
+
+    const combos: ComboData[] = [
+      ...parents,
+      ...model.combos.map((combo): ComboData => {
+        const color = comboColor(token, combo.appSystem);
+        return {
+          id: combo.id,
+          combo: groupByApp
+            ? layout === 'layered'
+              ? combo.appGroupId
+              : combo.clusterGroupId
+            : undefined,
+          style: {
+            type: 'rect',
+            padding: 18,
+            radius: 12,
+            fill: color,
+            fillOpacity: COMBO_FILL_OPACITY,
+            stroke: color,
+            strokeOpacity: COMBO_STROKE_OPACITY,
+            lineWidth: 1,
+            lineDash: [4, 4],
+            labelText: combo.title,
+            labelPlacement: 'top',
+            labelFill: color,
+            labelFontSize: 12,
+            labelFontWeight: 600,
+          },
+        };
+      }),
+    ];
 
     return { nodes, edges, combos };
-  }, [model, layout, visibleKinds, token, health, edgeStyle, placeholderText]);
+  }, [model, layout, groupByApp, visibleKinds, token, health, edgeStyle, placeholderText]);
 
   /*
    * The canvas is built once and its G6 event handlers live as long as it does, so anything they
@@ -374,10 +419,15 @@ export function TopologyGraph({
       id && (graph.hasNode(id) || graph.hasEdge(id) || graph.hasCombo(id)) ? id : null;
     const focus = onCanvas(hoverRef.current) ?? onCanvas(selectedId);
 
+    const groups = layout === 'layered' ? model.appGroups : model.clusterGroups;
     const states: Record<string, string[]> = {};
     const all = [
       ...model.nodes.map((n) => n.id),
       ...model.combos.map((c) => c.id),
+      // Without the app-system boxes here they are never handed a state at all, so they keep full
+      // opacity while everything they contain dims — the cluster ends up shouting over the node the
+      // hover was meant to isolate.
+      ...groups.map((g) => g.id),
       ...model.edges.map((e) => e.id),
     ];
 
@@ -392,10 +442,25 @@ export function TopologyGraph({
         near.add(edge.source);
         near.add(edge.target);
       }
-      // Focusing an app-system box means "show me this system", so its members count as neighbours.
-      // Without this the box lights up while everything inside it greys out.
+      // Focusing a box means "show me what is in it", so its contents count as neighbours. Without
+      // this the box lights up while everything inside it greys out. An app-system box reaches one
+      // level further: its participants, and then their nodes.
+      const focusedGroup = groups.find((group) => group.id === focus);
+      const inFocus = new Set(focusedGroup ? focusedGroup.comboIds : [focus]);
+      for (const comboId of inFocus) near.add(comboId);
       for (const node of model.nodes) {
-        if (node.comboId === focus) near.add(node.id);
+        if (inFocus.has(node.comboId)) near.add(node.id);
+      }
+      // A declared arrow runs between participant boxes, so an app-system box has no incident edge
+      // of its own; the arrows in and out of its participants are what it means to be connected.
+      if (focusedGroup) {
+        for (const edge of model.edges) {
+          if (inFocus.has(edge.source) || inFocus.has(edge.target)) {
+            incident.push(edge);
+            near.add(edge.source);
+            near.add(edge.target);
+          }
+        }
       }
       const activeEdges = new Set(incident.map((edge: TopoEdge) => edge.id));
       for (const id of all) {
@@ -421,7 +486,7 @@ export function TopologyGraph({
     applyStatesRef.current();
   };
 
-  useEffect(applyStates, [selectedId, model]);
+  useEffect(applyStates, [selectedId, model, layout]);
 
   const isEmpty = model.nodes.length === 0;
 

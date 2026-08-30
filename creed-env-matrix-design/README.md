@@ -22,9 +22,11 @@ distinct resolve to the same address.
 
 ```bash
 npm install
-npm run mock     # terminal 1 — mock API on :3001, data from server/mock.json
-npm run dev      # terminal 2 — UI on :5173
+npm run mock                                        # terminal 1 — mock API on :3001
+VITE_API_TARGET=http://localhost:3001 npm run dev   # terminal 2 — UI on :5173
 ```
+
+(The env var is not optional — see *Which backend `npm run dev` actually talks to* below.)
 
 ### Option B — real backend (PostgreSQL)
 
@@ -36,24 +38,38 @@ docker exec creed-artifactory-db createdb -U artifactory env_matrix
 cd .. && mvn -pl creed-resource/creed-resource-env-matrix spring-boot:run \
   -Dspring-boot.run.profiles=dev -Dspring-boot.run.workingDirectory="$PWD"
 
-# 3. start the UI
-npm run dev
+# 3. start the UI, pointed at :3001
+VITE_API_TARGET=http://localhost:3001 npm run dev
 ```
 
 Open <http://localhost:5173/>.
 
-Both options serve the identical contract on port `3001`, so the frontend needs no change to switch
-between them. To point at the module's normal HTTPS profile instead:
+### Which backend `npm run dev` actually talks to
+
+**The committed `.env` points at the HTTPS profile, not the mock:**
+
+```
+VITE_API_TARGET=https://localhost:18095
+```
+
+So a plain `npm run dev` proxies `/api` to `creed-resource-env-matrix` on **:18095** (`primary` /
+`secondary` / `cloud`; `secure: false` in `vite.config.ts` is what accepts the Creed-CA certificate).
+Options A and B above both answer on **:3001**, so they need the target pointed back at it:
 
 ```bash
-VITE_API_TARGET=https://localhost:18095 npm run dev
+VITE_API_TARGET=http://localhost:3001 npm run dev
 ```
+
+Worth knowing before debugging a change that "does not work": with the HTTPS backend running, the UI
+comes up fully populated whether or not `npm run mock` is running, so a stale backend build looks
+exactly like a broken frontend. A shell-exported `VITE_API_TARGET` wins over `.env`; both are read by
+`loadEnv` in `vite.config.ts`.
 
 ### Scripts
 
 | Script | What it does |
 |---|---|
-| `npm run dev` | Vite dev server on `:5173`, proxying `/api` → `:3001` |
+| `npm run dev` | Vite dev server on `:5173`, proxying `/api` → `VITE_API_TARGET` (`.env`: `https://localhost:18095`) |
 | `npm run mock` | Node mock API on `:3001` (`PORT=… ` to change) |
 | `npm run build` | Type-check and produce `dist/` |
 | `npm run typecheck` | Types only |
@@ -152,13 +168,14 @@ filter value rather than a hidden query parameter.
 ### Topology (`/topology`)
 
 The same filtered slice as a graph. One card per endpoint — service name, `ip:port`, instance,
-scheme, and a health stripe down the left edge — grouped into a dashed box per app system.
+scheme, and a health stripe down the left edge — boxed by participant, and those boxes boxed again
+by app system.
 
 Four kinds of line, each toggleable from the toolbar:
 
 | Line | Meaning | Source |
 |---|---|---|
-| Solid arrow | declared dependency, app system → app system | `pages/Topology/topology.config.ts` |
+| Solid arrow | declared dependency, participant → participant | one `env_release_link` row |
 | Grey dashes | two endpoints answer on the same `host` | derived from `/endpoints` |
 | Blue dots | two hostnames resolve to the same `ip` | derived from `/endpoints` |
 | Red dashes | the same `host:port` or `ip:port` is claimed twice | `/conflicts` |
@@ -172,7 +189,7 @@ A **release** is a named set of environment slices and the connections between t
 | Table | What it holds |
 |---|---|
 | `env_release` | name, tier (a label), status (`DRAFT`/`ACTIVE`/`ARCHIVED`) |
-| `env_release_node` | a **participant** — `(appSystem, country, envInstance)` |
+| `env_release_node` | a **participant** — `(appSystem, country, envInstance)`, plus where to draw it (`layer`, `sort_order`) |
 | `env_release_link` | a connection between two participants, plus `direction` |
 
 **A release is the required scope on this page.** The reason a connection cannot simply name two app
@@ -196,10 +213,98 @@ Narrowing by country or environment instance filters the *endpoints inside the b
 wiring — a connection must not vanish because of a country filter.
 
 Column order comes from the connections themselves: `rankParticipants` is a longest-path layering
-over the stored `source -> target` orientation, so the x axis *is* the hierarchy. `direction` never
-enters the ranking — counting a two-way link both ways would make every such pair a cycle. Two
+over the stored `source -> target` orientation, so the flow axis *is* the hierarchy. `direction`
+never enters the ranking — counting a two-way link both ways would make every such pair a cycle. Two
 layouts: **Layered** and **By app system**, both positioned by `pages/Topology/buildGraph.ts` rather
 than by a G6 layout.
+
+#### How the graph is derived from the endpoints
+
+The two halves of this module record two different kinds of fact, and the graph is the join of them.
+`env_endpoint` says **where something answers**; nothing in it, and nothing computable from a host or
+a port, says that one thing calls another. `env_release_node` / `env_release_link` say **who talks to
+whom**, and know nothing about addresses. Neither table has a foreign key to the other, deliberately.
+
+Everything on screen comes from one of the two, or from a rule over one of them:
+
+| On screen | Comes from | Rule |
+|---|---|---|
+| Endpoint card | one `env_endpoint` row in the filtered set | drawn only if some participant claims it |
+| Dashed placeholder | one `env_release_node` row | the participant matched no endpoint |
+| Participant box | one `env_release_node` row | always drawn, empty or not |
+| Where a box sits | `env_release_node.layer` / `.sort_order` | overrides the derived layer for that participant |
+| App-system box | the participant boxes | grouping by `appSystem` — presentation only |
+| Solid arrow | one `env_release_link` row | box → box, never card → card |
+| Grey dashes | endpoints | same `host`, chained in port order |
+| Blue dots | endpoints | same `ip`, different `host`, one card per hostname |
+| Red dashes | `GET /conflicts` | the backend decided the collision; the graph only draws it |
+| Layer (column / row) | the links | longest path over `source -> target`, see below |
+| Endpoint counter, "unclaimed" banner | endpoints | claimed by nobody |
+
+**The claim rule** is the whole join, and it runs one way — endpoints into participants:
+
+```
+participant(appSystem, country, envInstance)  ⟕  endpoint(appSystem, country, envInstance)
+
+country = '*' on the participant matches every country
+the first matching participant wins, specific slices sorted before wildcards
+```
+
+Three consequences worth knowing before reading a graph:
+
+- **An endpoint no participant claims is not on the canvas.** It is counted in a banner instead —
+  the release does not cover it, which is a fact about the release, not about the endpoint.
+- **A participant nothing matches is still on the canvas**, as a dashed placeholder. That gap between
+  "wired into the topology" and "recorded in the matrix" is the thing this viewer exists to surface.
+- **The endpoint filters never touch the wiring.** They change which cards sit inside a box; the
+  boxes, the arrows and the layering are fetched by release id alone.
+
+**Layering** is derived from the links and nothing else:
+
+```
+layer(p) = 0                                   if no declared link points at p
+         = max(layer(source)) + 1              over every link source -> p
+         (an edge that closes back onto the current path is skipped, so a
+          user-declared cycle cannot hang the walk)
+```
+
+`direction` is not consulted: it decides arrowheads, and counting a `BIDIRECTIONAL` link both ways
+would make every such pair a two-cycle with no defined layering.
+
+A participant may then be **pinned**: `env_release_node.layer` replaces that participant's number and
+leaves everything downstream where the links put it. `null` — the state every participant starts in —
+means "derive it", and cannot be spelt `0`, which means "column 0". `sort_order` does the same for
+position along the other axis, with app systems moving as blocks (a cluster takes the lowest sort
+order of its members). Both are edited from the graph's **Layers & order** dialog.
+
+Nothing here runs the other way. Adding an endpoint never creates a participant or an arrow; adding a
+link never creates an endpoint. Whatever the graph shows about who calls whom was typed by somebody
+on the **Configuration → Release topology** tab.
+
+#### Reading controls
+
+| Control | What it does | Stored |
+|---|---|---|
+| **Layered / By app system** | hierarchy along one axis, or one block per app system | this browser |
+| **→ ← ↓ ↑** | which way the layered hierarchy runs; layer 0 sits at the tail of the arrow | this browser |
+| **Group by app system** | draw (and pack together) a box around every participant of one app system | this browser |
+| **Layers & order** | pin a participant to a layer, or reorder app systems along the cross axis | the release |
+
+The split is between how someone reads a picture and what the picture says. Orientation and the
+app-system boxes are reading habits, kept in `localStorage` so they survive picking another release.
+A pinned layer is a claim about the estate — "this slice is a step of its own, whatever the links
+imply" — so it belongs to the release, in `env_release_node.layer` / `.sort_order`, where the next
+person to open it sees the same graph.
+
+**Layers & order** stages its edits and writes them with one **Save**; the graph does not move until
+that lands. The write is the same authoritative `PUT /releases/{id}/topology` the configuration page
+uses, so it resends the release's whole topology with only those two fields changed. Clearing a cell
+(`auto`) hands that participant back to the derived layering, and **Reset all** hands back the whole
+release — both still need saving.
+
+Because an app system can legitimately appear in several layers, the app-system box in the layered
+view is per *(app system, layer)*: `SG CCS SIT3` in column 0 and `CN CCS SIT5` in column 2 are two
+boxes, not one box stretched across everything between them.
 
 ### Configuration (`/config`)
 
@@ -221,7 +326,10 @@ are deleted, and other releases are never touched.
 
 Participants are edited with free-text fields (a slice with no endpoints yet is legal and shows as a
 placeholder); connections pick both ends from the release's own participants, so a participant has
-to exist before it can be connected. A participant added but not yet saved is still selectable —
+to exist before it can be connected. `layer` and `sort_order` are not editable here — a layer only
+means something next to the boxes around it, so it is set on the graph — but they travel with every
+row this page saves, because the save is authoritative and a payload that omitted them would clear
+the layering somebody arranged. A participant added but not yet saved is still selectable —
 the editor sends it as a `ref` that the save resolves to the new row's id. Declaring both `A → B`
 and `B → A` is rejected; that is what `BIDIRECTIONAL` is for.
 

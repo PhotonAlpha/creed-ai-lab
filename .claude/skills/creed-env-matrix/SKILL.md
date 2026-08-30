@@ -37,7 +37,7 @@ because CCS appears twice. So:
 | Table | Holds |
 |---|---|
 | `env_release` | name (unique), tier, status `DRAFT`/`ACTIVE`/`ARCHIVED` |
-| `env_release_node` | a **participant** — `(appSystem, country, envInstance)` within one release |
+| `env_release_node` | a **participant** — `(appSystem, country, envInstance)` within one release, plus `layer` / `sort_order` (where the graph draws it) |
 | `env_release_link` | a connection between two participants, plus `direction` |
 
 A release is what says which slices belong together, which is also what keeps every other dimension
@@ -50,6 +50,12 @@ orthogonal — country, envInstance, service and instance stay plain data.
   legitimately spans tiers; the UI warns, the API does not reject.
 - **`env_release_link.release_id` is redundant but load-bearing** — the identity index needs it, and
   it is what the service checks both ends against so a link cannot stitch two releases together.
+- **`layer` is nullable, and `null` is "derive it from the links"** (`V5`). The graph ranks
+  participants by a longest path over the links; a number here overrides that ranking for that one
+  participant. `0` cannot be the unset value — it means column 0, so a link added later that ought to
+  push the box right would silently disagree with a number nobody chose. `sort_order` is NOT NULL
+  default 0. Both are range-checked in `V5` **and** per row in `ReleaseService.validate`, because
+  this contract answers a bad row with a 422 that names it, not a 400 for the whole release.
 - **`direction` decides arrowheads only.** The stored `source -> target` orientation is what the
   layered view ranks on; counting a `BIDIRECTIONAL` link both ways makes every such pair a cycle.
 - **No foreign key to `env_endpoint`, deliberately.** A participant may name a slice with no
@@ -97,7 +103,7 @@ The config page's "save": the whole table in one transaction.
 |---|---|---|
 | `primary` / `secondary` | 18095 / 18096 | HTTPS (bundle `creed-env-matrix-server`) |
 | `cloud` | 18095 | HTTPS, config from [[creed-config-server]] |
-| **`dev`** | **3001** | **plain HTTP** — the port `vite.config.ts` proxies |
+| **`dev`** | **3001** | **plain HTTP** — the port the mock also uses; not the proxy default |
 
 - **`dev` and `test` exclude `SslObservabilityAutoConfiguration`** and disable the SSL health indicator. Boot's `SslMeterBinder` eagerly opens **every declared SSL bundle** at startup for certificate-expiry gauges, and there is **no property to disable it** — so `creed.https.enabled=false` is not enough; a missing keystore fails the whole context. This is the landmine to remember if you add a no-PKI profile to any module.
 - Tests use H2 + ddl-auto (Flyway off — V1/V2 are PostgreSQL-specific) and must set `spring.application.name` + `server.port`, because the `actuator` profile is `include`d from `application.yml` and cannot be un-included by a profile-specific file; OTel interpolates both and an unresolvable placeholder fails the context.
@@ -106,10 +112,16 @@ The config page's "save": the whole table in one transaction.
 ## Frontend (`creed-env-matrix-design`)
 
 Vite 8 + React 19 + **antd 5.29.3** + `@ant-design/pro-components` 2.8.10 + **`@antv/g6` 5.1.1**.
-`npm run dev` (:5173) proxies `/api` → `:3001`; `npm run mock` serves the same contract from
-`server/index.js` with no database. The proxy target is read from `.env` with `loadEnv` — a Vite
-config file runs *before* `.env` is loaded, so `process.env.VITE_API_TARGET` is always `undefined`
-there and the value silently falls back.
+`npm run mock` serves the contract from `server/index.js` on `:3001` with no database.
+
+**`npm run dev` does not talk to it by default.** The committed `.env` holds
+`VITE_API_TARGET=https://localhost:18095`, so a plain `npm run dev` proxies `/api` at whatever
+HTTPS instance of the module is running; reaching the mock (or the `dev` profile) needs
+`VITE_API_TARGET=http://localhost:3001 npm run dev`. The failure this produces is nasty: the UI comes
+up fully populated from the HTTPS backend, so a backend that was not restarted after a contract
+change is indistinguishable from a broken frontend. Check the proxy target *before* debugging the
+code. The value is read with `loadEnv` because a Vite config file runs *before* `.env` is loaded, so
+`process.env.VITE_API_TARGET` is always `undefined` there; a shell-exported value still wins.
 
 **Dependency constraints — do not "upgrade" past these without re-checking:**
 - **`@antv/g6` 5.1.1**, added for the topology page — see that section for why not `@ant-design/graphs`.
@@ -136,10 +148,15 @@ there and the value silently falls back.
 
 ## Topology graph (`pages/Topology`, `/topology`)
 
-The filtered slice as a graph: one **card node per endpoint**, boxed into a G6 **combo per app
-system**. Built on **`@antv/g6` 5.1.1** — deliberately *not* `@ant-design/graphs`, whose React
+The filtered slice as a graph: one **card node per endpoint**, boxed into a G6 **combo per
+participant**, and those combos nested inside one **combo per app system**. Built on **`@antv/g6` 5.1.1** — deliberately *not* `@ant-design/graphs`, whose React
 wrapper drags in `styled-components@6` and `@antv/graphin` for a wrapper thin enough to write here,
 in an app that already carries one React-19 compat shim. G6 declares no React peer dependency.
+
+**The endpoint → graph derivation is written out in `creed-env-matrix-design/README.md`**
+("How the graph is derived from the endpoints", mirrored in `README.zh-CN.md`): which element comes
+from which table, the claim rule, the layering formula, and the fact that the join runs one way only.
+`buildGraph.ts` is the only implementation of it — change one, change the other.
 
 **Edges come from two different places, and the distinction is the whole design:**
 
@@ -148,7 +165,8 @@ in an app that already carries one React-19 compat shim. G6 declares no React pe
 | `dep` | **Declared** — one `env_release_link` row, from `/releases/{id}/topology` |
 | `colo` / `alias` / `clash` | **Derived** from `/endpoints` (same `host`, same `ip`) and `/conflicts` |
 
-The graph is scoped to a **release**, and the group box is a **participant**, not an app system.
+The graph is scoped to a **release**, and the inner group box is a **participant**, not an app
+system — the app-system box around it is a second, purely visual level (below).
 Declared arrows are drawn combo to combo: an endpoint-level arrow would assert which endpoint calls
 which, and nothing in the data supports that. The topology is fetched by release id alone —
 narrowing by country filters the endpoints inside the boxes, never the wiring.
@@ -164,9 +182,35 @@ Derived edges **chain** rather than clique — five endpoints on one host is one
 longest-path layering over the stored `source -> target` orientation, ignoring an edge that closes
 back onto the current path so a user-created cycle cannot hang the walk.
 
+**The app-system box is presentation only, and in the layered view it is keyed on *(app system,
+layer)*.** A topology node is still a slice — CCS legitimately appears twice in one chain — so a
+single box per app system would have to stretch across every column between its two appearances and
+overlap whatever sits there. `TopoCombo` therefore carries both an `appGroupId` (layered) and a
+`clusterGroupId` (cluster), and `TopologyGraph` picks by layout.
+
+**Four orientations, one layout function.** `layOutLayered` works in **(rank, cross)** space — rank
+is the hierarchy axis, cross is what participants stack along — and only `place()` maps that to x/y,
+negating rank for `RL`/`BT` and swapping the axes for `TB`/`BT`. The card is 196 × 52, so the wrap
+limit swaps with the axis too (`MAX_ROWS` horizontally, `MAX_LANE_NODES_VERTICAL` vertically).
+
+**Layer pins and cross-axis order live on the release**, in `env_release_node.layer` /
+`.sort_order`: a pin is a claim about the estate, so everyone opening the release sees it. Only what
+does not change the picture's meaning — orientation, layout, the app-system boxes — stays in
+`localStorage` (`useTopologyView`). A pin replaces that one participant's rank and leaves its
+downstream where the links put it; re-deriving from a pin would shunt half the graph for a one-box
+correction.
+
+`LayerEditorModal` **stages edits and saves once**: the only write is the authoritative
+`PUT /releases/{id}/topology`, so it resends every participant and link with just those two fields
+changed — one request per keystroke would rewrite the release on every digit and leave half the table
+applied on a rejection. **Every other writer of that route must resend the two fields too**, which is
+why `ParticipantRow` in the config page's release editor carries them through without exposing them.
+The editor's table sorts by app system, *not* by the layer being edited, or the row being typed into
+jumps out from under the cursor.
+
 **The graph runs no G6 layout at all.** `buildGraph.ts` assigns every node an x/y for both layouts
-(`layered` = one column per rank, groups wrapping into sub-columns past `MAX_ROWS`; `cluster` = the
-same groups packed as blocks). `combo-combined` was tried and overlaps the boxes into mush, and no
+(`layered` = one band per rank, groups wrapping into lanes past the wrap limit; `cluster` = one band
+per app system, shelf-packed). `combo-combined` was tried and overlaps the boxes into mush, and no
 built-in layout knows the declared ranking. G6 skips the layout stage when `options.layout` is
 undefined. A **circular** layout was also tried and dropped: nodes are 196px cards, so a ring of
 forty endpoints is ~3000px wide and fit-to-view kills the labels.
@@ -189,6 +233,19 @@ forty endpoints is ~3000px wide and fit-to-view kills the labels.
 - **Gate zoom behind Ctrl.** Plain wheel-to-zoom swallows the page scroll on a page with a filter
   bar above the canvas.
 - **`register` is global** — guard with `getExtension` so Vite HMR does not re-register the type.
+- **Combo gutters are measured card to card and have to clear the boxes.** `GROUP_GAP` must fit two
+  18px paddings plus the next participant's label; `APP_GROUP_GAP` two more paddings plus the
+  cluster's own label. Below those numbers neighbouring boxes touch and every label is drawn on the
+  border of the box before it — the same mush `combo-combined` produced, one level up.
+- **A nested combo must share its parent's `fillOpacity`/`strokeOpacity`.** The state maps below set
+  both to fixed values, so a box whose base value differs can never be restored. App-system boxes are
+  distinguished by a solid stroke and a bigger label instead.
+- **An app-system box has no incident edge of its own** — the arrows belong to the participants
+  inside it — so hover/selection has to walk one level further, and the box ids must be in the state
+  payload or they stay bright while their contents dim.
+- **The cluster layout's shelf width has to count the gutters.** Measured on cards alone, a sheet of
+  one-participant systems has almost no area, the target width lands under one row, every cluster
+  gets its own shelf, and fit-to-view shrinks the resulting 1300px column to nothing.
 - **Clearing a state with `[]` silently does nothing.** `setElementState(id, [])` stores the empty
   array and resolves successfully, but the draw never repaints the element back to its base style —
   the graph stayed dimmed forever after the first hover. Every state branch must set the same

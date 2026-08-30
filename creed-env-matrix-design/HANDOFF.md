@@ -9,15 +9,24 @@
 npm install
 
 # A — no database, no JDK
-npm run mock     # mock API on :3001, data from server/mock.json
-npm run dev      # UI on :5173
+npm run mock                                        # mock API on :3001
+VITE_API_TARGET=http://localhost:3001 npm run dev   # UI on :5173
 
-# B — real backend: start creed-resource-env-matrix with -Dspring-boot.run.profiles=dev, then
+# B — real backend on :3001: creed-resource-env-matrix with -Dspring-boot.run.profiles=dev, then
+VITE_API_TARGET=http://localhost:3001 npm run dev
+
+# C — the module's normal HTTPS profile on :18095 (what the committed .env points at)
 npm run dev
 ```
 
-Both backends serve the identical contract on `:3001`, so no frontend change is needed to switch.
-`VITE_API_TARGET=https://localhost:18095 npm run dev` points at the HTTPS profile instead.
+All three serve the identical contract, so no frontend change is needed to switch.
+
+**`npm run dev` with no override is C, not A.** The committed `.env` holds
+`VITE_API_TARGET=https://localhost:18095`, so the UI comes up fully populated from whatever HTTPS
+backend happens to be running — with or without `npm run mock` — and a backend that has not been
+restarted since a contract change looks exactly like a broken frontend. This cost real debugging
+time; check the proxy target first. A shell-exported value wins over `.env`, and both are read by
+`loadEnv` in `vite.config.ts`.
 
 ## Current state
 
@@ -28,10 +37,17 @@ Complete and verified in a browser against the real backend.
   panel listing each colliding address.
 - **Topology (`/topology`)** — the same filtered slice as a graph (`@antv/g6`): one card per
   endpoint, boxed by **participant** (an environment slice: app system + country + env instance),
-  with **declared** arrows between participants and derived lines for same-host / same-IP /
-  conflicting addresses. **A release is the required scope**, not a tier. Two layouts, click for
-  details, hover to highlight.
-  Verified in a browser against `npm run mock`; not yet exercised against the Postgres `dev` profile.
+  those boxes boxed again **by app system**, with **declared** arrows between participants and
+  derived lines for same-host / same-IP / conflicting addresses. **A release is the required scope**,
+  not a tier. Two layouts, four flow directions (`→ ← ↓ ↑`), a **Layers & order** dialog that writes
+  `env_release_node.layer` / `.sort_order` back into the release, click for details, hover to
+  highlight.
+  Verified in a browser against `npm run mock` **and** against the HTTPS backend on real PostgreSQL:
+  pin + reorder → save → the two changed rows (and only those) updated in `env_release_node` → full
+  reload draws the stored layout → **Reset all** + save returns every row to `null` / `0`.
+  **The derivation from endpoints to graph is documented in `README.md` → "How the graph is derived
+  from the endpoints"** (and the same section in `README.zh-CN.md`) — keep it in step with
+  `pages/Topology/buildGraph.ts`, which is the only place that join lives.
 - **Config (`/config`)** — two tabs. *Endpoints*: the full table, add/edit/delete via one
   page-level modal, save-back-to-database. *Release topology*: a release list, its participants and
   its connections, saved with one authoritative batch write per release.
@@ -104,6 +120,30 @@ Other constraints:
 - **An endpoint is claimed by the first participant whose slice matches, specific before wildcard.**
   A release may declare both `CCS/SG/SIT3` and `CCS/'*'/SIT3`; without the specific-first sort the
   wildcard swallows every region and the specific box renders empty.
+- **The app-system box is presentation only, and in the layered view it is per _(app system, layer)_.**
+  A topology node is still a slice — CCS can appear twice in one chain — so one box per app system
+  across the whole graph would have to stretch over every column in between and overlap them.
+- **Combo gutters are measured card to card and must clear the boxes.** `GROUP_GAP` has to fit two
+  18px paddings plus the next participant's label; `APP_GROUP_GAP` two more paddings plus the
+  cluster's own label. Under those numbers the boxes touch and each label is drawn on its neighbour's
+  border. Both are in `pages/Topology/topology.config.ts` with the arithmetic written out.
+- **A nested combo must share its parent's `fillOpacity`/`strokeOpacity`.** The hover states set both
+  to fixed values, so a box whose base value differs can never be restored (landmine 9). App-system
+  boxes are told apart by a solid stroke and a bigger label, not by a different opacity.
+- **The cluster layout shelf-packs app systems, and the shelf width counts the gutters.** Measuring
+  only the cards makes a sheet of one-participant systems look like almost no area at all, the target
+  width comes out narrower than a single row, every cluster lands on its own shelf and fit-to-view
+  shrinks a 1300px column of cards to nothing.
+- **Layer pins and ordering live on the release** (`env_release_node.layer` / `.sort_order`, added by
+  `V5`), not in the browser: a pinned layer is a claim about the estate, so the next person to open
+  the release sees the same graph. `layer` is **nullable** — `null` is "derive it from the links" and
+  cannot be spelt `0`, which means column 0. A pin replaces that one participant's layer and leaves
+  its downstream alone. Only orientation / layout / grouping stay in `localStorage`.
+- **Every writer of `PUT /releases/{id}/topology` must resend `layer` and `sortOrder`.** The save
+  replaces the release's whole topology, so the configuration page carries both fields through
+  untouched (`ParticipantRow`) even though it cannot edit them — omitting them clears the layering.
+- **The layer editor stages its edits and saves once.** One request per keystroke would rewrite the
+  whole release on every digit, and a rejection would leave half the table applied.
 - **The editor's `_key` becomes the payload's `ref`.** A participant added in the browser has no id,
   and the connection rows have to name it before the save assigns one — `toTopologyRequest` is the
   only place that translation happens, and it is the easiest thing here to break.

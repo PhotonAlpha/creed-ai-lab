@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
+import { App as AntdApp } from 'antd';
 import {
   Alert,
   Button,
@@ -8,11 +9,13 @@ import {
   Segmented,
   Space,
   Statistic,
+  Switch,
   Tag,
+  Tooltip,
   Typography,
   theme,
 } from 'antd';
-import { CompressOutlined, ReloadOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, CompressOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Select } from 'antd';
 import { FilterBar } from '../../components/FilterBar';
 import { useDimensions } from '../../hooks/useDimensions';
@@ -27,11 +30,14 @@ import type {
   ReleaseLink,
   ReleaseNode,
 } from '../../api/types';
-import { EDGE_KINDS, buildTopology } from './buildGraph';
-import type { EdgeKind, TopologyLayout } from './buildGraph';
+import { EDGE_KINDS, ORIENTATIONS, buildTopology } from './buildGraph';
+import type { EdgeKind, Orientation, TopologyLayout } from './buildGraph';
 import { edgeColors } from './palette';
 import { NodeDetail } from './NodeDetail';
 import { TopologyGraph } from './TopologyGraph';
+import { LayerEditorModal } from './LayerEditorModal';
+import type { LayoutEdit } from './LayerEditorModal';
+import { useTopologyView } from './useTopologyView';
 
 const ALL_VISIBLE: Record<EdgeKind, boolean> = {
   dep: true,
@@ -40,8 +46,24 @@ const ALL_VISIBLE: Record<EdgeKind, boolean> = {
   clash: true,
 };
 
+/**
+ * The orientation picker's labels.
+ *
+ * An arrow *is* the label: four spelled-out directions would be the widest control in a toolbar
+ * that already carries the layout switch and a four-entry legend, and the tooltip carries the words
+ * for anyone who wants them.
+ */
+const ORIENTATION_ARROWS: Record<Orientation, string> = {
+  LR: '→',
+  RL: '←',
+  TB: '↓',
+  BT: '↑',
+};
+
 export function TopologyPage() {
   const { t } = useI18n();
+  /** Themed `message`, from the `AntdApp` wrapper in `main.tsx` — the static API ignores the theme. */
+  const { message } = AntdApp.useApp();
   const { token } = theme.useToken();
   const { dimensions, loading: dimensionsLoading, reload: reloadDimensions } = useDimensions();
   /** Same stale-response guard as the matrix page — see `load`. */
@@ -58,10 +80,20 @@ export function TopologyPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [layout, setLayout] = useState<TopologyLayout>('layered');
   const [visibleKinds, setVisibleKinds] = useState<Record<EdgeKind, boolean>>(ALL_VISIBLE);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [savingLayout, setSavingLayout] = useState(false);
+
+  /**
+   * How to draw the graph — orientation and the app-system boxes, remembered in `localStorage`.
+   *
+   * Where each participant sits is *not* here: `layer` and `sortOrder` are columns on
+   * `env_release_node`, arrive with the topology, and are written back by the layer editor.
+   */
+  const { view, setView } = useTopologyView();
+  const { layout, orientation, groupByApp } = view;
 
   /**
    * Releases, and the one the graph is scoped to.
@@ -136,20 +168,79 @@ export function TopologyPage() {
   }, [filter, releaseId, dimensionsLoading, load]);
 
   const model = useMemo(
-    () => buildTopology(endpoints, conflicts, participants, releaseLinks),
-    [endpoints, conflicts, participants, releaseLinks],
+    () =>
+      buildTopology(endpoints, conflicts, participants, releaseLinks, { orientation, groupByApp }),
+    [endpoints, conflicts, participants, releaseLinks, orientation, groupByApp],
   );
   const kindColors = useMemo(() => edgeColors(token), [token]);
 
   // A node that the new filter no longer contains would leave the panel showing a stale endpoint.
+  // App-system boxes belong here too: their ids carry the layer, so pinning a participant to
+  // another column retires the box that was selected.
   useEffect(() => {
     setSelectedId((current) =>
-      current && (model.nodeById.has(current) || model.combos.some((c) => c.id === current))
+      current &&
+      (model.nodeById.has(current) ||
+        model.combos.some((c) => c.id === current) ||
+        model.appGroups.some((g) => g.id === current) ||
+        model.clusterGroups.some((g) => g.id === current))
         ? current
         : null,
     );
   }, [model]);
 
+
+  /**
+   * Writes the edited layers back into the release.
+   *
+   * The only route that stores a participant is `PUT /releases/{id}/topology`, and it is
+   * authoritative for the whole release — so this resends every participant and every link exactly
+   * as they came back from the server, with only `layer` and `sortOrder` replaced. Sending just the
+   * edited rows would delete everything else in the release.
+   */
+  const saveLayout = useCallback(
+    async (edits: Map<number, LayoutEdit>) => {
+      if (!releaseId) return false;
+      setSavingLayout(true);
+      try {
+        const result = await envMatrixApi.saveReleaseTopology(releaseId, {
+          nodes: participants.map((participant) => {
+            const edit = edits.get(participant.id);
+            return {
+              id: participant.id,
+              appSystem: participant.appSystem,
+              country: participant.country,
+              envInstance: participant.envInstance,
+              label: participant.label,
+              note: participant.note,
+              layer: edit ? edit.layer : participant.layer,
+              sortOrder: edit ? edit.sortOrder : participant.sortOrder,
+            };
+          }),
+          links: releaseLinks.map((link) => ({
+            id: link.id,
+            source: { id: link.sourceNodeId },
+            target: { id: link.targetNodeId },
+            direction: link.direction,
+            note: link.note,
+          })),
+        });
+        if (!result.success) {
+          message.error(t('config.rejected', { count: result.issues.length }));
+          return false;
+        }
+        message.success(t('config.saved'));
+        await load(filter, releaseId);
+        return true;
+      } catch (e) {
+        message.error((e as Error).message);
+        return false;
+      } finally {
+        setSavingLayout(false);
+      }
+    },
+    [releaseId, participants, releaseLinks, message, t, load, filter],
+  );
 
   const selectedRelease = releases.find((release) => release.id === releaseId);
 
@@ -305,12 +396,47 @@ export function TopologyPage() {
                   <Segmented<TopologyLayout>
                     size="small"
                     value={layout}
-                    onChange={setLayout}
+                    onChange={(value) => setView({ layout: value })}
                     options={(['layered', 'cluster'] as const).map((value) => ({
                       value,
                       label: t(`topology.layout.${value}` as MessageKey),
                     }))}
                   />
+                  {/* Orientation only moves the layered view: the clustered one has no flow axis to
+                      point anywhere, so the control would do nothing there. */}
+                  {layout === 'layered' && (
+                    <Segmented<Orientation>
+                      size="small"
+                      value={orientation}
+                      onChange={(value) => setView({ orientation: value })}
+                      options={ORIENTATIONS.map((value) => ({
+                        value,
+                        label: (
+                          <Tooltip title={t(`topology.orientation.${value}` as MessageKey)}>
+                            <span style={{ padding: '0 2px' }}>{ORIENTATION_ARROWS[value]}</span>
+                          </Tooltip>
+                        ),
+                      }))}
+                    />
+                  )}
+                  <Space size={6}>
+                    <Switch
+                      size="small"
+                      checked={groupByApp}
+                      onChange={(checked) => setView({ groupByApp: checked })}
+                    />
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {t('topology.groupByApp')}
+                    </Typography.Text>
+                  </Space>
+                  <Button
+                    size="small"
+                    icon={<ApartmentOutlined />}
+                    onClick={() => setCustomOpen(true)}
+                    disabled={model.combos.length === 0}
+                  >
+                    {t('topology.custom')}
+                  </Button>
                   <Button
                     size="small"
                     icon={<CompressOutlined />}
@@ -354,6 +480,7 @@ export function TopologyPage() {
               <TopologyGraph
                 model={model}
                 layout={layout}
+                groupByApp={groupByApp}
                 visibleKinds={visibleKinds}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
@@ -376,6 +503,15 @@ export function TopologyPage() {
           </Col>
         </Row>
       </Space>
+
+      <LayerEditorModal
+        open={customOpen}
+        onClose={() => setCustomOpen(false)}
+        combos={model.combos}
+        releaseName={selectedRelease?.name ?? '—'}
+        saving={savingLayout}
+        onSave={saveLayout}
+      />
     </PageContainer>
   );
 }
