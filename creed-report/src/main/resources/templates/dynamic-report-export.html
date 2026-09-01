@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<!-- Self-contained offline twin of dynamic-report.html: the same table fragment and the same
+     chrome, with every stylesheet inlined and the definition form and switchers dropped -- a
+     downloaded file has nothing to submit to. -->
+<html lang="en" th:lang="${profile.languageTag()}" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{report.dynamic.offlineTitle}">Creed Dynamic Report (Offline)</title>
+    <style th:utext="${bootstrapCss}">/* bootstrap css inlined here */</style>
+    <style th:utext="${reportCss}">/* shared report css inlined here */</style>
+    <!-- Last, so the country's palette wins; only this country's sheet is inlined. -->
+    <style th:utext="${countryCss}">/* country css inlined here */</style>
+    <th:block th:replace="~{fragments/report-chrome :: styles}"></th:block>
+    <style>
+        @media print {
+            .no-print { display: none !important; }
+            body { background: #fff; }
+        }
+    </style>
+</head>
+<body th:class="${profile.styleClass()}">
+
+<nav th:replace="~{fragments/report-chrome :: header(${profile}, ${generatedAt}, #{report.offlineSnapshot}, null)}"></nav>
+
+<div class="container my-4">
+
+    <div th:replace="~{${profile.contentTemplate} :: notice}"></div>
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1 content-accent" th:text="${table.title}">Dynamic Table</h4>
+            <p class="text-muted mb-0"
+               th:text="${#strings.listJoin(table.columns.![label], ' / ')}">Col / Col</p>
+        </div>
+        <div>
+            <span class="badge total-badge fs-6">
+                <span th:text="#{report.total}">Total</span>: <span th:text="${total}">0</span>
+            </span>
+        </div>
+    </div>
+
+    <div th:replace="~{fragments/dynamic-table :: table(${table})}"></div>
+
+    <p th:replace="~{fragments/report-chrome :: footer(#{report.footerOffline})}"></p>
+</div>
+
+<script th:utext="${bootstrapJs}">/* bootstrap js inlined here */</script>
+</body>
+</html>

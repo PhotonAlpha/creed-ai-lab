@@ -1,0 +1,16 @@
+/* Malaysia edition -- PDF stylesheet, inlined into report-export-pdf.html after that template's base
+ * block, so these rules win at equal specificity.
+ *
+ * CSS 2.1 only: openpdf-html (Flying Saucer) is not a browser -- no custom properties, no
+ * flexbox, no rem. Selectors match the PDF template's markup, which differs from the browser
+ * one, which is why this is a separate file from style.css rather than the same rules reused.
+ */
+
+.section-head h2 { color: #010066; }
+.total-badge      { background-color: #010066; }
+.country-notice   { border-left-color: #010066; background-color: #ececf5; }
+
+/* Denser rows, square badges. */
+table.report-table tbody th,
+table.report-table tbody td { padding-top: 2px; padding-bottom: 2px; }
+.badge                 { border-radius: 1px; }

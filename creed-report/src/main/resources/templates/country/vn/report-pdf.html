@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<!-- Vietnam edition -- report fragments for the PDF export, pulled in the same way:
+
+         <div th:replace="~{${profile.pdfContentTemplate} :: notice}"></div>
+
+     Rebuilt for openpdf-html (Flying Saucer): CSS 2.1 only, so no Bootstrap utilities, no flexbox
+     and no definition-list grid -- the same layout expressed with tables and floats. Text comes
+     from the same region bundles as the browser fragments, so the two cannot drift apart. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- The definition list as a two-column table. -->
+<div th:fragment="notice" class="country-notice">
+    <div class="country-notice-title" th:text="#{report.country.name}">Vietnam</div>
+    <table class="country-notice-table">
+        <tr>
+            <td class="country-notice-term" th:text="#{report.country.formatLabel}">Format</td>
+            <td th:text="#{report.country.notice}">Dates are day-first.</td>
+        </tr>
+        <tr>
+            <td class="country-notice-term" th:text="#{report.country.timezoneLabel}">Timezone</td>
+            <td th:text="#{report.country.timezone}">Asia/Ho_Chi_Minh</td>
+        </tr>
+    </table>
+</div>
+</body>
+</html>

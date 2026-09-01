@@ -1,0 +1,17 @@
+/* Thailand edition -- PDF stylesheet, inlined into report-export-pdf.html after that template's base
+ * block, so these rules win at equal specificity.
+ *
+ * CSS 2.1 only: openpdf-html (Flying Saucer) is not a browser -- no custom properties, no
+ * flexbox, no rem. Selectors match the PDF template's markup, which differs from the browser
+ * one, which is why this is a separate file from style.css rather than the same rules reused.
+ */
+
+.section-head h2 { color: #a51931; }
+.total-badge      { background-color: #a51931; }
+.country-notice   { border-left-color: #a51931; background-color: #fbeeef; }
+
+/* Taller rows: Thai stacks tone marks above and vowels below the line, which the 4px default
+   padding clips. Pill badges. */
+table.report-table tbody th,
+table.report-table tbody td { padding-top: 7px; padding-bottom: 7px; line-height: 1.6; }
+.badge                 { border-radius: 8pt; }

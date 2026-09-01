@@ -1,6 +1,14 @@
 package com.creed.report.service;
 
 import com.creed.report.config.MessageSourceConfig;
+import com.creed.report.i18n.CountryProfile;
+import com.creed.report.dynamic.DynamicTable;
+import com.creed.report.dynamic.DynamicTableProperties;
+import com.creed.report.dynamic.DynamicTableRequest;
+import com.creed.report.dynamic.DynamicTableService;
+import com.creed.report.i18n.CountryStyles;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.creed.report.i18n.ReportCountry;
 import com.creed.report.model.ServerInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +37,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class PdfExportServiceTest {
 
+    private final CountryStyles countryStyles = new CountryStyles();
+
     private PdfExportService service;
 
     @BeforeEach
@@ -49,7 +59,7 @@ class PdfExportServiceTest {
 
     @Test
     void rendersReportPdfTemplateToPdfBytes() {
-        byte[] pdf = renderReport(Locale.ENGLISH);
+        byte[] pdf = renderReport(ReportCountry.GLOBAL, Locale.ENGLISH);
 
         assertThat(new String(pdf, 0, 5, StandardCharsets.US_ASCII)).isEqualTo("%PDF-");
         // A real laid-out page, not an empty shell.
@@ -60,22 +70,88 @@ class PdfExportServiceTest {
 
     @Test
     void simplifiedChineseLocaleRendersWithNotoSansSC() {
-        String pdf = ascii(renderReport(Locale.SIMPLIFIED_CHINESE));
+        String pdf = ascii(renderReport(ReportCountry.GLOBAL, Locale.SIMPLIFIED_CHINESE));
         assertThat(pdf).contains("NotoSansSC-Regular");
     }
 
     @Test
     void traditionalChineseLocaleRendersWithNotoSansTC() {
-        String pdf = ascii(renderReport(Locale.TRADITIONAL_CHINESE));
+        String pdf = ascii(renderReport(ReportCountry.GLOBAL, Locale.TRADITIONAL_CHINESE));
         assertThat(pdf).contains("NotoSansTC-Regular");
     }
 
     @Test
     void unknownLocaleFallsBackToEnglishBundle() {
-        String pdf = ascii(renderReport(Locale.forLanguageTag("fr")));
+        String pdf = ascii(renderReport(ReportCountry.GLOBAL, Locale.forLanguageTag("fr")));
         assertThat(pdf).contains("NotoSans-Regular")
                 .doesNotContain("NotoSansSC-Regular")
                 .doesNotContain("NotoSansTC-Regular");
+    }
+
+    @Test
+    void thaiRendersWithNotoSansThai() {
+        // Thai is the one added script with no coverage in the Latin/CJK faces; this also pins the
+        // th_TH bundle chain, since only it points pdf.font.family at the Thai family.
+        String pdf = ascii(renderReport(ReportCountry.TH, Locale.forLanguageTag("th")));
+        assertThat(pdf).contains("NotoSansThai-Regular")
+                // Flying Saucer picks one family per run, so the Thai face has to carry the
+                // Latin host names and IPs too — a fallback to Noto Sans would mean it did not.
+                .doesNotContain("NotoSans-Regular");
+    }
+
+    @Test
+    void latinScriptCountriesKeepTheDefaultNotoSansFace() {
+        // Malay and Vietnamese add no script: Noto Sans covers both, Vietnamese diacritics included.
+        assertThat(ascii(renderReport(ReportCountry.MY, Locale.forLanguageTag("ms"))))
+                .contains("NotoSans-Regular").doesNotContain("NotoSansThai-Regular");
+        assertThat(ascii(renderReport(ReportCountry.VN, Locale.forLanguageTag("vi"))))
+                .contains("NotoSans-Regular").doesNotContain("NotoSansThai-Regular");
+    }
+
+    @Test
+    void everyCountryHasItsOwnFragmentTemplateAndStylesheet() {
+        // The fragment is resolved by template path (country/<code>/report-pdf) and the CSS by
+        // CountryStyles, so a country missing either fails here rather than rendering a bare page.
+        for (ReportCountry country : ReportCountry.values()) {
+            byte[] pdf = renderReport(country, Locale.ENGLISH);
+            assertThat(new String(pdf, 0, 5, StandardCharsets.US_ASCII))
+                    .as("country %s", country.code()).isEqualTo("%PDF-");
+            assertThat(countryStyles.pdf(country)).as("pdf stylesheet for %s", country.code())
+                    .contains(".total-badge");
+        }
+    }
+
+    @Test
+    void eachCountrysPdfStylesheetIsItsOwnFile() {
+        // The refactor's payoff: one file per country instead of one shared block, so no country
+        // can silently inherit another's palette.
+        assertThat(countryStyles.pdf(ReportCountry.TH)).contains("#a51931").doesNotContain("#010066");
+        assertThat(countryStyles.pdf(ReportCountry.MY)).contains("#010066").doesNotContain("#a51931");
+        assertThat(countryStyles.pdf(ReportCountry.VN)).contains("#da251d");
+    }
+
+    @Test
+    void theDynamicReportRendersACallerDefinedTableThroughTheSameChrome() {
+        // dynamic-report-export-pdf shares fragments/report-chrome-pdf with the server report, so
+        // this also pins that the extracted @page/base CSS still lays a table out.
+        DynamicTableService tables = new DynamicTableService(new ObjectMapper(),
+                new MessageSourceConfig().messageSource(), new DynamicTableProperties());
+        for (ReportCountry country : ReportCountry.values()) {
+            CountryProfile profile = CountryProfile.of(country, Locale.ENGLISH);
+            DynamicTable table = tables.build(new DynamicTableRequest("Ad hoc", "host,ip,uptimeDays",
+                    "[{\"host\":\"a\",\"ip\":\"10.0.0.1\",\"uptimeDays\":1234}]"), profile, profile.locale());
+
+            byte[] pdf = service.renderTemplate("dynamic-report-export-pdf", Map.of(
+                    "profile", profile,
+                    "countryPdfCss", countryStyles.pdf(country),
+                    "table", table,
+                    "total", String.valueOf(table.size()),
+                    "generatedAt", "2026-09-02 12:00:00"), profile.locale());
+
+            assertThat(new String(pdf, 0, 5, StandardCharsets.US_ASCII))
+                    .as("dynamic pdf for %s", country.code()).isEqualTo("%PDF-");
+            assertThat(pdf.length).isGreaterThan(1000);
+        }
     }
 
     @Test
@@ -94,16 +170,20 @@ class PdfExportServiceTest {
         assertThat(new String(pdf, 0, 5, StandardCharsets.US_ASCII)).isEqualTo("%PDF-");
     }
 
-    private byte[] renderReport(Locale locale) {
+    private byte[] renderReport(ReportCountry country, Locale language) {
         List<ServerInfo> servers = List.of(
                 new ServerInfo("creed-auth-01", "10.10.1.11", "creed-author-server",
                         "CN", "auth", "prod", "cn-east-1a", "blue"),
                 new ServerInfo("creed-gw-02", "10.10.2.22", "creed-gateway",
                         "SG", "gateway", "staging", "ap-se-1a", "green"));
+        // Same shape as ReportController: the profile's effective locale is what the template runs in.
+        CountryProfile profile = CountryProfile.of(country, language);
         return service.renderTemplate("report-export-pdf", Map.of(
+                "profile", profile,
+                "countryPdfCss", countryStyles.pdf(country),
                 "servers", servers,
-                "total", servers.size(),
-                "generatedAt", "2026-07-22 12:00:00"), locale);
+                "total", String.valueOf(servers.size()),
+                "generatedAt", "2026-07-22 12:00:00"), profile.locale());
     }
 
     /** Lossless byte-to-char view for searching ASCII names inside binary PDF output. */

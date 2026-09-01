@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<!-- Vietnam edition -- report fragments for the BROWSER pages (report.html, report-export.html).
+     Pulled in by path, not by fragment name:
+
+         <div th:replace="~{${profile.contentTemplate} :: notice}"></div>
+
+     so the fragment names in here are the same in every country and this file can grow more of
+     them without any name mangling. CountryProfile owns the path convention
+     (country/<code>/report); adding a country means adding a directory next to this one.
+
+     Text comes from the region message bundles (report-messages_<lang>_<REGION>.properties), so a
+     country's wording is translated per language without this file knowing about languages. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- The same facts as a two-column definition list. -->
+<div th:fragment="notice" class="country-notice rounded p-3 mb-3">
+    <div class="fw-semibold content-accent mb-2" th:text="#{report.country.name}">Vietnam</div>
+    <dl class="row mb-0 small">
+        <dt class="col-sm-3" th:text="#{report.country.formatLabel}">Format</dt>
+        <dd class="col-sm-9 mb-0" th:text="#{report.country.notice}">Dates are day-first.</dd>
+        <dt class="col-sm-3" th:text="#{report.country.timezoneLabel}">Timezone</dt>
+        <dd class="col-sm-9 mb-0"><code th:text="#{report.country.timezone}">Asia/Ho_Chi_Minh</code></dd>
+    </dl>
+</div>
+</body>
+</html>

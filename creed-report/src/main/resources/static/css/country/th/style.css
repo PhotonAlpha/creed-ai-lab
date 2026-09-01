@@ -1,0 +1,16 @@
+/* Thailand edition -- browser stylesheet.
+ *
+ * Loaded by country code (a <link> on the live page, inlined by CountryStyles into the offline
+ * export), so exactly one of these is ever in effect and the selectors need no .country-<code>
+ * prefix. Adding a country means adding a directory here, not editing a shared block.
+ */
+
+.content-accent { color: #a51931; }
+.total-badge    { background-color: #a51931; }
+.country-notice { border-left: 4px solid #a51931; background-color: #fbeeef; }
+
+/* Taller rows: Thai stacks tone marks above and vowels below the line, and Bootstrap's 0.5rem
+   cell padding clips them. Pill badges. */
+.report-table td,
+.report-table th { padding-top: .6rem; padding-bottom: .6rem; line-height: 1.7; }
+.badge            { border-radius: 999px; }

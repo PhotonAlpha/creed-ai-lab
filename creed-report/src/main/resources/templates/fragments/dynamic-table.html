@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<!-- The caller-defined table, shared by the live page and the offline HTML export so the download
+     is byte-for-byte the same table the page showed.
+
+     Nothing here knows what the columns are: the header row iterates ${table.columns} and each body
+     row iterates its own cells, which DynamicTableService already lined up with those columns and
+     formatted for the country. A cell prints cell.text (country-formatted); the raw value is kept
+     on the cell for the Excel export, which wants numbers to stay numbers.
+
+     .report-table is the same hook the server report uses, so a country's stylesheet styles this
+     table too -- Thai rows stay tall, Vietnamese headers stay small-caps. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<div th:fragment="table(table)" class="card shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-striped align-middle mb-0 report-table">
+                <thead class="table-dark">
+                <tr>
+                    <th scope="col">#</th>
+                    <th scope="col" th:each="column : ${table.columns}" th:text="${column.label}">Column</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="row, iter : ${table.rows}">
+                    <th scope="row" th:text="${iter.count}">1</th>
+                    <td th:each="cell : ${row}" th:text="${cell.text}">value</td>
+                </tr>
+                <tr th:if="${table.empty}">
+                    <td class="text-center text-muted py-4"
+                        th:attr="colspan=${table.columns.size() + 1}"
+                        th:text="#{report.empty}">No records.</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- The definition, as hidden fields. Every export button re-posts it, so the three forms cannot
+     disagree about what they are exporting. -->
+<th:block th:fragment="definitionFields(definition)">
+    <input type="hidden" name="title" th:value="${definition.title}">
+    <input type="hidden" name="headers" th:value="${definition.headers}">
+    <input type="hidden" name="data" th:value="${definition.data}">
+</th:block>
+
+</body>
+</html>

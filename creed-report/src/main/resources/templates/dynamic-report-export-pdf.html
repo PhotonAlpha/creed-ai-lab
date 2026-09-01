@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<!-- PDF twin of dynamic-report-export.html. Every bit of chrome -- the @page margin boxes, the base
+     CSS 2.1, the header, the heading row and the footer -- comes from fragments/report-chrome-pdf,
+     the same fragments report-export-pdf.html uses, so both PDF reports open and close identically
+     and only their tables differ. Model: profile / countryPdfCss / table / total / generatedAt.
+
+     The table is rebuilt here rather than shared with fragments/dynamic-table: that one is
+     Bootstrap markup, and Flying Saucer has no flexbox or utility classes. Column count is
+     caller-driven, so widths are left to the renderer's auto layout. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title th:text="${table.title}">Creed Dynamic Report (PDF)</title>
+    <th:block th:replace="~{fragments/report-chrome-pdf :: styles}"></th:block>
+<!-- The country edition's own CSS 2.1 rules, inlined by CountryStyles. After the base block, so its
+     palette wins. Source: static/css/country/<code>/style-pdf.css. -->
+<style th:utext="${countryPdfCss}">/* country pdf css inlined here */</style>
+</head>
+<body th:class="${profile.styleClass()}">
+
+<div th:replace="~{fragments/report-chrome-pdf :: header(#{report.brand}, ${generatedAt})}"></div>
+
+<div th:replace="~{${profile.pdfContentTemplate} :: notice}"></div>
+
+<div th:replace="~{fragments/report-chrome-pdf :: section(${table.title}, null, ${total})}"></div>
+
+<div class="card">
+    <table class="report-table">
+        <thead>
+        <tr>
+            <th>#</th>
+            <th th:each="column : ${table.columns}" th:text="${column.label}">Column</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="row, iter : ${table.rows}" th:classappend="${iter.odd} ? 'odd'">
+            <th th:text="${iter.count}">1</th>
+            <td th:each="cell : ${row}" th:text="${cell.text}">value</td>
+        </tr>
+        <tr th:if="${table.empty}" class="empty-row">
+            <td th:attr="colspan=${table.columns.size() + 1}" th:text="#{report.empty}">No records.</td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+
+<p th:replace="~{fragments/report-chrome-pdf :: footer}"></p>
+
+</body>
+</html>

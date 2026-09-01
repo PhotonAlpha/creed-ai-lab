@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<!-- Shared chrome for the PDF exports (report-export-pdf.html and dynamic-report-export-pdf.html),
+     the paged-media counterpart of fragments/report-chrome.html and there for the same reason: the
+     header, the @page margin boxes and the footer are IDENTICAL in every country edition and in
+     every report, because nothing in this file reads the country.
+
+     Everything here is CSS 2.1 for openpdf-html (Flying Saucer): the renderer is not a browser --
+     no Bootstrap, no CSS variables, no flexbox, layout via floats. What it does support and the
+     browser templates do not is paged media: @page margin boxes with counter(page)/counter(pages),
+     thead repeated per page (-fs-table-paginate), rows kept unsplit (page-break-inside).
+
+     The style fragment must stay a TEMPLATE rather than a .css file: the locale's font stack and
+     the page-counter fragments come from message keys, injected by th:inline="css". A country's own
+     rules are a plain file, inlined after this block by CountryStyles. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+
+<style th:fragment="styles" th:inline="css">
+        @page {
+            size: A4 landscape;
+            margin: 16mm 12mm 18mm 12mm;
+            @top-left {
+                content: "[(#{pdf.page.header})]";
+                font-family: [(#{pdf.font.family})];
+                font-size: 8pt;
+                color: #4e4376;
+            }
+            @bottom-right {
+                content: "[(#{pdf.page.prefix})]" counter(page) "[(#{pdf.page.middle})]" counter(pages) "[(#{pdf.page.suffix})]";
+                font-family: [(#{pdf.font.family})];
+                font-size: 8pt;
+                color: #6c757d;
+            }
+        }
+
+        body {
+            font-family: [(#{pdf.font.family})];
+            font-size: 10pt;
+            color: #212529;
+            background-color: #ffffff;
+        }
+
+        /* navbar.report-header: linear-gradient(90deg, #2b5876, #4e4376) -> solid + accent border */
+        .report-header {
+            background-color: #2b5876;
+            border-bottom: 3px solid #4e4376;
+            color: #ffffff;
+            padding: 10px 14px;
+            margin-bottom: 14px;
+        }
+        .report-header .brand {
+            font-size: 14pt;
+            font-weight: bold;
+        }
+        .report-header .meta {
+            float: right;
+            font-size: 9pt;
+            color: #d8dee9;
+            padding-top: 3px;
+        }
+
+        /* "Server Topology" heading row with the Total badge floated right */
+        .section-head { margin: 0 2px 10px 2px; }
+        .section-head h2 {
+            font-size: 12pt;
+            margin: 0 0 3px 0;
+        }
+        .section-head .columns {
+            font-size: 9pt;
+            color: #6c757d;
+            margin: 0;
+        }
+        /* Colour comes from the country stylesheet inlined below; structure stays here. */
+        .total-badge {
+            float: right;
+            color: #ffffff;
+            font-size: 10pt;
+            padding: 3px 10px;
+            border-radius: 6px;
+        }
+
+        /* card shell around the table */
+        .card {
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 0;
+        }
+
+        table.report-table {
+            width: 100%;
+            border-collapse: collapse;
+            -fs-table-paginate: paginate; /* Flying Saucer: repeat thead on every page */
+        }
+        table.report-table thead th {
+            background-color: #212529; /* .table-dark */
+            color: #ffffff;
+            text-align: left;
+            padding: 5px 8px;
+            font-size: 9pt;
+            white-space: nowrap;
+        }
+        table.report-table tbody th,
+        table.report-table tbody td {
+            border-bottom: 1px solid #dee2e6;
+            padding: 4px 8px;
+            font-size: 9pt;
+            text-align: left;
+            font-weight: normal;
+        }
+        table.report-table tbody th { font-weight: bold; } /* row number keeps the <th scope="row"> look */
+        table.report-table tbody tr { page-break-inside: avoid; }
+        table.report-table tbody tr.odd { background-color: #f5f7fa; } /* .table-striped */
+
+        code.ip { font-family: Courier, monospace; font-size: 8.5pt; }
+
+        .badge {
+            display: inline-block;
+            color: #ffffff;
+            font-size: 8pt;
+            padding: 1px 6px;
+            border-radius: 6px;
+        }
+        /* .badge.bg-light.text-dark.border (country) */
+        .badge-country {
+            background-color: #f8f9fa;
+            color: #212529;
+            border: 1px solid #dee2e6;
+        }
+        .badge-env-prod    { background-color: #198754; }
+        .badge-env-staging { background-color: #fd7e14; }
+        .badge-env-dev     { background-color: #0d6efd; }
+        .badge-slot-blue   { background-color: #0d6efd; }
+        .badge-slot-green  { background-color: #198754; }
+
+        .empty-row td {
+            text-align: center;
+            color: #6c757d;
+            padding: 16px 8px;
+        }
+
+        .footer-note {
+            margin: 10px 2px 0 2px;
+            font-size: 8pt;
+            color: #6c757d;
+        }
+
+        .clearfix { clear: both; }
+
+        /* --- structure of the per-country content block (country/<code>/report-pdf.html) ---- */
+        .country-notice {
+            border-left: 4px solid;   /* colour from the country stylesheet */
+            padding: 6px 10px;
+            margin: 0 2px 10px 2px;
+        }
+        .country-notice-plain { margin: 0 2px 10px 2px; font-size: 9pt; color: #6c757d; }
+        .country-notice-title { font-weight: bold; font-size: 10pt; }
+        .country-notice-body  { font-size: 9pt; }
+        .country-notice-meta  { font-size: 8.5pt; color: #6c757d; }
+        .country-notice-chip  {
+            float: right;
+            background-color: #6c757d;
+            color: #ffffff;
+            font-size: 8pt;
+            padding: 1px 6px;
+            border-radius: 6px;
+        }
+        .country-notice-table { font-size: 9pt; border-collapse: collapse; margin-top: 3px; }
+        .country-notice-term  { font-weight: bold; padding-right: 12px; white-space: nowrap; }
+
+</style>
+
+</head>
+<body>
+
+<!-- Page header. Same markup and palette for every country and both reports; the country appears
+     only as its name in the meta line. -->
+<div th:fragment="header(title, generatedAt)" class="report-header">
+    <span class="meta">
+        <span th:text="#{report.country.name}">Global</span>
+        &#183; <span th:text="#{report.generatedAt}">Generated at</span>
+        <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
+        &#183; <span th:text="#{report.pdfSnapshot}">PDF snapshot</span>
+    </span>
+    <span class="brand" th:text="${title}">Creed &#183; Server Inventory Report</span>
+    <div class="clearfix"></div>
+</div>
+
+<!-- The heading row above the table: title on the left, total badge floated right. -->
+<div th:fragment="section(heading, columns, total)" class="section-head">
+    <span class="total-badge"><span th:text="#{report.total}">Total</span>: <span th:text="${total}">0</span></span>
+    <h2 th:text="${heading}">Server Topology</h2>
+    <p class="columns" th:if="${columns != null}" th:text="${columns}">Host / IP / App</p>
+    <div class="clearfix"></div>
+</div>
+
+<!-- Page footer, country-independent like the header. -->
+<p th:fragment="footer" class="footer-note" th:text="#{report.footer}">
+    Powered by Spring Boot &#183; Thymeleaf &#183; openpdf-html &#183; PDF export
+</p>
+
+</body>
+</html>

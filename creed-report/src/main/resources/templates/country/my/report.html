@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<!-- Malaysia edition -- report fragments for the BROWSER pages (report.html, report-export.html).
+     Pulled in by path, not by fragment name:
+
+         <div th:replace="~{${profile.contentTemplate} :: notice}"></div>
+
+     so the fragment names in here are the same in every country and this file can grow more of
+     them without any name mangling. CountryProfile owns the path convention
+     (country/<code>/report); adding a country means adding a directory next to this one.
+
+     Text comes from the region message bundles (report-messages_<lang>_<REGION>.properties), so a
+     country's wording is translated per language without this file knowing about languages. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- One compact line with the timezone as a trailing chip. -->
+<div th:fragment="notice" class="country-notice rounded px-3 py-2 mb-3 d-flex align-items-center gap-2 flex-wrap">
+    <span class="fw-semibold content-accent" th:text="#{report.country.name}">Malaysia</span>
+    <span class="small" th:text="#{report.country.notice}">Dates are day-first.</span>
+    <span class="badge bg-secondary ms-auto" th:text="#{report.country.timezone}">Asia/Kuala_Lumpur</span>
+</div>
+</body>
+</html>

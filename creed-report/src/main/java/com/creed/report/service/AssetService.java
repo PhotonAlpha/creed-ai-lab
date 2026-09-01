@@ -26,17 +26,21 @@ public class AssetService {
     private static final String ICONS_CSS_PATH = "META-INF/resources/webjars/bootstrap-icons/" + ICONS_VERSION + "/font/bootstrap-icons.min.css";
     private static final String ICONS_FONT_PATH = "META-INF/resources/webjars/bootstrap-icons/" + ICONS_VERSION + "/font/fonts/bootstrap-icons.woff2";
     private static final String STYLE_PATH = "static/css/style.css";
+    /** Shared, country-neutral look of the report pages; a country's own sheet is layered on top. */
+    private static final String REPORT_CSS_PATH = "static/css/report.css";
 
     private String bootstrapCss;
     private String bootstrapJs;
     private String bootstrapIconsCss;
     private String styleCss;
+    private String reportCss;
 
     @PostConstruct
     void load() throws IOException {
         this.bootstrapCss = readClasspath(CSS_PATH).replace("</style>", "<\\/style>");
         this.bootstrapJs  = readClasspath(JS_PATH).replace("</script>", "<\\/script>");
         this.styleCss = readClasspath(STYLE_PATH).replace("</style>", "<\\/style>");
+        this.reportCss = readClasspath(REPORT_CSS_PATH).replace("</style>", "<\\/style>");
         this.bootstrapIconsCss = inlineIconsFont().replace("</style>", "<\\/style>");
     }
 
@@ -56,6 +60,15 @@ public class AssetService {
     /** The project's custom diff/highlight styles (normally served from /css/style.css). */
     public String styleCss() {
         return styleCss;
+    }
+
+    /**
+     * The report pages' shared stylesheet (normally served from /css/report.css). Country-neutral:
+     * the offline export inlines this and then the country's own sheet from
+     * {@link com.creed.report.i18n.CountryStyles}.
+     */
+    public String reportCss() {
+        return reportCss;
     }
 
     private String inlineIconsFont() throws IOException {

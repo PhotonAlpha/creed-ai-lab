@@ -45,6 +45,21 @@ creed:
       # Bundled: Noto Sans (Latin) + Noto Sans SC/TC (Chinese), picked per locale by the
       # pdf.font.family message key. This matches the code default; listed here for visibility.
       font-paths: "classpath:/fonts/*.ttf,classpath:/fonts/*.otf"
+    # Country axis: ?country=global|th|my|vn, remembered in the creed-report-country cookie and
+    # folded into the request locale's region subtag by CountryLocaleResolver. The per-country
+    # presentation defaults live in the ReportCountry enum; `profiles` below overrides individual
+    # fields of one country and may be omitted entirely (see the commented example).
+    country:
+      default-country: "${CREED_REPORT_DEFAULT_COUNTRY:global}"
+    # Guard rails for /dynamic, whose table comes from the caller: POI and openpdf-html lay the
+    # whole thing out in memory, so an oversized payload is refused as bad input (400).
+    dynamic:
+      max-columns: "${CREED_REPORT_DYNAMIC_MAX_COLUMNS:64}"
+      max-rows: "${CREED_REPORT_DYNAMIC_MAX_ROWS:20000}"
+#      profiles:
+#        my:
+#          date-pattern: "dd-MM-yyyy HH:mm"
+#          languages: [ "ms", "en" ]
 
 logging:
   level:

@@ -1,52 +1,42 @@
 <!DOCTYPE html>
-<html lang="en" th:lang="${#locale.toLanguageTag()}" xmlns:th="http://www.thymeleaf.org">
+<!-- Self-contained offline twin of report.html: same country edition, same fragments, with every
+     stylesheet inlined (Bootstrap and the shared sheet by AssetService, the country's own by
+     CountryStyles) and the switchers omitted — a downloaded file has no server to switch against.
+     Fonts are NOT embedded — the Noto faces are tens of MB — so the stack just prefers the locale's
+     face if the viewer has it, else system fonts. -->
+<html lang="en" th:lang="${profile.languageTag()}" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
     <title th:text="#{report.offlineTitle}">Creed Server Report (Offline)</title>
     <style th:utext="${bootstrapCss}">/* bootstrap css inlined here */</style>
-    <style th:inline="css">
-        /* Self-contained export: fonts are NOT embedded (the Noto faces are tens of MB) — the
-           stack just prefers the locale's Noto face if the viewer has it, else system fonts. */
-        body { font-family: [(#{html.font.family})]; }
-        body { background-color: #f5f7fa; }
-        .report-header { background: linear-gradient(90deg, #2b5876, #4e4376); color: #fff; }
-        .badge-env-prod    { background-color: #198754; }
-        .badge-env-staging { background-color: #fd7e14; }
-        .badge-env-dev     { background-color: #0d6efd; }
-        .badge-slot-blue   { background-color: #0d6efd; }
-        .badge-slot-green  { background-color: #198754; }
-        .table thead th    { white-space: nowrap; }
-        code.ip            { font-size: 0.95em; }
+    <style th:utext="${reportCss}">/* shared report css inlined here */</style>
+    <!-- Last, so the country's palette wins; only this country's sheet is inlined. -->
+    <style th:utext="${countryCss}">/* country css inlined here */</style>
+    <th:block th:replace="~{fragments/report-chrome :: styles}"></th:block>
+    <style>
         @media print {
             .no-print { display: none !important; }
             body { background: #fff; }
         }
     </style>
 </head>
-<body>
+<body th:class="${profile.styleClass()}">
 
-<nav class="navbar navbar-dark report-header shadow-sm">
-    <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1" th:text="#{report.brand}">Creed &middot; Server Inventory Report</span>
-        <span class="text-light small">
-            <span th:text="#{report.generatedAt}">Generated at</span>
-            <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
-            &middot; <span th:text="#{report.offlineSnapshot}">offline snapshot</span>
-        </span>
-    </div>
-</nav>
+<nav th:replace="~{fragments/report-chrome :: header(${profile}, ${generatedAt}, #{report.offlineSnapshot}, null)}"></nav>
 
 <div class="container my-4">
 
+    <div th:replace="~{${profile.contentTemplate} :: notice}"></div>
+
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
-            <h4 class="mb-1" th:text="#{report.topology}">Server Topology</h4>
+            <h4 class="mb-1 content-accent" th:text="#{report.topology}">Server Topology</h4>
             <p class="text-muted mb-0" th:text="#{report.columns}">
                 Host / IP / App / Country / Service / Env / Zone / Slot
             </p>
         </div>
         <div>
-            <span class="badge bg-secondary fs-6">
+            <span class="badge total-badge fs-6">
                 <span th:text="#{report.total}">Total</span>: <span th:text="${total}">0</span>
             </span>
         </div>
@@ -55,7 +45,7 @@
     <div class="card shadow-sm">
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-hover table-striped align-middle mb-0">
+                <table class="table table-hover table-striped align-middle mb-0 report-table">
                     <thead class="table-dark">
                     <tr>
                         <th scope="col">#</th>
@@ -100,9 +90,7 @@
         </div>
     </div>
 
-    <p class="text-muted small mt-3 mb-0" th:text="#{report.footerOffline}">
-        Powered by Spring Boot &middot; Thymeleaf &middot; Bootstrap 5 &middot; offline export
-    </p>
+    <p th:replace="~{fragments/report-chrome :: footer(#{report.footerOffline})}"></p>
 </div>
 
 <script th:utext="${bootstrapJs}">/* bootstrap js inlined here */</script>

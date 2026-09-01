@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<!-- The dynamic report page: a table the CALLER describes -- ?headers= names the columns,
+     ?data= carries the rows as JSON -- rendered with the same country/language machinery as the
+     server report. The header, footer and country notice are the shared fragments, so this report
+     is a different table inside identical chrome.
+
+     Visiting with no parameters renders just the definition form below, which is also how a
+     caller-sized payload gets in: the form POSTs, and so do the three export buttons, because
+     ?data= outgrows a query string long before a real report does. -->
+<html lang="en" th:lang="${profile.languageTag()}" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{report.dynamic.pageTitle}">Creed Dynamic Report</title>
+    <link rel="stylesheet" th:href="@{/webjars/bootstrap/css/bootstrap.min.css}">
+    <link rel="stylesheet" th:href="@{/css/report.css}">
+    <!-- Last, so the country's palette wins; only ever one country's sheet is loaded. -->
+    <link rel="stylesheet" th:href="@{${profile.styleSheet}}">
+    <th:block th:replace="~{fragments/report-chrome :: styles}"></th:block>
+</head>
+<body th:class="${profile.styleClass()}">
+
+<nav th:replace="~{fragments/report-chrome :: header(${profile}, ${generatedAt}, null, ${countries})}"></nav>
+
+<div class="container my-4">
+
+    <div th:replace="~{${profile.contentTemplate} :: notice}"></div>
+
+    <!-- The table definition. Posting it back is what makes an arbitrarily large ?data= workable,
+         and it keeps the page usable without hand-building a URL. -->
+    <form class="card shadow-sm mb-4" th:action="@{/dynamic}" method="post">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label" for="title" th:text="#{report.dynamic.titleLabel}">Report title</label>
+                    <input class="form-control form-control-sm" id="title" name="title"
+                           th:value="${definition.title}">
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label" for="headers" th:text="#{report.dynamic.headersLabel}">Headers</label>
+                    <input class="form-control form-control-sm" id="headers" name="headers"
+                           th:value="${definition.headers}" placeholder="host,ip,app,country">
+                    <div class="form-text" th:text="#{report.dynamic.headersHint}">
+                        Comma separated column keys; known keys are translated.
+                    </div>
+                </div>
+                <div class="col-12">
+                    <label class="form-label" for="data" th:text="#{report.dynamic.dataLabel}">Rows (JSON)</label>
+                    <textarea class="form-control form-control-sm font-monospace" id="data" name="data" rows="5"
+                              th:text="${definition.data}"
+                              placeholder='[{"host":"creed-th-gw-01","ip":"10.30.1.11"}]'></textarea>
+                    <div class="form-text" th:text="#{report.dynamic.dataHint}">
+                        A JSON array of objects keyed by header, or of arrays in header order.
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card-footer bg-transparent">
+            <button class="btn btn-primary btn-sm" type="submit" th:text="#{report.dynamic.render}">Render</button>
+        </div>
+    </form>
+
+    <th:block th:if="${table != null}">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h4 class="mb-1 content-accent" th:text="${table.title}">Dynamic Table</h4>
+                <p class="text-muted mb-0"
+                   th:text="${#strings.listJoin(table.columns.![label], ' / ')}">Col / Col</p>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge total-badge fs-6">
+                    <span th:text="#{report.total}">Total</span>: <span th:text="${total}">0</span>
+                </span>
+                <!-- Exports re-post the definition rather than linking it: the country and language
+                     ride along in their cookies, but the table itself only exists in this form. -->
+                <form th:action="@{/dynamic/export}" method="post" class="d-inline">
+                    <th:block th:replace="~{fragments/dynamic-table :: definitionFields(${definition})}"></th:block>
+                    <button class="btn btn-primary btn-sm" type="submit"
+                            th:text="#{report.downloadOffline}">Download offline HTML</button>
+                </form>
+                <form th:action="@{/dynamic/export/pdf}" method="post" class="d-inline">
+                    <th:block th:replace="~{fragments/dynamic-table :: definitionFields(${definition})}"></th:block>
+                    <button class="btn btn-outline-primary btn-sm" type="submit"
+                            th:text="#{report.downloadPdf}">Download PDF</button>
+                </form>
+                <!-- Excel goes through the shared /export/excel strategy dispatcher, which accepts
+                     POST precisely so this definition can reach ReportType.DYNAMIC. -->
+                <form th:action="@{/export/excel}" method="post" class="d-inline">
+                    <input type="hidden" name="type" value="dynamic">
+                    <th:block th:replace="~{fragments/dynamic-table :: definitionFields(${definition})}"></th:block>
+                    <button class="btn btn-success btn-sm" type="submit"
+                            th:text="#{report.downloadExcel}">Download Excel</button>
+                </form>
+            </div>
+        </div>
+
+        <div th:replace="~{fragments/dynamic-table :: table(${table})}"></div>
+    </th:block>
+
+    <p th:replace="~{fragments/report-chrome :: footer(#{report.footerWeb})}"></p>
+</div>
+
+<script th:src="@{/webjars/bootstrap/js/bootstrap.bundle.min.js}"></script>
+</body>
+</html>

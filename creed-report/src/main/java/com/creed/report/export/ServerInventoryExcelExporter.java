@@ -1,5 +1,7 @@
 package com.creed.report.export;
 
+import com.creed.report.i18n.CountryFormatter;
+import com.creed.report.i18n.CountryProfile;
 import com.creed.report.model.ServerInfo;
 import com.creed.report.service.ServerInfoService;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -12,6 +14,9 @@ import java.util.Locale;
 /**
  * {@link ReportType#SERVER_INVENTORY} strategy: the server table of {@code /report}, as a single
  * sheet with the same columns and the same localized headers as the page and the PDF.
+ *
+ * <p>Country-aware like the page: the export covers exactly the rows that country's edition shows,
+ * and the caption's timestamp and count use that country's formats.
  */
 @Component
 public class ServerInventoryExcelExporter implements ExcelReportExporter {
@@ -32,13 +37,15 @@ public class ServerInventoryExcelExporter implements ExcelReportExporter {
     @Override
     public void write(Workbook workbook, ExcelExportRequest request) {
         Locale locale = request.locale();
-        List<ServerInfo> servers = serverInfoService.listServers();
+        CountryProfile profile = request.country();
+        List<ServerInfo> servers = serverInfoService.listServers(profile.country());
         ExcelStyles styles = new ExcelStyles(workbook);
 
         ExcelSheetBuilder sheet = ExcelSheetBuilder.create(workbook, styles, msg("excel.sheet.servers", locale))
-                .title(msg("report.brand", locale))
+                .title(msg("report.brand", locale) + " · " + msg("report.country.name", locale))
                 .caption(msg("report.generatedAt", locale) + ": " + request.generatedAtText()
-                         + "  |  " + msg("report.total", locale) + ": " + servers.size())
+                         + "  |  " + msg("report.total", locale) + ": "
+                         + CountryFormatter.number(servers.size(), profile))
                 .blank()
                 .header(msg("excel.col.index", locale),
                         msg("report.col.host", locale),

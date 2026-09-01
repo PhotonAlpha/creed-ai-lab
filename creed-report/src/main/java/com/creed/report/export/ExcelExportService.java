@@ -56,9 +56,17 @@ public class ExcelExportService {
         log.info("Excel export strategies registered: {}", byType.keySet());
     }
 
-    /** The report types an exporter is registered for, in enum order — what the UI offers. */
+    /** Every report type an exporter is registered for, in enum order. */
     public List<ReportType> supportedTypes() {
         return List.copyOf(strategies.keySet());
+    }
+
+    /**
+     * The subset a menu can offer as a plain link — see {@link ReportType#linkable()}. A type whose
+     * data has to travel with the request is reachable only from the page that holds that data.
+     */
+    public List<ReportType> linkableTypes() {
+        return strategies.keySet().stream().filter(ReportType::linkable).toList();
     }
 
     /**

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<!-- Thailand edition -- report fragments for the PDF export, pulled in the same way:
+
+         <div th:replace="~{${profile.pdfContentTemplate} :: notice}"></div>
+
+     Rebuilt for openpdf-html (Flying Saucer): CSS 2.1 only, so no Bootstrap utilities, no flexbox
+     and no definition-list grid -- the same layout expressed with tables and floats. Text comes
+     from the same region bundles as the browser fragments, so the two cannot drift apart. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- Stacked, with the era note emphasized. -->
+<div th:fragment="notice" class="country-notice">
+    <div class="country-notice-title" th:text="#{report.country.name}">Thailand</div>
+    <div class="country-notice-body" th:text="#{report.country.notice}">Dates use the Buddhist era.</div>
+    <div class="country-notice-meta">
+        <span th:text="#{report.country.timezoneLabel}">Timezone</span>:
+        <span th:text="#{report.country.timezone}">Asia/Bangkok</span>
+    </div>
+</div>
+</body>
+</html>

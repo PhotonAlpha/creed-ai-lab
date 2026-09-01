@@ -1,174 +1,34 @@
 <!DOCTYPE html>
-<!-- PDF adaptation of report-export.html for openpdf-html (Flying Saucer). Same visual language
-     (brand header, card, env/slot/country badges, striped table) but rebuilt in CSS 2.1: the
-     renderer is not a browser, so no Bootstrap (CSS variables/flexbox), no JS, no linear-gradient
-     (solid #2b5876 + #4e4376 accent border instead), layout via floats. Paged-media extras the
-     HTML export doesn't have: @page margin boxes with page counters, thead repeated per page
-     (-fs-table-paginate), rows kept unsplit (page-break-inside). Same model as report-export
-     minus bootstrapCss/bootstrapJs: servers / total / generatedAt.
+<!-- PDF twin of report-export.html: the server inventory as paged media. All the chrome -- the
+     @page margin boxes, the base CSS 2.1, the header, the heading row and the footer -- comes from
+     fragments/report-chrome-pdf, shared with dynamic-report-export-pdf.html, so the two PDF reports
+     cannot drift apart. What is left here is this report's own table.
+     Model: profile / countryPdfCss / servers / total / generatedAt.
 
-     Localized: every display string comes from messages*.properties (#{...}), including the CSS
-     bits — th:inline="css" injects the per-locale font stack (pdf.font.family: Noto Sans /
-     Noto Sans SC / Noto Sans TC, registered by PdfExportService) and the @page margin-box
-     header/page-counter fragments. Flying Saucer has no per-glyph fallback, so each locale's
-     stack must lead with the face that covers its script. -->
+     Localized on two axes. Language: display strings and the CSS font stack come from
+     messages*.properties. Country: the edition's markup and CSS are pulled in BY PATH from
+     ${profile} -- ${profile.pdfContentTemplate} for the fragment, CountryStyles for the inlined
+     stylesheet -- so this template never branches on the country. -->
 <html xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8"/>
     <title th:text="#{report.title}">Creed Server Report (PDF)</title>
-    <style th:inline="css">
-        @page {
-            size: A4 landscape;
-            margin: 16mm 12mm 18mm 12mm;
-            @top-left {
-                content: "[(#{pdf.page.header})]";
-                font-family: [(#{pdf.font.family})];
-                font-size: 8pt;
-                color: #4e4376;
-            }
-            @bottom-right {
-                content: "[(#{pdf.page.prefix})]" counter(page) "[(#{pdf.page.middle})]" counter(pages) "[(#{pdf.page.suffix})]";
-                font-family: [(#{pdf.font.family})];
-                font-size: 8pt;
-                color: #6c757d;
-            }
-        }
-
-        body {
-            font-family: [(#{pdf.font.family})];
-            font-size: 10pt;
-            color: #212529;
-            background-color: #ffffff;
-        }
-
-        /* navbar.report-header: linear-gradient(90deg, #2b5876, #4e4376) -> solid + accent border */
-        .report-header {
-            background-color: #2b5876;
-            border-bottom: 3px solid #4e4376;
-            color: #ffffff;
-            padding: 10px 14px;
-            margin-bottom: 14px;
-        }
-        .report-header .brand {
-            font-size: 14pt;
-            font-weight: bold;
-        }
-        .report-header .meta {
-            float: right;
-            font-size: 9pt;
-            color: #d8dee9;
-            padding-top: 3px;
-        }
-
-        /* "Server Topology" heading row with the Total badge floated right */
-        .topology-head { margin: 0 2px 10px 2px; }
-        .topology-head h2 {
-            font-size: 12pt;
-            margin: 0 0 3px 0;
-        }
-        .topology-head .columns {
-            font-size: 9pt;
-            color: #6c757d;
-            margin: 0;
-        }
-        .total-badge {
-            float: right;
-            background-color: #6c757d;
-            color: #ffffff;
-            font-size: 10pt;
-            padding: 3px 10px;
-            border-radius: 6px;
-        }
-
-        /* card shell around the table */
-        .card {
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            padding: 0;
-        }
-
-        table.servers {
-            width: 100%;
-            border-collapse: collapse;
-            -fs-table-paginate: paginate; /* Flying Saucer: repeat thead on every page */
-        }
-        table.servers thead th {
-            background-color: #212529; /* .table-dark */
-            color: #ffffff;
-            text-align: left;
-            padding: 5px 8px;
-            font-size: 9pt;
-            white-space: nowrap;
-        }
-        table.servers tbody th,
-        table.servers tbody td {
-            border-bottom: 1px solid #dee2e6;
-            padding: 4px 8px;
-            font-size: 9pt;
-            text-align: left;
-            font-weight: normal;
-        }
-        table.servers tbody th { font-weight: bold; } /* row number keeps the <th scope="row"> look */
-        table.servers tbody tr { page-break-inside: avoid; }
-        table.servers tbody tr.odd { background-color: #f5f7fa; } /* .table-striped */
-
-        code.ip { font-family: Courier, monospace; font-size: 8.5pt; }
-
-        .badge {
-            display: inline-block;
-            color: #ffffff;
-            font-size: 8pt;
-            padding: 1px 6px;
-            border-radius: 6px;
-        }
-        /* .badge.bg-light.text-dark.border (country) */
-        .badge-country {
-            background-color: #f8f9fa;
-            color: #212529;
-            border: 1px solid #dee2e6;
-        }
-        .badge-env-prod    { background-color: #198754; }
-        .badge-env-staging { background-color: #fd7e14; }
-        .badge-env-dev     { background-color: #0d6efd; }
-        .badge-slot-blue   { background-color: #0d6efd; }
-        .badge-slot-green  { background-color: #198754; }
-
-        .empty-row td {
-            text-align: center;
-            color: #6c757d;
-            padding: 16px 8px;
-        }
-
-        .footer-note {
-            margin: 10px 2px 0 2px;
-            font-size: 8pt;
-            color: #6c757d;
-        }
-
-        .clearfix { clear: both; }
-    </style>
+    <th:block th:replace="~{fragments/report-chrome-pdf :: styles}"></th:block>
+<!-- The country edition's own CSS 2.1 rules, inlined by CountryStyles (openpdf-html renders from a
+     string, so there is no base URL for a <link>). After the base block, so its palette wins; only
+     this country's sheet is ever inlined. Source: static/css/country/<code>/style-pdf.css. -->
+<style th:utext="${countryPdfCss}">/* country pdf css inlined here */</style>
 </head>
-<body>
+<body th:class="${profile.styleClass()}">
 
-<div class="report-header">
-    <span class="meta">
-        <span th:text="#{report.generatedAt}">Generated at</span>
-        <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
-        &#183; <span th:text="#{report.pdfSnapshot}">PDF snapshot</span>
-    </span>
-    <span class="brand" th:text="#{report.brand}">Creed &#183; Server Inventory Report</span>
-    <div class="clearfix"></div>
-</div>
+<div th:replace="~{fragments/report-chrome-pdf :: header(#{report.brand}, ${generatedAt})}"></div>
 
-<div class="topology-head">
-    <span class="total-badge"><span th:text="#{report.total}">Total</span>: <span th:text="${total}">0</span></span>
-    <h2 th:text="#{report.topology}">Server Topology</h2>
-    <p class="columns" th:text="#{report.columns}">Host / IP / App / Country / Service / Env / Zone / Slot</p>
-    <div class="clearfix"></div>
-</div>
+<div th:replace="~{${profile.pdfContentTemplate} :: notice}"></div>
+
+<div th:replace="~{fragments/report-chrome-pdf :: section(#{report.topology}, #{report.columns}, ${total})}"></div>
 
 <div class="card">
-    <table class="servers">
+    <table class="report-table">
         <thead>
         <tr>
             <th>#</th>
@@ -205,9 +65,7 @@
     </table>
 </div>
 
-<p class="footer-note" th:text="#{report.footer}">
-    Powered by Spring Boot &#183; Thymeleaf &#183; openpdf-html &#183; PDF export
-</p>
+<p th:replace="~{fragments/report-chrome-pdf :: footer}"></p>
 
 </body>
 </html>

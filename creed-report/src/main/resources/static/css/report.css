@@ -1,0 +1,26 @@
+/* Shared look for the report pages (report.html and the offline report-export.html).
+ *
+ * Country-neutral by construction: this file owns the page chrome and the table's structure, and
+ * deliberately sets NO accent colours -- those live in static/css/country/<code>/style.css, one
+ * file per country edition, loaded on top of this one. A country whose stylesheet is missing
+ * therefore renders visibly unstyled instead of silently inheriting someone else's palette.
+ *
+ * The locale's font stack is NOT here: it comes from a message key, so it stays in the
+ * `styles` fragment of templates/fragments/report-chrome.html. That is the whole rule -- CSS that
+ * needs a message is a Thymeleaf fragment, CSS that does not is a plain file.
+ */
+
+body { background-color: #f5f7fa; }
+
+/* --- chrome: identical in every country --------------------------------------------------- */
+.report-header { background: linear-gradient(90deg, #2b5876, #4e4376); color: #fff; }
+.report-footer { color: #6c757d; }
+
+/* --- content: structure shared by every country ------------------------------------------- */
+.report-table thead th { white-space: nowrap; }
+.badge-env-prod    { background-color: #198754; }
+.badge-env-staging { background-color: #fd7e14; }
+.badge-env-dev     { background-color: #0d6efd; }
+.badge-slot-blue   { background-color: #0d6efd; }
+.badge-slot-green  { background-color: #198754; }
+code.ip            { font-size: 0.95em; }

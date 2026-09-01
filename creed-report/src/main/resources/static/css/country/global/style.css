@@ -1,0 +1,10 @@
+/* Global -- the neutral baseline the other editions vary from edition -- browser stylesheet.
+ *
+ * Loaded by country code (a <link> on the live page, inlined by CountryStyles into the offline
+ * export), so exactly one of these is ever in effect and the selectors need no .country-<code>
+ * prefix. Adding a country means adding a directory here, not editing a shared block.
+ */
+
+.content-accent { color: #2b5876; }
+.total-badge    { background-color: #6c757d; }
+.country-notice { border-left: 4px solid #2b5876; background-color: #eef2f7; }

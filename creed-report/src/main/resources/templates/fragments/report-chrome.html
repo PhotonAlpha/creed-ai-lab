@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<!-- Shared chrome for the browser-rendered report pages (report.html and report-export.html).
+
+     This file exists to make one requirement structural rather than a convention someone has to
+     remember: the page header and footer are IDENTICAL in every country edition. Nothing in these
+     fragments branches on ${profile.country}, and none of them pulls in a country template or
+     stylesheet — the country reaches the page only below the header, through
+     ${profile.contentTemplate} and ${profile.styleSheet}.
+
+     The PDF export has its own chrome inside report-export-pdf.html: that is a single template, so
+     there is nothing to share, and paged-media CSS 2.1 cannot be expressed with these classes. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+
+<!-- The only CSS that has to be a template: the locale's font stack comes from a message key,
+     so it cannot be a static .css file. Everything else is:
+       static/css/report.css                     shared, country-neutral
+       static/css/country/<code>/style.css       one file per country edition
+     The live page links both; the offline export inlines them (AssetService + CountryStyles). -->
+<style th:fragment="styles" th:inline="css">
+    /* Browsers fall back per glyph, so this only sets the locale's preferred face. */
+    body { font-family: [(#{html.font.family})]; }
+</style>
+
+</head>
+<body>
+
+<!-- Page header. Same markup, same palette, same order for every country: the country shows up
+     only as the name in the meta line and (on the live page) as the selected switcher button.
+     `countries` null renders the header without switchers, which is what the offline export wants. -->
+<nav th:fragment="header(profile, generatedAt, snapshot, countries)"
+     class="navbar navbar-dark report-header shadow-sm">
+    <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1" th:text="#{report.brand}">Creed &middot; Server Inventory Report</span>
+        <span class="d-flex align-items-center gap-3">
+            <!-- The th:if MUST sit on an outer element: th:replace has higher precedence than
+                 th:if, so putting both on one tag includes the fragment unconditionally — and the
+                 switcher's @{...} links then blow up in the offline export, which renders on a
+                 plain non-web Context. -->
+            <th:block th:if="${countries != null}">
+                <span th:replace="~{fragments/report-chrome :: switcher(${profile}, ${countries})}"></span>
+            </th:block>
+            <span class="text-light small">
+                <span th:text="#{report.country.name}">Global</span>
+                &middot; <span th:text="#{report.generatedAt}">Generated at</span>
+                <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
+                <th:block th:if="${snapshot != null}">&middot; <span th:text="${snapshot}">snapshot</span></th:block>
+            </span>
+        </span>
+    </div>
+</nav>
+
+<!-- The two axes, as two button groups. Country and language are separate links, and each is
+     remembered in its own cookie, so switching one never resets the other. Both lists are
+     model-driven: `countries` from CountryCatalog, the languages from the selected country. -->
+<span th:fragment="switcher(profile, countries)" class="d-flex align-items-center gap-2">
+    <span class="btn-group btn-group-sm" role="group" th:attr="aria-label=#{report.countryLabel}">
+        <a th:each="c : ${countries}" class="btn btn-outline-light"
+           th:href="@{/report(country=${c.code()})}"
+           th:classappend="${profile.country() == c} ? 'active'"
+           th:text="#{${'report.countrySwitch.' + c.code()}}">Country</a>
+    </span>
+    <span class="btn-group btn-group-sm" role="group" th:attr="aria-label=#{report.languageLabel}">
+        <a th:each="tag : ${profile.languages()}" class="btn btn-outline-light"
+           th:href="@{/report(lang=${tag})}"
+           th:classappend="${profile.isLanguage(tag)} ? 'active'"
+           th:text="#{${'report.lang.' + tag}}">Language</a>
+    </span>
+</span>
+
+<!-- Page footer. Country-independent by construction, like the header. -->
+<p th:fragment="footer(text)" class="report-footer small mt-3 mb-0" th:text="${text}">
+    Powered by Spring Boot &middot; Thymeleaf &middot; Bootstrap 5
+</p>
+
+</body>
+</html>

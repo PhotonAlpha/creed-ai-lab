@@ -1,6 +1,8 @@
 package com.creed.report.export;
 
 import com.creed.report.config.MessageSourceConfig;
+import com.creed.report.dynamic.DynamicTableProperties;
+import com.creed.report.dynamic.DynamicTableService;
 import com.creed.report.service.EnvironmentInspectionService;
 import com.creed.report.service.ServerInfoService;
 import org.apache.poi.ss.usermodel.Row;
@@ -8,6 +10,7 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.junit.jupiter.api.Test;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.MessageSource;
 
 import java.io.ByteArrayInputStream;
@@ -30,9 +33,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ExcelExportServiceTest {
 
     private final MessageSource messages = new MessageSourceConfig().messageSource();
+    private final DynamicTableService tables =
+            new DynamicTableService(new ObjectMapper(), messages, new DynamicTableProperties());
     private final ExcelExportService service = new ExcelExportService(List.of(
             new ServerInventoryExcelExporter(new ServerInfoService(), messages),
-            new EnvironmentExcelExporter(new EnvironmentInspectionService(), messages)));
+            new EnvironmentExcelExporter(new EnvironmentInspectionService(), messages),
+            new DynamicTableExcelExporter(tables, messages)));
 
     @Test
     void serverInventoryStrategyWritesTheServerTable() throws IOException {
@@ -92,8 +98,50 @@ class ExcelExportServiceTest {
     }
 
     @Test
+    void dynamicStrategyWritesTheCallerDefinedTable() throws IOException {
+        // headers/data ride in on the pass-through parameters map -- no new plumbing for a report
+        // type whose shape is not known until the request arrives.
+        byte[] xlsx = service.export(request(ReportType.DYNAMIC, Locale.ENGLISH, Map.of(
+                "title", "Ad hoc",
+                "headers", "host,ip,uptimeDays",
+                "data", "[{\"host\":\"a\",\"ip\":\"10.0.0.1\",\"uptimeDays\":1234}]")));
+
+        try (Workbook workbook = read(xlsx)) {
+            Sheet sheet = workbook.getSheet("Data");
+            assertThat(sheet).isNotNull();
+            assertThat(sheet.getRow(0).getCell(0).getStringCellValue()).isEqualTo("Ad hoc");
+            assertThat(values(sheet.getRow(3))).containsExactly("#", "Host", "IP", "uptimeDays");
+            // The number stays numeric so the sheet can still sum the column.
+            assertThat(values(sheet.getRow(4))).containsExactly("1.0", "a", "10.0.0.1", "1234.0");
+        }
+    }
+
+    @Test
+    void dynamicStrategyLocalizesHeadersAndFormatsForTheCountry() throws IOException {
+        byte[] xlsx = service.export(request(ReportType.DYNAMIC, Locale.of("vi", "VN"), Map.of(
+                "headers", "host,ip",
+                "data", "[{\"host\":\"a\",\"ip\":\"10.0.0.1\"}]")));
+
+        try (Workbook workbook = read(xlsx)) {
+            Sheet sheet = workbook.getSheet("Dữ liệu");
+            assertThat(sheet).isNotNull();
+            // Both the index column and the data columns come out of the Vietnamese bundle.
+            assertThat(values(sheet.getRow(3))).containsExactly("STT", "Máy chủ", "IP");
+        }
+    }
+
+    @Test
     void everyReportTypeHasAStrategy() {
         assertThat(service.supportedTypes()).containsExactly(ReportType.values());
+    }
+
+    @Test
+    void onlyTypesThatWorkFromABareLinkAreOfferedAsLinks() {
+        // The report page's dropdown is model-driven, so a type whose data must be posted with the
+        // request has to be excluded there or the menu offers a guaranteed 400.
+        assertThat(service.linkableTypes())
+                .containsExactly(ReportType.SERVER_INVENTORY, ReportType.ENVIRONMENT)
+                .doesNotContain(ReportType.DYNAMIC);
     }
 
     @Test

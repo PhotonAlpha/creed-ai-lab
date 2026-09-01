@@ -16,19 +16,28 @@ import java.util.Locale;
 public enum ReportType {
 
     /** Server inventory — the table shown on {@code /report}. */
-    SERVER_INVENTORY("server", "report.type.server", "creed-server-report"),
+    SERVER_INVENTORY("server", "report.type.server", "creed-server-report", true),
 
     /** Environment inspector — profiles, effective properties and property sources. */
-    ENVIRONMENT("environment", "report.type.environment", "creed-environment-report");
+    ENVIRONMENT("environment", "report.type.environment", "creed-environment-report", true),
+
+    /**
+     * A table the caller describes: columns from {@code headers}, rows from {@code data} JSON.
+     * Unlike the other two it has no data of its own, so it only makes sense with those parameters
+     * attached — which is why {@code /dynamic}'s Excel button posts them rather than linking.
+     */
+    DYNAMIC("dynamic", "report.type.dynamic", "creed-dynamic-report", false);
 
     private final String code;
     private final String titleKey;
     private final String filePrefix;
+    private final boolean linkable;
 
-    ReportType(String code, String titleKey, String filePrefix) {
+    ReportType(String code, String titleKey, String filePrefix, boolean linkable) {
         this.code = code;
         this.titleKey = titleKey;
         this.filePrefix = filePrefix;
+        this.linkable = linkable;
     }
 
     /** Request/URL value identifying this type. */
@@ -44,6 +53,18 @@ public enum ReportType {
     /** Download filename prefix; the caller appends a timestamp and the extension. */
     public String filePrefix() {
         return filePrefix;
+    }
+
+    /**
+     * Whether a bare {@code /export/excel?type=<code>} link produces a report.
+     *
+     * <p>False for a type that has no data of its own — {@link #DYNAMIC} needs the caller's
+     * {@code headers}/{@code data} posted with it — so a menu built from
+     * {@link ExcelExportService#linkableTypes()} cannot offer a link that would only answer 400.
+     * ({@link #ENVIRONMENT} takes parameters too, but every one of them has a default.)
+     */
+    public boolean linkable() {
+        return linkable;
     }
 
     /**
