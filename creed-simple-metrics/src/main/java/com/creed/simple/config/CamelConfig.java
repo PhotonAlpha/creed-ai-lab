@@ -7,12 +7,13 @@ import io.micrometer.context.ContextExecutorService;
 import io.micrometer.context.ContextRegistry;
 import io.micrometer.context.ContextSnapshotFactory;
 import io.micrometer.core.instrument.binder.MeterBinder;
-import io.micrometer.core.instrument.binder.httpcomponents.hc5.ObservationExecChainHandler;
-import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
+import com.creed.metrics.ConnectionPoolMetrics;
 import io.micrometer.observation.ObservationRegistry;
 import org.apache.camel.CamelContext;
 import org.apache.camel.ProducerTemplate;
 import org.apache.camel.component.http.HttpComponent;
+import org.apache.hc.client5.http.observation.ObservingOptions;
+import org.apache.hc.client5.http.observation.impl.ObservationClassicExecInterceptor;
 import org.apache.hc.client5.http.impl.ChainElement;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.slf4j.Logger;
@@ -104,7 +105,7 @@ public class CamelConfig {
     @Bean
     MeterBinder camelHttpPoolMetrics(
             @Qualifier("camelHttpConnectionManager") PoolingHttpClientConnectionManager camelHttpConnectionManager) {
-        return new PoolingHttpClientConnectionManagerMetricsBinder(camelHttpConnectionManager, "camelHttpPool");
+        return new ConnectionPoolMetrics(camelHttpConnectionManager, "camelHttpPool");
     }
 
     /**
@@ -130,11 +131,24 @@ public class CamelConfig {
                 // obfuscation, `logbook.*` config). First per the Logbook docs, so it sees the
                 // message before other interceptors touch it.
                 .addExecInterceptorFirst("logbook", new LogbookHttpExecHandler(logbook))
-                // Micrometer's hc5 instrumentation: an `httpcomponents.httpclient.request` Observation
-                // (timer + trace propagation) per attempt — the camel-http twin of the RestClient's
-                // `http.client.requests`. Placed right inside RETRY per the Micrometer docs.
+                // Apache's hc5 observation support: an `http.client.request` Observation (timer +
+                // trace propagation) per attempt — the camel-http twin of the RestClient's
+                // `http.client.requests`. Still placed right inside RETRY, so it times each
+                // ATTEMPT, not the whole retried operation, and so it brackets the same work the
+                // lbAudit handler below logs.
+                //
+                // Deliberately constructed directly rather than via
+                // HttpClientObservationSupport.enable(builder, ...): that helper installs every
+                // interceptor with addExecInterceptorFirst, which would (a) move this outside RETRY
+                // and silently change it from per-attempt to per-operation timing, and (b) also bind
+                // its own ConnPoolMeters, duplicating the pool gauges ConnectionPoolMetrics already
+                // publishes under the names the dashboards use.
+                //
+                // Name change from the retired Micrometer handler: the Observation (and therefore
+                // the derived timer and span) is `http.client.request`, was
+                // `httpcomponents.httpclient.request`. Nothing in monitoring/ queried the old name.
                 .addExecInterceptorAfter(ChainElement.RETRY.name(), "micrometer",
-                        new ObservationExecChainHandler(observationRegistry))
+                        new ObservationClassicExecInterceptor(observationRegistry, ObservingOptions.DEFAULT))
                 // innermost (inside retry): logs the instance the route planner picked, per attempt,
                 // plus route/total occupancy of this pool
                 .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler(connectionManager)));

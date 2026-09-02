@@ -19,11 +19,15 @@ spring:
   # exists so a frontend developer can run the backend without generating the mesh PKI at all, so the
   # binder is excluded rather than fed a keystore.
   autoconfigure:
-    exclude: org.springframework.boot.actuate.autoconfigure.ssl.SslObservabilityAutoConfiguration
+    exclude: org.springframework.boot.micrometer.metrics.autoconfigure.ssl.SslMetricsAutoConfiguration
 
 management:
   health:
     # Same reason: the SSL health indicator reads bundles too.
+    ssl:
+      enabled: false
+  info:
+    # Boot 4's actuator SslInfo also opens every declared bundle; disable it for the same reason.
     ssl:
       enabled: false
 

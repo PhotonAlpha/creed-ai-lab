@@ -23,3 +23,11 @@ Spring Cloud **Config Server** serving the mesh's externalized config. HTTPS `84
 ## Notes
 - Also carries a static `spring.cloud.discovery.client.simple.instances` registry (`catalog-cluster` 18081/18082, `order-cluster` 18091/18092, with `zone` metadata) — present for discovery/LB experiments.
 - SSL bundles here are **PEM** (`creed-pem-server`/`creed-pem-client`) shipped on the classpath, so it runs without `-Dspring-boot.run.workingDirectory` unlike the `file:${creed.rootPath}` modules.
+
+## Spring Boot 4 note
+
+Spring Cloud Config Server is **5.0.x** (train 2025.1.x); verified serving `/{app}/{profile}` over HTTPS with Basic auth on Boot 4.
+
+`client/HttpClientsConfiguration` needed two Boot 4 changes: the module now declares **`spring-boot-starter-restclient`** (Boot 4 moved `RestTemplateBuilder` and the `org.springframework.boot.http.client` builders out of `spring-boot-starter-web`), and `ClientHttpRequestFactorySettings` is renamed **`HttpClientSettings`** (same fluent API, and `ClientHttpRequestFactoryBuilder.build(...)` takes it directly).
+
+Tests use **`spring-boot-resttestclient`** for `TestRestTemplate`, which `spring-boot-starter-test` no longer bundles.

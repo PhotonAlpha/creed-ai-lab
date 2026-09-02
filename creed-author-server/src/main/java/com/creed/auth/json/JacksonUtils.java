@@ -1,18 +1,18 @@
 package com.creed.auth.json;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.SerializationFeature;
 import lombok.SneakyThrows;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -20,13 +20,15 @@ import java.util.Objects;
 @UtilityClass
 @Slf4j
 public class JacksonUtils {
-    private static ObjectMapper objectMapper = new ObjectMapper();
-
-    static {
-        objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        objectMapper.registerModule(new JavaTimeModule());
-    }
+    /**
+     * Jackson 3 mappers are immutable: features are set on a builder before {@code build()} rather
+     * than by mutating a constructed mapper, so the old static block is now a builder chain. The
+     * JavaTimeModule registration is gone because Jackson 3 handles {@code java.time} natively.
+     */
+    private static ObjectMapper objectMapper = JsonMapper.builder()
+            .configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false)
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            .build();
 
     /**
      * 初始化 objectMapper 属性
@@ -63,7 +65,7 @@ public class JacksonUtils {
         }
         try {
             return objectMapper.readValue(text, clazz);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.error("json parse err,json:{}", text, e);
             throw new RuntimeException(e);
         }
@@ -92,7 +94,7 @@ public class JacksonUtils {
         }
         try {
             return objectMapper.readValue(bytes, clazz);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.error("json parse err,json:{}", bytes, e);
             throw new RuntimeException(e);
         }
@@ -101,7 +103,7 @@ public class JacksonUtils {
     public static <T> T parseObject(String text, TypeReference<T> typeReference) {
         try {
             return objectMapper.readValue(text, typeReference);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.error("json parse err,json:{}", text, e);
             throw new RuntimeException(e);
         }
@@ -113,7 +115,7 @@ public class JacksonUtils {
         }
         try {
             return objectMapper.readValue(text, objectMapper.getTypeFactory().constructCollectionType(List.class, clazz));
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.error("json parse err,json:{}", text, e);
             throw new RuntimeException(e);
         }
@@ -122,7 +124,7 @@ public class JacksonUtils {
     public static JsonNode parseTree(String text) {
         try {
             return objectMapper.readTree(text);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.error("json parse err,json:{}", text, e);
             throw new RuntimeException(e);
         }
@@ -131,7 +133,7 @@ public class JacksonUtils {
     public static JsonNode parseTree(byte[] text) {
         try {
             return objectMapper.readTree(text);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.error("json parse err,json:{}", text, e);
             throw new RuntimeException(e);
         }

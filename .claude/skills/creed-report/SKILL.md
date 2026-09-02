@@ -104,3 +104,9 @@ A report whose columns and rows the caller supplies, sharing every piece of the 
 
 ## Notes
 - No config-server / SSL dependency; runs fully standalone. See [[creed-platform]] only for build/run basics (local Maven repo, JDK).
+
+## Spring Boot 4 note
+
+`dynamic/DynamicTableService` uses **Jackson 3** (`tools.jackson.databind.ObjectMapper`, `tools.jackson.core.type.TypeReference`, `tools.jackson.core.JacksonException`). Jackson 3 exceptions are unchecked, so the `catch (JacksonException)` blocks are catching a `RuntimeException` — they still compile and still matter (bad `data=` must answer 400, not 500), but nothing forces you to keep them.
+
+`service/EnvironmentInspectionService` imports `org.springframework.boot.bootstrap.DefaultBootstrapContext` (moved out of `org.springframework.boot` in Boot 4).

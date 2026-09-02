@@ -10,7 +10,7 @@ import com.creed.report.i18n.CountryProfile;
 import com.creed.report.i18n.CountryStyles;
 import com.creed.report.i18n.ReportCountry;
 import com.creed.report.model.ServerInfo;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;

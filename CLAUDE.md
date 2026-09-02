@@ -8,8 +8,11 @@ narrative content belongs in a skill or a `HANDOFF.md` (§6).
 
 ## 1. Stack
 
-Java **21** source/target, built with **JDK 25** · Spring Boot **3.5.14** · Spring Cloud **2025.0.2**
-· Camel 4.18.2 (simple-metrics only) · Maven 3.9.16, local repo **`/Users/ethan/Desktop/workspace/repos`**
+Java **21** source/target, built with **JDK 25** · Spring Boot **4.0.8** (Spring Framework 7,
+Jakarta EE 11) · Spring Cloud **2025.1.3** · **Jackson 3** (`tools.jackson.*`, not
+`com.fasterxml.jackson.*`) · Camel 4.22.0 (simple-metrics only) · Logbook 4.1.0 (simple-metrics only) · httpclient5 **5.6.4**
+(pinned above Boot's 5.5.2 by direct `dependencyManagement`, for `httpclient5-observation`)
+· Maven 3.9.16, local repo **`/Users/ethan/Desktop/workspace/repos`**
 (not `~/.m2`) · frontend React 19 + TS + Vite 8 + **antd 5** + Ant Design Pro 2 + AntV G6 5 ·
 PostgreSQL on the `creed-artifactory-db` container (env-matrix only; everything else is in-memory).
 
@@ -92,6 +95,38 @@ Details in the `creed-platform` skill.
   property — a declared-but-missing keystore fails startup even with HTTPS off.
 - Connection pools: `@Bean(destroyMethod="close")` + `setConnectionManagerShared(true)`.
 - **Don't guess metric names** — read them from `localhost:8889/metrics`.
+
+### Spring Boot 4 module split (the upgrade's recurring trap)
+
+Boot 4 broke the monolithic starters into per-technology modules, so things that used to arrive
+transitively now need declaring. Symptom is always the same: `package … does not exist`, or a bean
+that silently isn't auto-configured.
+
+- **`spring-boot-starter-actuator` no longer brings tracing.** Add `spring-boot-micrometer-tracing`
+  or nothing injects `io.micrometer.tracing.Tracer` and the context fails at startup.
+- **`spring-boot-starter-test` no longer bundles MockMvc / TestRestTemplate.** Add
+  `spring-boot-starter-webmvc-test` and/or `spring-boot-resttestclient` (or
+  `spring-boot-starter-test-classic` for the old all-in-one behaviour).
+- **`spring-boot-starter-web` no longer brings RestTemplate/RestClient.** Add
+  `spring-boot-starter-restclient` for `RestTemplateBuilder` and the
+  `org.springframework.boot.http.client` builders.
+- **Classes moved**: `…boot.DefaultBootstrapContext` → `…boot.bootstrap.…`;
+  `…boot.web.embedded.tomcat.TomcatServletWebServerFactory` → `…boot.tomcat.servlet.…`;
+  `…boot.web.client.RestTemplateBuilder` → `…boot.restclient.…`;
+  `…boot.actuate.metrics.MetricsEndpoint` → `…boot.micrometer.metrics.actuate.endpoint.…`;
+  `…boot.actuate.health.HealthEndpoint` → `…boot.health.actuate.endpoint.…`;
+  `ClientHttpRequestFactorySettings` → `HttpClientSettings`. To find one, index the jars rather than
+  guess: `unzip -l <jar> | grep <SimpleName>.class` across `~/repos/org/springframework/**`.
+- **SSL bundles now have a THIRD eager reader.** On top of `SslMeterBinder` (whose autoconfiguration
+  is renamed `…micrometer.metrics.autoconfigure.ssl.SslMetricsAutoConfiguration`), the actuator's
+  `SslInfo` opens every declared bundle. A declared-but-missing keystore still fails startup — the
+  test/dev profiles need `management.info.ssl.enabled: false` as well as the health switch and the
+  autoconfigure exclusion.
+- **Jackson 3 is the default** and its exceptions are **unchecked**: `JsonProcessingException` →
+  `tools.jackson.core.JacksonException`, so `catch (IOException)` around mapper calls becomes dead
+  code and fails compilation. Mappers are immutable — configure via `JsonMapper.builder()`, and drop
+  `JavaTimeModule` (java.time is built in). Jackson 2 is still BOM-managed if a third-party library
+  needs it.
 
 ## 6. Where the rest of the docs live
 

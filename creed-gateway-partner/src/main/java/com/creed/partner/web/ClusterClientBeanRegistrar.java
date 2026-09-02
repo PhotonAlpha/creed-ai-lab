@@ -4,7 +4,7 @@ import com.creed.partner.lb.RestClientSuppliers;
 import com.creed.partner.web.PartnerClusterProperties.ClusterSpec;
 import com.creed.partner.web.PartnerClusterProperties.PoolSpec;
 import io.micrometer.core.instrument.binder.MeterBinder;
-import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
+import com.creed.metrics.ConnectionPoolMetrics;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanFactory;
@@ -108,7 +108,7 @@ public class ClusterClientBeanRegistrar
                         .requestInterceptor(beanFactory.getBean(LoadBalancerAuditInterceptor.class))
                         .build(), null);
         register(registry, businessMetrics, MeterBinder.class, () ->
-                new PoolingHttpClientConnectionManagerMetricsBinder(
+                new ConnectionPoolMetrics(
                         bean(businessPool, PoolingHttpClientConnectionManager.class),
                         "creed-partner-" + name + "-aggregate"), null);
 
@@ -124,7 +124,7 @@ public class ClusterClientBeanRegistrar
         register(registry, healthClient, RestClient.class, () ->
                 RestClient.builder().requestFactory(bean(healthFactory, ClientHttpRequestFactory.class)).build(), null);
         register(registry, healthMetrics, MeterBinder.class, () ->
-                new PoolingHttpClientConnectionManagerMetricsBinder(
+                new ConnectionPoolMetrics(
                         bean(healthPool, PoolingHttpClientConnectionManager.class),
                         "creed-partner-" + name + "-health"), null);
     }

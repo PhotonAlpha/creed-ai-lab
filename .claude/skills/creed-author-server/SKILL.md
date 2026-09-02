@@ -18,3 +18,12 @@ OAuth2/OIDC **Authorization Server** — the issuer the whole mesh trusts. Port 
 ## Notes
 - See [[creed-platform]] for the mTLS/SSL-bundle and HttpClient 5 conventions this module exemplifies.
 - Config-server import is present but commented out in `application.yml` (runs standalone by default).
+
+## Spring Boot 4 note
+
+Spring Authorization Server is now **7.x**, folded into `spring-security-config`:
+- `org.springframework.security.oauth2.server.authorization.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration` → `org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration`
+- `…config.annotation.web.configurers.OAuth2AuthorizationServerConfigurer` → `org.springframework.security.config.annotation.web.configurers.oauth2.server.authorization.OAuth2AuthorizationServerConfigurer`
+- the static `OAuth2AuthorizationServerConfigurer.authorizationServer()` factory is gone — use the public constructor.
+
+`json/JacksonUtils` is on **Jackson 3**: the mapper is built once via `JsonMapper.builder()` (Jackson 3 mappers are immutable), `JavaTimeModule` is dropped (java.time is native), and the `catch (IOException)` blocks are now `catch (JacksonException)` because Jackson 3 exceptions are unchecked.

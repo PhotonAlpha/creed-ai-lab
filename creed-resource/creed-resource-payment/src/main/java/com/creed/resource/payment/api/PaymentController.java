@@ -1,7 +1,7 @@
 package com.creed.resource.payment.api;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -102,7 +102,7 @@ public class PaymentController {
      * starts in {@code PENDING}. 400 when the amount is missing/non-positive or the method unknown.
      */
     @PostMapping
-    public ResponseEntity<Payment> create(@RequestBody PaymentRequest request) throws JsonProcessingException {
+    public ResponseEntity<Payment> create(@RequestBody PaymentRequest request) throws JacksonException {
         log.info("create:{}", MAPPER.writeValueAsString(request));
         if (request.amount() == null || request.amount().signum() <= 0) {
             return ResponseEntity.badRequest().build();
@@ -130,7 +130,7 @@ public class PaymentController {
      * then apply as usual).
      */
     @PostMapping("/checkout")
-    public ResponseEntity<Payment> checkout(@RequestBody PaymentRequest request) throws JsonProcessingException {
+    public ResponseEntity<Payment> checkout(@RequestBody PaymentRequest request) throws JacksonException {
         log.info("checkout:{}", MAPPER.writeValueAsString(request));
         if (request.amount() == null || request.amount().signum() <= 0) {
             return ResponseEntity.badRequest().build();
@@ -154,7 +154,7 @@ public class PaymentController {
     /** Replace an existing payment's mutable fields; 404 when it does not exist. */
     @PutMapping("/{id}")
     public ResponseEntity<Payment> update(@PathVariable String id, @RequestBody PaymentRequest request)
-            throws JsonProcessingException {
+            throws JacksonException {
         log.info("update:{} request:{}", id, MAPPER.writeValueAsString(request));
         Payment existing = store.get(id);
         if (existing == null) {

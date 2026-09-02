@@ -30,8 +30,8 @@
 
     <properties>
         <java.version>21</java.version>
-        <spring-boot.version>3.5.14</spring-boot.version>
-        <spring-cloud.version>2025.0.2</spring-cloud.version>
+        <spring-boot.version>4.1.1</spring-boot.version>
+        <spring-cloud.version>2025.1.3</spring-cloud.version>
         <!-- OpenTelemetry Java Instrumentation BOM: aligns opentelemetry-spring-boot-starter,
              OTLP exporters and the Logback appender on a single version. -->
         <otel-instrumentation.version>2.20.1</otel-instrumentation.version>
@@ -41,6 +41,12 @@
         <opentelemetry.version>1.54.1</opentelemetry.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <lombok.version>1.18.46</lombok.version>
+        <camel.version>4.22.0</camel.version>
+        <!-- Boot 4.0.8 pins httpclient5 5.5.2, but httpclient5-observation (the upstream
+             replacement for the deprecated io.micrometer httpcomponents.hc5 package) starts at
+             5.6. Overridden via explicit dependencyManagement entries below, NOT this property:
+             a property cannot override a BOM that is imported rather than inherited. -->
+        <httpclient5.version>5.6.4</httpclient5.version>
         <!-- 覆盖 parent 同名属性，jacoco 版本由 parent pluginManagement 统一注入 -->
         <jacoco-maven-plugin.version>0.8.13</jacoco-maven-plugin.version>
         <!-- SonarQube reads the per-module XML report produced by jacoco:report during install. -->
@@ -87,7 +93,7 @@
             <dependency>
                 <groupId>org.apache.camel.springboot</groupId>
                 <artifactId>camel-spring-boot-dependencies</artifactId>
-                <version>4.18.2</version>
+                <version>${camel.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -107,6 +113,18 @@
                 <version>${otel-instrumentation.version}-alpha</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+
+            <!-- Direct entries win over imported BOMs, which is how these beat Boot's 5.5.2. -->
+            <dependency>
+                <groupId>org.apache.httpcomponents.client5</groupId>
+                <artifactId>httpclient5</artifactId>
+                <version>${httpclient5.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.httpcomponents.client5</groupId>
+                <artifactId>httpclient5-observation</artifactId>
+                <version>${httpclient5.version}</version>
             </dependency>
 
             <dependency>

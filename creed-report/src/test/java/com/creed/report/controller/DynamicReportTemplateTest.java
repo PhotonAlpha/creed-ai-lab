@@ -8,7 +8,7 @@ import com.creed.report.dynamic.DynamicTableService;
 import com.creed.report.i18n.CountryProfile;
 import com.creed.report.i18n.CountryStyles;
 import com.creed.report.i18n.ReportCountry;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.thymeleaf.context.Context;

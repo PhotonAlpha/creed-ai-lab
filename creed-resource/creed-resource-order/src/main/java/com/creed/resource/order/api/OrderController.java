@@ -1,7 +1,7 @@
 package com.creed.resource.order.api;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -185,7 +185,7 @@ public class OrderController {
 
     /** Create a new order; the server assigns the id, status and timestamp. */
     @PostMapping
-    public ResponseEntity<Order> create(@RequestBody OrderRequest request) throws JsonProcessingException {
+    public ResponseEntity<Order> create(@RequestBody OrderRequest request) throws JacksonException {
         log.info("get:{}", MAPPER.writeValueAsString(request));
         Order order = seed(request.customer(), request.item(), request.quantity(),
                 request.total() != null ? request.total().toPlainString() : "0", "NEW");
@@ -199,7 +199,7 @@ public class OrderController {
      * starts in {@code NEW} like every created order; payment is authorized by the chain's next hop.
      */
     @PostMapping("/checkout")
-    public ResponseEntity<?> checkout(@RequestBody OrderRequest request) throws JsonProcessingException {
+    public ResponseEntity<?> checkout(@RequestBody OrderRequest request) throws JacksonException {
         log.info("checkout:{}", MAPPER.writeValueAsString(request));
         if (request.customer() == null || request.customer().isBlank()
                 || request.item() == null || request.item().isBlank()
@@ -217,7 +217,7 @@ public class OrderController {
      * Replace an existing order's mutable fields; 404 when it does not exist.
      */
     @PutMapping("/{id}")
-    public ResponseEntity<Order> update(@PathVariable String id, @RequestBody OrderRequest request) throws JsonProcessingException {
+    public ResponseEntity<Order> update(@PathVariable String id, @RequestBody OrderRequest request) throws JacksonException {
         log.info("update:{} request:{}", id, MAPPER.writeValueAsString(request));
         Order existing = store.get(id);
         if (existing == null) {

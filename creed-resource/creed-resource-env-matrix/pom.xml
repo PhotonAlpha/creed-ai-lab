@@ -75,6 +75,12 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Spring Boot 4 split spring-boot-starter-test: MockMvc/TestRestTemplate now ship in their own modules. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- Controller/service slice tests run against H2 in PostgreSQL compatibility mode so
              `mvn test` never needs the Docker Postgres to be up. -->
         <dependency>

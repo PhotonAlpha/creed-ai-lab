@@ -154,3 +154,25 @@ outbound `creed-partner-client` tolerant/degrades-to-plain-HTTP), registered **p
 `SslBundleConfiguration` rather than `spring.ssl.bundle.jks.*` — forces keystore/truststore load and key
 recovery at startup instead of on first handshake. See [[creed-platform]] for the shared PKI/bundle
 conventions and the `TomcatHttpsConfiguration` pattern (present here too).
+
+## Spring Boot 4 note
+
+Runs on Camel **4.22.0** — the classic `<camelContext>` Spring XML DSL still works (31 routes, 11 rest-dsl, verified starting on Boot 4). Camel's BOM manages no `org.springframework.*` artifact, so Boot's BOM wins on Spring versions.
+
+Two module-specific Boot 4 requirements:
+- **Logbook 4.1.0** (was 3.9.0). Logbook 3.x auto-configuration injects a Jackson **2** `com.fasterxml.jackson.databind.ObjectMapper` bean, which Boot 4 no longer defines — the context fails at startup. The 4.x line targets Boot 4 and Jackson 3.
+- **`spring-boot-micrometer-tracing`** must be declared: Boot 4's actuator starter no longer brings tracing auto-configuration, and this module injects `io.micrometer.tracing.Tracer` (`TracingFilter`, `SpanTaskDecorator`, both thread-pool configs).
+
+`ContentCachingRequestWrapper` lost its single-argument constructor in Spring Framework 7; a cache limit is now mandatory.
+
+## hc5 pool metrics / observation deprecation
+
+`CamelConfig`'s pool gauges now come from **`com.creed.metrics.ConnectionPoolMetrics`** (creed-common-metrics), not Micrometer's `PoolingHttpClientConnectionManagerMetricsBinder` — the whole `io.micrometer…httpcomponents.hc5` package is deprecated from Micrometer 1.17 / Boot 4.1, and Apache's replacement emits different meters and only binds via an `HttpClientBuilder`. See [[creed-platform]] for the full reasoning; meter names and tags are unchanged, so the dashboards were not touched.
+
+The request observation is migrated too: `ObservationExecChainHandler` → **`new ObservationClassicExecInterceptor(observationRegistry, ObservingOptions.DEFAULT)`** from `httpclient5-observation` (needs `httpclient5` 5.6.4, pinned in the root pom).
+
+**Constructed directly, deliberately not via `HttpClientObservationSupport.enable(builder, …)`.** That helper installs everything with `addExecInterceptorFirst`, which would break this module's exec chain in two ways: it moves the observation *outside* RETRY — silently changing it from per-attempt to per-operation timing, and decoupling it from what `CamelLoadBalancerAuditExecHandler` logs per attempt — and it also binds its own `ConnPoolMeters`, duplicating pool gauges under Apache names alongside the `ConnectionPoolMetrics` ones the dashboards use. Constructing the interceptor keeps the documented ordering: Logbook outermost, observation right inside RETRY, `lbAudit` innermost.
+
+**Meter/span rename**: the Observation is now `http.client.request` (was `httpcomponents.httpclient.request`), so Prometheus shows `http_client_request_seconds*`. Nothing in `monitoring/` queried the old name — checked before the change. Do not confuse it with Spring's RestClient `http.client.requests` (plural), which this module also emits.
+
+Verified end to end against a live `creed-resource-catalog`: `http_client_request_seconds_count{error="none",http_method="GET",http_status_code="200",net_peer_name="catalog-resource"}`, with pool gauges unduplicated and the chain order intact.

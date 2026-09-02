@@ -1,6 +1,6 @@
 package com.creed.simple.route;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
 import org.apache.camel.http.base.HttpOperationFailedException;

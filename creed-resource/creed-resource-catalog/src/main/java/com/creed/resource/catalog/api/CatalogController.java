@@ -1,7 +1,7 @@
 package com.creed.resource.catalog.api;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -172,7 +172,7 @@ public class CatalogController {
      * the reservation stays — an acceptable simplification for this in-memory demo store.
      */
     @PostMapping("/reserve")
-    public ResponseEntity<Map<String, Object>> reserve(@RequestBody ReserveRequest request) throws JsonProcessingException {
+    public ResponseEntity<Map<String, Object>> reserve(@RequestBody ReserveRequest request) throws JacksonException {
         log.info("reserve:{}", MAPPER.writeValueAsString(request));
         if (request.sku() == null || request.sku().isBlank() || request.quantity() <= 0) {
             return ResponseEntity.badRequest()
@@ -229,7 +229,7 @@ public class CatalogController {
 
     /** Create a new product; the server assigns the sku and timestamp. */
     @PostMapping
-    public ResponseEntity<Product> create(@RequestBody ProductRequest request) throws JsonProcessingException {
+    public ResponseEntity<Product> create(@RequestBody ProductRequest request) throws JacksonException {
         log.info("create:{}", MAPPER.writeValueAsString(request));
         Product product = seed(request.name(), request.category(),
                 request.price() != null ? request.price().toPlainString() : "0", request.stock());
@@ -238,7 +238,7 @@ public class CatalogController {
 
     /** Replace an existing product's mutable fields; 404 when it does not exist. */
     @PutMapping("/{sku}")
-    public ResponseEntity<Product> update(@PathVariable String sku, @RequestBody ProductRequest request) throws JsonProcessingException {
+    public ResponseEntity<Product> update(@PathVariable String sku, @RequestBody ProductRequest request) throws JacksonException {
         log.info("update:{} request:{}", sku, MAPPER.writeValueAsString(request));
         Product existing = store.get(sku);
         if (existing == null) {

@@ -14,12 +14,12 @@ spring:
   application:
     name: creed-resource-env-matrix-test
   # application.yml declares the `creed-env-matrix-server` SSL bundle, and Boot's SslMeterBinder
-  # (SslObservabilityAutoConfiguration, no property to disable it) eagerly opens EVERY declared
+  # (SslMetricsAutoConfiguration, no property to disable it) eagerly opens EVERY declared
   # bundle at startup to publish certificate-expiry gauges. Turning creed.https.enabled off is not
   # enough — the bundle is still declared, so a missing keystore fails the whole context. Tests must
   # not depend on .support/scripts/pki having been generated, hence the exclusion.
   autoconfigure:
-    exclude: org.springframework.boot.actuate.autoconfigure.ssl.SslObservabilityAutoConfiguration
+    exclude: org.springframework.boot.micrometer.metrics.autoconfigure.ssl.SslMetricsAutoConfiguration
   datasource:
     url: "jdbc:h2:mem:env_matrix_test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL"
     driver-class-name: org.h2.Driver
@@ -37,7 +37,12 @@ server:
 
 management:
   health:
-    # Same reason as the SslObservability exclusion above: the SSL health indicator reads bundles.
+    # Same reason as the SslMetrics exclusion above: the SSL health indicator reads bundles.
+    ssl:
+      enabled: false
+  info:
+    # Spring Boot 4 added a THIRD eager reader: the actuator's SslInfo enumerates every declared
+    # bundle and opens its keystore to report certificate details. Same failure, same remedy.
     ssl:
       enabled: false
 

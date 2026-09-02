@@ -10,7 +10,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.actuate.metrics.MetricsEndpoint;
+import org.springframework.boot.micrometer.metrics.actuate.endpoint.MetricsEndpoint;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -87,7 +87,7 @@ public class ActuatorMetricsLogger {
     );
     /**
      * Apache HttpClient 5 connection-pool gauges registered by
-     * {@code PoolingHttpClientConnectionManagerMetricsBinder} (see {@code GatewayRestTemplateConfiguration}).
+     * {@code ConnectionPoolMetrics} (see {@code GatewayRestTemplateConfiguration}).
      * Every meter carries an {@code httpclient=<name>} tag; {@code total.connections} additionally splits
      * into {@code state=available} / {@code state=leased}.
      */

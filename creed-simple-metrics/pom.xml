@@ -15,7 +15,9 @@
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <logbook.version>3.9.0</logbook.version>
+        <!-- Logbook 4.x is the Spring Boot 4 / Jackson 3 line; 3.9 injects a Jackson 2
+             ObjectMapper bean, which Boot 4 no longer defines. -->
+        <logbook.version>4.1.0</logbook.version>
     </properties>
 
     <dependencies>
@@ -39,6 +41,13 @@
                formerly the body/header part of CamelLoadBalancerAuditExecHandler).
              Formatting/obfuscation/body-size live under the `logbook.*` keys in application.yml;
              output goes to the `org.zalando.logbook` TRACE logger (enabled in logback-spring.xml). -->
+        <!-- Apache's own hc5 observation support: replaces Micrometer's deprecated
+             ObservationExecChainHandler (whole io.micrometer httpcomponents.hc5 package is
+             deprecated from Micrometer 1.17 / Boot 4.1). -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5-observation</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.zalando</groupId>
             <artifactId>logbook-spring-boot-starter</artifactId>
@@ -93,6 +102,13 @@
         <!-- Brave bridge: turns Micrometer Observations into Brave spans and populates the
              traceId/spanId MDC that Spring Boot's default log pattern (LOG_CORRELATION_PATTERN) shows.
              Version managed by the Spring Boot (micrometer-tracing) BOM. -->
+        <!-- Spring Boot 4 moved tracing auto-configuration out of spring-boot-starter-actuator into
+             its own module. Without it the Micrometer bridge below registers no Tracer bean and any
+             component injecting io.micrometer.tracing.Tracer fails the context at startup. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-micrometer-tracing</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-tracing-bridge-brave</artifactId>

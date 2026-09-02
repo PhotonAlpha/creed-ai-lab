@@ -2,9 +2,9 @@ package com.creed.report.dynamic;
 
 import com.creed.report.i18n.CountryFormatter;
 import com.creed.report.i18n.CountryProfile;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.MessageSource;
 import org.springframework.stereotype.Service;
@@ -127,7 +127,7 @@ public class DynamicTableService {
         try {
             return objectMapper.readValue(data, new TypeReference<List<Object>>() { });
         }
-        catch (JsonProcessingException ex) {
+        catch (JacksonException ex) {
             throw new InvalidTableDefinitionException(
                     "'data' is not a JSON array of rows: " + ex.getOriginalMessage(), ex);
         }
@@ -176,7 +176,7 @@ public class DynamicTableService {
             try {
                 return objectMapper.writeValueAsString(value);
             }
-            catch (JsonProcessingException ex) {
+            catch (JacksonException ex) {
                 return String.valueOf(value);
             }
         }
