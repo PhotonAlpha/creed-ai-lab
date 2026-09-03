@@ -77,6 +77,13 @@ public final class RestClientSuppliers {
                 .setMaxConnPerRoute(maxPerRoute)
                 .setDefaultConnectionConfig(connectionConfig);
         if (bundle != null) {
+//            SSLContext sslContext = bundle.createSslContext();
+//
+//            ClientTlsStrategyBuilder.create()
+//                    .setHostVerificationPolicy(HostnameVerificationPolicy.CLIENT)
+//                    .setHostnameVerifier(NoopHostnameVerifier.INSTANCE)
+//                    .setSslContext()
+//                    .buildClassic();
             builder.setTlsSocketStrategy(new DefaultClientTlsStrategy(bundle.createSslContext()));
         }
         return builder.build();

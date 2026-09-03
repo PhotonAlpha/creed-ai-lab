@@ -1,6 +1,6 @@
 package com.creed.simple.web;
 
-import com.creed.simple.config.CamelLoadBalancerAuditExecHandler;
+import com.creed.simple.config.PoolingHttpClientConnectionManagerAuditExecHandler;
 import com.creed.simple.lb.ManagedHttpClientPool;
 import com.creed.simple.lb.PartnerProps;
 import io.micrometer.observation.ObservationRegistry;
@@ -58,7 +58,7 @@ public class CookieRelayRestClientConfiguration {
                 .addExecInterceptorFirst("logbook", new LogbookHttpExecHandler(logbook))
                 // One-line LB-resolved-instance log, same as the camel-http component; pool stats
                 // reflect the shared clusterHttpConnectionManager this client rides on.
-                .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler(clusterHttpConnectionManager))
+                .addExecInterceptorLast("lbAudit", new PoolingHttpClientConnectionManagerAuditExecHandler(clusterHttpConnectionManager))
                 .build();
         return new HttpComponentsClientHttpRequestFactory(httpClient);
     }

@@ -1,6 +1,7 @@
 package com.creed.simple.config;
 
 import com.creed.simple.lb.LoadBalancerAuditInterceptor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.classic.ExecChain;
 import org.apache.hc.client5.http.classic.ExecChainHandler;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
@@ -9,8 +10,6 @@ import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.HttpException;
 import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.pool.PoolStats;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
@@ -35,13 +34,11 @@ import java.io.IOException;
  * trace id, so the manager's DEBUG logging can stay off outside leak hunts. {@code pending} is the
  * queue of callers waiting for a connection — the saturation signal the DEBUG lines don't print.
  */
-public class CamelLoadBalancerAuditExecHandler implements ExecChainHandler {
-
-    private static final Logger log = LoggerFactory.getLogger(CamelLoadBalancerAuditExecHandler.class);
-
+@Slf4j
+public class PoolingHttpClientConnectionManagerAuditExecHandler implements ExecChainHandler {
     private final PoolingHttpClientConnectionManager pool;
 
-    public CamelLoadBalancerAuditExecHandler(PoolingHttpClientConnectionManager pool) {
+    public PoolingHttpClientConnectionManagerAuditExecHandler(PoolingHttpClientConnectionManager pool) {
         this.pool = pool;
     }
 
@@ -53,13 +50,13 @@ public class CamelLoadBalancerAuditExecHandler implements ExecChainHandler {
         try {
             ClassicHttpResponse response = chain.proceed(request, scope);
             long ms = (System.nanoTime() - startNanos) / 1_000_000;
-            log.info("LB resolved -> instance={}:{} {} {} status={} in {}ms {}",
+            log.info("PoolingHttpClientConnection resolved -> instance={}:{} {} {} status={} in {}ms {}",
                     target.getHostName(), target.getPort(), request.getMethod(),
                     request.getRequestUri(), response.getCode(), ms, poolSummary(scope));
             return response;
         } catch (IOException | HttpException | RuntimeException ex) {
             long ms = (System.nanoTime() - startNanos) / 1_000_000;
-            log.warn("LB resolved -> instance={}:{} {} {} FAILED in {}ms: {} {}",
+            log.warn("PoolingHttpClientConnection resolved -> instance={}:{} {} {} FAILED in {}ms: {} {}",
                     target.getHostName(), target.getPort(), request.getMethod(),
                     request.getRequestUri(), ms, ex.toString(), poolSummary(scope));
             throw ex;
