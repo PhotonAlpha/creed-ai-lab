@@ -137,7 +137,7 @@ public class CamelConfig {
                         new ObservationExecChainHandler(observationRegistry))
                 // innermost (inside retry): logs the instance the route planner picked, per attempt,
                 // plus route/total occupancy of this pool
-                .addExecInterceptorLast("lbAudit", new CamelLoadBalancerAuditExecHandler(connectionManager)));
+                .addExecInterceptorLast("lbAudit", new PoolingHttpClientConnectionManagerAuditExecHandler(connectionManager)));
         component.setConnectionRequestTimeout(connectionRequestTimeout.toMillis());
         component.setResponseTimeout(responseTimeout.toMillis());
         return component;
