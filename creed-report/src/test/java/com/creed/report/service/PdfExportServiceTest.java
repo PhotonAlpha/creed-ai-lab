@@ -143,7 +143,7 @@ class PdfExportServiceTest {
 
             byte[] pdf = service.renderTemplate("dynamic-report-export-pdf", Map.of(
                     "profile", profile,
-                    "countryPdfCss", countryStyles.pdf(country),
+                    "pdfCss", countryStyles.pdf(country),
                     "table", table,
                     "total", String.valueOf(table.size()),
                     "generatedAt", "2026-09-02 12:00:00"), profile.locale());
@@ -180,7 +180,7 @@ class PdfExportServiceTest {
         CountryProfile profile = CountryProfile.of(country, language);
         return service.renderTemplate("report-export-pdf", Map.of(
                 "profile", profile,
-                "countryPdfCss", countryStyles.pdf(country),
+                "pdfCss", countryStyles.pdf(country),
                 "servers", servers,
                 "total", String.valueOf(servers.size()),
                 "generatedAt", "2026-07-22 12:00:00"), profile.locale());

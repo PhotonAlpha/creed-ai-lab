@@ -1,5 +1,5 @@
-/* Malaysia edition -- PDF stylesheet, inlined into report-export-pdf.html after that template's base
- * block, so these rules win at equal specificity.
+/* Malaysia edition -- PDF stylesheet, appended by CountryStyles to the shared
+ * static/css/report-pdf.css, so these rules win at equal specificity.
  *
  * CSS 2.1 only: openpdf-html (Flying Saucer) is not a browser -- no custom properties, no
  * flexbox, no rem. Selectors match the PDF template's markup, which differs from the browser

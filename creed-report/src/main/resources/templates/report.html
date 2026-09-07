@@ -20,7 +20,7 @@
 </head>
 <body th:class="${profile.styleClass()}">
 
-<nav th:replace="~{fragments/report-chrome :: header(${profile}, ${generatedAt}, null, ${countries})}"></nav>
+<nav th:replace="~{fragments/report-chrome :: header(${profile}, ${generatedAt}, null, ${countries}, '/report')}"></nav>
 
 <div class="container my-4">
 

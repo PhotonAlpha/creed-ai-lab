@@ -6,19 +6,16 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.ssl.SslBundleRegistrar;
-import org.springframework.boot.ssl.SslBundle;
-import org.springframework.boot.ssl.SslBundleKey;
-import org.springframework.boot.ssl.SslBundleRegistry;
-import org.springframework.boot.ssl.SslBundles;
-import org.springframework.boot.ssl.SslStoreBundle;
+import org.springframework.boot.ssl.*;
 import org.springframework.boot.ssl.jks.JksSslStoreBundle;
 import org.springframework.boot.ssl.jks.JksSslStoreDetails;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.util.StringUtils;
 
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -143,7 +140,19 @@ public class SslBundleConfiguration {
         SslStoreBundle stores = new JksSslStoreBundle(keystore, truststore);
         // For these PKCS12 stores the private-key entry password equals the keystore password, so pass it
         // explicitly: createSslContext() will then actually recover the key and surface a wrong password.
-        SslBundle bundle = SslBundle.of(stores, SslBundleKey.of(keystorePassword, keyAlias));
+//        SslOptions options = SslOptions.of(
+//                Set.of()//ciphers,
+//                , Set.of() // enabled protocols
+//        );
+//        SslBundle bundle = SslBundle.of(stores, SslBundleKey.of(keystorePassword, keyAlias), options);
+
+        SslBundleKey sslBundleKey;
+        if (StringUtils.hasText(keyAlias)) {
+            sslBundleKey = SslBundleKey.of(keystorePassword, keyAlias);
+        } else {
+            sslBundleKey = SslBundleKey.of(keystorePassword);
+        }
+        SslBundle bundle = SslBundle.of(stores, sslBundleKey);
 
         try {
             // Forces keystore + truststore load and private-key recovery now — a bad password, missing

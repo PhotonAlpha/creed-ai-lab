@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<!-- The DEFAULT country edition's PDF fragments: what a country renders when it ships no
+     report-pdf.html of its own (ReportCountry.DEFAULT_PDF_TEMPLATE).
+
+     `default` is a stand-in edition, NOT a country -- there is no `default` ReportCountry constant
+     and no ?country=default; it only ever fills the country-shaped hole below.
+     Pulled in exactly like a country's own file, because that is all the resolution does:
+
+         <div th:replace="~{${profile.pdfContentTemplate} :: notice}"></div>
+
+     Every fragment a country edition may define MUST exist here too -- this file is the contract
+     the PDF templates rely on, and a country that overrides it only overrides the whole file.
+
+     Deliberately minimal and country-neutral: the text still comes from the region bundles, so a
+     country without its own layout is still rendered in its own language and wording. CSS 2.1 only
+     (openpdf-html): classes come from static/css/report-pdf.css, colours from the country sheet. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- One muted line -- the least a country notice can be. -->
+<p th:fragment="notice" class="country-notice-plain" th:text="#{report.country.notice}">
+    All regions.
+</p>
+
+</body>
+</html>

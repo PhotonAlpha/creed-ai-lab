@@ -1,5 +1,7 @@
 package com.creed.report.i18n;
 
+import org.springframework.core.io.ClassPathResource;
+
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -103,23 +105,40 @@ public enum ReportCountry {
      * Everything a country edition owns lives under its own code, in two places:
      *
      *   templates/country/<code>/report.html         browser fragments
-     *   templates/country/<code>/report-pdf.html     PDF fragments
+     *   templates/country/<code>/report-pdf.html     PDF fragments        -- optional, see below
      *   static/css/country/<code>/style.css          browser stylesheet
      *   static/css/country/<code>/style-pdf.css      PDF stylesheet (inlined, not linked)
      *
      * The four accessors below are the single definition of that layout: templates and
      * CountryStyles both go through them, so adding a country is creating those files and adding
      * a constant -- never editing a shared block, and never mangling a fragment name.
+     *
+     * The two PDF files DEGRADE: a country that ships neither renders the `default` edition's
+     * instead of failing, so a new country can go live on its browser edition alone and grow its
+     * PDF look later. The browser pair stays mandatory -- that is the edition a reader lands on.
+     *
+     * `default` is a stand-in edition, NOT a country: it has no constant here, is not offered by
+     * the switcher and cannot be asked for with ?country=default. It sits under country/ purely
+     * because it fills the country-shaped hole in the cascade.
      */
+
+    /** Fragments a country without its own {@code report-pdf.html} renders. */
+    public static final String DEFAULT_PDF_TEMPLATE = "country/default/report-pdf";
+
+    /** Stylesheet a country without its own {@code style-pdf.css} is rendered with. */
+    public static final String DEFAULT_PDF_STYLESHEET = "/css/country/default/style-pdf.css";
 
     /** Thymeleaf template holding this country's browser fragments. */
     public String contentTemplate() {
         return "country/" + code() + "/report";
     }
 
-    /** Thymeleaf template holding this country's PDF fragments. */
+    /**
+     * Thymeleaf template holding this country's PDF fragments, or {@link #DEFAULT_PDF_TEMPLATE}
+     * when it ships none.
+     */
     public String pdfContentTemplate() {
-        return "country/" + code() + "/report-pdf";
+        return pdfContentTemplateFor(code());
     }
 
     /** Context-relative URL of this country's browser stylesheet. */
@@ -128,12 +147,38 @@ public enum ReportCountry {
     }
 
     /**
-     * This country's PDF stylesheet. Inlined into the PDF rather than linked — openpdf-html renders
-     * from a string with no base URL — though it sits under the same directory as the browser one
-     * so a country edition stays a single folder.
+     * This country's PDF stylesheet, or {@link #DEFAULT_PDF_STYLESHEET} when it ships none. Inlined
+     * into the PDF rather than linked — openpdf-html renders from a string with no base URL —
+     * though it sits under the same directory as the browser one so a country edition stays a
+     * single folder.
      */
     public String pdfStyleSheet() {
-        return "/css/country/" + code() + "/style-pdf.css";
+        return pdfStyleSheetFor(code());
+    }
+
+    /*
+     * Resolution is a packaged-resource probe, not configuration: the answer can only change by
+     * rebuilding. Deliberately NOT cached — both are read once per PDF render (and once at startup
+     * by CountryStyles), so the probe costs nothing measurable, and an uncached lookup keeps
+     * `spring.thymeleaf.cache: false` honest when a country file is dropped in during development.
+     */
+
+    /** Package-private so the fallback can be tested with a code no country claims. */
+    static String pdfContentTemplateFor(String code) {
+        String own = "country/" + code + "/report-pdf";
+        // The prefix/suffix mirror spring.thymeleaf.prefix/suffix; a template name is not a path,
+        // so the probe has to spell the packaged location out.
+        return exists("templates/" + own + ".html") ? own : DEFAULT_PDF_TEMPLATE;
+    }
+
+    /** Package-private so the fallback can be tested with a code no country claims. */
+    static String pdfStyleSheetFor(String code) {
+        String own = "/css/country/" + code + "/style-pdf.css";
+        return exists("static" + own) ? own : DEFAULT_PDF_STYLESHEET;
+    }
+
+    private static boolean exists(String classpathLocation) {
+        return new ClassPathResource(classpathLocation).exists();
     }
 
     /**

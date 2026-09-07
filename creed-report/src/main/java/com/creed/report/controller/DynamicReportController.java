@@ -119,7 +119,7 @@ public class DynamicReportController {
 
         Map<String, Object> variables = new HashMap<>();
         variables.put("profile", profile);
-        variables.put("countryPdfCss", countryStyles.pdf(profile.country()));
+        variables.put("pdfCss", countryStyles.pdf(profile.country()));
         variables.put("table", table);
         variables.put("total", CountryFormatter.number(table.size(), profile));
         variables.put("generatedAt", CountryFormatter.timestamp(now, profile));

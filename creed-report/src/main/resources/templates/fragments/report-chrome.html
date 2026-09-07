@@ -27,8 +27,9 @@
 
 <!-- Page header. Same markup, same palette, same order for every country: the country shows up
      only as the name in the meta line and (on the live page) as the selected switcher button.
-     `countries` null renders the header without switchers, which is what the offline export wants. -->
-<nav th:fragment="header(profile, generatedAt, snapshot, countries)"
+     `countries` null renders the header without switchers, which is what the offline export wants;
+     `page` is the path the switcher links back to and is only read when they are rendered. -->
+<nav th:fragment="header(profile, generatedAt, snapshot, countries, page)"
      class="navbar navbar-dark report-header shadow-sm">
     <div class="container-fluid">
         <span class="navbar-brand mb-0 h1" th:text="#{report.brand}">Creed &middot; Server Inventory Report</span>
@@ -38,7 +39,7 @@
                  switcher's @{...} links then blow up in the offline export, which renders on a
                  plain non-web Context. -->
             <th:block th:if="${countries != null}">
-                <span th:replace="~{fragments/report-chrome :: switcher(${profile}, ${countries})}"></span>
+                <span th:replace="~{fragments/report-chrome :: switcher(${profile}, ${countries}, ${page})}"></span>
             </th:block>
             <span class="text-light small">
                 <span th:text="#{report.country.name}">Global</span>
@@ -52,17 +53,21 @@
 
 <!-- The two axes, as two button groups. Country and language are separate links, and each is
      remembered in its own cookie, so switching one never resets the other. Both lists are
-     model-driven: `countries` from CountryCatalog, the languages from the selected country. -->
-<span th:fragment="switcher(profile, countries)" class="d-flex align-items-center gap-2">
+     model-driven: `countries` from CountryCatalog, the languages from the selected country.
+
+     `page` is the caller's own path (/report, /dynamic, ...) and MUST be passed: this fragment is
+     shared by every report page, so a hard-coded target would silently move the reader to a
+     different report on the first switch. -->
+<span th:fragment="switcher(profile, countries, page)" class="d-flex align-items-center gap-2">
     <span class="btn-group btn-group-sm" role="group" th:attr="aria-label=#{report.countryLabel}">
         <a th:each="c : ${countries}" class="btn btn-outline-light"
-           th:href="@{/report(country=${c.code()})}"
+           th:href="@{${page}(country=${c.code()})}"
            th:classappend="${profile.country() == c} ? 'active'"
            th:text="#{${'report.countrySwitch.' + c.code()}}">Country</a>
     </span>
     <span class="btn-group btn-group-sm" role="group" th:attr="aria-label=#{report.languageLabel}">
         <a th:each="tag : ${profile.languages()}" class="btn btn-outline-light"
-           th:href="@{/report(lang=${tag})}"
+           th:href="@{${page}(lang=${tag})}"
            th:classappend="${profile.isLanguage(tag)} ? 'active'"
            th:text="#{${'report.lang.' + tag}}">Language</a>
     </span>

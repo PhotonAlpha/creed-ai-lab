@@ -60,8 +60,18 @@ curl -G 'http://localhost:9100/report/dynamic/export/pdf' -o /tmp/d.pdf \
   A country edition owns four files under its own code — `templates/country/<code>/report.html`
   and `report-pdf.html`, `static/css/country/<code>/style.css` and `style-pdf.css` — pulled in
   **by path** (`~{${profile.contentTemplate} :: notice}`, `@{${profile.styleSheet}}`), so fragment
-  names are identical across countries and there is no shared block to edit. `CountryStyles` loads
-  the stylesheets eagerly and **fails startup** if one is missing. The **page header and footer are
+  names are identical across countries and there is no shared block to edit. Styling is two layers,
+  shared first and country last: `static/css/report.css` for the browser (the page links both) and
+  `static/css/report-pdf.css` for the PDF, which `CountryStyles.pdf()` concatenates in front of the
+  country sheet so a template gets base + country as one `${pdfCss}` string and cannot lose the base
+  by forgetting a variable. `CountryStyles` loads all of them eagerly and **fails startup** if one
+  is missing — except the two PDF files, which **degrade**: a country shipping no
+  `country/<code>/report-pdf.html` or `style-pdf.css` renders the `country/default/` edition
+  (`templates/country/default/report-pdf.html`, `static/css/country/default/style-pdf.css`) instead, and the countries doing so are named in the startup log
+  (`ReportCountry.pdfContentTemplateFor/pdfStyleSheetFor`, `CountryLayoutTest`). The browser pair
+  stays mandatory. The header's country/language switcher links back to the page it is rendered on —
+  `header(..., page)` — so switching on `/dynamic` stays on `/dynamic`
+  (`ReportChromeSwitcherTest`). The **page header and footer are
   identical in every country** — they live in `templates/fragments/report-chrome.html`, read no
   country field and pull in no country file; `OfflineHtmlExportTemplateTest` asserts it.
 - **Dynamic table report** (`DynamicReportController`, `/dynamic`) — the table's shape comes from

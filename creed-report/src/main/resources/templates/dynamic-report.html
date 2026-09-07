@@ -19,7 +19,7 @@
 </head>
 <body th:class="${profile.styleClass()}">
 
-<nav th:replace="~{fragments/report-chrome :: header(${profile}, ${generatedAt}, null, ${countries})}"></nav>
+<nav th:replace="~{fragments/report-chrome :: header(${profile}, ${generatedAt}, null, ${countries}, '/dynamic')}"></nav>
 
 <div class="container my-4">
 
@@ -49,7 +49,8 @@
                               th:text="${definition.data}"
                               placeholder='[{"host":"creed-th-gw-01","ip":"10.30.1.11"}]'></textarea>
                     <div class="form-text" th:text="#{report.dynamic.dataHint}">
-                        A JSON array of objects keyed by header, or of arrays in header order.
+                        A JSON array of objects keyed by header, or of arrays in header order.<br>
+                        [{"host":"a","ip":"10.0.0.1","uptimeDays":1234},{"host":"b","ip":"127.0.0.1","uptimeDays":5678}]
                     </div>
                 </div>
             </div>

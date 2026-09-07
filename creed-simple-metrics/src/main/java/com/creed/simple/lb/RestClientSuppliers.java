@@ -7,16 +7,23 @@ import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
-import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
+import org.apache.hc.client5.http.ssl.*;
+import org.apache.hc.core5.ssl.SSLContexts;
 import org.apache.hc.core5.util.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ssl.NoSuchSslBundleException;
 import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
+import org.springframework.boot.ssl.SslStoreBundle;
 import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 
+import javax.net.ssl.SSLContext;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.UnrecoverableKeyException;
 import java.time.Duration;
 
 @UtilityClass
@@ -77,15 +84,29 @@ public final class RestClientSuppliers {
                 .setMaxConnPerRoute(maxPerRoute)
                 .setDefaultConnectionConfig(connectionConfig);
         if (bundle != null) {
-//            SSLContext sslContext = bundle.createSslContext();
-//
-//            ClientTlsStrategyBuilder.create()
-//                    .setHostVerificationPolicy(HostnameVerificationPolicy.CLIENT)
-//                    .setHostnameVerifier(NoopHostnameVerifier.INSTANCE)
-//                    .setSslContext()
-//                    .buildClassic();
-            builder.setTlsSocketStrategy(new DefaultClientTlsStrategy(bundle.createSslContext()));
+            //解决无法创建自定义SSL Context的问题
+            SslStoreBundle stores = bundle.getStores();
+            String pw = bundle.getKey().getPassword();
+            char[] keyPw = pw != null ? pw.toCharArray() : new char[0];
+            try {
+                SSLContext ctx = SSLContexts.custom()
+                        .loadKeyMaterial(stores.getKeyStore(), keyPw)
+                        .loadTrustMaterial(stores.getTrustStore(), null)
+                        .build();
+                TlsSocketStrategy tlsSocketStrategy = ClientTlsStrategyBuilder.create()
+                        .setSslContext(ctx)
+                        .setHostVerificationPolicy(HostnameVerificationPolicy.CLIENT)
+                        .setHostnameVerifier(NoopHostnameVerifier.INSTANCE)
+                        .buildClassic();
+                builder.setTlsSocketStrategy(tlsSocketStrategy);
+            } catch (NoSuchAlgorithmException | KeyManagementException | KeyStoreException |
+                     UnrecoverableKeyException e) {
+                throw new IllegalStateException("Cannot initialize SSL context" + e.getMessage(), e);
+            }
+        } else {
+            log.warn("SslBundle is not available, mTLS will be disabled.");
         }
+
         return builder.build();
     }
 

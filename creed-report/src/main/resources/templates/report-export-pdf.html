@@ -3,7 +3,7 @@
      @page margin boxes, the base CSS 2.1, the header, the heading row and the footer -- comes from
      fragments/report-chrome-pdf, shared with dynamic-report-export-pdf.html, so the two PDF reports
      cannot drift apart. What is left here is this report's own table.
-     Model: profile / countryPdfCss / servers / total / generatedAt.
+     Model: profile / pdfCss / servers / total / generatedAt.
 
      Localized on two axes. Language: display strings and the CSS font stack come from
      messages*.properties. Country: the edition's markup and CSS are pulled in BY PATH from
@@ -14,10 +14,10 @@
     <meta charset="UTF-8"/>
     <title th:text="#{report.title}">Creed Server Report (PDF)</title>
     <th:block th:replace="~{fragments/report-chrome-pdf :: styles}"></th:block>
-<!-- The country edition's own CSS 2.1 rules, inlined by CountryStyles (openpdf-html renders from a
-     string, so there is no base URL for a <link>). After the base block, so its palette wins; only
-     this country's sheet is ever inlined. Source: static/css/country/<code>/style-pdf.css. -->
-<style th:utext="${countryPdfCss}">/* country pdf css inlined here */</style>
+<!-- The static CSS 2.1 rules, inlined by CountryStyles as one string (openpdf-html renders from a
+     string, so there is no base URL for a <link>): the shared static/css/report-pdf.css followed by
+     this country's static/css/country/<code>/style-pdf.css, so the country's palette wins. -->
+<style th:utext="${pdfCss}">/* base + country pdf css inlined here */</style>
 </head>
 <body th:class="${profile.styleClass()}">
 

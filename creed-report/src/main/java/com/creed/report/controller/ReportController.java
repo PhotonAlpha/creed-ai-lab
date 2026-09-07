@@ -138,7 +138,7 @@ public class ReportController {
 
         byte[] body = pdfExportService.renderTemplate("report-export-pdf", Map.of(
                 "profile", profile,
-                "countryPdfCss", countryStyles.pdf(profile.country()),
+                "pdfCss", countryStyles.pdf(profile.country()),
                 "servers", servers,
                 "total", CountryFormatter.number(servers.size(), profile),
                 "generatedAt", CountryFormatter.timestamp(now, profile)), locale);

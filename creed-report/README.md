@@ -41,13 +41,31 @@ GLOBAL: en/zh-CN/zh-TW），选了不支持的语言会回落到该国家的默�
     static/css/country/<code>/style.css         # 浏览器样式      @{${profile.styleSheet}}
     static/css/country/<code>/style-pdf.css     # PDF 样式（内联）
 
+国家样式是**通用样式 + 国家特定样式**两层，国家层在后所以同优先级下它赢：
+
+    static/css/report.css       # 浏览器通用（页面 <link>，导出时内联）
+    static/css/report-pdf.css   # PDF 通用（CountryStyles 拼在国家 PDF 样式前面一起内联）
+
 片段名在各国家之间是相同的，所以一个国家可以随意增加片段而不会与别人冲突；
 每次只加载当前国家的一份 css，因此国家样式里不需要 `.country-<code>` 前缀。
-新增国家 = 加一个 `ReportCountry` 常量 + 上面四个文件 + 对应的 region 语言包，
-没有任何公共块需要修改；样式文件缺失会在**启动时**报错（`CountryStyles`）。
+两个 PDF 文件是**可选的**：`country/<code>/` 下找不到就自动降级到 `country/default/` 这一份
+
+    templates/country/default/report-pdf.html   # 默认 PDF 片段（必须覆盖国家可能定义的所有片段名）
+    static/css/country/default/style-pdf.css    # 默认 PDF 国家样式（不是通用层，通用层是 report-pdf.css）
+
+`default` 是一份**替补版本，不是国家**：没有对应的 `ReportCountry` 常量，切换器里不出现，
+`?country=default` 也无效；它放在 `country/` 下只是因为它顶的是国家那一层。
+
+降级不是静默的：启动日志会列出哪些国家在用默认 PDF 样式。所以一个新国家可以先只上浏览器版，
+PDF 的专属外观以后再补。**浏览器的两个文件仍然是必需的** —— 那是用户真正打开的版本。
+
+新增国家 = 加一个 `ReportCountry` 常量 + 上面的文件 + 对应的 region 语言包，
+没有任何公共块需要修改；浏览器样式缺失会在**启动时**报错（`CountryStyles`）。
 
 **页头与页尾在所有国家版本中完全一致** —— 它们来自
 `templates/fragments/report-chrome.html`，不读取任何国家字段、也不加载任何国家文件。
+页头里的国家/语言切换按钮链接回**当前这一页**（`header(...)` 的 `page` 参数），
+所以在 `/dynamic` 上切语言不会跳到 `/report`。
 
 
 # 动态表格报表（表头 + 数据都由调用方传入）
@@ -78,3 +96,9 @@ GLOBAL: en/zh-CN/zh-TW），选了不支持的语言会回落到该国家的默�
 
 GET 同样可用，方便把一整张报表做成一个链接分享。
 `headers` 缺失、JSON 解析失败、或超过 `creed.report.dynamic.max-columns` / `max-rows` 时返回 **400**。
+
+
+sample
+```json
+[{"host":"a","ip":"10.0.0.1","uptimeDays":1234},{"host":"b","ip":"127.0.0.1","uptimeDays":5678}]
+```

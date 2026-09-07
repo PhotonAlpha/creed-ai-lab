@@ -1,0 +1,14 @@
+/* The DEFAULT country edition's PDF stylesheet: what a country is rendered with when it ships no
+ * style-pdf.css of its own (ReportCountry.DEFAULT_PDF_STYLESHEET).
+ *
+ * `default` is a stand-in edition, NOT a country -- there is no `default` ReportCountry constant
+ * and no ?country=default. It sits under country/ because it stands in for the country half of the
+ * cascade, and so defines exactly what a country sheet defines: the palette. It is NOT the shared
+ * base; that is static/css/report-pdf.css, always applied, ahead of this.
+ *
+ * CSS 2.1 only, and appended after report-pdf.css, so these rules win at equal specificity.
+ */
+
+.section-head h2 { color: #2b5876; }
+.total-badge      { background-color: #6c757d; }
+.country-notice   { border-left-color: #2b5876; background-color: #eef2f7; }

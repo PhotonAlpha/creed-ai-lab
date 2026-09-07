@@ -69,9 +69,27 @@ A country edition owns four files, all under its own code:
 
 ```
 templates/country/<code>/report.html        browser fragments   (th:fragment="notice", …)
-templates/country/<code>/report-pdf.html    PDF fragments       (same names, CSS-2.1 markup)
+templates/country/<code>/report-pdf.html    PDF fragments       (same names, CSS-2.1 markup; OPTIONAL)
 static/css/country/<code>/style.css         browser stylesheet
-static/css/country/<code>/style-pdf.css     PDF stylesheet (inlined, not linked)
+static/css/country/<code>/style-pdf.css     PDF stylesheet (inlined, not linked; OPTIONAL)
+
+- **The PDF pair degrades, the browser pair does not.** `ReportCountry.pdfContentTemplate()` /
+`pdfStyleSheet()` probe the classpath and hand back the `country/default/` edition
+(`templates/country/default/report-pdf.html`, `static/css/country/default/style-pdf.css`) when the
+country ships none, so a new country can go live on its browser
+edition alone. The probe is uncached on purpose (once per PDF render, and it keeps
+`spring.thymeleaf.cache: false` honest). Two rules come with it: the default template must define
+**every** fragment name a country file may define — a country overrides the whole file, not one
+fragment — and `country/default/` is the *country* half's stand-in, **not** the shared base
+(that is `report-pdf.css`, always applied) — and `default` is not a country: no enum constant, not
+in the switcher, `?country=default` does nothing.
+
+Two layers, shared then country: `static/css/report.css` (browser, linked by the page) and
+`static/css/report-pdf.css` (PDF). `CountryStyles.pdf()` returns base + country **already
+concatenated**, so the PDF templates take one `${pdfCss}` block — deliberate: a second variable is
+something a caller can forget, and a silently unstyled PDF is exactly the failure this class exists
+to prevent. Only locale-dependent CSS stays a template (`report-chrome-pdf :: styles` = the `@page`
+margin boxes and `body { font-family }`, both fed by message keys).
 ```
 
 `ReportCountry.contentTemplate()` / `pdfContentTemplate()` / `styleSheet()` / `pdfStyleSheet()` are the **single definition** of that layout; templates and `CountryStyles` both go through them.
@@ -81,6 +99,7 @@ static/css/country/<code>/style-pdf.css     PDF stylesheet (inlined, not linked)
 - **Split rule for CSS**: CSS that needs a message key stays a Thymeleaf fragment (`report-chrome :: styles`, which is now just the locale font stack); everything else is a plain `.css` file. The shared, country-neutral rules are `static/css/report.css` and deliberately set **no** accent colours — every country, `global` included, defines its own, so a missing stylesheet renders visibly wrong.
 - **`CountryStyles` loads all of them eagerly in its constructor** (not `@PostConstruct`, so tests can `new CountryStyles()`) and throws naming the country and path — a missing country stylesheet is a **startup** failure, not a quietly unstyled page.
 - **The page header and footer are identical in every country.** That is structural, not a convention: they are fragments in `fragments/report-chrome.html` that read no country field and pull in no country template or stylesheet, and `OfflineHtmlExportTemplateTest.theHeaderAndFooterAreIdenticalInEveryCountry` diffs them across all four editions.
+- **The switcher must be told its page.** `report-chrome :: switcher(profile, countries, page)` builds its links from `page`, passed down from `header(..., page)` (`'/report'`, `'/dynamic'`, `null` in the offline exports, which render no switcher). It used to hard-code `@{/report(...)}`, which silently moved the reader off `/dynamic` on the first country or language switch.
 - **`th:replace` outranks `th:if`** — both on one tag includes the fragment regardless of the condition. The switcher's `th:if` therefore sits on an outer `<th:block>`; without it the switcher's `@{...}` links reach the offline export, which renders on a plain non-web `Context`, and 500 it.
 - **Adding a country** = one `ReportCountry` constant + its four files above + its region bundles (`_<lang>_<REGION>.properties` per language it offers). No shared block to edit anywhere.
 
