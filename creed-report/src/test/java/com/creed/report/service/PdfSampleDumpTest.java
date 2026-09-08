@@ -51,7 +51,9 @@ class PdfSampleDumpTest {
         engine.setTemplateResolver(resolver);
         engine.setTemplateEngineMessageSource(new MessageSourceConfig().messageSource());
         PdfExportService service = new PdfExportService(engine,
-                new PathMatchingResourcePatternResolver(), "classpath:/fonts/*.ttf,classpath:/fonts/*.otf");
+                new PathMatchingResourcePatternResolver(), "classpath:/fonts/*.ttf,classpath:/fonts/*.otf",
+                "classpath:/static/img/creed-logo.png",
+                "classpath:/static/img/creed-logo-inverse.png");
 
         List<ServerInfo> servers = List.of(
                 new ServerInfo("creed-auth-01", "10.10.1.11", "creed-author-server",

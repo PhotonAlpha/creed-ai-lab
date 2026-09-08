@@ -21,51 +21,59 @@
 </head>
 <body th:class="${profile.styleClass()}">
 
-<div th:replace="~{fragments/report-chrome-pdf :: header(#{report.brand}, ${generatedAt})}"></div>
+<!-- The .page-frame wrapper is not decoration: its <thead>/<tfoot> are what repeat the header and
+     footer (logo included) on every page, via -fs-table-paginate. The report body goes in the
+     single <tbody> cell. tfoot before tbody is deliberate -- it is the order the renderer was
+     verified with. -->
+<table class="page-frame">
+    <thead th:replace="~{fragments/report-chrome-pdf :: runningHeader(#{report.brand}, ${generatedAt})}"></thead>
+    <tfoot th:replace="~{fragments/report-chrome-pdf :: runningFooter}"></tfoot>
+    <tbody>
+    <tr><td>
+    <div th:replace="~{${profile.pdfContentTemplate} :: notice}"></div>
 
-<div th:replace="~{${profile.pdfContentTemplate} :: notice}"></div>
+    <div th:replace="~{fragments/report-chrome-pdf :: section(#{report.topology}, #{report.columns}, ${total})}"></div>
 
-<div th:replace="~{fragments/report-chrome-pdf :: section(#{report.topology}, #{report.columns}, ${total})}"></div>
-
-<div class="card">
-    <table class="report-table">
-        <thead>
-        <tr>
-            <th>#</th>
-            <th th:text="#{report.col.host}">Host</th>
-            <th th:text="#{report.col.ip}">IP</th>
-            <th th:text="#{report.col.app}">App</th>
-            <th th:text="#{report.col.country}">Country</th>
-            <th th:text="#{report.col.service}">Service</th>
-            <th th:text="#{report.col.env}">Env</th>
-            <th th:text="#{report.col.zone}">Zone</th>
-            <th th:text="#{report.col.slot}">Slot</th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr th:each="s, iter : ${servers}" th:classappend="${iter.odd} ? 'odd'">
-            <th th:text="${iter.count}">1</th>
-            <td th:text="${s.host}">creed-host</td>
-            <td><code class="ip" th:text="${s.ip}">0.0.0.0</code></td>
-            <td th:text="${s.app}">creed-app</td>
-            <td><span class="badge badge-country" th:text="${s.country}">CN</span></td>
-            <td th:text="${s.service}">service</td>
-            <td>
-                <span class="badge" th:classappend="${'badge-env-' + s.env}" th:text="${s.env}">env</span>
-            </td>
-            <td th:text="${s.zone}">zone</td>
-            <td>
-                <span class="badge" th:classappend="${'badge-slot-' + s.slot}" th:text="${s.slot}">slot</span>
-            </td>
-        </tr>
-        <tr th:if="${#lists.isEmpty(servers)}" class="empty-row">
-            <td colspan="9" th:text="#{report.empty}">No server records.</td>
-        </tr>
-        </tbody>
-    </table>
-</div>
-
-<p th:replace="~{fragments/report-chrome-pdf :: footer}"></p>
+    <div class="card">
+        <table class="report-table">
+            <thead>
+            <tr>
+                <th>#</th>
+                <th th:text="#{report.col.host}">Host</th>
+                <th th:text="#{report.col.ip}">IP</th>
+                <th th:text="#{report.col.app}">App</th>
+                <th th:text="#{report.col.country}">Country</th>
+                <th th:text="#{report.col.service}">Service</th>
+                <th th:text="#{report.col.env}">Env</th>
+                <th th:text="#{report.col.zone}">Zone</th>
+                <th th:text="#{report.col.slot}">Slot</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="s, iter : ${servers}" th:classappend="${iter.odd} ? 'odd'">
+                <th th:text="${iter.count}">1</th>
+                <td th:text="${s.host}">creed-host</td>
+                <td><code class="ip" th:text="${s.ip}">0.0.0.0</code></td>
+                <td th:text="${s.app}">creed-app</td>
+                <td><span class="badge badge-country" th:text="${s.country}">CN</span></td>
+                <td th:text="${s.service}">service</td>
+                <td>
+                    <span class="badge" th:classappend="${'badge-env-' + s.env}" th:text="${s.env}">env</span>
+                </td>
+                <td th:text="${s.zone}">zone</td>
+                <td>
+                    <span class="badge" th:classappend="${'badge-slot-' + s.slot}" th:text="${s.slot}">slot</span>
+                </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(servers)}" class="empty-row">
+                <td colspan="9" th:text="#{report.empty}">No server records.</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+    </td></tr>
+    </tbody>
+</table>
 
 </body>
 </html>

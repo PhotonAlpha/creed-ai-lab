@@ -67,6 +67,24 @@ PDF 的专属外观以后再补。**浏览器的两个文件仍然是必需的**
 页头里的国家/语言切换按钮链接回**当前这一页**（`header(...)` 的 `page` 参数），
 所以在 `/dynamic` 上切语言不会跳到 `/report`。
 
+# PDF 的页眉页脚与 logo
+PDF 导出的页眉栏、页脚注和 logo 图片**每一页都有**（不只首页）。实现上，两个 PDF 模板都把正文
+包进一张 `.page-frame` 表格，页眉页脚是它的 `<thead>` / `<tfoot>`，靠 `-fs-table-paginate`
+逐页重复；页码仍然由 `@page` 的 `@bottom-right` 打印，因为 `counter(page)` 只在页边距框里可用。
+
+logo 有深浅两版，可用配置或环境变量替换成自己的：
+
+    creed.report.pdf.logo          CREED_REPORT_PDF_LOGO           # 深色版，用在白底的页脚
+    creed.report.pdf.logo-inverse  CREED_REPORT_PDF_LOGO_INVERSE   # 反白版，用在深色页眉栏
+
+仓库里自带的两张是**占位图**（`static/img/creed-logo*.png`）。替换时注意三点：
+
+* 只支持 **PNG / JPEG / GIF**，**SVG 不行** —— 渲染器（openpdf-html / Flying Saucer）没有 SVG 支持；
+* 图片由 `PdfExportService` 读一次后以 `data:` URI 内联，因为渲染器拿到的是字符串、没有 base URL，
+  写相对路径或 `/img/x.png` 都解析不到；
+* 文件缺失或格式不支持只会打一条 WARN 并**不画这张图**，不会让导出失败；`logo-inverse` 缺失时
+  自动回落到 `logo`（深色 logo 放在深色栏上会看不清，但不至于没有页眉）。
+
 
 # 动态表格报表（表头 + 数据都由调用方传入）
     http://localhost:48080/report/dynamic

@@ -58,6 +58,24 @@ body {
     border-radius: 6px;
 }
 
+/* --- the running page frame -------------------------------------------------------------------
+ * The wrapper table whose thead/tfoot repeat on every page (-fs-table-paginate). This is the ONLY
+ * way to get a repeated block containing an image out of this renderer: an @page margin box draws
+ * nothing for content:url(), and a position:fixed box is clipped to the page's content area so it
+ * cannot be parked in the margin. Keep the cells padding-free -- the header bar and footer note
+ * carry their own spacing, and a padded frame cell would indent the whole report.
+ */
+.page-frame { width: 100%; border-collapse: collapse; -fs-table-paginate: paginate; }
+.page-frame > thead > tr > td,
+.page-frame > tfoot > tr > td,
+.page-frame > tbody > tr > td { padding: 0; }
+
+/* Logos are PNGs delivered as data: URIs by PdfExportService (no base URL, so no other src works).
+ * The header bar is dark and takes the knockout variant; the footer sits on white and takes the
+ * normal one. */
+.report-header .brand-logo { height: 9mm; float: left; margin: 0 10px 0 0; }
+.footer-note .footer-logo  { height: 6mm; vertical-align: middle; margin-right: 8px; }
+
 /* card shell around the table */
 .card {
     border: 1px solid #dee2e6;
@@ -121,6 +139,8 @@ code.ip { font-family: Courier, monospace; font-size: 8.5pt; }
     margin: 10px 2px 0 2px;
     font-size: 8pt;
     color: #6c757d;
+    border-top: 1px solid #dee2e6;
+    padding-top: 5px;
 }
 
 .clearfix { clear: both; }

@@ -43,6 +43,19 @@ curl -G 'http://localhost:9100/report/dynamic/export/pdf' -o /tmp/d.pdf \
 - **Report pages** (`ReportController`) — server info, with **HTML / PDF / Excel** export.
   - PDF via `openpdf-html` (Flying Saucer fork), using dedicated `*-pdf.html` templates in print
     CSS 2.1 with paged media. Bootstrap view templates cannot be reused (no flexbox/JS).
+  - **Running header + footer with a logo image, on every page.** Both PDF templates wrap their
+    body in a `.page-frame` table whose `<thead>`/`<tfoot>` are the shared chrome fragments
+    (`report-chrome-pdf :: runningHeader/runningFooter`); `-fs-table-paginate` repeats them per
+    page. The logos are `creed.report.pdf.logo` (dark, for the white footer) and
+    `creed.report.pdf.logo-inverse` (knockout, for the dark header bar) — PNG/JPEG/GIF only, no
+    SVG — read once and injected as `${logo}` / `${logoInverse}` data: URIs by `PdfExportService`
+    on **every** render, so no controller can forget them and a missing file just drops the
+    `<img>` (warned, never fatal; a missing inverse falls back to the plain logo).
+    `PdfRunningChromeTest` renders a 160-row report and asserts the header text, the footer text
+    and two image XObjects on every page of both templates. The two bundled PNGs under
+    `static/img/` are **placeholders** — swap the files or point the properties elsewhere; they are
+    committed (unlike `fonts/`, which is gitignored) because they are small and a logo-less header
+    would otherwise be the out-of-the-box look.
   - **Excel via a strategy pattern** (`com.creed.report.export`): `ReportType` enum is the key,
     `ExcelReportExporter` the strategy, `ExcelExportService` the context. **A new report type = one
     enum constant + one `@Component` exporter**; the page's dropdown is model-driven and picks it up
@@ -85,6 +98,16 @@ curl -G 'http://localhost:9100/report/dynamic/export/pdf' -o /tmp/d.pdf \
 
 ## Landmines
 
+- **Getting an image onto every PDF page has exactly one working mechanism**, and the two obvious
+  ones fail silently. An `@page` margin box **cannot** hold an image — `content: url(...)` draws
+  nothing (so margin boxes stay text-only, which is also the only place `counter(page)` works).
+  `position: fixed` **does** repeat per page, but it is positioned against the page's *content* box
+  and clipped to it, so the negative offsets that would park a logo in the page margin render
+  nothing at all. What works is the `.page-frame` wrapper table with `-fs-table-paginate`. A new
+  PDF template that forgets that wrapper silently loses its header and footer.
+- **Do not put a `<tfoot>` on the data table.** The wrapper table is fine, but a `<tfoot>` added to
+  the paginating `report-table` itself blew a 60-row table up to **122 pages** with its content
+  dropped. Running footers belong to the frame.
 - **PDF fonts cost a debugging session.** CFF-flavored OTFs embed but silently drop all CJK glyphs —
   use static glyf TTFs. Flying Saucer does **not** synthesize bold, so without a Bold face bold CJK
   text silently disappears. There is no per-glyph fallback across families, so each locale's
@@ -112,6 +135,12 @@ curl -G 'http://localhost:9100/report/dynamic/export/pdf' -o /tmp/d.pdf \
 
 ## Open items
 
+- **`PdfSampleDumpTest` does not create `-Dpdf.sample.dir`** — it fails with `NoSuchFileException`
+  if the directory does not already exist. `mkdir -p` first, or add one `Files.createDirectories`.
+- The `@page` `@top-left` box still prints `pdf.page.header`, which now says nearly the same thing
+  as the running header bar one line below it on every page. Harmless, but it is duplication that
+  only made sense while the brand bar appeared on page 1 only; dropping the box (and the key from
+  the seven bundles) would tidy it.
 - **The root `TODO.md` is stale.** Its unchecked boxes (导出PDF / 导出Excel / 根据策略导出相应格式的报表)
   all describe work that has since landed — see commits `290092a`, `7b2ca7a`, `6ab6df9`. Either tick
   them off or delete the file; as written it misrepresents the module's state.

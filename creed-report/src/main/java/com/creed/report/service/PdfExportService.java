@@ -17,7 +17,9 @@ import org.thymeleaf.context.Context;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -54,6 +56,28 @@ import java.util.Map;
  * silently disappears if the family only has Regular; (3) no per-glyph fallback across families,
  * so each locale's {@code pdf.font.family} stack leads with the face covering its script.
  *
+ * <p><b>Images.</b> {@code setDocumentFromString} is called with no base URL, so a relative or
+ * absolute-path {@code src} resolves to nothing — every image has to arrive as a {@code data:} URI.
+ * This service therefore reads {@code creed.report.pdf.logo} (and the knockout variant
+ * {@code creed.report.pdf.logo-inverse}, for the dark header bar) once, base64-encodes them and
+ * injects {@code ${logo}} / {@code ${logoInverse}} into <b>every</b> template render: it is the
+ * single funnel for all PDF output, so a template can rely on the variables existing and no
+ * controller can forget to pass them. A missing or unreadable file degrades to an empty string —
+ * the templates skip the {@code <img>} — and logs a warning, like a missing font does. Formats are
+ * PNG/JPEG/GIF; <b>SVG does not render</b> (Flying Saucer has no SVG support), which is why the
+ * bundled logo is a PNG.
+ *
+ * <p>Three renderer limits shaped the header/footer markup, all of them established by trying:
+ * (1) an {@code @page} margin box cannot hold an image — {@code content: url(...)} silently draws
+ * nothing, so margin boxes stay text-only (the page counter);
+ * (2) {@code position: fixed} <i>does</i> repeat on every page, but it is positioned against the
+ * page's <b>content</b> box and clipped to it, so the negative offsets that would park a logo in
+ * the page margin render nothing at all;
+ * (3) what works is a wrapper table with {@code -fs-table-paginate: paginate} — its {@code <thead>}
+ * and {@code <tfoot>} repeat on every page and can contain arbitrary markup, images included. That
+ * is {@code .page-frame} in the PDF templates. Note the trap: putting a {@code <tfoot>} on the
+ * <i>data</i> table instead blew a 60-row table up to 122 pages.
+ *
  * <p>Font loading cost: {@code addFont} takes a file path, a {@code file:}/{@code jar:} URL or a
  * bare classpath-resource path (OpenPDF's {@code RandomAccessFileOrArray} tries disk, then URL
  * schemes, then {@code BaseFont.getResourceStream}), so jar-packaged fonts are read in place —
@@ -70,15 +94,25 @@ public class PdfExportService {
     private final TemplateEngine templateEngine;
     private final ResourcePatternResolver resourceResolver;
     private final String[] fontLocations;
+    private final String logoLocation;
+    private final String logoInverseLocation;
     private volatile List<String> fontFiles;
+    private volatile String logo;
+    private volatile String logoInverse;
 
     public PdfExportService(TemplateEngine templateEngine,
                             ResourceLoader resourceLoader,
                             @Value("${creed.report.pdf.font-paths:classpath:/fonts/*.ttf,classpath:/fonts/*.otf}")
-                            String fontPaths) {
+                            String fontPaths,
+                            @Value("${creed.report.pdf.logo:classpath:/static/img/creed-logo.png}")
+                            String logoPath,
+                            @Value("${creed.report.pdf.logo-inverse:classpath:/static/img/creed-logo-inverse.png}")
+                            String logoInversePath) {
         this.templateEngine = templateEngine;
         this.resourceResolver = ResourcePatternUtils.getResourcePatternResolver(resourceLoader);
         this.fontLocations = fontPaths.isBlank() ? new String[0] : fontPaths.split("\\s*,\\s*");
+        this.logoLocation = logoPath;
+        this.logoInverseLocation = logoInversePath;
     }
 
     /**
@@ -92,6 +126,11 @@ public class PdfExportService {
     /** Renders a Thymeleaf template in the given locale and converts the result to PDF bytes. */
     public byte[] renderTemplate(String templateName, Map<String, Object> variables, Locale locale) {
         Context context = new Context(locale);
+        // Set before the caller's variables, so an explicit ${logo} still wins, and set HERE rather
+        // than in each controller: this is the one funnel every PDF passes through, which is what
+        // makes a logo-less header impossible to ship by forgetting a model attribute.
+        context.setVariable("logo", logo());
+        context.setVariable("logoInverse", logoInverse());
         variables.forEach(context::setVariable);
         return renderHtml(templateEngine.process(templateName, context));
     }
@@ -110,6 +149,73 @@ public class PdfExportService {
         catch (Exception ex) {
             throw new IllegalStateException("HTML -> PDF rendering failed", ex);
         }
+    }
+
+    /** The report logo as a {@code data:} URI, or {@code ""} when none could be read. */
+    String logo() {
+        String uri = this.logo;
+        if (uri == null) {
+            uri = dataUri(logoLocation);
+            this.logo = uri;
+        }
+        return uri;
+    }
+
+    /**
+     * The knockout logo for the dark header bar. Degrades to {@link #logo()} when no inverse file
+     * is configured or present — the same "the PDF half degrades" rule the country templates follow,
+     * so a deployment that only has one logo file still gets a header, just a low-contrast one.
+     */
+    String logoInverse() {
+        String uri = this.logoInverse;
+        if (uri == null) {
+            String resolved = dataUri(logoInverseLocation);
+            uri = resolved.isEmpty() ? logo() : resolved;
+            this.logoInverse = uri;
+        }
+        return uri;
+    }
+
+    private String dataUri(String location) {
+        if (location == null || location.isBlank()) {
+            return "";
+        }
+        // Bare paths are filesystem paths, as with the font locations.
+        String resolvable = location.contains(":") ? location : "file:" + location;
+        try {
+            Resource resource = resourceResolver.getResource(resolvable);
+            if (!resource.exists()) {
+                log.warn("PDF logo '{}' not found; the PDF header/footer will render without it", location);
+                return "";
+            }
+            String mediaType = imageMediaType(resource.getFilename());
+            if (mediaType == null) {
+                log.warn("PDF logo '{}' is not a PNG/JPEG/GIF; openpdf-html cannot render it "
+                        + "(SVG in particular is unsupported)", location);
+                return "";
+            }
+            try (InputStream in = resource.getInputStream()) {
+                return "data:" + mediaType + ";base64," + Base64.getEncoder().encodeToString(in.readAllBytes());
+            }
+        }
+        catch (IOException ex) {
+            log.warn("PDF logo '{}' could not be read: {}", location, ex.toString());
+            return "";
+        }
+    }
+
+    private static String imageMediaType(String filename) {
+        String name = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
+        if (name.endsWith(".png")) {
+            return "image/png";
+        }
+        if (name.endsWith(".jpg") || name.endsWith(".jpeg")) {
+            return "image/jpeg";
+        }
+        if (name.endsWith(".gif")) {
+            return "image/gif";
+        }
+        return null;
     }
 
     private void registerFonts(ITextFontResolver fontResolver) {

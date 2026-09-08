@@ -54,7 +54,9 @@ class PdfExportServiceTest {
         // methods, and messageSource() wires its own parent.
         engine.setTemplateEngineMessageSource(new MessageSourceConfig().messageSource());
         service = new PdfExportService(engine, new PathMatchingResourcePatternResolver(),
-                "classpath:/fonts/*.ttf,classpath:/fonts/*.otf");
+                "classpath:/fonts/*.ttf,classpath:/fonts/*.otf",
+                "classpath:/static/img/creed-logo.png",
+                "classpath:/static/img/creed-logo-inverse.png");
     }
 
     @Test

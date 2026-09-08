@@ -19,33 +19,41 @@
 </head>
 <body th:class="${profile.styleClass()}">
 
-<div th:replace="~{fragments/report-chrome-pdf :: header(#{report.brand}, ${generatedAt})}"></div>
+<!-- The .page-frame wrapper is not decoration: its <thead>/<tfoot> are what repeat the header and
+     footer (logo included) on every page, via -fs-table-paginate. The report body goes in the
+     single <tbody> cell. tfoot before tbody is deliberate -- it is the order the renderer was
+     verified with. -->
+<table class="page-frame">
+    <thead th:replace="~{fragments/report-chrome-pdf :: runningHeader(#{report.brand}, ${generatedAt})}"></thead>
+    <tfoot th:replace="~{fragments/report-chrome-pdf :: runningFooter}"></tfoot>
+    <tbody>
+    <tr><td>
+    <div th:replace="~{${profile.pdfContentTemplate} :: notice}"></div>
 
-<div th:replace="~{${profile.pdfContentTemplate} :: notice}"></div>
+    <div th:replace="~{fragments/report-chrome-pdf :: section(${table.title}, null, ${total})}"></div>
 
-<div th:replace="~{fragments/report-chrome-pdf :: section(${table.title}, null, ${total})}"></div>
-
-<div class="card">
-    <table class="report-table">
-        <thead>
-        <tr>
-            <th>#</th>
-            <th th:each="column : ${table.columns}" th:text="${column.label}">Column</th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr th:each="row, iter : ${table.rows}" th:classappend="${iter.odd} ? 'odd'">
-            <th th:text="${iter.count}">1</th>
-            <td th:each="cell : ${row}" th:text="${cell.text}">value</td>
-        </tr>
-        <tr th:if="${table.empty}" class="empty-row">
-            <td th:attr="colspan=${table.columns.size() + 1}" th:text="#{report.empty}">No records.</td>
-        </tr>
-        </tbody>
-    </table>
-</div>
-
-<p th:replace="~{fragments/report-chrome-pdf :: footer}"></p>
+    <div class="card">
+        <table class="report-table">
+            <thead>
+            <tr>
+                <th>#</th>
+                <th th:each="column : ${table.columns}" th:text="${column.label}">Column</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="row, iter : ${table.rows}" th:classappend="${iter.odd} ? 'odd'">
+                <th th:text="${iter.count}">1</th>
+                <td th:each="cell : ${row}" th:text="${cell.text}">value</td>
+            </tr>
+            <tr th:if="${table.empty}" class="empty-row">
+                <td th:attr="colspan=${table.columns.size() + 1}" th:text="#{report.empty}">No records.</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+    </td></tr>
+    </tbody>
+</table>
 
 </body>
 </html>

@@ -45,6 +45,13 @@ creed:
       # Bundled: Noto Sans (Latin) + Noto Sans SC/TC (Chinese), picked per locale by the
       # pdf.font.family message key. This matches the code default; listed here for visibility.
       font-paths: "classpath:/fonts/*.ttf,classpath:/fonts/*.otf"
+      # Logo drawn in the PDF running header and footer (every page). PNG/JPEG/GIF only -- the
+      # renderer has no SVG support -- and it is inlined as a data: URI, because openpdf-html gets
+      # the document as a string and so has no base URL to resolve an image path against.
+      # `logo` is used where the background is white (the footer); `logo-inverse` is the knockout
+      # variant for the dark header bar and falls back to `logo` when absent.
+      logo: "${CREED_REPORT_PDF_LOGO:classpath:/static/img/creed-logo.png}"
+      logo-inverse: "${CREED_REPORT_PDF_LOGO_INVERSE:classpath:/static/img/creed-logo-inverse.png}"
     # Country axis: ?country=global|th|my|vn, remembered in the creed-report-country cookie and
     # folded into the request locale's region subtag by CountryLocaleResolver. The per-country
     # presentation defaults live in the ReportCountry enum; `profiles` below overrides individual

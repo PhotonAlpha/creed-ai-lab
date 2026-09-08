@@ -9,6 +9,10 @@
      browser templates do not is paged media: @page margin boxes with counter(page)/counter(pages),
      thead repeated per page (-fs-table-paginate), rows kept unsplit (page-break-inside).
 
+     The header and footer here are the <thead>/<tfoot> of the .page-frame wrapper table that each
+     PDF template opens around its body -- that is what makes them repeat on every page and what
+     lets them carry a logo image. A template that forgets the wrapper loses both.
+
      Only the locale-dependent CSS is still a TEMPLATE here -- the @page margin boxes and the font
      stack, injected by th:inline="css" from message keys. The static rules moved out to
      static/css/report-pdf.css, which CountryStyles inlines together with the country's own sheet
@@ -47,18 +51,33 @@
 </head>
 <body>
 
-<!-- Page header. Same markup and palette for every country and both reports; the country appears
-     only as its name in the meta line. -->
-<div th:fragment="header(title, generatedAt)" class="report-header">
-    <span class="meta">
-        <span th:text="#{report.country.name}">Global</span>
-        &#183; <span th:text="#{report.generatedAt}">Generated at</span>
-        <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
-        &#183; <span th:text="#{report.pdfSnapshot}">PDF snapshot</span>
-    </span>
-    <span class="brand" th:text="${title}">Creed &#183; Server Inventory Report</span>
-    <div class="clearfix"></div>
-</div>
+<!-- RUNNING page header: the <thead> of the .page-frame wrapper table, so it repeats on EVERY
+     page. That is the only mechanism this renderer offers for a repeated block containing an
+     image: an @page margin box draws nothing for content:url(), and a position:fixed box is
+     clipped to the page's content area, so it cannot sit in the margin. See PdfExportService's
+     javadoc for the full result of probing all three.
+
+     ${logoInverse} is the knockout (white) logo, because this bar is dark; both it and ${logo}
+     are injected by PdfExportService on every render, so no caller passes them. Empty when no
+     logo file could be read -- the <img> then disappears and the bar renders as it always did.
+
+     Same markup and palette for every country and both reports; the country appears only as its
+     name in the meta line. -->
+<thead th:fragment="runningHeader(title, generatedAt)">
+<tr><td>
+    <div class="report-header">
+        <span class="meta">
+            <span th:text="#{report.country.name}">Global</span>
+            &#183; <span th:text="#{report.generatedAt}">Generated at</span>
+            <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
+            &#183; <span th:text="#{report.pdfSnapshot}">PDF snapshot</span>
+        </span>
+        <img class="brand-logo" th:if="${!#strings.isEmpty(logoInverse)}" th:src="${logoInverse}" alt=""/>
+        <span class="brand" th:text="${title}">Creed &#183; Server Inventory Report</span>
+        <div class="clearfix"></div>
+    </div>
+</td></tr>
+</thead>
 
 <!-- The heading row above the table: title on the left, total badge floated right. -->
 <div th:fragment="section(heading, columns, total)" class="section-head">
@@ -68,10 +87,17 @@
     <div class="clearfix"></div>
 </div>
 
-<!-- Page footer, country-independent like the header. -->
-<p th:fragment="footer" class="footer-note" th:text="#{report.footer}">
-    Powered by Spring Boot &#183; Thymeleaf &#183; openpdf-html &#183; PDF export
-</p>
+<!-- RUNNING page footer: the <tfoot> of the same wrapper table, so it too repeats on every page,
+     next to the @bottom-right page counter (which stays a margin box because counter(page) is only
+     available there). ${logo} is the dark logo: this sits on white. -->
+<tfoot th:fragment="runningFooter">
+<tr><td>
+    <p class="footer-note">
+        <img class="footer-logo" th:if="${!#strings.isEmpty(logo)}" th:src="${logo}" alt=""/>
+        <span th:text="#{report.footer}">Powered by Spring Boot &#183; Thymeleaf &#183; openpdf-html</span>
+    </p>
+</td></tr>
+</tfoot>
 
 </body>
 </html>
