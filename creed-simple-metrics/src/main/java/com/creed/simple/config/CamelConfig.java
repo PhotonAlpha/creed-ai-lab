@@ -2,9 +2,7 @@ package com.creed.simple.config;
 
 import com.creed.simple.lb.LoadBalancerRoutePlanner;
 import com.creed.simple.lb.RestClientSuppliers;
-import com.creed.simple.lb.StickyContextThreadLocalAccessor;
 import io.micrometer.context.ContextExecutorService;
-import io.micrometer.context.ContextRegistry;
 import io.micrometer.context.ContextSnapshotFactory;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.binder.httpcomponents.hc5.ObservationExecChainHandler;
@@ -68,8 +66,6 @@ public class CamelConfig {
      */
     @Bean
     ProducerTemplate producerTemplate(CamelContext camelContext) {
-        ContextRegistry.getInstance()
-                .registerThreadLocalAccessor(new StickyContextThreadLocalAccessor());
         ProducerTemplate template = camelContext.createProducerTemplate();
         ExecutorService pool = camelContext.getExecutorServiceManager()
                 .newDefaultThreadPool(template, "ProducerTemplate");

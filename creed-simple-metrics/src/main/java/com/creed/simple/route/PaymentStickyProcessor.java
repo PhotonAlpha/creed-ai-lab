@@ -1,9 +1,10 @@
 package com.creed.simple.route;
 
-import com.creed.simple.lb.StickyContextHolder;
+import com.creed.simple.lb.StickyMetadataServiceInstanceListSupplier;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
+import org.apache.camel.Message;
 import org.apache.camel.Processor;
 import org.apache.camel.ProducerTemplate;
 import org.apache.camel.http.common.HttpMethods;
@@ -13,15 +14,15 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Lifts the caller's {@code stickyId} cookie off the inbound exchange into {@link StickyContextHolder}
- * so the {@code payment-resource} LB child context can pin the downstream call to the instance whose
- * registry {@code metadata.stickyId} matches (see {@code StickyMetadataServiceInstanceListSupplier}).
+ * Narrows the caller's {@code Cookie} header down to the single {@code stickyId} cookie, so it — and
+ * nothing else the inbound servlet request carried — rides along to {@code payment-resource}. The
+ * {@code payment-resource} LB child context then pins the call to the instance whose registry
+ * {@code metadata.stickyId} matches (see {@code StickyMetadataServiceInstanceListSupplier}).
  *
- * <p>Runs as the first step of the {@code fetch-payment} route — i.e. on the same thread that will
- * execute the camel-http producer and, inside it, {@code LoadBalancerRoutePlanner}'s blocking
- * {@code choose()}. It <em>always overwrites</em> the holder ({@code null} when the request has no
- * sticky cookie): route threads come from pools, so an unconditional set is what prevents a previous
- * request's sticky id from leaking into this one.
+ * <p>Runs as the first step of the {@code fetch-payment} route. The sticky id travels on the exchange
+ * (and from there onto the outgoing HTTP request), <em>not</em> on the thread: multicast branches,
+ * aggregation pools and the async {@code ProducerTemplate} all copy exchange headers, so there is no
+ * pooled-thread staleness to defend against and no context propagation to configure.
  */
 @Slf4j
 @Component("paymentStickyProcessor")
@@ -30,7 +31,8 @@ public class PaymentStickyProcessor implements Processor {
     ProducerTemplate producerTemplate;
 
 
-    static final String COOKIE_NAME = "stickyId";
+    static final String COOKIE_HEADER = "Cookie";
+    static final String COOKIE_NAME = StickyMetadataServiceInstanceListSupplier.STICKY_COOKIE;
 
     @Override
     public void process(Exchange exchange) {
@@ -42,11 +44,13 @@ public class PaymentStickyProcessor implements Processor {
 //        String result = producerTemplate.requestBodyAndHeaders("direct:fetch-order", null, headers, String.class);
 //        String result = producerTemplate.requestBodyAndHeaders("https://order-resource/api/order/items?bridgeEndpoint=true", null, headers, String.class);
 //        log.info("result:{}", result);
-        String cookieHeader = exchange.getIn().getHeader("Cookie", String.class);
-        String stickyId = parseStickyId(cookieHeader);
-        StickyContextHolder.set(stickyId);
+        Message message = exchange.getMessage();
+        String stickyId = parseStickyId(message.getHeader(COOKIE_HEADER, String.class));
         if (stickyId != null) {
+            message.setHeader(COOKIE_HEADER, COOKIE_NAME + "=" + stickyId);
             log.debug("[LB-STICKY] request carries {}={}", COOKIE_NAME, stickyId);
+        } else {
+            message.removeHeader(COOKIE_HEADER);
         }
     }
 

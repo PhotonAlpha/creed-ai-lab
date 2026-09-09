@@ -22,8 +22,9 @@ HTTPS `8096`, Camel REST under `/camel/*`. Needs the downstream resource servers
   (`fetch-catalog` / `fetch-order` / `fetch-payment`), and a `@LoadBalanced RestClient`
   (`RemoteClusterProcessor`, used by the `fulfillment` bulk fetches). Both resolve
   `https://<service-id>/...` against one shared `SimpleDiscoveryClient` registry.
-- **Cookie-based sticky routing for `payment-resource`** only: `stickyId` cookie →
-  `StickyContextHolder` → an instance-list supplier that filters on `metadata.stickyId`.
+- **Cookie-based sticky routing for `payment-resource`** only: the `stickyId` cookie rides the
+  outgoing request → `LoadBalancerRoutePlanner`'s three-arg `determineRoute` turns it into a
+  `RequestDataContext` → an instance-list supplier that filters on `metadata.stickyId`.
 - **Runtime-toggleable health checks**: `GET/PUT /admin/lb/health-check`.
 - HTTP-client plumbing is factored into `lb/ManagedHttpClientPool` — one `@Bean(destroyMethod="close")`
   that is both `Closeable` and a `MeterBinder`, replacing the pool + factory + binder trio.
@@ -37,8 +38,15 @@ HTTPS `8096`, Camel REST under `/camel/*`. Needs the downstream resource servers
   which breaks the multicast branches that reuse `direct:catalog`.
 - **`spring.main.allow-circular-references: true` is required** — the inline `<threadPool>` beans
   cycle with camel-spring-boot's health-check registry auto-config.
-- **`StickyContextHolder` must always be overwritten, including with `null`.** Route threads are
-  pooled, so a stale value leaks into the next request.
+- **The camel-http path is `choose(...)`, not `execute(...)`** — so no `LoadBalancerLifecycle`
+  callbacks (no `loadbalancer.requests.*` metrics), no `spring.cloud.loadbalancer.hint.*`, no
+  instance failover on retry, and the `Host` header keeps the logical service name. Full comparison
+  against `LoadBalancerInterceptor` and the risk list:
+  `docs/camel-http-loadbalancer.md` → 「与 `LoadBalancerInterceptor` 的区别与风险」.
+- **`fetch-payment` deliberately does NOT set `skipRequestHeaders=true`** (unlike `fetch-catalog` /
+  `fetch-order`): the sticky cookie has to reach the outgoing HTTP request, since that request is what
+  the route planner hands to the load balancer. `<removeHeaders pattern="*" excludePattern="Cookie"/>`
+  plus the processor's narrowing of the Cookie header is the equivalent whitelist.
 - **Turning health checks OFF must `destroy()` the inner supplier** — its `afterPropertiesSet()` holds
   a permanent subscription that keeps the probe loop running regardless of traffic. `choose()` only
   sees a flip after the LB cache TTL (35 s default).

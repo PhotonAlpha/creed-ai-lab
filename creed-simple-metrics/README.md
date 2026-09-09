@@ -31,14 +31,16 @@ order / payment / aggregate / aggregate-notify / **fulfillment**）。`/aggregat
 LoadBalancer 轮询健康实例。
 
 **payment 集群支持 cookie 粘滞（sticky session）**：请求带 `Cookie: stickyId=<value>` 时，
-`PaymentStickyProcessor`（`fetch-payment` 路由第一步）把值放进 `StickyContextHolder`（ThreadLocal，
-camel-http 的 producer 与 `LoadBalancerRoutePlanner.choose()` 同线程执行所以可见），`payment-resource`
-专属的 `PaymentStickyLoadBalancerConfiguration`（经 `@LoadBalancerClient(name="payment-resource")` 挂载，
+`PaymentStickyProcessor`（`fetch-payment` 路由第一步）把 Cookie 头收窄成只剩这一个 cookie，让它随出站
+请求发出；`LoadBalancerRoutePlanner` 覆写 hc5 的三参 `determineRoute`，从该请求解析出 cookie 包成
+`RequestDataContext` 走 `choose(serviceId, request)`——粘滞完全跟着请求走，不依赖线程上下文。
+`payment-resource` 专属的 `PaymentStickyLoadBalancerConfiguration`（经
+`@LoadBalancerClient(name="payment-resource")` 挂载，
 其余服务仍走默认 `PartnerLoadBalancerConfiguration`，后者的 supplier 加了 `@ConditionalOnMissingBean`
 避免子上下文 bean 冲突）在健康检查过的存活列表上按 `metadata.stickyId`（`application.yml` 注册表中
 每实例声明）过滤：命中→只连该实例；无 cookie→正常轮询；无匹配或钉住的实例探活失败→WARN 并回退全量
 存活列表（可用性优先于粘滞）。自定义 supplier 时 `get()` / `get(Request)` 的原理与注意点
-（组装期捕获 ThreadLocal、过滤层放缓存外、空列表回退语义等）见
+（三参 `determineRoute` 的上下文来源、组装期捕获请求态、过滤层放缓存外、空列表回退语义等）见
 [docs/camel-http-loadbalancer.md](docs/camel-http-loadbalancer.md) 的
 「自定义 ServiceInstanceListSupplier」一节。
 

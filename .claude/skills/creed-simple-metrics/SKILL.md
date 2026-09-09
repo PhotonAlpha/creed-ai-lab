@@ -28,7 +28,11 @@ gotcha writeup (including the three schema/attribute-name traps under Camel 4's 
   keep plain `https://<service-id>/...` endpoint URIs; `CamelConfig.httpComponent`'s
   `HttpClientConfigurer` installs the route planner, which resolves the service-id via
   `DiscoveryClient`/`LoadBalancerClient.choose()` at connect time — the replacement for the removed
-  `ServiceCall` EIP. Full design: `docs/camel-http-loadbalancer.md`.
+  `ServiceCall` EIP. `choose(...)` is only half of what the `@LoadBalanced` path's `execute(...)` does,
+  so this path has **no `LoadBalancerLifecycle` callbacks** (no `loadbalancer.requests.*` metrics), no
+  `hint` properties, no failover on hc5 retry, and it keeps the logical name in the `Host` header
+  (redirects/vhost routing/`server.address` all see the service-id). Full design plus the side-by-side
+  comparison and risk list: `docs/camel-http-loadbalancer.md` → 「与 `LoadBalancerInterceptor` 的区别与风险」.
 - **`@LoadBalanced RestClient`** (`RemoteClusterProcessor`, used by the `fulfillment` pipeline's bulk
   fetches): same `https://<service-id>` trick, resolved by the Spring Cloud LB interceptor.
   `LoadBalancerAuditInterceptor` (added after the LB post-processor, so it's innermost / sees the
@@ -49,9 +53,18 @@ notes: `docs/camel-http-loadbalancer.md` 运行时开关 section.
 ## Sticky routing for `payment-resource`
 
 Request carries `Cookie: stickyId=<value>` → `PaymentStickyProcessor` (first step of `fetch-payment`)
-lifts it into `StickyContextHolder` (a plain `ThreadLocal` — camel-http's producer and
-`LoadBalancerRoutePlanner.choose()` run synchronously on the same route thread, so it's visible;
-**always overwrite**, including `null`, since route threads are pooled). `payment-resource` alone gets
+narrows the `Cookie` header to that one cookie and lets it ride the outgoing request (so `fetch-payment`,
+unlike `fetch-catalog`/`fetch-order`, must NOT use `skipRequestHeaders=true`; it uses
+`<removeHeaders pattern="*" excludePattern="Cookie"/>` instead) → `LoadBalancerRoutePlanner` overrides
+hc5's **three-arg** `determineRoute(target, request, context)` — the overload `InternalHttpClient`
+actually calls — adapts that request into the same `RequestData`/`RequestDataContext` that
+`BlockingLoadBalancerClient.execute(...)` builds, and calls `choose(serviceId, request)`. Selection is
+therefore request-scoped, not thread-scoped: multicast branches and the async `ProducerTemplate` need no
+context propagation. (Bare `choose(serviceId)` would pass `new DefaultRequest<>()`, whose no-arg
+constructor discards its context — `getContext()` returns `null` and every `instanceof
+RequestDataContext` supplier silently no-ops. Don't parse cookies with Spring's
+`RequestData(HttpRequest)` either: it splits the whole Cookie header on `=` and sees only the first
+cookie.) `payment-resource` alone gets
 `PaymentStickyLoadBalancerConfiguration` (via `@LoadBalancerClient(name="payment-resource")`; every
 other service keeps `PartnerLoadBalancerConfiguration` as `defaultConfiguration`); it stacks
 `StickyMetadataServiceInstanceListSupplier` **outside the cache** on the same
@@ -106,8 +119,7 @@ trace id), but it means the value only survives where something correctly thread
 Two real breaks from this, both documented in depth:
 
 - **`ProducerTemplate.asyncRequestBody*`** (pool threads): fixed via a context-propagating executor
-  (`CamelConfig.producerTemplate` wraps the pool with `ContextExecutorService` + a custom
-  `StickyContextThreadLocalAccessor` so `StickyContextHolder` rides along too). Full mechanism, the
+  (`CamelConfig.producerTemplate` wraps the pool with `ContextExecutorService`). Full mechanism, the
   "looked connected but wasn't" false-positive from the old remote-baggage era, and a pitfall checklist:
   `docs/camel-producertemplate-context-propagation.md`.
 - **`camel-observation-starter`'s producer/CLIENT span** (every `<to>` endpoint call, even a single

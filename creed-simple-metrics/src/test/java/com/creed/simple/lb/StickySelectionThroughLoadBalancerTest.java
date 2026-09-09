@@ -1,10 +1,10 @@
 package com.creed.simple.lb;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.cloud.client.DefaultServiceInstance;
 import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.loadbalancer.DefaultRequest;
+import org.springframework.cloud.client.loadbalancer.Request;
 import org.springframework.cloud.client.loadbalancer.Response;
 import org.springframework.cloud.loadbalancer.core.RoundRobinLoadBalancer;
 import org.springframework.cloud.loadbalancer.core.ServiceInstanceListSupplier;
@@ -21,15 +21,16 @@ import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static com.creed.simple.lb.StickyMetadataServiceInstanceListSupplierTest.requestWithSticky;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Integration-style tests that drive the sticky supplier through a real
- * {@link RoundRobinLoadBalancer#choose} — the exact path {@code LoadBalancerRoutePlanner} takes via
- * {@code BlockingLoadBalancerClient} — rather than poking {@code select(...)} directly. This pins the
- * riskiest part of the design: {@link StickyContextHolder}'s ThreadLocal must be captured on the
- * <em>calling</em> thread inside {@code get()}, so concurrent callers with different sticky ids must
- * each land on their own instance even though they share one supplier and one load balancer.
+ * {@link RoundRobinLoadBalancer#choose(Request)} — the exact path {@code LoadBalancerRoutePlanner} takes
+ * via {@code BlockingLoadBalancerClient}. This pins the core of the design: selection follows the
+ * <em>request</em>, so concurrent callers with different sticky ids each land on their own instance
+ * while sharing one supplier and one load balancer — and, unlike the old ThreadLocal carrier, so does a
+ * caller whose request is chosen on some other pool's thread.
  */
 class StickySelectionThroughLoadBalancerTest {
 
@@ -40,11 +41,6 @@ class StickySelectionThroughLoadBalancerTest {
     private final ServiceInstance secondary = instance("payment-2", 18094, STICKY_SECONDARY);
 
     private final RoundRobinLoadBalancer loadBalancer = loadBalancerOver(List.of(primary, secondary));
-
-    @AfterEach
-    void clearHolder() {
-        StickyContextHolder.clear();
-    }
 
     private static ServiceInstance instance(String id, int port, String stickyId) {
         return new DefaultServiceInstance(id, "payment-resource", "localhost", port, true,
@@ -72,45 +68,50 @@ class StickySelectionThroughLoadBalancerTest {
                 "payment-resource");
     }
 
-    /** Mirrors BlockingLoadBalancerClient.choose: block on the reactive choose from the caller thread. */
-    private ServiceInstance choose() {
-        Response<ServiceInstance> response = Mono.from(loadBalancer.choose(new DefaultRequest<>())).block();
+    /** Mirrors BlockingLoadBalancerClient.choose(serviceId, request): block on the reactive choose. */
+    private ServiceInstance choose(Request<?> request) {
+        Response<ServiceInstance> response = Mono.from(loadBalancer.choose(request)).block();
         return response != null && response.hasServer() ? response.getServer() : null;
     }
 
     @Test
-    void chooseHonoursTheCallingThreadsStickyId() {
-        StickyContextHolder.set(STICKY_SECONDARY);
+    void chooseHonoursTheRequestsStickyCookie() {
         for (int i = 0; i < 5; i++) {
-            assertThat(choose()).as("call %d must stay pinned", i).isEqualTo(secondary);
+            assertThat(choose(requestWithSticky(STICKY_SECONDARY))).as("call %d must stay pinned", i)
+                    .isEqualTo(secondary);
         }
-
-        StickyContextHolder.set(STICKY_PRIMARY);
         for (int i = 0; i < 5; i++) {
-            assertThat(choose()).isEqualTo(primary);
+            assertThat(choose(requestWithSticky(STICKY_PRIMARY))).isEqualTo(primary);
         }
     }
 
     @Test
-    void chooseRoundRobinsWhenNoStickyIdIsSet() {
-        StickyContextHolder.set(null);
+    void chooseRoundRobinsWhenTheRequestCarriesNoStickyCookie() {
         Set<Integer> ports = IntStream.range(0, 6)
-                .mapToObj(i -> choose().getPort())
+                .mapToObj(i -> choose(requestWithSticky(null)).getPort())
+                .collect(Collectors.toSet());
+        assertThat(ports).containsExactlyInAnyOrder(18093, 18094);
+    }
+
+    @Test
+    void chooseRoundRobinsWhenThereIsNoRequestContextAtAll() {
+        // The two-arg determineRoute path (RedirectExec): choose(serviceId) with an empty context.
+        Set<Integer> ports = IntStream.range(0, 6)
+                .mapToObj(i -> choose(new DefaultRequest<>()).getPort())
                 .collect(Collectors.toSet());
         assertThat(ports).containsExactlyInAnyOrder(18093, 18094);
     }
 
     @Test
     void chooseFallsBackToRoundRobinForAnUnknownStickyId() {
-        StickyContextHolder.set("DEADBEEF");
         Set<Integer> ports = IntStream.range(0, 6)
-                .mapToObj(i -> choose().getPort())
+                .mapToObj(i -> choose(requestWithSticky("DEADBEEF")).getPort())
                 .collect(Collectors.toSet());
         assertThat(ports).containsExactlyInAnyOrder(18093, 18094);
     }
 
     @Test
-    void concurrentCallersWithDifferentStickyIdsAreIsolatedPerThread() throws Exception {
+    void concurrentCallersWithDifferentStickyIdsAreIsolatedPerRequest() throws Exception {
         int callsPerThread = 25;
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService pool = Executors.newFixedThreadPool(2);
@@ -128,19 +129,14 @@ class StickySelectionThroughLoadBalancerTest {
         }
     }
 
-    /** A caller thread that sets its own sticky id once, then records every instance choose() returns. */
+    /** A caller that records every instance choose() returns for its own sticky request. */
     private java.util.concurrent.Callable<Set<ServiceInstance>> stickyCaller(
             CountDownLatch start, String stickyId, int calls) {
         return () -> {
             start.await();
-            StickyContextHolder.set(stickyId);
-            try {
-                return IntStream.range(0, calls)
-                        .mapToObj(i -> choose())
-                        .collect(Collectors.toSet());
-            } finally {
-                StickyContextHolder.clear();
-            }
+            return IntStream.range(0, calls)
+                    .mapToObj(i -> choose(requestWithSticky(stickyId)))
+                    .collect(Collectors.toSet());
         };
     }
 }

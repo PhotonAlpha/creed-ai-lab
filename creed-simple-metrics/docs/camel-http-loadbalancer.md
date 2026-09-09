@@ -12,11 +12,11 @@ HttpClient 5 的 `HttpRoutePlanner` 扩展点上接入 Spring Cloud LoadBalancer
 HttpProducer.executeMethod → httpClient.executeOpen(target=catalog-resource)
         │
         ▼  InternalHttpClient 在 exec chain 之前调用
-HttpRoutePlanner.determineRoute("catalog-resource")            ← 本方案唯一的切入点
+HttpRoutePlanner.determineRoute(target, request, context)      ← 本方案唯一的切入点（三参重载）
         │
         ├─ DiscoveryClient.getServices() 不含该 host → DefaultRoutePlanner 直连（真实域名不受影响）
         │
-        └─ 是逻辑服务名 → LoadBalancerClient.choose("catalog-resource")
+        └─ 是逻辑服务名 → LoadBalancerClient.choose("catalog-resource", RequestDataContext(出站请求))
                               │（per-service 子上下文里的 supplier 链）
                               ▼
                     ServiceInstance(https://localhost:18081)
@@ -84,7 +84,8 @@ org.apache.hc.client5.http.routing.HttpRoutePlanner                 （HttpClien
 ```
 
 调用时机：`InternalHttpClient` 在**整个 exec chain（重试/重定向/协议层）之前**调用
-`determineRoute(target, context)`，返回的 `HttpRoute`（目标 host:port + secure 标志 + 代理链）同时是
+`determineRoute(target, request, context)`（三参重载；两参那个只剩 `RedirectExec` 在用），
+返回的 `HttpRoute`（目标 host:port + secure 标志 + 代理链）同时是
 **连接池的分池 key**——所以每个下游实例天然独立分池，`PoolingHttpClientConnectionManagerMetricsBinder`
 的 per-route 指标也按实例区分。planner 返回与请求 URI authority 不同的 host:port 是协议允许的
 （这正是反向代理/LB 的语义）：TLS 按**解析后的实例 host** 做 SNI 与证书校验（与 `@LoadBalanced`
@@ -97,10 +98,10 @@ camel-servlet 入站 → direct:catalog → direct:fetch-catalog
 → removeHeaders CamelHttp*                                   （踩坑 3）
 → HttpProducer.process：createMethod（URI=https://catalog-resource/...）→ executeMethod
 → CloseableHttpClient.executeOpen(target=catalog-resource:443)
-→ InternalHttpClient.determineRoute
+→ InternalHttpClient.determineRoute(target, request, context)
    → LoadBalancerRoutePlanner：
        discoveryClient.getServices().contains("catalog-resource") → true
-       loadBalancerClient.choose("catalog-resource")
+       loadBalancerClient.choose("catalog-resource", DefaultRequest(RequestDataContext(出站请求)))
          → LoadBalancerClientFactory 子上下文 "catalog-resource"
          → RoundRobinLoadBalancer.choose
          → Caching → HealthCheck(存活列表) → Discovery 链取列表，position++ 轮询
@@ -110,6 +111,96 @@ camel-servlet 入站 → direct:catalog → direct:fetch-catalog
 → 请求发出（Host: catalog-resource）→ ClassicHttpResponse 流式返回
 → <unmarshal json> → aggregateStrategy / REST JSON 绑定
 ```
+
+---
+
+## 与 `LoadBalancerInterceptor` 的区别与风险
+
+同一个 `LoadBalancerClient`，`@LoadBalanced` RestClient/RestTemplate 路径走的是 `execute(...)`，
+本模块的 planner 走的是 `choose(...)`——**只用了前者的一半**。剩下那一半被 HttpClient 的路由机制
+替代了，差异都出在这里。
+
+```java
+// LoadBalancerInterceptor#intercept
+return loadBalancer.execute(serviceName, requestFactory.createRequest(request, body, execution));
+
+// BlockingLoadBalancerClient#execute 干了六件事
+String hint = getHint(serviceId);                                  // ① 读 hint 属性
+var lbRequest = new LoadBalancerRequestAdapter<>(request,
+        buildRequestContext(request, hint));                       // ② 包成 RequestDataContext
+lifecycles.forEach(l -> l.onStart(lbRequest));                     // ③ 生命周期开始
+ServiceInstance si = choose(serviceId, lbRequest);                 // ④ 带上下文选实例
+... request.apply(si) → ServiceRequestWrapper.getURI() → reconstructURI   // ⑤ 整条 URI 改写
+... lifecycles.forEach(l -> l.onComplete(SUCCESS/FAILED/DISCARD)); // ⑥ 结果反馈
+```
+
+planner 覆写三参 `determineRoute` 后补上了 ②④；①③⑤⑥ 仍然没有，且⑤是被 `HttpRoute` 从另一个层面
+实现的（改连接、不改请求）。
+
+| 维度 | `LoadBalancerInterceptor`（`execute`） | `LoadBalancerRoutePlanner`（`choose`） |
+|---|---|---|
+| 请求上下文 | 框架构造 `RequestDataContext` | 本模块从出站 `HttpRequest` 自建（同款） |
+| `spring.cloud.loadbalancer.hint.*` | 生效 | **不读**，context 里恒为 `default` |
+| `LoadBalancerLifecycle` 回调 | onStart/onStartRequest/onComplete 全触发 | **一个都不触发** |
+| 请求行 / `Host` 头 | 改写成真实实例（`reconstructURI`） | **保持逻辑服务名**，只换连接目标 |
+| scheme/port 决定权 | 注册实例（整条 URI 重写） | 端点 URI 定 scheme，`HttpRoute` 定 TLS 与 port |
+| 无存活实例 | `IllegalStateException` + `onComplete(DISCARD)` | `HttpException` → `CamelExchangeException` |
+| 重试换实例 | 有官方 `RetryLoadBalancerInterceptor`（spring-retry） | **没有**，hc5 重试锁死同一 route |
+| `RequestConfig.proxy` / 隧道 | 走 `DefaultRoutePlanner`，正常 | LB 分支自建 `HttpRoute`，**被绕过** |
+| 连接池分池 key | 真实实例 host:port | 同左（两边一致） |
+
+### 风险清单（按踩到的概率排序）
+
+1. **`Host` 头保持逻辑名**——语义上最大的一条。interceptor 经 `ServiceRequestWrapper.getURI()` →
+   `reconstructURI` 把 scheme/host/port 全换成真实实例，下游看到 `Host: localhost:18093`；planner 只
+   产出 `HttpRoute`，请求行与 `Host` 头仍是 `payment-resource`。
+   - ✅ 不受影响：TLS 的 SNI 与主机名校验用的是 route target（`localhost`），与 `@LoadBalanced` 一致；
+   - ⚠️ 下游若按 `Host` 做虚拟主机/多租户路由会走错；
+   - ⚠️ 下游生成的绝对 URL（302 `Location`、HATEOAS 链接、cookie domain）会带逻辑名；
+   - ⚠️ 下游 access log / server 端 observability 的 `server.address` 记的是逻辑名；
+   - ⚠️ 有 `Host` 白名单校验的容器（Tomcat allowed hosts 之类）会直接 400；
+   - ⚠️ 重定向：`RedirectExec` 对新 target **重新** `determineRoute`（且只调两参重载），若 Location
+     里是逻辑名，会重新 choose 到**另一个实例**，重定向的会话连续性被打断。
+2. **`LoadBalancerLifecycle` 回调全不触发**。`MicrometerStatsLoadBalancerLifecycle` 的
+   `loadbalancer.requests.active/.success/.failed` 在 camel-http 这条路上是空的，而
+   `@LoadBalanced` RestClient 那条路上有——同一个服务两套口径，做面板/告警时极易误判。自定义
+   `LoadBalancerLifecycle` bean 同样对 Camel 流量无效。当前 RoundRobin 不需要反馈，但换成依赖统计
+   （失败率 / RT 加权）的算法时会直接失真。
+3. **重试不换实例**。hc5 的 `HttpRequestRetryExec` 在 exec chain 内部、route 已定死，只会重打同一
+   实例。故障转移**必须**靠 Camel 级 redelivery（`onException().maximumRedeliveries(n)`）重新进
+   planner——这是运维前提，不是可选项。常态剔除仍由健康检查完成。
+4. **hint 属性静默失效**。`RequestDataContext` 的 hint 恒为 `default`，`HintBasedServiceInstanceListSupplier`
+   与 `X-SC-LB-Hint` 头在这条路上不起作用。不报错、不打日志——要用得先给 planner 注入
+   `ReactiveLoadBalancer.Factory` 去读 `getProperties(serviceId).getHint()`。
+5. **scheme 判定来源不同**。interceptor 以注册实例的 scheme 为准并重写整条请求；planner 用解析后的
+   scheme 决定是否 layer TLS（`new HttpRoute(resolved, null, secure)`），但请求 URI 的 scheme 仍是
+   端点上写的那个。当前注册表全 https 不会触发；一旦混进 `http://` 实例，就会出现"明文连接、请求
+   却自称 https"的不一致。
+6. **代理与 hc5 路由特性被绕过**。LB 分支自己 `new HttpRoute(...)`，没走
+   `DefaultRoutePlanner.determineProxy()`，所以 `RequestConfig.setProxy(...)`、本地绑定地址、隧道
+   对 LB 流量**静默失效**，只有非 LB 的 fallback 分支还有。将来要经正向代理出网时，这是个"只有一半
+   生效"的难查故障。
+7. **每请求一次 `discoveryClient.getServices()` + 命名劫持**。`SimpleDiscoveryClient` 是内存 map，
+   没问题；换 Eureka/Consul 前要改成本地缓存的 set。另外只要目标主机名字面等于某个 service-id 就会
+   被 LB 接管——逻辑名和真实域名不要重名。
+
+### 已经补齐的那条（三参 `determineRoute`）
+
+早期版本调的是无参 `choose(serviceId)`，`BlockingLoadBalancerClient` 内部用的是
+`ReactiveLoadBalancer.REQUEST`，而 `DefaultRequest()` 的无参构造把 `new DefaultRequestContext()` 的
+结果**丢掉了**——`getContext()` 实际返回 `null`，于是所有 `instanceof XxxContext` 判断为假：
+
+| 组件 | interceptor 路径 | 旧的无参 `choose` |
+|---|---|---|
+| `RequestBasedStickySessionServiceInstanceListSupplier` | 生效 | 失效 |
+| `HintBasedServiceInstanceListSupplier` | 生效 | 失效 |
+| `RetryAwareServiceInstanceListSupplier` | 生效 | 失效 |
+
+本模块的 payment 粘滞当年就是被这条逼出来的：粘滞 id 只能改走 `StickyContextHolder`（ThreadLocal），
+再配一个 `StickyContextThreadLocalAccessor` 才能跨 `ProducerTemplate` 池线程——而且"始终覆写"的契约
+只有 `fetch-payment` 遵守，`checkout` 路由复用同一 servlet 线程时会读到上一个请求的残留值。
+覆写三参重载、把出站请求包成 `RequestDataContext` 之后，这两个类连同那类 bug 一起删除了，
+详见「自定义 ServiceInstanceListSupplier」一节。
 
 ---
 
@@ -151,6 +242,7 @@ camel-servlet 入站 → direct:catalog → direct:fetch-catalog
 7. **`choose()` 不触发 `LoadBalancerLifecycle`**：`onStart/onComplete` 回调（Micrometer 的
    `loadbalancer.requests` 统计靠它）只有 `execute()` 会走，而 `execute()` 要包裹整个调用，塞不进
    planner。本场景放弃该指标；HTTP 层指标由池 binder（`camelHttpPool`）与 Camel observation 覆盖。
+   完整影响面见「与 `LoadBalancerInterceptor` 的区别与风险」第 2 条。
 8. **多服务/多 supplier 的区分**：靠 `LoadBalancerClientFactory` 的 per-serviceId 子上下文，不靠 bean
    名。同一配置类在每个子上下文各实例化一份，内部可用
    `LoadBalancerClientFactory.getName(env)` 取服务名分支；结构性差异用
@@ -160,7 +252,7 @@ camel-servlet 入站 → direct:catalog → direct:fetch-catalog
 9. **故障转移语义**：HttpClient 内置 retry 在**同一条 route** 上重试，不会换实例；要换实例需 Camel
    redelivery（`onException().maximumRedeliveries(n)`），重投会重新进 planner 选新实例。实例故障的
    常态剔除由健康检查完成（探活失败 → 列表移除 → `choose()` 不再返回；全挂时 planner 抛
-   `HttpException: No alive instances`）。
+   `HttpException: No alive instances`）。同上节风险第 3 条。
 10. **本地验证的端口占用**：Artifactory 容器占 8081/8082,资源服务本地实例已整体迁移到
     18081/18082（catalog）、18091/18092（order）与 18093/18094（payment）,`application.yml` 的
     simple 注册表同步更新。
@@ -183,20 +275,36 @@ payment-resource 的 cookie 粘滞（`StickyMetadataServiceInstanceListSupplier`
   - `@LoadBalanced` RestTemplate/RestClient 路径（`LoadBalancerInterceptor` →
     `BlockingLoadBalancerClient.execute(serviceId, lbRequest)`）：框架把出站请求包成 `RequestData`
     放进 `RequestDataContext`，`request.getContext()` 能读到 URL/headers；
-  - 本模块 `LoadBalancerRoutePlanner` 路径：直接 `choose(serviceId)`，内部构造
-    `DefaultRequest<DefaultRequestContext>`，**context 里只有 hint，没有任何请求数据**。
-    这就是粘滞值改走 `StickyContextHolder`（ThreadLocal）、两个方法共用同一实现的原因。
+  - 本模块 `LoadBalancerRoutePlanner` 路径：hc5 的 `HttpRoutePlanner` 有两个重载，
+    `InternalHttpClient.doExecute` 调的是**三参** `determineRoute(target, request, context)`
+    （两参那个只剩 `RedirectExec` 在用）。覆写三参重载就拿得到出站 `HttpRequest`，把它转成与
+    `BlockingLoadBalancerClient.execute(...)` 同款的 `RequestData`/`RequestDataContext`，再走
+    `choose(serviceId, request)` —— 于是 `get(Request)` 在这条路上也有真实上下文可读，粘滞 id
+    直接从请求 cookie 里取，不需要任何线程上下文。
+    - 若只调无参 `choose(serviceId)`，内部构造的是 `DefaultRequest<>()`，而它的无参构造把
+      `new DefaultRequestContext()` 的结果**丢掉了**，`getContext()` 实际返回 `null` —— 依赖
+      `instanceof RequestDataContext` 的 supplier（粘滞、hint、retry-aware）全部静默失效。
+    - cookie 解析别用 Spring 的 `RequestData(HttpRequest)`：它对整个 Cookie 头 `split("=")`，
+      多 cookie 时只认得第一个。planner 里按 `;` 再按首个 `=` 自己拆。
+    - 代价：出站请求必须真的带上那个 cookie。`fetch-payment` 因此**不能**用
+      `skipRequestHeaders=true`（它跳过全部 header 复制），改成
+      `<removeHeaders pattern="*" excludePattern="Cookie"/>` + `paymentStickyProcessor` 把 Cookie
+      头收窄成只剩 `stickyId=<v>`：白名单等价，语义更清楚。
+    - 仍未补齐的部分：`choose(...)` 到底不是 `execute(...)`，`LoadBalancerLifecycle` 回调
+      （`loadbalancer.requests.*` 指标）与 `spring.cloud.loadbalancer.hint.*` 属性依旧不生效，
+      context 里的 hint 固定是 `default`。
 
 ### 注意点（按重要性排序）
 
 1. **两个方法成对覆写、语义一致。** 链上的包装层有的调 `get()`、有的调 `get(request)`；
    只覆写其一，另一条路径会经 default 方法/delegate 绕过你的逻辑。
-2. **组装期 vs 发射期——ThreadLocal 只在前者可靠。** `get()` 方法体在 `choose()` 的调用线程上
+2. **组装期 vs 发射期——请求态必须在前者取出。** `get(Request)` 方法体在 `choose()` 的调用线程上
    同步执行（组装期）；返回的 Flux 里的 `map`/`filter` lambda 在发射期执行，发射线程不保证是
-   调用线程（health-check supplier 从自己的 Scheduler 发射、cache 回放可能换线程）。所以必须
-   **在方法体里把请求态捕获成不可变局部变量**再进算子链（见
-   `filteredByCurrentThreadStickyId()`）；写进 lambda 就是"平时能跑、并发才炸"的 bug。
-   并发隔离由 `StickySelectionThroughLoadBalancerTest` 的双线程用例锁定。
+   调用线程（health-check supplier 从自己的 Scheduler 发射、cache 回放可能换线程）。所以要
+   **在方法体里把请求态捕获成不可变局部变量**再进算子链（见 `stickyIdOf(request)` 的调用位置）。
+   请求态改从 `Request` 参数取之后，这条从"并发才炸的 ThreadLocal bug"降级成写法习惯——但凡
+   将来又想在这里读线程上下文（MDC、SecurityContext），坑原样还在。并发隔离由
+   `StickySelectionThroughLoadBalancerTest` 的多请求用例锁定。
 3. **get() 里不做重活、不阻塞。** 每次 `choose()` 都会调它，只应在 delegate 的 Flux 上叠轻量算子；
    IO/探活放链的内层并被 caching 包住。
 4. **链上位置决定正确性。** 请求相关的过滤必须在 `withCaching()` **之外**（每请求执行，缓存里
@@ -207,7 +315,7 @@ payment-resource 的 cookie 粘滞（`StickyMetadataServiceInstanceListSupplier`
    "No alive instances"。是"钉不住就失败"还是"回退全量"要显式决策——本实现选回退 + WARN
    （可用性优先于粘滞），框架的 `ZonePreferenceServiceInstanceListSupplier` 同策略。
 6. **supplier 是每服务单例，别放请求态字段。** 它活在对应服务的 LB 子上下文里被所有请求共享；
-   请求态只能经 Request 参数或线程上下文传入。另外 default 配置与 per-client 配置会同时注册进
+   请求态只能经 Request 参数传入（线程上下文能用，但见第 2 点：能不用就别用）。另外 default 配置与 per-client 配置会同时注册进
    子上下文：default 侧的 supplier bean 必须 `@ConditionalOnMissingBean(ServiceInstanceListSupplier.class)`
    （见 `PartnerLoadBalancerConfiguration`），否则两个 supplier bean 冲突。
 

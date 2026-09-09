@@ -1,16 +1,24 @@
 package com.creed.simple.lb.config;
 
-import com.creed.simple.lb.StickyContextHolder;
 import com.creed.simple.lb.StickyMetadataServiceInstanceListSupplier;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.springframework.cloud.client.DefaultServiceInstance;
 import org.springframework.cloud.client.ServiceInstance;
+import org.springframework.cloud.client.loadbalancer.DefaultRequest;
+import org.springframework.cloud.client.loadbalancer.Request;
+import org.springframework.cloud.client.loadbalancer.RequestData;
+import org.springframework.cloud.client.loadbalancer.RequestDataContext;
 import org.springframework.cloud.loadbalancer.core.ServiceInstanceListSupplier;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import reactor.core.publisher.Flux;
 
+import java.net.URI;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -32,9 +40,14 @@ class PaymentStickyLoadBalancerConfigurationTest {
     private final PaymentStickyLoadBalancerConfiguration config = new PaymentStickyLoadBalancerConfiguration();
     private final ConfigurableApplicationContext context = mock(ConfigurableApplicationContext.class);
 
-    @AfterEach
-    void clearHolder() {
-        StickyContextHolder.clear();
+    /** A request carrying the given sticky cookie, shaped like the one the route planner builds. */
+    private static Request<RequestDataContext> requestWithSticky(String stickyId) {
+        MultiValueMap<String, String> cookies = new LinkedMultiValueMap<>();
+        if (stickyId != null) {
+            cookies.add(StickyMetadataServiceInstanceListSupplier.STICKY_COOKIE, stickyId);
+        }
+        return new DefaultRequest<>(new RequestDataContext(new RequestData(HttpMethod.GET,
+                URI.create("https://payment-resource/api/payment"), new HttpHeaders(), cookies, new HashMap<>())));
     }
 
     private static ServiceInstance instance(String id, int port, String stickyId) {
@@ -49,7 +62,8 @@ class PaymentStickyLoadBalancerConfigurationTest {
         List<ServiceInstance> alive = List.of(primary, secondary);
 
         ServiceInstanceListSupplier base = mock(ServiceInstanceListSupplier.class);
-        org.mockito.Mockito.when(base.get()).thenReturn(Flux.just(alive));
+        org.mockito.Mockito.when(base.get(org.mockito.ArgumentMatchers.any(Request.class)))
+                .thenReturn(Flux.just(alive));
 
         try (MockedStatic<PartnerLoadBalancerConfiguration> mocked =
                      mockStatic(PartnerLoadBalancerConfiguration.class)) {
@@ -59,13 +73,11 @@ class PaymentStickyLoadBalancerConfigurationTest {
 
             assertThat(supplier).isInstanceOf(StickyMetadataServiceInstanceListSupplier.class);
 
-            // With a sticky id set, the sticky layer narrows the base's alive list to the pinned instance.
-            StickyContextHolder.set(STICKY);
-            assertThat(supplier.get().blockFirst()).containsExactly(primary);
+            // With a sticky cookie on the request, the sticky layer narrows the base's alive list.
+            assertThat(supplier.get(requestWithSticky(STICKY)).blockFirst()).containsExactly(primary);
 
-            // Without a sticky id it passes the full alive list straight through.
-            StickyContextHolder.set(null);
-            assertThat(supplier.get().blockFirst()).isEqualTo(alive);
+            // Without one it passes the full alive list straight through.
+            assertThat(supplier.get(requestWithSticky(null)).blockFirst()).isEqualTo(alive);
         }
     }
 }

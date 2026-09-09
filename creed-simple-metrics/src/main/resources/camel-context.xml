@@ -184,14 +184,18 @@
 
         <!-- Payment has no /items sample endpoint; its list endpoint (GET /api/payment) is the
              aggregation-friendly equivalent and returns the full payment list.
-             paymentStickyProcessor lifts the caller's stickyId cookie into StickyContextHolder BEFORE
-             the http producer runs: the payment-resource LB child context then pins the connection to
-             the alive instance whose registry metadata.stickyId matches (fallback: round-robin). -->
+             Unlike the catalog/order routes this one does NOT set skipRequestHeaders: the stickyId
+             cookie has to reach the outgoing HTTP request, because that request is what
+             LoadBalancerRoutePlanner hands to the payment-resource LB child context, which pins the
+             connection to the alive instance whose registry metadata.stickyId matches (fallback:
+             round-robin). paymentStickyProcessor has already reduced the Cookie header to that one
+             cookie, and removeHeaders drops everything else the servlet consumer put on the exchange
+             — so the header whitelist here is exactly {Cookie}. -->
         <route id="fetch-payment">
             <from uri="direct:fetch-payment"/>
             <process ref="paymentStickyProcessor"/>
-            <removeHeaders pattern="CamelHttp*"/>
-            <to uri="https://payment-resource/api/payment?skipRequestHeaders=true&amp;skipResponseHeaders=true"/>
+            <removeHeaders pattern="*" excludePattern="Cookie"/>
+            <to uri="https://payment-resource/api/payment?skipResponseHeaders=true"/>
             <unmarshal><json library="Jackson"/></unmarshal>
         </route>
 

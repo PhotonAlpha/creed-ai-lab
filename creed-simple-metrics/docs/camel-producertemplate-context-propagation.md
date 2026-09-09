@@ -1,10 +1,9 @@
 # ProducerTemplate 线程模型与 traceId/上下文传播:原理、方案与踩坑
 
 `asyncRequestBody*` 会把路由执行切到 ProducerTemplate 内部线程池,而 traceId(Observation scope /
-Brave span / baggage → MDC)与 `StickyContextHolder` 全是 ThreadLocal 语义——本文记录这条断链是
-怎么发生的、曾经"看似没断"的假象来自哪里,以及最终方案:**context-propagating executor +
-自定义 `ThreadLocalAccessor`**(`CamelConfig.producerTemplate` /
-`StickyContextThreadLocalAccessor`)。审计/计时观测的三层设计见
+Brave span / baggage → MDC)全是 ThreadLocal 语义——本文记录这条断链是怎么发生的、曾经"看似没断"
+的假象来自哪里,以及最终方案:**context-propagating executor**(`CamelConfig.producerTemplate`)。
+审计/计时观测的三层设计见
 [camel-audit-observability.md](camel-audit-observability.md)。
 
 ## 1. ProducerTemplate 线程模型:它自己没有"转发线程池"
@@ -65,8 +64,6 @@ restore Observation scope → tracing handler 重开 Brave scope → `Correlatio
 ```java
 @Bean
 ProducerTemplate producerTemplate(CamelContext camelContext) {
-    ContextRegistry.getInstance()
-            .registerThreadLocalAccessor(new StickyContextThreadLocalAccessor());
     ProducerTemplate template = camelContext.createProducerTemplate();
     ExecutorService pool = camelContext.getExecutorServiceManager()
             .newDefaultThreadPool(template, "ProducerTemplate");
@@ -79,7 +76,7 @@ ProducerTemplate producerTemplate(CamelContext camelContext) {
 要点:
 
 - **提交时快照、执行前恢复、结束后还原**:`captureAll()` 在调用线程上抓取所有注册的
-  `ThreadLocalAccessor`(Observation scope + 下述 sticky)——所以时序上"先 set 后提交"的值
+  `ThreadLocalAccessor`(这里只有 Observation scope)——所以时序上"先 set 后提交"的值
   才会被带过去;
 - **生命周期**:裸池经 `ExecutorServiceManager` 创建,CamelContext 停止时由 Camel 关闭;
   交给 template 的只是包装层(`setExecutorService` 设置的外部 executor,template 自己不关);
@@ -98,37 +95,30 @@ ProducerTemplate producerTemplate(CamelContext camelContext) {
 `ThreadPoolTaskExecutor.setTaskDecorator(new ContextPropagatingTaskDecorator())` 上
 `supplyAsync`——池归自己配置/监控,机制与本方案同源(都是 `ContextSnapshot`)。
 
-## 5. 自定义 `ThreadLocalAccessor`:让 `StickyContextHolder` 一起被搬运
+## 5. 粘滞 id 为什么不在这条链上:请求态走 Request,不走线程
 
-`captureAll()` 只搬**注册过 accessor** 的 ThreadLocal;`StickyContextHolder` 是普通
-ThreadLocal,不注册就照旧断链。注册三步(`StickyContextThreadLocalAccessor`):
+`captureAll()` 只搬**注册过 accessor** 的 ThreadLocal。早期版本里 payment 的粘滞 id 存在
+`StickyContextHolder`(普通 ThreadLocal),于是必须额外写一个 `StickyContextThreadLocalAccessor`
+注册到全局 `ContextRegistry`,才能让它跟着 Observation scope 一起过池线程边界。
 
-```java
-public final class StickyContextThreadLocalAccessor implements ThreadLocalAccessor<String> {
-    public static final String KEY = "creed.stickyId";
-    @Override public Object key()                  { return KEY; }
-    @Override public String getValue()             { return StickyContextHolder.get(); }   // 快照:捕获
-    @Override public void setValue(String value)   { StickyContextHolder.set(value); }     // 恢复:有值
-    @Override public void setValue()               { StickyContextHolder.clear(); }        // 恢复:快照为 null → 显式清
-    @Override public void reset()                  { StickyContextHolder.clear(); }
-}
+**现在不需要了**:粘滞 id 改由 `LoadBalancerRoutePlanner` 的三参 `determineRoute` 从**出站请求
+的 cookie** 读出,包成 `RequestDataContext` 传给 `choose(serviceId, request)`
+(见 [camel-http-loadbalancer.md](camel-http-loadbalancer.md))。请求态挂在 Exchange/HTTP 请求上,
+multicast 分支、聚合线程池、`asyncRequestBody*` 都会复制 Exchange header,天然跨线程;
+holder 与 accessor 两个类已删除。
 
-// 注册(同 key 重复注册会替换,幂等):
-ContextRegistry.getInstance().registerThreadLocalAccessor(new StickyContextThreadLocalAccessor());
-```
+留作参考的一般结论(下次真有非请求态的 ThreadLocal 要过池边界时):
 
-语义要点:
-
-- **`getValue()` 返回 null = "无值"**,恢复时走无参 `setValue()`(即显式 clear),而不是
-  "保留池线程残留"——包装后的池线程不可能泄漏上一个请求的 stickyId,比
-  `StickyContextHolder` 原有的 "always overwrite" 契约更强;
-- 注册在**全局** `ContextRegistry` 上:应用里一切基于 `captureAll()` 的传播
-  (Reactor、`ContextPropagatingTaskDecorator`、本 executor)都会捎带它;
-- 不想写类也可用便捷重载:
-  `registerThreadLocalAccessor(KEY, StickyContextHolder::get, StickyContextHolder::set, StickyContextHolder::clear)`;
-- 另一种注册途径是 ServiceLoader(`META-INF/services/io.micrometer.context.ThreadLocalAccessor`,
-  micrometer 自己的 `ObservationThreadLocalAccessor` 即此方式),适合 library;应用内显式注册
-  更可发现。
+- 实现 `ThreadLocalAccessor<T>` 的 `key()/getValue()/setValue(v)/setValue()/reset()`,其中
+  **`getValue()` 返回 null = "无值"**,恢复时走无参 `setValue()`(显式 clear)而不是"保留池线程
+  残留"——这比任何"调用方务必 always overwrite"的口头契约都强;
+- 注册在**全局** `ContextRegistry` 上(同 key 重复注册会替换,幂等),应用里一切基于
+  `captureAll()` 的传播(Reactor、`ContextPropagatingTaskDecorator`、本 executor)都会捎带它;
+- 不想写类可用便捷重载 `registerThreadLocalAccessor(KEY, getter, setter, clearer)`;库则走
+  ServiceLoader(`META-INF/services/io.micrometer.context.ThreadLocalAccessor`,micrometer 自己的
+  `ObservationThreadLocalAccessor` 即此方式)。
+- **但优先反问一句**:这个值真的属于线程吗?本例的答案是"不,它属于请求"——把它放回请求里,
+  整条传播链就一起消失了。
 
 ## 6. 坑点清单(速查)
 
@@ -140,7 +130,7 @@ ContextRegistry.getInstance().registerThreadLocalAccessor(new StickyContextThrea
 | 4 | `camel.main.use-mdc-logging` 治不了第一跳 | `MDCUnitOfWork` 在 **Exchange 创建时**快照 MDC,而 async 的 Exchange 在池线程上才创建,快照到的已是空 | 只作为补充(Exchange 进路由后 Camel 内部切线程时不丢) |
 | 5 | "看似接上了"的假象 | remote baggage + headers copy + camel-observation 提取;curl 裸调即穿帮 | 改 local 后以 executor 传播为准,不依赖入站头 |
 | 6 | `MDCContext.getValue` 的 MDC fallback | baggage 为空时读池线程残留 MDC,掩盖断链 | 建议移除 fallback,让断链显式暴露 |
-| 7 | `StickyContextHolder` 残留/不传播 | 普通 ThreadLocal,`captureAll()` 不认识 | 注册 `StickyContextThreadLocalAccessor`(§5) |
+| 7 | 粘滞 id 残留/不传播 | 曾把请求态放进普通 ThreadLocal,`captureAll()` 不认识 | 请求态改走 `RequestDataContext`(§5),holder 已删除 |
 | 8 | `<multicast parallelProcessing>` 分支断链 | 路由自有池,不在 template executor 覆盖范围;同根因也曾在普通单跳 `<to>` 上复现,见 #10 | 需要时对 EIP 的 `executorServiceRef` 同法包装 |
 | 9 | executor 生命周期 | template 不关外部 executor;自 new 的池没人关 | 裸池走 `ExecutorServiceManager`,Camel 停机时关闭 |
 | 10 | 单跳同步 `<to>` 调用里 baggage 也会丢 | `camel-observation-starter` 给每个 endpoint 建的 producer/CLIENT span 用自己的 parent 查找(`ActiveSpanManager`/`ObservationRegistry.getCurrentObservation()`),不保证继承当前 Brave `TraceContext.extra` | 已修:移除 `camel-observation-starter` 依赖,详见 [camel-observation-baggage-loss.md](camel-observation-baggage-loss.md) |
@@ -154,4 +144,5 @@ ContextRegistry.getInstance().registerThreadLocalAccessor(new StickyContextThrea
    (裸 curl 下一致才是真传播;remote 时代裸 curl 必对不上);
 2. 池线程上 `LB resolved -> instance=...`(lbAudit)与 Logbook 审计块同 traceId → hc5 observation
    接上了 parent;
-3. 连打两个不同 stickyId 的请求,确认池线程复用时无 stickyId 串号(§5 的显式 clear 语义)。
+3. 连打两个不同 stickyId 的请求,确认池线程复用时无 stickyId 串号——现在这是结构性保证:
+   粘滞 id 只存在于请求里,线程上没有可残留的槽位(§5)。
