@@ -44,15 +44,24 @@ curl -G 'http://localhost:9100/report/dynamic/export/pdf' -o /tmp/d.pdf \
   - PDF via `openpdf-html` (Flying Saucer fork), using dedicated `*-pdf.html` templates in print
     CSS 2.1 with paged media. Bootstrap view templates cannot be reused (no flexbox/JS).
   - **Running header + footer with a logo image, on every page.** Both PDF templates wrap their
-    body in a `.page-frame` table whose `<thead>`/`<tfoot>` are the shared chrome fragments
-    (`report-chrome-pdf :: runningHeader/runningFooter`); `-fs-table-paginate` repeats them per
-    page. The logos are `creed.report.pdf.logo` (dark, for the white footer) and
+    body in a `.page-frame` table whose `<thead>`/`<tfoot>` are chrome fragments from
+    `fragments/report-chrome-pdf.html`; `-fs-table-paginate` repeats them per page. That file now
+    holds **two chrome sets**, and a template uses one whole: `styles/runningHeader/runningFooter/
+    section` is the original dark bar (`report-export-pdf.html`), `formStyles/formHeader/
+    formFooter/formSection` is the printed-bank-form look modelled on
+    `resources/pdf-template/sample-form-uob-infinity-standard-registration.pdf`
+    (`dynamic-report-export-pdf.html`): empty top margin, logo alone top-left with the title under
+    it in bold uppercase `#005cb9`, a blue rule + numbered chip opening the section, and a two-line
+    footnote in `#414042` opposite the page counter. The meta line (country · generated at · PDF
+    snapshot) is header-right in the dark chrome and footnote line 2 in the form chrome, so the form
+    report carries **one** logo per page, not two. The logos are `creed.report.pdf.logo` (dark, for the white footer) and
     `creed.report.pdf.logo-inverse` (knockout, for the dark header bar) — PNG/JPEG/GIF only, no
     SVG — read once and injected as `${logo}` / `${logoInverse}` data: URIs by `PdfExportService`
     on **every** render, so no controller can forget them and a missing file just drops the
     `<img>` (warned, never fatal; a missing inverse falls back to the plain logo).
-    `PdfRunningChromeTest` renders a 160-row report and asserts the header text, the footer text
-    and two image XObjects on every page of both templates. The two bundled PNGs under
+    `PdfRunningChromeTest` renders a 160-row report of each template and asserts, per page, the
+    header text, the footer text and the image count that template's chrome should produce (2 for
+    the dark bar, 1 for the form). The two bundled PNGs under
     `static/img/` are **placeholders** — swap the files or point the properties elsewhere; they are
     committed (unlike `fonts/`, which is gitignored) because they are small and a logo-less header
     would otherwise be the out-of-the-box look.
@@ -137,10 +146,16 @@ curl -G 'http://localhost:9100/report/dynamic/export/pdf' -o /tmp/d.pdf \
 
 - **`PdfSampleDumpTest` does not create `-Dpdf.sample.dir`** — it fails with `NoSuchFileException`
   if the directory does not already exist. `mkdir -p` first, or add one `Files.createDirectories`.
-- The `@page` `@top-left` box still prints `pdf.page.header`, which now says nearly the same thing
-  as the running header bar one line below it on every page. Harmless, but it is duplication that
-  only made sense while the brand bar appeared on page 1 only; dropping the box (and the key from
-  the seven bundles) would tidy it.
+- The `@page` `@top-left` box still prints `pdf.page.header` **in `report-export-pdf.html`**, which
+  says nearly the same thing as the running header bar one line below it on every page. Harmless,
+  but it is duplication that only made sense while the brand bar appeared on page 1 only; dropping
+  the box (and the key from the seven bundles) would tidy it. `formStyles` already omits it, so the
+  dynamic report is clean.
+- **The form chrome stops at the chrome.** `dynamic-report-export-pdf.html` still renders its table
+  with the shared `.card` + `#212529` `thead` from `report-pdf.css`, and the country notice keeps
+  the country's own accent, so a dark table and a red notice sit under blue form chrome. Restyling
+  the table to match (light rules, blue header row) is the obvious follow-up — it was left out
+  because it changes the *other* report too unless `.report-table` is split per chrome set.
 - **The root `TODO.md` is stale.** Its unchecked boxes (导出PDF / 导出Excel / 根据策略导出相应格式的报表)
   all describe work that has since landed — see commits `290092a`, `7b2ca7a`, `6ab6df9`. Either tick
   them off or delete the file; as written it misrepresents the module's state.

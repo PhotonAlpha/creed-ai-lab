@@ -4,6 +4,15 @@
      header, the @page margin boxes and the footer are IDENTICAL in every country edition and in
      every report, because nothing in this file reads the country.
 
+     TWO chrome sets live here, same mechanism, different look:
+       styles / runningHeader / runningFooter / section   the original dark-bar chrome
+                                                          (report-export-pdf.html)
+       formStyles / formHeader / formFooter / formSection the printed-bank-form chrome modelled on
+                                                          pdf-template/sample-form-uob-infinity-standard-registration.pdf
+                                                          (dynamic-report-export-pdf.html)
+     Pick one set per template and use it whole -- the two disagree about what the @page margin
+     boxes print and about where the meta line lives, so mixing them duplicates or drops text.
+
      Everything here is CSS 2.1 for openpdf-html (Flying Saucer): the renderer is not a browser --
      no Bootstrap, no CSS variables, no flexbox, layout via floats. What it does support and the
      browser templates do not is paged media: @page margin boxes with counter(page)/counter(pages),
@@ -40,6 +49,29 @@
                 font-family: [(#{pdf.font.family})];
                 font-size: 8pt;
                 color: #6c757d;
+            }
+        }
+
+        /* Flying Saucer has no per-glyph fallback, so this stack -- not the base sheet's -- is
+           what makes a locale's script render at all. */
+        body { font-family: [(#{pdf.font.family})]; }
+</style>
+
+<!-- The form chrome's paged-media block. Same job as `styles` above -- the only PDF CSS that has
+     to be a template, because its text comes from message keys -- but it prints NO @top-left:
+     the sample form leaves the top margin empty and lets the logo/title block do the identifying,
+     and a margin box repeating the title above that block would just say it twice. The page
+     counter stays a margin box because counter(page) is available nowhere else; it is restyled
+     into the form's small dark-grey type. -->
+<style th:fragment="formStyles" th:inline="css">
+        @page {
+            size: A4 landscape;
+            margin: 14mm 12mm 16mm 12mm;
+            @bottom-right {
+                content: "[(#{pdf.page.prefix})]" counter(page) "[(#{pdf.page.middle})]" counter(pages) "[(#{pdf.page.suffix})]";
+                font-family: [(#{pdf.font.family})];
+                font-size: 7.5pt;
+                color: #414042;
             }
         }
 
@@ -96,6 +128,65 @@
         <img class="footer-logo" th:if="${!#strings.isEmpty(logo)}" th:src="${logo}" alt=""/>
         <span th:text="#{report.footer}">Powered by Spring Boot &#183; Thymeleaf &#183; openpdf-html</span>
     </p>
+</td></tr>
+</tfoot>
+
+
+<!-- ================================================================================================
+     FORM CHROME -- the look of pdf-template/sample-form-uob-infinity-standard-registration.pdf:
+     white page, logo alone at the top left, the document title under it in bold uppercase brand
+     blue, sections opened by a full-width blue rule + a filled number chip, and a two-line footnote
+     in small dark grey at the foot of every page opposite the page counter.
+
+     Palette taken from the sample itself (sampled off the rendered page, not guessed):
+       #005cb9  title / rule / number chip     #414042  footnote grey     #bfd6ed  chip tint
+     It is fixed brand chrome, NOT the country palette -- no country/<code>/style-pdf.css touches a
+     .form-* rule, so this template looks the same in every edition, which is the point of a form.
+     The rules themselves are in static/css/report-pdf.css, like all the other static PDF CSS.
+     ============================================================================================ -->
+
+<!-- RUNNING page header, form flavour: logo + title, repeated on every page by the same
+     .page-frame <thead> mechanism the dark bar uses (see runningHeader above for why it has to be
+     a table row). ${logo} here, not ${logoInverse}: this header sits on white. The meta line the
+     dark bar floats right has moved to formFooter -- the sample carries its document code and
+     locale in the footnote, not the header. -->
+<thead th:fragment="formHeader(title)">
+<tr><td>
+    <div class="form-header">
+        <img class="form-logo" th:if="${!#strings.isEmpty(logo)}" th:src="${logo}" alt=""/>
+        <div class="clearfix"></div>
+        <h1 class="form-title" th:text="${title}">Creed &#183; Server Inventory Report</h1>
+    </div>
+</td></tr>
+</thead>
+
+<!-- The heading row above the table, form flavour: blue rule, numbered chip, blue heading, total
+     floated right. `index` is the section's number in the document -- the sample numbers every
+     section, and a report with one table passes 1. -->
+<div th:fragment="formSection(index, heading, columns, total)" class="form-section">
+    <span class="form-section-total"><span th:text="#{report.total}">Total</span>: <span th:text="${total}">0</span></span>
+    <span class="form-section-index" th:text="${index} + '.'">1.</span>
+    <h2 class="form-section-heading" th:text="${heading}">Server Topology</h2>
+    <p class="form-section-columns" th:if="${columns != null}" th:text="${columns}">Host / IP / App</p>
+    <div class="clearfix"></div>
+</div>
+
+<!-- RUNNING page footer, form flavour: two lines of small dark grey at the bottom left of every
+     page, sitting opposite the @bottom-right page counter exactly as the sample's footnote does.
+     Line 2 is this report's answer to the sample's "CYB-107/F (07.26) - Singapore": the edition
+     and the moment it was rendered. No logo -- the sample's footnote is text only, so unlike the
+     dark chrome this footer contributes no image to the page. -->
+<tfoot th:fragment="formFooter(generatedAt)">
+<tr><td>
+    <div class="form-footer">
+        <p class="form-footer-line" th:text="#{report.footer}">Powered by Spring Boot &#183; Thymeleaf &#183; openpdf-html</p>
+        <p class="form-footer-line">
+            <span th:text="#{report.country.name}">Global</span>
+            &#183; <span th:text="#{report.generatedAt}">Generated at</span>
+            <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
+            &#183; <span th:text="#{report.pdfSnapshot}">PDF snapshot</span>
+        </p>
+    </div>
 </td></tr>
 </tfoot>
 

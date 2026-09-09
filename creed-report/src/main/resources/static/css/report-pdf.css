@@ -145,6 +145,74 @@ code.ip { font-family: Courier, monospace; font-size: 8.5pt; }
 
 .clearfix { clear: both; }
 
+/* --- form chrome (fragments/report-chrome-pdf :: form*) ---------------------------------------
+ * The printed-bank-form look, modelled line for line on
+ * pdf-template/sample-form-uob-infinity-standard-registration.pdf: logo alone at the top left,
+ * title under it in bold uppercase brand blue, sections opened by a full-width blue rule and a
+ * filled number chip, footnote in small dark grey at the foot of the page.
+ *
+ * Colours are sampled off the rendered sample page: #005cb9 title/rule/chip, #414042 footnote
+ * grey, #bfd6ed chip tint. They are deliberately FIXED here rather than delegated to
+ * country/<code>/style-pdf.css the way .section-head is -- a form's identity does not change with
+ * the edition -- so nothing below is overridden downstream.
+ */
+.form-header { margin: 0 2px 12px 2px; }
+.form-header .form-logo { height: 10mm; float: left; }
+.form-title {
+    color: #005cb9;
+    font-size: 15pt;
+    font-weight: bold;
+    text-transform: uppercase;   /* a no-op for the Thai/CJK editions, which is the correct result */
+    letter-spacing: 0.2pt;
+    margin: 8px 0 0 0;
+}
+
+/* The section rule + number chip. Order matters in the markup: both floats are emitted before the
+ * heading, and the heading clears them with a margin rather than by clearing, so the chip and the
+ * total stay on the heading's own line. */
+.form-section {
+    border-top: 2pt solid #005cb9;
+    padding-top: 7px;
+    margin: 0 2px 10px 2px;
+}
+.form-section-index {
+    float: left;
+    width: 7mm;
+    background-color: #005cb9;
+    color: #ffffff;
+    font-size: 10pt;
+    font-weight: bold;
+    text-align: center;
+    padding: 1px 0 2px 0;
+}
+.form-section-heading {
+    color: #005cb9;
+    font-size: 12pt;
+    margin: 0 0 2px 10mm;
+}
+.form-section-columns {
+    color: #414042;
+    font-size: 9pt;
+    margin: 0 0 0 10mm;
+}
+.form-section-total {
+    float: right;
+    background-color: #eef4fb;
+    border: 1px solid #bfd6ed;
+    color: #005cb9;
+    font-size: 9pt;
+    padding: 1px 8px 2px 8px;
+}
+
+/* Footnote: no rule above it and no logo in it -- the sample's is bare text, and the page counter
+ * it sits opposite is the @bottom-right margin box from formStyles. */
+.form-footer {
+    margin: 12px 2px 0 2px;
+    font-size: 7.5pt;
+    color: #414042;
+}
+.form-footer-line { margin: 0; line-height: 1.4; }
+
 /* --- structure of the per-country content block (country/<code>/report-pdf.html) ------------ */
 .country-notice {
     border-left: 4px solid;   /* colour from the country stylesheet */

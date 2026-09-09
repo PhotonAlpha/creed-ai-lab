@@ -1,8 +1,20 @@
 <!DOCTYPE html>
 <!-- PDF twin of dynamic-report-export.html. Every bit of chrome -- the @page margin boxes, the base
-     CSS 2.1, the header, the heading row and the footer -- comes from fragments/report-chrome-pdf,
-     the same fragments report-export-pdf.html uses, so both PDF reports open and close identically
-     and only their tables differ. Model: profile / pdfCss / table / total / generatedAt.
+     CSS 2.1, the header, the heading row and the footer -- comes from fragments/report-chrome-pdf.
+     Model: profile / pdfCss / table / total / generatedAt.
+
+     This report wears that file's FORM chrome (formStyles / formHeader / formSection / formFooter),
+     the printed-bank-form look modelled on
+     pdf-template/sample-form-uob-infinity-standard-registration.pdf: an empty top margin, the logo
+     alone at the top left with the title under it in bold uppercase brand blue, a blue rule and a
+     numbered chip opening the section, and a two-line footnote in small dark grey opposite the page
+     counter. report-export-pdf.html keeps the original dark-bar chrome, so the two PDF reports no
+     longer open and close identically -- that is the point of this template, and the reason the
+     fragments are two sets rather than one edited in place.
+
+     Note what MOVED with the look: the country/timestamp/"PDF snapshot" meta line is no longer in
+     the header, it is the footnote's second line (the sample carries its document code and locale
+     there), and the @top-left margin box is gone. Nothing is printed twice; nothing is lost.
 
      The table is rebuilt here rather than shared with fragments/dynamic-table: that one is
      Bootstrap markup, and Flying Saucer has no flexbox or utility classes. Column count is
@@ -11,7 +23,7 @@
 <head>
     <meta charset="UTF-8"/>
     <title th:text="${table.title}">Creed Dynamic Report (PDF)</title>
-    <th:block th:replace="~{fragments/report-chrome-pdf :: styles}"></th:block>
+    <th:block th:replace="~{fragments/report-chrome-pdf :: formStyles}"></th:block>
 <!-- The static CSS 2.1 rules, inlined by CountryStyles as one string (openpdf-html renders from a
      string, so there is no base URL for a <link>): the shared static/css/report-pdf.css followed by
      this country's static/css/country/<code>/style-pdf.css, so the country's palette wins. -->
@@ -19,18 +31,18 @@
 </head>
 <body th:class="${profile.styleClass()}">
 
-<!-- The .page-frame wrapper is not decoration: its <thead>/<tfoot> are what repeat the header and
-     footer (logo included) on every page, via -fs-table-paginate. The report body goes in the
-     single <tbody> cell. tfoot before tbody is deliberate -- it is the order the renderer was
+<!-- The .page-frame wrapper is not decoration: its <thead>/<tfoot> are what repeat the header
+     (logo included) and the footnote on every page, via -fs-table-paginate. The report body goes in
+     the single <tbody> cell. tfoot before tbody is deliberate -- it is the order the renderer was
      verified with. -->
 <table class="page-frame">
-    <thead th:replace="~{fragments/report-chrome-pdf :: runningHeader(#{report.brand}, ${generatedAt})}"></thead>
-    <tfoot th:replace="~{fragments/report-chrome-pdf :: runningFooter}"></tfoot>
+    <thead th:replace="~{fragments/report-chrome-pdf :: formHeader(#{report.brand})}"></thead>
+    <tfoot th:replace="~{fragments/report-chrome-pdf :: formFooter(${generatedAt})}"></tfoot>
     <tbody>
     <tr><td>
     <div th:replace="~{${profile.pdfContentTemplate} :: notice}"></div>
 
-    <div th:replace="~{fragments/report-chrome-pdf :: section(${table.title}, null, ${total})}"></div>
+    <div th:replace="~{fragments/report-chrome-pdf :: formSection(1, ${table.title}, null, ${total})}"></div>
 
     <div class="card">
         <table class="report-table">

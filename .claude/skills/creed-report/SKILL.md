@@ -11,9 +11,19 @@ Standalone **Spring MVC + Thymeleaf** reporting/visualization app. Plain HTTP `9
 - **Commit diff viewer** — `controller/DiffController` (`@Controller`, `GET /` & `/commit`, `GET /export/commit` offline HTML). Models `Commit`, `DiffFile`, `DiffRow`, `Cell`. Renders git commit diffs as side-by-side HTML.
 - **Report pages** — `controller/ReportController` (`GET /report`, `GET /export` offline HTML, `GET /export/pdf` PDF), backed by `service/ServerInfoService` (`model/ServerInfo`) and `service/AssetService` (inlines CSS/JS for self-contained export). **i18n on two axes** — see the *Country + language* section below. Bundles live in `classpath:/i18n/<domain>-messages[_locale].properties` (`report-`, `payment-`; `_zh` duplicates `_zh_CN` as bare-`zh` fallback). `config/MessageSourceConfig` defines **one `MessageSource` bean per domain**, composed with `setParentMessageSource` — head bean **must** be named `messageSource` (container/Thymeleaf lookup name, and what `MessageSourceAutoConfiguration` backs off on, which is why `spring.messages.*` is absent from application.yml and would be inert if added). Each domain owns a key prefix so they can't shadow each other; `fallbackToSystemLocale=false` so unknown locales get English (it also picks the font stack). Tests build the chain via `new MessageSourceConfig().messageSource()` rather than re-declaring basenames. The bundles also carry per-locale CSS font stacks: `pdf.font.family` (PDF, picks the one Noto face FS can use) and `html.font.family` (browser stack, locale's Noto face first). Templates use `#{...}` throughout — incl. inside `<style th:inline="css">` for the `@page` margin-box page-counter fragments (`pdf.page.*`, edge spaces kept via ` ` escapes).
 - **PDF running header/footer + logo** — both PDF templates wrap their body in
-  `<table class="page-frame">` whose `<thead>`/`<tfoot>` are `report-chrome-pdf ::
-  runningHeader(title, generatedAt)` / `:: runningFooter`, repeated per page by
-  `-fs-table-paginate`. **This is the only mechanism that repeats markup containing an image**, and
+  `<table class="page-frame">` whose `<thead>`/`<tfoot>` come from `fragments/report-chrome-pdf.html`,
+  repeated per page by `-fs-table-paginate`. That file carries **two chrome sets** and a template
+  wears one whole (mixing them duplicates or drops the meta line): `styles / runningHeader(title,
+  generatedAt) / runningFooter / section` — the dark bar, `report-export-pdf.html`; and
+  `formStyles / formHeader(title) / formFooter(generatedAt) / formSection(index, heading, columns,
+  total)` — the printed-bank-form look copied from
+  `resources/pdf-template/sample-form-uob-infinity-standard-registration.pdf`,
+  `dynamic-report-export-pdf.html`. The form set prints no `@top-left`, puts the meta line in the
+  footnote instead of the header, uses `${logo}` (not the knockout) on white, and its footnote holds
+  no image — so it draws one logo per page where the dark bar draws two, which is exactly what
+  `PdfRunningChromeTest` asserts per template. Its palette (`#005cb9` title/rule/chip, `#414042`
+  footnote, sampled off the sample PDF) is **fixed in `static/css/report-pdf.css`, not delegated to
+  the country sheet** — a form looks the same in every edition. **This is the only mechanism that repeats markup containing an image**, and
   the two that look right fail silently: an `@page` margin box draws nothing for `content: url(...)`
   (margin boxes stay text-only — and are the only place `counter(page)` exists), and a
   `position: fixed` box repeats per page but is positioned against the page's *content* box and
@@ -136,7 +146,7 @@ A report whose columns and rows the caller supplies, sharing every piece of the 
 - The Excel side needed **no new plumbing**: `headers`/`data`/`title` ride in on `ExcelExportRequest.parameters`, which is exactly what that pass-through map is for, and `DynamicTableRequest.from(...)` makes the controller and the exporter read the same names.
 
 ## Conventions
-- **Shared chrome, per-report body.** Both reports' header/footer come from `fragments/report-chrome.html` (browser) and `fragments/report-chrome-pdf.html` (PDF — `styles` with the `@page` boxes and base CSS 2.1, plus `header`/`section`/`footer`). Adding a report means a body, not chrome. The table CSS hook is `.report-table` (was `.servers-table`), so a country's stylesheet styles *any* report's table.
+- **Shared chrome, per-report body.** Both reports' header/footer come from `fragments/report-chrome.html` (browser) and `fragments/report-chrome-pdf.html` (PDF — a chrome set is `*styles` with the `@page` boxes, plus `*Header`/`*Section`/`*Footer`; two sets live there, see above). Adding a report means a body and a choice of chrome set, not new chrome. The table CSS hook is `.report-table` (was `.servers-table`), so a country's stylesheet styles *any* report's table.
 - **Offline HTML export** is a recurring pattern: controllers produce `MediaType.TEXT_HTML_VALUE` with assets inlined (via `AssetService`) so the output renders with no server. Templates ending `-export.html` (`commit-export.html`, `report-export.html`) are the self-contained variants.
 - Templates: `commit.html`/`commit-export.html`, `report.html`/`report-export.html`/`report-export-pdf.html`, `dynamic-report.html`/`dynamic-report-export.html`/`dynamic-report-export-pdf.html`, `environment.html`/`environment-rendered.html`, plus `fragments/` (chrome, chrome-pdf, dynamic-table) and `country/<code>/`.
 

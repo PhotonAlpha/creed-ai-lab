@@ -39,9 +39,18 @@ import static org.assertj.core.api.Assertions.assertThat;
  * produced PDF page by page — text via {@link PdfTextExtractor}, the logo via each page's image
  * XObjects.
  *
- * <p>The header assertion deliberately keys off the meta line (the timestamp, "PDF snapshot")
- * rather than the brand: the {@code @top-left} margin box prints a nearly identical title on every
- * page, so a brand-only assertion would pass even with the running header gone.
+ * <p>The two reports wear different chrome and are therefore asserted differently, each on the
+ * text only its running block can produce:
+ * <ul>
+ * <li>{@code report-export-pdf} (dark-bar chrome) keys the header off the meta line (the timestamp,
+ * "PDF snapshot") rather than the brand: its {@code @top-left} margin box prints a nearly identical
+ * title on every page, so a brand-only assertion would pass even with the running header gone. Two
+ * images per page — header logo and footer logo.</li>
+ * <li>{@code dynamic-report-export-pdf} (form chrome, modelled on the sample bank form) prints no
+ * {@code @top-left} at all, so the brand IS proof of the running header there; the meta line moved
+ * into the footnote and is asserted as footer text. Its footnote is text only, like the sample's,
+ * so a page carries one image, not two.</li>
+ * </ul>
  */
 class PdfRunningChromeTest {
 
@@ -109,15 +118,22 @@ class PdfRunningChromeTest {
     // assertions would hold even with the running chrome removed.
     @Test
     void theDynamicReportRepeatsHeaderFooterAndLogoOnEveryPage() throws IOException {
-        assertRunningChrome(dynamicPdf(160), "dynamic-report-export-pdf");
+        // Form chrome: the brand only ever comes from the running header (no @top-left margin box),
+        // and the meta line is the footnote's second line. One logo, in the header. The expected
+        // text is upper case because the form title is -- text-transform, applied by the renderer.
+        assertRunningChrome(dynamicPdf(160), "dynamic-report-export-pdf",
+                List.of("SERVER INVENTORY REPORT"),
+                List.of(FOOTER_NOTE, GENERATED_AT, "PDF snapshot"), 1);
     }
 
     @Test
     void theServerReportRepeatsHeaderFooterAndLogoOnEveryPage() throws IOException {
-        assertRunningChrome(serverPdf(160), "report-export-pdf");
+        assertRunningChrome(serverPdf(160), "report-export-pdf",
+                List.of(GENERATED_AT, "PDF snapshot"), List.of(FOOTER_NOTE), 2);
     }
 
-    private void assertRunningChrome(byte[] pdf, String template) throws IOException {
+    private void assertRunningChrome(byte[] pdf, String template, List<String> header,
+                                     List<String> footer, int logos) throws IOException {
         PdfReader reader = new PdfReader(pdf);
         try {
             assertThat(reader.getNumberOfPages())
@@ -127,12 +143,12 @@ class PdfRunningChromeTest {
             for (int page = 1; page <= reader.getNumberOfPages(); page++) {
                 String text = extractor.getTextFromPage(page);
                 assertThat(text).as("%s running header on page %d", template, page)
-                        .contains(GENERATED_AT).contains("PDF snapshot");
+                        .contains(header);
                 assertThat(text).as("%s running footer on page %d", template, page)
-                        .contains(FOOTER_NOTE);
+                        .contains(footer);
                 assertThat(imagesOn(reader, page))
-                        .as("%s header + footer logo on page %d", template, page)
-                        .isGreaterThanOrEqualTo(2);
+                        .as("%s running logo(s) on page %d", template, page)
+                        .isGreaterThanOrEqualTo(logos);
             }
         }
         finally {
