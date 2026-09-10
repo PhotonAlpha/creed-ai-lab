@@ -132,12 +132,29 @@ works without any of that.
 
 ## Landmines
 
+- **What CSS the PDF renderer supports is written down** — `.claude/skills/creed-report/flying-saucer-css.md`
+  catalogues the properties, selectors, units and at-rules openpdf-html 2.2.2 actually implements,
+  each behavioural claim rendered and eyeballed rather than remembered. Check it before adding a rule
+  to `report-pdf.css`, a `country/<code>/style-pdf.css`, or a `<style>` in a `*-pdf.html`.
+- **Never put `@media` in CSS that reaches the renderer.** Verified: the block never applies (`print`,
+  `screen` and `all` all fail) **and every rule after it in that stylesheet is swallowed too** — a
+  parser bug drops the whole media rule at EOF. Nothing silently degrades; a third of your sheet just
+  stops existing. The PDF-side sheets are currently clean; `static/css/report-pdf-preview.css` uses
+  `@media print` legitimately, because it is *linked by the browser preview and never inlined into a
+  PDF*. Do not merge it into `report-pdf.css`.
+- **`linear-gradient()` parses and draws nothing** in PDF output — `ITextOutputDevice.drawLinearGradient`
+  is an empty method. The declaration is accepted, so there is no error to find; you just get no
+  paint. Same class of trap: `calc()`, `var()`, `rem`, `box-shadow` and `transform` are dropped.
 - **Getting an image onto every PDF page has exactly one working mechanism**, and the two obvious
   ones fail silently. An `@page` margin box **cannot** hold an image — `content: url(...)` draws
   nothing (so margin boxes stay text-only, which is also the only place `counter(page)` works).
   `position: fixed` **does** repeat per page, but it is positioned against the page's *content* box
   and clipped to it, so the negative offsets that would park a logo in the page margin render
-  nothing at all. What works is the `.page-frame` wrapper table with `-fs-table-paginate`. A new
+  nothing at all. What works is the `.page-frame` wrapper table with `-fs-table-paginate` — and, as
+  probing for the CSS reference established, `position: running(name)` + `content: element(name)` in
+  an `@page` margin box, which does repeat an image and is the only way to reach the page *margin*.
+  The table stays: it is what `PdfRunningChromeTest` pins. But "exactly one" was "exactly one of the
+  three we tried". A new
   PDF template that forgets that wrapper silently loses its header and footer.
 - **Do not put a `<tfoot>` on the data table.** The wrapper table is fine, but a `<tfoot>` added to
   the paginating `report-table` itself blew a 60-row table up to **122 pages** with its content
