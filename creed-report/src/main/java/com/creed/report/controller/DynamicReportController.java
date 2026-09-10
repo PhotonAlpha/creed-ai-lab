@@ -9,6 +9,7 @@ import com.creed.report.i18n.CountryProfile;
 import com.creed.report.i18n.CountryStyles;
 import com.creed.report.service.AssetService;
 import com.creed.report.service.PdfExportService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -37,11 +38,21 @@ import java.util.Map;
  * which is also why the page's export buttons are forms that re-post the current definition rather
  * than links that would have to re-encode it.
  *
+ * <p><b>Debugging the PDF.</b> {@code /dynamic/preview/pdf} serves the PDF template's own XHTML
+ * as {@code text/html}, so the paged-media markup can be opened in devtools instead of guessed at
+ * from the finished bytes. Same endpoint parameters, same model, same string.
+ *
  * <p>Excel is not here: it goes through the existing {@code /export/excel?type=dynamic} strategy,
  * which reads the same three parameters off the request.
  */
 @Controller
 public class DynamicReportController {
+
+    /** Rendered to bytes by /dynamic/export/pdf and to a browser tab by /dynamic/preview/pdf. */
+    private static final String PDF_TEMPLATE = "dynamic-report-export-pdf";
+
+    /** Context-path-relative; the preview resolves it against the request. */
+    private static final String PREVIEW_STYLESHEET = "/css/report-pdf-preview.css";
 
     private final DynamicTableService tableService;
     private final AssetService assetService;
@@ -115,6 +126,59 @@ public class DynamicReportController {
     public ResponseEntity<byte[]> exportPdf(@RequestParam Map<String, String> parameters, Locale locale) {
         LocalDateTime now = LocalDateTime.now();
         CountryProfile profile = countryCatalog.profileFor(locale);
+
+        byte[] body = pdfExportService.renderTemplate(PDF_TEMPLATE,
+                pdfModel(parameters, profile, locale, now), locale);
+        return download(body, MediaType.APPLICATION_PDF, filename(profile, now, "pdf"));
+    }
+
+    /**
+     * The PDF template rendered <b>to the browser</b> instead of to bytes: same URL parameters,
+     * same model, same string — {@code text/html} inline, so devtools can inspect the boxes,
+     * toggle the rules and live-edit the CSS that the PDF is actually made of.
+     *
+     * <p>It is the same string by construction, not by convention:
+     * {@link PdfExportService#renderTemplateHtml} is the first half of the export above, stopped
+     * before Flying Saucer, logo data URIs and all. A preview that re-built the model, or rendered
+     * a browser twin of the template, would be a lookalike free to drift — and a lookalike is
+     * worthless for the one question this endpoint exists to answer: why does the PDF look like
+     * that?
+     *
+     * <p>What the browser adds is {@code ${previewCss}} — {@code report-pdf-preview.css}, the one
+     * stylesheet the renderer never sees. It sizes {@code <body>} to the {@code @page} box so
+     * column widths and wrap points match the PDF's to the millimetre, and {@code @font-face}s the
+     * very TTFs the PDF embeds (served by {@link com.creed.report.config.PdfPreviewConfig}). It is
+     * passed as a resolved URL rather than left to an {@code @{...}} in the template, because the
+     * PDF path renders that template on a plain non-web context where a link expression throws.
+     *
+     * <p>Limits worth knowing before trusting a pixel: on screen the sheet just grows — the running
+     * header/footer repeat per page only in the PDF — and no browser implements the {@code @page}
+     * margin boxes, so the page counter is missing. <b>Cmd+P is the paginated check</b>: Chrome
+     * honours the document's own {@code @page} size/margins and repeats the {@code .page-frame}
+     * {@code thead}/{@code tfoot} per page, just as {@code -fs-table-paginate} does.
+     */
+    @RequestMapping(value = "/dynamic/preview/pdf", method = { RequestMethod.GET, RequestMethod.POST },
+            produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> previewPdf(@RequestParam Map<String, String> parameters,
+                                             Locale locale, HttpServletRequest request) {
+        CountryProfile profile = countryCatalog.profileFor(locale);
+        Map<String, Object> variables = pdfModel(parameters, profile, locale, LocalDateTime.now());
+        // Only the preview sets this; its presence is what switches the shim on in the template.
+        variables.put("previewCss", request.getContextPath() + PREVIEW_STYLESHEET);
+
+        String html = pdfExportService.renderTemplateHtml(PDF_TEMPLATE, variables, locale);
+        // Inline, not an attachment: the point is to look at it in a tab.
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/html; charset=UTF-8"))
+                .body(html);
+    }
+
+    /**
+     * The PDF template's model, built once for both the export and its preview — the two must not
+     * be able to disagree about what they are rendering.
+     */
+    private Map<String, Object> pdfModel(Map<String, String> parameters, CountryProfile profile,
+                                         Locale locale, LocalDateTime now) {
         DynamicTable table = tableService.build(DynamicTableRequest.from(parameters), profile, locale);
 
         Map<String, Object> variables = new HashMap<>();
@@ -123,9 +187,7 @@ public class DynamicReportController {
         variables.put("table", table);
         variables.put("total", CountryFormatter.number(table.size(), profile));
         variables.put("generatedAt", CountryFormatter.timestamp(now, profile));
-
-        byte[] body = pdfExportService.renderTemplate("dynamic-report-export-pdf", variables, locale);
-        return download(body, MediaType.APPLICATION_PDF, filename(profile, now, "pdf"));
+        return variables;
     }
 
     private static String filename(CountryProfile profile, LocalDateTime now, String extension) {

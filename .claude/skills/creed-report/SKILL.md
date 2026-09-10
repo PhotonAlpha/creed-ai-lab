@@ -41,10 +41,44 @@ Standalone **Spring MVC + Thymeleaf** reporting/visualization app. Plain HTTP `9
   both templates.
 - **PDF export** — `service/PdfExportService`: Thymeleaf → XHTML → PDF via `com.github.librepdf:openpdf-html` (Flying Saucer fork on OpenPDF, classes under `org.openpdf.*`, `ITextRenderer`). PDF templates are dedicated `*-pdf.html` variants (`report-export-pdf.html`, the CSS-2.1 rebuild of `report-export.html`'s look) with print CSS 2.1 + paged-media (`@page` margin boxes, `counter(page)/counter(pages)`, `-fs-table-paginate`) — Bootstrap view templates can't be reused (no flexbox/JS). Parsing is lenient (bundled neko-htmlunit repairs sloppy HTML) but keep templates well-formed. Fonts: `creed.report.pdf.font-paths` (comma-separated Spring resource patterns, default `classpath:/fonts/*.ttf,*.otf`; registered IDENTITY_H + embedded; `addFont` accepts file paths, `file:`/`jar:` URLs and classpath-resource paths natively, and `BaseFont`'s static cache makes per-render re-registration a cache hit). Bundled Noto faces in `src/main/resources/fonts/`: Noto Sans + Noto Sans SC/TC/Thai, Regular+Bold each. **Font gotchas (cost a debugging session):** CFF-flavored OTFs (official noto-cjk builds) embed but silently drop all CJK glyphs — use static glyf TTFs (SC/TC are cut from Google Fonts variable TTFs via `fonttools varLib.instancer wght=N --update-name-table`; plain variable TTFs fail to register); Flying Saucer doesn't synthesize bold, so without a Bold face bold CJK text (headings/th) silently disappears; no per-glyph fallback across families, so each locale's `pdf.font.family` stack must lead with the face covering its script — **and that face must also carry the Latin** the table is full of (host names, IPs). The bundled `NotoSansThai-*.ttf` are the **Google Fonts** build (Thai *plus* Latin-1), instanced at wght 400/700; the `notofonts.github.io` release is Thai-only (101 glyphs) and would blank every host name in a Thai PDF. Malay and Vietnamese add no script — Noto Sans covers Vietnamese diacritics — so only `_th` overrides `pdf.font.family`.
 - **Excel export (strategy pattern)** — `GET /export/excel?type=<code>` on `ReportController`, package `com.creed.report.export`, POI (`org.apache.poi:poi-ooxml`, version pinned in the module pom — Boot's BOM doesn't manage it). `ReportType` enum (wire codes `server` / `environment`) is the strategy key; `ExcelReportExporter` is the strategy (`reportType()` + `write(Workbook, ExcelExportRequest)`); `ExcelExportService` is the context — Spring injects every exporter bean, it builds the `EnumMap` (duplicate type ⇒ startup failure), owns the `XSSFWorkbook` lifecycle (exporters must not write/close it) and the download filename. **A new report type = one enum constant + one `@Component` exporter**; the `/report` page's Excel dropdown is driven by the `reportTypes` model attribute (`ExcelExportService.supportedTypes()`), so it lists new types automatically. Implementations: `ServerInventoryExcelExporter` (one sheet, same columns as the page/PDF), `EnvironmentExcelExporter` (Summary / Effective Properties / Property Sources / All Properties, the last flagging which occurrence of a shadowed key won). All request query params are passed through in `ExcelExportRequest.parameters` — that is how the environment report picks up `spring.profiles.active` / `spring.config.location` / `spring.config.additional-location` from the URL (defaults from `EnvironmentInspectionService`). Shared helpers: `ExcelStyles` (workbook-scoped cell styles — POI caps a workbook at 64k styles, so never per cell) and `ExcelSheetBuilder` (fluent title/caption/header/row + `finish()` doing merge, freeze pane, autofilter and capped autosize; sheet names go through `WorkbookUtil.createSafeSheetName`, 31-char limit). Localized like the rest: `report.type.*` and `excel.*` keys in the report bundle. Unknown `type` ⇒ `UnknownReportTypeException` (`@ResponseStatus(BAD_REQUEST)`), not a 500.
-- **Dynamic table report** — `controller/DynamicReportController` (`/dynamic`, `/dynamic/export`, `/dynamic/export/pdf`), package `com.creed.report.dynamic`. The table's *shape* comes from the request: `headers` is split on commas into column **keys**, `data` is a JSON array of rows. Details in the *Caller-defined tables* section below.
+- **Dynamic table report** — `controller/DynamicReportController` (`/dynamic`, `/dynamic/export`, `/dynamic/export/pdf`, `/dynamic/preview/pdf` — the PDF template rendered to a browser tab, see *Previewing a PDF template*), package `com.creed.report.dynamic`. The table's *shape* comes from the request: `headers` is split on commas into column **keys**, `data` is a JSON array of rows. Details in the *Caller-defined tables* section below.
 - **Environment Inspector** — `controller/EnvironmentInspectionController` (REST: `GET /api/environment`, `/api/environment/rendered`) + `controller/EnvironmentViewController` (Thymeleaf: `GET /environment`, `/environment/rendered`), backed by `service/EnvironmentInspectionService`. Models `EnvironmentSnapshot`, `PropertySourceView`, `PropertyEntry`, `RenderedEnvironment`. **For anything in this feature, use the [[env-inspector]] skill** — it has the full requirements/design (replays Spring Boot's config-loading pipeline standalone, renders effective properties to YAML/.properties).
 
 ### Previewing a PDF template
+
+**In a browser, with devtools** — `GET|POST /dynamic/preview/pdf` takes the same parameters as
+`/dynamic/export/pdf` and answers `text/html`: the PDF template's own XHTML, served inline. Same
+string by construction, not by convention — `PdfExportService.renderTemplateHtml` is
+`renderTemplate` stopped before the renderer, so the logo data URIs, `${pdfCss}` and the message
+bundle are the export's, and a lookalike cannot drift into place. Its context is a plain non-web
+`Context` like every PDF render, which is why the stylesheet URL arrives as `${previewCss}` from
+the controller rather than as an `@{...}` in the template (a link expression throws there). The
+`/dynamic` page has a **Preview PDF layout** button (`report.previewPdf`) posting the definition to
+it. Only the dynamic report has one; the dark-bar set gets it by copying `formPreview` with that
+set's `@page` numbers.
+
+The preview adds exactly one thing: `static/css/report-pdf-preview.css`, the only stylesheet in the
+module openpdf-html never sees and the only place modern CSS is allowed. It (1) draws `<body>` as
+the page box — page size with the `@page` margins as `padding` and `box-sizing: border-box`, so the
+content box matches the PDF's to the millimetre — off custom properties supplied by
+`report-chrome-pdf :: formPreview`, which lives beside the `@page` rule it mirrors so the two cannot
+drift; (2) `@font-face`s the embedded TTFs under the family names `pdf.font.family` asks for, served
+at `/fonts/**` by `config/PdfPreviewConfig` (`classpath:/fonts/` is outside `static/`, so nothing
+served it before) — without them the browser substitutes a system face and every line measures
+differently; (3) marks each page's worth of flow. That last one is an **overlay**
+(`body::before`, absolute, `z-index`, `pointer-events: none`), not a background: the report's table
+paints an opaque row over every stripe, so a gradient behind it is one nobody sees. It is
+approximate — the PDF's repeated chrome costs it ~2 rows a page — and `@media print` undoes the
+whole sheet so **Cmd+P** is the honest paginated check: Chrome honours the document's own `@page`
+and repeats `.page-frame`'s `thead`/`tfoot` the way `-fs-table-paginate` does. What no browser can
+show is the `@page` margin boxes, i.e. the page counter.
+
+Watch two things: the shim's include carries its `th:if` on an **outer** `<th:block>` (`th:replace`
+on the same tag outranks `th:if`, and the `<link>` would reach the PDF), and `spring-boot:run` serves
+from `target/classes`, so editing the preview CSS on disk needs `resources:resources` before a
+refresh — devtools live-editing does not. `PdfPreviewHtmlTest` pins the guarantee: strip the shim
+region and the preview equals the export's markup byte for byte; a PDF render contains no `<link>`,
+no `--preview-*`.
 
 `PdfSampleDumpTest` is the iteration loop — it renders `report-export-pdf` **and**
 `dynamic-report-export-pdf` for every country × language through the real engine, bundles and fonts,
@@ -148,7 +182,7 @@ A report whose columns and rows the caller supplies, sharing every piece of the 
 ## Conventions
 - **Shared chrome, per-report body.** Both reports' header/footer come from `fragments/report-chrome.html` (browser) and `fragments/report-chrome-pdf.html` (PDF — a chrome set is `*styles` with the `@page` boxes, plus `*Header`/`*Section`/`*Footer`; two sets live there, see above). Adding a report means a body and a choice of chrome set, not new chrome. The table CSS hook is `.report-table` (was `.servers-table`), so a country's stylesheet styles *any* report's table.
 - **Offline HTML export** is a recurring pattern: controllers produce `MediaType.TEXT_HTML_VALUE` with assets inlined (via `AssetService`) so the output renders with no server. Templates ending `-export.html` (`commit-export.html`, `report-export.html`) are the self-contained variants.
-- Templates: `commit.html`/`commit-export.html`, `report.html`/`report-export.html`/`report-export-pdf.html`, `dynamic-report.html`/`dynamic-report-export.html`/`dynamic-report-export-pdf.html`, `environment.html`/`environment-rendered.html`, plus `fragments/` (chrome, chrome-pdf, dynamic-table) and `country/<code>/`.
+- Templates: `commit.html`/`commit-export.html`, `report.html`/`report-export.html`/`report-export-pdf.html`, `dynamic-report.html`/`dynamic-report-export.html`/`dynamic-report-export-pdf.html`, `environment.html`/`environment-rendered.html`, plus `fragments/` (chrome, chrome-pdf, dynamic-table) and `country/<code>/`. Stylesheets: `report.css` (browser), `report-pdf.css` (PDF, inlined), `report-pdf-preview.css` (browser preview of a PDF template — linked, never inlined, never seen by the renderer).
 
 ## Notes
 - No config-server / SSL dependency; runs fully standalone. See [[creed-platform]] only for build/run basics (local Maven repo, JDK).

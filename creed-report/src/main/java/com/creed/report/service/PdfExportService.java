@@ -125,6 +125,25 @@ public class PdfExportService {
 
     /** Renders a Thymeleaf template in the given locale and converts the result to PDF bytes. */
     public byte[] renderTemplate(String templateName, Map<String, Object> variables, Locale locale) {
+        return renderHtml(renderTemplateHtml(templateName, variables, locale));
+    }
+
+    /**
+     * The XHTML a PDF is made of — the first half of {@link #renderTemplate}, stopped before the
+     * renderer.
+     *
+     * <p>Exists so a PDF template can be served to a browser <b>as the very string that would have
+     * been laid out</b> (see {@code /dynamic/preview/pdf}): same template, same message bundle,
+     * same {@code ${pdfCss}}, same injected {@code ${logo}} data URIs. A preview built any other
+     * way — a second template, a copy of the model — is a lookalike that can drift, and debugging
+     * a lookalike in devtools tells you nothing about the PDF.
+     *
+     * <p>Note the context is a plain non-web {@link Context}, exactly as the PDF path needs it:
+     * the PDF templates must stay renderable without a request, so anything the preview needs from
+     * the web layer (the stylesheet URL) arrives as a variable rather than as an {@code @{...}}
+     * link expression, which would throw here.
+     */
+    public String renderTemplateHtml(String templateName, Map<String, Object> variables, Locale locale) {
         Context context = new Context(locale);
         // Set before the caller's variables, so an explicit ${logo} still wins, and set HERE rather
         // than in each controller: this is the one funnel every PDF passes through, which is what
@@ -132,7 +151,7 @@ public class PdfExportService {
         context.setVariable("logo", logo());
         context.setVariable("logoInverse", logoInverse());
         variables.forEach(context::setVariable);
-        return renderHtml(templateEngine.process(templateName, context));
+        return templateEngine.process(templateName, context);
     }
 
     /** Converts a self-contained XHTML string to PDF bytes. */

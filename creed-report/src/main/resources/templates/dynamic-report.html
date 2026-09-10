@@ -5,8 +5,9 @@
      is a different table inside identical chrome.
 
      Visiting with no parameters renders just the definition form below, which is also how a
-     caller-sized payload gets in: the form POSTs, and so do the three export buttons, because
-     ?data= outgrows a query string long before a real report does. -->
+     caller-sized payload gets in: the form POSTs, and so do the export buttons, because ?data=
+     outgrows a query string long before a real report does. One of those buttons is not a
+     download: "preview PDF layout" opens the PDF template's own markup in a tab, for devtools. -->
 <html lang="en" th:lang="${profile.languageTag()}" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
@@ -82,6 +83,13 @@
                     <th:block th:replace="~{fragments/dynamic-table :: definitionFields(${definition})}"></th:block>
                     <button class="btn btn-outline-primary btn-sm" type="submit"
                             th:text="#{report.downloadPdf}">Download PDF</button>
+                </form>
+                <!-- The same PDF, rendered to a tab instead of to bytes: the paged-media template
+                     in devtools. target=_blank so the report stays put behind it. -->
+                <form th:action="@{/dynamic/preview/pdf}" method="post" class="d-inline" target="_blank">
+                    <th:block th:replace="~{fragments/dynamic-table :: definitionFields(${definition})}"></th:block>
+                    <button class="btn btn-outline-secondary btn-sm" type="submit"
+                            th:text="#{report.previewPdf}">Preview PDF layout</button>
                 </form>
                 <!-- Excel goes through the shared /export/excel strategy dispatcher, which accepts
                      POST precisely so this definition can reach ReportType.DYNAMIC. -->

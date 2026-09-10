@@ -1,0 +1,122 @@
+/* Browser preview of a PDF template -- the ONE stylesheet in this module that openpdf-html never
+ * sees, and the only place modern CSS is allowed.
+ *
+ * Loaded solely by /dynamic/preview/pdf, which serves the exact XHTML string that would have been
+ * handed to Flying Saucer (PdfExportService.renderTemplateHtml). Everything that string carries --
+ * report-pdf.css, the country sheet, the @page block from fragments/report-chrome-pdf :: formStyles
+ * -- is already applied when this file loads; it adds only what a browser needs in order to show
+ * that markup the way the renderer lays it out:
+ *
+ *   1. THE PAGE BOX. A browser has no @page geometry on screen, so <body> is drawn as one sheet of
+ *      exactly the page size with the @page margins as padding. Content width therefore matches the
+ *      PDF's to the millimetre, which is what makes a table's column widths and a heading's wrap
+ *      point meaningful in devtools. The numbers come in as custom properties from the chrome set's
+ *      preview fragment, so they cannot drift from the @page rule they mirror.
+ *   2. THE FONTS. The PDF embeds classpath:/fonts/*.ttf; the browser is served the same files by
+ *      PdfPreviewConfig at /fonts/**, @font-face'd under the very family names pdf.font.family
+ *      asks for -- otherwise a CJK or Thai preview silently falls back to a system face and every
+ *      line measures differently from the PDF.
+ *
+ * What it deliberately does NOT fake: pagination. On screen the sheet just grows, and the running
+ * header/footer (the .page-frame thead/tfoot) appear once instead of per page. The faint rules
+ * mark every page's worth of flow so you can see where a break will land, and Cmd+P is the real
+ * check -- see the @media print block at the bottom.
+ */
+
+/* --- the embedded faces, by the names pdf.font.family uses --------------------------------------
+ * Paths are relative to this file (/css/), so they resolve to /fonts/** under any context path.
+ * Bold is a separate face on purpose: neither Flying Saucer nor this preview should synthesize it
+ * -- that is exactly the difference that makes a bold CJK heading vanish from the PDF only. */
+@font-face { font-family: 'Noto Sans';      src: url('../fonts/NotoSans-Regular.ttf')     format('truetype'); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: 'Noto Sans';      src: url('../fonts/NotoSans-Bold.ttf')        format('truetype'); font-weight: 700; font-style: normal; font-display: block; }
+@font-face { font-family: 'Noto Sans SC';   src: url('../fonts/NotoSansSC-Regular.ttf')   format('truetype'); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: 'Noto Sans SC';   src: url('../fonts/NotoSansSC-Bold.ttf')      format('truetype'); font-weight: 700; font-style: normal; font-display: block; }
+@font-face { font-family: 'Noto Sans TC';   src: url('../fonts/NotoSansTC-Regular.ttf')   format('truetype'); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: 'Noto Sans TC';   src: url('../fonts/NotoSansTC-Bold.ttf')      format('truetype'); font-weight: 700; font-style: normal; font-display: block; }
+@font-face { font-family: 'Noto Sans Thai'; src: url('../fonts/NotoSansThai-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: block; }
+@font-face { font-family: 'Noto Sans Thai'; src: url('../fonts/NotoSansThai-Bold.ttf')    format('truetype'); font-weight: 700; font-style: normal; font-display: block; }
+
+/* --- the sheet ------------------------------------------------------------------------------- */
+html {
+    background-color: #58585a;      /* the desk the sheet lies on; never printed */
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    /* border-box + the @page margins as padding == the PDF's content box, to the millimetre. */
+    box-sizing: border-box;
+    width: var(--preview-page-width);
+    min-height: var(--preview-page-height);
+    margin: 28px auto 60px auto;
+    padding: var(--preview-page-margin);
+    box-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+    position: relative; /* containing block for the page rules below */
+}
+
+/* One faint rule per page's worth of flow, starting at the top of the content area.
+ *
+ * An OVERLAY, not a background: the report's own table paints an opaque row on every stripe, so a
+ * gradient behind it is a gradient nobody ever sees. Absolutely positioned inside <body>, so it is
+ * laid out against the padding box, offset by the top margin to line up with the content, and
+ * lifted above the table by z-index. pointer-events:none keeps devtools' element picker on the
+ * markup underneath, which is the whole point of the preview.
+ *
+ * Approximate on purpose: the PDF repeats the running header and footer on every page, so real
+ * page 2 starts a little lower than the second rule. It answers "is this table about to spill, and
+ * roughly where?", not "here is the exact break".
+ */
+body::before {
+    content: "";
+    position: absolute;
+    top: var(--preview-margin-top);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(
+            to bottom,
+            transparent 0,
+            transparent calc(var(--preview-content-height) - 1px),
+            rgba(0, 92, 185, 0.35) calc(var(--preview-content-height) - 1px),
+            rgba(0, 92, 185, 0.35) var(--preview-content-height));
+}
+
+/* A standing reminder that this is not the PDF itself. CSS-only, so no template carries a word of
+   preview chrome. */
+body::after {
+    content: "PDF preview \00b7 browser layout \00b7 Cmd+P for the paginated check";
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    z-index: 99;
+    background-color: rgba(0, 92, 185, 0.92);
+    color: #ffffff;
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    padding: 5px 10px;
+    border-radius: 4px;
+}
+
+/* --- Cmd+P: the closest thing to the real PDF a browser can show -------------------------------
+ * Undo the on-screen sheet and let the document's own @page rule (size + margins, already in the
+ * markup) drive the paper. Chrome then paginates for real AND repeats the .page-frame thead/tfoot
+ * per page, exactly as -fs-table-paginate does in the PDF -- so a page break that looks wrong here
+ * looks wrong in the PDF too. The one thing it cannot show is the @page margin boxes: no browser
+ * implements @bottom-right { content: counter(page) }, so the page counter is missing and Chrome
+ * prints its own header/footer instead (turn those off in the print dialog).
+ */
+@media print {
+    html { background-color: #ffffff; }
+    body {
+        width: auto;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+    body::before,
+    body::after { display: none; }
+}

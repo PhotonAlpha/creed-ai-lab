@@ -171,6 +171,39 @@
     <div class="clearfix"></div>
 </div>
 
+<!-- BROWSER PREVIEW of the form chrome -- included only when the caller passed ${previewCss},
+     i.e. by /dynamic/preview/pdf and never by a PDF render, so nothing here reaches Flying Saucer.
+
+     It exists because the PDF templates are the one part of this app you cannot open in devtools:
+     the renderer takes a string and hands back bytes. The preview serves that exact string to the
+     browser and adds two things a browser needs to show it the way the renderer would:
+
+       1. the page box as a sheet -- the browser has no notion of @page geometry on screen, so the
+          numbers below MIRROR this set's @page rule in formStyles (A4 landscape, margins
+          14/12/16/12) and must be changed with it. That is why the geometry lives here, in the
+          chrome set that owns the @page, rather than in each template.
+       2. the same fonts. The PDF embeds classpath:/fonts/*.ttf; the browser has no idea what
+          "Noto Sans SC" is unless it is served one, which PdfPreviewConfig does at /fonts/**, and
+          report-pdf-preview.css @font-faces under the very family names pdf.font.family asks for.
+
+     The href arrives as a variable, NOT as @{...}: this file is rendered on a plain non-web
+     Context on the PDF path, where a link expression throws. The dark-bar set has no twin of this
+     fragment yet -- /report has no preview endpoint; give it one by copying these six lines with
+     that set's @page numbers. -->
+<th:block th:fragment="formPreview(previewCss)">
+    <style th:inline="css">
+        /* A4 landscape, minus formStyles' @page margins. Keep in step with that rule. */
+        :root {
+            --preview-page-width: 297mm;
+            --preview-page-height: 210mm;
+            --preview-page-margin: 14mm 12mm 16mm 12mm;
+            --preview-margin-top: 14mm;      /* where the content area starts */
+            --preview-content-height: 180mm; /* 210 - 14 - 16: one page's worth of flow */
+        }
+    </style>
+    <link rel="stylesheet" th:href="${previewCss}"/>
+</th:block>
+
 <!-- RUNNING page footer, form flavour: two lines of small dark grey at the bottom left of every
      page, sitting opposite the @bottom-right page counter exactly as the sample's footnote does.
      Line 2 is this report's answer to the sample's "CYB-107/F (07.26) - Singapore": the edition

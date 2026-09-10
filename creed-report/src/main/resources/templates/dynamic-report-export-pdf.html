@@ -16,6 +16,10 @@
      the header, it is the footnote's second line (the sample carries its document code and locale
      there), and the @top-left margin box is gone. Nothing is printed twice; nothing is lost.
 
+     Debugging this file: GET /dynamic/preview/pdf renders it to the browser instead of to bytes --
+     same string, same model, devtools available -- and Cmd+P there paginates it for real. See
+     report-pdf-preview.css for what the browser can and cannot reproduce.
+
      The table is rebuilt here rather than shared with fragments/dynamic-table: that one is
      Bootstrap markup, and Flying Saucer has no flexbox or utility classes. Column count is
      caller-driven, so widths are left to the renderer's auto layout. -->
@@ -28,6 +32,14 @@
      string, so there is no base URL for a <link>): the shared static/css/report-pdf.css followed by
      this country's static/css/country/<code>/style-pdf.css, so the country's palette wins. -->
 <style th:utext="${pdfCss}">/* base + country pdf css inlined here */</style>
+<!-- Browser preview only: /dynamic/preview/pdf serves this very markup as text/html and passes
+     ${previewCss}, so the block below draws the A4 page box and @font-face's the embedded fonts.
+     A PDF render passes nothing, the th:if is false and Flying Saucer sees the file unchanged.
+     The th:if sits on an OUTER block on purpose -- th:replace on the same tag outranks th:if and
+     would include the fragment (and its ${previewCss}-less <link>) on the PDF path too. -->
+<th:block th:if="${previewCss != null}">
+    <th:block th:replace="~{fragments/report-chrome-pdf :: formPreview(${previewCss})}"></th:block>
+</th:block>
 </head>
 <body th:class="${profile.styleClass()}">
 

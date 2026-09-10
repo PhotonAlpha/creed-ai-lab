@@ -36,6 +36,26 @@ curl -G 'http://localhost:9100/report/dynamic/export/pdf' -o /tmp/d.pdf \
   --data-urlencode 'country=th'
 ```
 
+**In the browser, with devtools**: swap `/dynamic/export/pdf` for **`/dynamic/preview/pdf`** and the
+same URL answers `text/html` — the PDF template's own XHTML, the exact string
+`PdfExportService.renderTemplateHtml` would have handed the renderer, `${logo}` data URIs and all.
+The page adds only `static/css/report-pdf-preview.css`, which draws `<body>` as a real A4-landscape
+sheet (page size, `@page` margins as padding, so the content box matches the PDF to the millimetre)
+and `@font-face`s the very TTFs the PDF embeds, served at `/fonts/**` by `PdfPreviewConfig`. The
+`/dynamic` page has a **Preview PDF layout** button that posts the current definition to it.
+
+Two things the browser cannot reproduce, both by construction: the `@page` margin boxes (no browser
+implements `@bottom-right { content: counter(page) }`, so the page counter is missing), and
+pagination — on screen the sheet just grows, and the running header/footer appear once instead of
+per page. The faint blue rules mark each page's worth of flow (approximate: the repeated chrome
+costs the PDF ~2 rows a page), and **Cmd+P is the real check** — Chrome honours the document's own
+`@page` and repeats the `.page-frame` `thead`/`tfoot`, like `-fs-table-paginate` does.
+
+Caveat when iterating: `spring-boot:run` serves from `target/classes`, so an edit to
+`src/main/resources/static/css/report-pdf-preview.css` needs `mvn -pl creed-report resources:resources`
+(or an IDE that copies resources) before a refresh shows it. Live-editing the sheet in devtools
+works without any of that.
+
 ## Current state
 
 - **Commit diff viewer** (`DiffController`) — git commit diffs as side-by-side HTML, plus offline
@@ -102,6 +122,11 @@ curl -G 'http://localhost:9100/report/dynamic/export/pdf' -o /tmp/d.pdf \
   either objects keyed by header or arrays in header order. Same HTML / PDF / Excel exports, same
   country + language handling, same chrome. GET and POST both work — and the page's export buttons
   POST rather than link, because `data` outgrows a query string.
+  - **`/dynamic/preview/pdf`** serves the PDF template to a browser instead of to bytes, for
+    devtools. It is the *same string* by construction — `PdfExportService.renderTemplateHtml` is
+    the export path stopped before Flying Saucer — plus one `${previewCss}` link;
+    `PdfPreviewHtmlTest` strips the shim and asserts the remainder is byte-identical to the export's
+    markup, and that a PDF render carries no preview markup at all. See the run section above.
 - **Environment Inspector** — REST + Thymeleaf views over a standalone `ConfigurableEnvironment`
   replay. **Use the `env-inspector` skill for anything in this feature.**
 
@@ -151,6 +176,12 @@ curl -G 'http://localhost:9100/report/dynamic/export/pdf' -o /tmp/d.pdf \
   but it is duplication that only made sense while the brand bar appeared on page 1 only; dropping
   the box (and the key from the seven bundles) would tidy it. `formStyles` already omits it, so the
   dynamic report is clean.
+- **The PDF preview is a browser, not the renderer.** `/dynamic/preview/pdf` guarantees the same
+  *input* (markup, CSS, fonts, page box), never the same *output*: Flying Saucer and Blink are two
+  layout engines, and they disagree most about table auto-layout and page breaks. Trust it for
+  "does this fit / wrap / measure right", verify the finished thing with the PDF. The shim's include
+  in `dynamic-report-export-pdf.html` also has the `th:if` on an **outer** `<th:block>` — `th:replace`
+  on the same tag outranks `th:if`, and the fragment's `<link>` would then reach the PDF path.
 - **The form chrome stops at the chrome.** `dynamic-report-export-pdf.html` still renders its table
   with the shared `.card` + `#212529` `thead` from `report-pdf.css`, and the country notice keeps
   the country's own accent, so a dark table and a red notice sit under blue form chrome. Restyling
