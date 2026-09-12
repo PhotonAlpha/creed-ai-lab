@@ -68,22 +68,48 @@ PDF 的专属外观以后再补。**浏览器的两个文件仍然是必需的**
 所以在 `/dynamic` 上切语言不会跳到 `/report`。
 
 # PDF 的页眉页脚与 logo
-PDF 导出的页眉栏、页脚注和 logo 图片**每一页都有**（不只首页）。实现上，两个 PDF 模板都把正文
-包进一张 `.page-frame` 表格，页眉页脚是它的 `<thead>` / `<tfoot>`，靠 `-fs-table-paginate`
-逐页重复；页码仍然由 `@page` 的 `@bottom-right` 打印，因为 `counter(page)` 只在页边距框里可用。
+PDF 导出的页眉栏、页脚注和 logo 图片**每一页都有**（不只首页）。这件事有**两种**可用机制，
+分别用在不同的位置：
 
-logo 有深浅两版，可用配置或环境变量替换成自己的：
+**一、`.page-frame` 表格**（页眉都用它）—— 正文包进一张表格，页眉页脚是它的 `<thead>` /
+`<tfoot>`，靠 `-fs-table-paginate` 逐页重复。页码由 `@page` 的页边距框打印，因为
+`counter(page)` 只在页边距框里可用。
+
+**二、running element**（对账单版式的页脚用它）：
+
+    .statement-footer { position: running(statementfoot); }
+    @page { @bottom-center { content: element(statementfoot); vertical-align: top; } }
+
+区别在于**能到达的位置**：`<tfoot>` 只能到达**内容的底部**，内容不满一页时它就跟在最后一行下面；
+running element 被画在**页边距**里，所以页脚**始终贴着每一页的物理底部**，哪怕最后一页只有两行。
+需要页脚钉在页底时，这是唯一可行的办法（把 `.page-frame` 撑满整页的两种写法都失败：
+`height: 100%` 被忽略，写死 `height: 247mm` 会把 3 行的报表撑成 3 页且首页空白）。
+
+两个必须知道的坑：
+
+* **`@page` 的底边距要够深**（对账单版式是 `34mm`）—— 页边距框不会把边距撑大，超出的部分直接裁掉；
+* **那个框要写 `vertical-align: top`** —— 底对齐时，比文字高的浮动印章会挂在最后一行基线之下，
+  被页面边缘切掉。
+
+还有一条反直觉但很有用的结论：**`counter(page)` 在 running element 内部是可以解析的**（因为该元素
+本身就排版在页边距框里）。页边距的底边只有一条横带、两个框无法上下堆叠，所以「页脚在上、页码在下」
+这种两层结构，只有靠把两层都放进同一个 running element 才能表达 —— 页码那行是空 `<p>`，文字由
+`:after { content: counter(page) ... counter(pages) }` 生成，中间的 " of " 仍走语言包。
+
+图片有三张，都可用配置或环境变量替换成自己的：
 
     creed.report.pdf.logo          CREED_REPORT_PDF_LOGO           # 深色版，用在白底的页脚
     creed.report.pdf.logo-inverse  CREED_REPORT_PDF_LOGO_INVERSE   # 反白版，用在深色页眉栏
+    creed.report.pdf.stamp         CREED_REPORT_PDF_STAMP          # 印章，用在对账单版式的页脚
 
-仓库里自带的两张是**占位图**（`static/img/creed-logo*.png`）。替换时注意三点：
+仓库里自带的三张都是**占位图**（`static/img/creed-logo*.png`、`creed-stamp.png`）。替换时注意三点：
 
 * 只支持 **PNG / JPEG / GIF**，**SVG 不行** —— 渲染器（openpdf-html / Flying Saucer）没有 SVG 支持；
 * 图片由 `PdfExportService` 读一次后以 `data:` URI 内联，因为渲染器拿到的是字符串、没有 base URL，
   写相对路径或 `/img/x.png` 都解析不到；
 * 文件缺失或格式不支持只会打一条 WARN 并**不画这张图**，不会让导出失败；`logo-inverse` 缺失时
-  自动回落到 `logo`（深色 logo 放在深色栏上会看不清，但不至于没有页眉）。
+  自动回落到 `logo`（深色 logo 放在深色栏上会看不清，但不至于没有页眉）。**印章不回落**到 logo ——
+  没有印章就不画，不能拿品牌标志去占印章的位置。
 
 
 # 动态表格报表（表头 + 数据都由调用方传入）
@@ -108,15 +134,60 @@ logo 有深浅两版，可用配置或环境变量替换成自己的：
 
 导出（三种格式，与页面完全一致；页面上的导出按钮是 **POST 表单**，因为 `data` 往往塞不进 URL）：
 
-    POST /report/dynamic/export        headers, data, title   # 离线 HTML
-    POST /report/dynamic/export/pdf    headers, data, title   # PDF
+    POST /report/dynamic/export        headers, data, title             # 离线 HTML
+    POST /report/dynamic/export/pdf    headers, data, title, template   # PDF
+    POST /report/dynamic/preview/pdf   同上                              # PDF 版式的 HTML 预览
     POST /report/export/excel          type=dynamic, headers, data, title
 
 GET 同样可用，方便把一整张报表做成一个链接分享。
 `headers` 缺失、JSON 解析失败、或超过 `creed.report.dynamic.max-columns` / `max-rows` 时返回 **400**。
+
+## PDF 多版式（`template=`）
+PDF 可以选版式，页面上有下拉框，接口上是 `template=` 参数：
+
+    template=form        # 默认。银行表单式，A4 横向
+    template=statement   # 对账单式，A4 纵向；页脚贴页底 + 居中页码，见上一节
+
+不传就是 `form`（和没有这个参数时的行为一致）；传了未知值返回 **400**，不会悄悄换一种版式给你。
+版式是「一个枚举常量 + 一个 `*-pdf.html` + 一套 chrome 片段」，新增一种会自动出现在页面下拉框里。
+离线 HTML 导出**不吃**这个参数 —— 它是页面的孪生体，没有「页」可排。
 
 
 sample
 ```json
 [{"host":"a","ip":"10.0.0.1","uptimeDays":1234},{"host":"b","ip":"127.0.0.1","uptimeDays":5678}]
 ```
+
+
+# 审批状态列表（固定版式 API，数据写死在 controller 里）
+把 `docs/template.jpg` 那份打印件 1:1 做成 PDF 的接口。**不接受任何入参**：
+
+    GET|POST /report/approval-status/export/pdf     # PDF 下载
+    GET|POST /report/approval-status/preview/pdf    # 同一份 markup 以 text/html 返回，给 devtools 用
+
+    curl -o approval.pdf http://localhost:48080/report/approval-status/export/pdf
+
+数据是 `ApprovalStatusReportController.SAMPLE_JSON` —— 一段 JSON 文本块，由 Jackson 解析进
+`model/ApprovalStatusReport`。**13 条记录是刻意的**：和原件的 "13 Record(s)" / "1 of 2" 对齐，
+文档必须是两页，重复的页眉、页脚、印章、页码才有得可验。
+
+这个接口存在的意义是**钉住版面**，不是做数据源 —— 相隔一周调两次，除了导出时间戳以外输出完全一致，
+所以它既是参照渲染件也是回归测试。要接真实数据的话，复用同一个模板
+`approval-status-export-pdf.html`，把 model 在别处组装好传进去即可。
+
+版面分四段：
+
+    logo 独占一行，下方细线                                  ← 页眉，每页重复（<thead>）
+    报表名，品牌蓝粗体，上下各一条线                          ← 正文，只出现一次
+    筛选条件块（4 列一行）→ 记录数 → 数据表（浅蓝表头带）      ← 正文
+    上层：左 = 导出日期 | 导出时间 + 报表名，右 = 印章          ← 页脚，每页重复（页边距框）
+    下层：页码「1 of 2」居中
+
+筛选条件块用 `<table>` 排（这个渲染器既没有 grid 也没有 flexbox），条件在模型里是**有序 List**
+而不是 Map —— 顺序本身就是版面。Account 单元格是**多行数据**（公司名 / 账号 / 币种），每行一个
+`<p>`：换行是数据，不交给渲染器去猜。这两点也是它没有复用动态表格的原因 —— 一个字符串矩形
+表达不了「带标签的键值对，四个一行」和「这个格子的四行必须待在一起」。
+
+页眉页脚直接复用对账单 chrome（`fragments/report-chrome-pdf.html` 的 `statement*` 片段），
+自己不定义任何 chrome。原件是 UOB 的文件，这里用的是项目自己的 CREED logo 和印章 ——
+交付的是版式，不是别家的标识。

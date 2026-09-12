@@ -12,32 +12,57 @@ Standalone **Spring MVC + Thymeleaf** reporting/visualization app. Plain HTTP `9
 - **Report pages** — `controller/ReportController` (`GET /report`, `GET /export` offline HTML, `GET /export/pdf` PDF), backed by `service/ServerInfoService` (`model/ServerInfo`) and `service/AssetService` (inlines CSS/JS for self-contained export). **i18n on two axes** — see the *Country + language* section below. Bundles live in `classpath:/i18n/<domain>-messages[_locale].properties` (`report-`, `payment-`; `_zh` duplicates `_zh_CN` as bare-`zh` fallback). `config/MessageSourceConfig` defines **one `MessageSource` bean per domain**, composed with `setParentMessageSource` — head bean **must** be named `messageSource` (container/Thymeleaf lookup name, and what `MessageSourceAutoConfiguration` backs off on, which is why `spring.messages.*` is absent from application.yml and would be inert if added). Each domain owns a key prefix so they can't shadow each other; `fallbackToSystemLocale=false` so unknown locales get English (it also picks the font stack). Tests build the chain via `new MessageSourceConfig().messageSource()` rather than re-declaring basenames. The bundles also carry per-locale CSS font stacks: `pdf.font.family` (PDF, picks the one Noto face FS can use) and `html.font.family` (browser stack, locale's Noto face first). Templates use `#{...}` throughout — incl. inside `<style th:inline="css">` for the `@page` margin-box page-counter fragments (`pdf.page.*`, edge spaces kept via ` ` escapes).
 - **PDF running header/footer + logo** — both PDF templates wrap their body in
   `<table class="page-frame">` whose `<thead>`/`<tfoot>` come from `fragments/report-chrome-pdf.html`,
-  repeated per page by `-fs-table-paginate`. That file carries **two chrome sets** and a template
+  repeated per page by `-fs-table-paginate`. That file carries **three chrome sets** and a template
   wears one whole (mixing them duplicates or drops the meta line): `styles / runningHeader(title,
   generatedAt) / runningFooter / section` — the dark bar, `report-export-pdf.html`; and
   `formStyles / formHeader(title) / formFooter(generatedAt) / formSection(index, heading, columns,
   total)` — the printed-bank-form look copied from
   `resources/pdf-template/sample-form-uob-infinity-standard-registration.pdf`,
-  `dynamic-report-export-pdf.html`. The form set prints no `@top-left`, puts the meta line in the
+  `dynamic-report-export-pdf.html`; and `statementStyles / statementHeader / statementTitle(title,
+  total) / statementFooter(title, exportDate, exportTime)` — the transaction-statement look copied
+  from `docs/template.jpg`, `dynamic-report-statement-pdf.html`. The form set prints no `@top-left`, puts the meta line in the
   footnote instead of the header, uses `${logo}` (not the knockout) on white, and its footnote holds
   no image — so it draws one logo per page where the dark bar draws two, which is exactly what
   `PdfRunningChromeTest` asserts per template. Its palette (`#005cb9` title/rule/chip, `#414042`
   footnote, sampled off the sample PDF) is **fixed in `static/css/report-pdf.css`, not delegated to
-  the country sheet** — a form looks the same in every edition. **Of the three mechanisms probed at the time this was written, it is the only one that repeats
-  markup containing an image**, and the other two fail silently: an `@page` margin box draws nothing for `content: url(...)`
-  (margin boxes stay text-only — and are the only place `counter(page)` exists), and a
-  `position: fixed` box repeats per page but is positioned against the page's *content* box and
-  clipped to it, so a negative offset that would put it in the margin renders nothing. A **fourth**
-  mechanism has since been verified to work, image included: `position: running(name)` +
-  `content: element(name)` in an `@page` margin box — the standards-track running element, and the
-  one way to put markup in the page *margin* rather than the content box
-  ([`flying-saucer-css.md`](flying-saucer-css.md) §6). Nothing needs rewriting — `.page-frame` is
-  tested and works — but read "the only mechanism" as "the only one that had been tried". Related trap:
+  the country sheet** — a form looks the same in every edition.
+  **The statement set** is worn by two reports (the dynamic report's `statement` layout and the
+  approval-status listing) and `statementTitle(heading)` prints the title band **only** — what sits
+  under its rule differs per report (a record count, a criteria block), so the body prints it in a
+  `.statement-count`. It is the only **A4 portrait** set and the only one whose header is pure image
+  (the logo, nothing else) — so its running header can only be proved by counting image XObjects,
+  which is what `PdfRunningChromeTest` does; its footer is two storeys, the `<tfoot>` (export
+  date/time + report name + the `${stamp}` seal) and `@bottom-center` (`"N of M"`, the one counter
+  that is *not* wrapped in `pdf.page.prefix/suffix`). Two images per page. Its palette is fixed like
+  the form's, plus `#dbe5f1` for the table's header band — reached with a `table.statement-table`
+  selector declared *after* the base `table.report-table` one, same specificity, later wins, and no
+  country sheet sets a background there. What a country **does** still reach is row density, because
+  the table keeps the shared `.report-table` hook.
+  **The statement footnote is not in the frame.** It is a **running element** — `.statement-footer`
+  carries `position: running(statementfoot)` and `@bottom-center` pulls it in with
+  `content: element(statementfoot)` — so it sits at the foot of every *page*, including a last page
+  the content does not fill; a frame `<tfoot>` only ever reaches the foot of the *content*, and both
+  ways of stretching the frame fail (`height: 100%` ignored; `height: 247mm` turned a three-row
+  report into three pages with the first blank). Both footer storeys live in that one box, because
+  **`counter(page)` resolves inside the running element** and two margin boxes cannot stack
+  vertically. It needs a bottom `@page` margin deep enough for the whole block (34mm — the box
+  clips, it does not grow the margin) and `vertical-align: top` on the box, or the floated seal
+  hangs below the page edge. §6 of [`flying-saucer-css.md`](flying-saucer-css.md) has the probe
+  notes. A browser ignores `position: running()`, so `report-pdf-preview.css` parks the block in the
+  sheet's bottom margin band instead.
+  **Two of the four mechanisms repeat markup containing an image** — the `.page-frame` table (every
+  header, and the dark-bar/form footers) and the running element (the statement footnote) — and the
+  other two fail silently: an `@page` margin box draws nothing for `content: url(...)` (margin boxes
+  stay text-only, and are the only place `counter(page)` exists), and a `position: fixed` box repeats
+  per page but is positioned against the page's *content* box and clipped to it, so a negative offset
+  that would put it in the margin renders nothing. Related trap:
   a `<tfoot>` on the **data** table (rather than the frame) turned a 60-row table into 122 pages
   with the rows dropped. Logos: `creed.report.pdf.logo` (dark, white footer) and
-  `creed.report.pdf.logo-inverse` (knockout, dark header bar; falls back to the plain one), read
-  once by `PdfExportService` and injected as `${logo}`/`${logoInverse}` **data: URIs into every
-  render** — deliberately in the service, not the controllers: it is the single funnel for all PDF
+  `creed.report.pdf.logo-inverse` (knockout, dark header bar; falls back to the plain one) and
+  `creed.report.pdf.stamp` (the statement seal — **no** fallback to the logo: a missing seal prints
+  nothing rather than putting the brand mark where a seal belongs), read
+  once by `PdfExportService` and injected as `${logo}`/`${logoInverse}`/`${stamp}` **data: URIs into
+  every render** — deliberately in the service, not the controllers: it is the single funnel for all PDF
   output, so a template can rely on the variables and a forgotten model attribute cannot ship a
   logo-less header. `setDocumentFromString` gets no base URL, so a data: URI is the *only* image
   source that resolves; PNG/JPEG/GIF only (**no SVG** — Flying Saucer has no SVG support), missing
@@ -47,6 +72,21 @@ Standalone **Spring MVC + Thymeleaf** reporting/visualization app. Plain HTTP `9
 - **PDF export** — `service/PdfExportService`: Thymeleaf → XHTML → PDF via `com.github.librepdf:openpdf-html` (Flying Saucer fork on OpenPDF, classes under `org.openpdf.*`, `ITextRenderer`). **What CSS this renderer actually supports is catalogued in [`flying-saucer-css.md`](flying-saucer-css.md)** — properties, selectors, units, at-rules, and the verified landmines (`@media` destroys the rest of the stylesheet; `linear-gradient` parses and draws nothing; `calc`/`var`/`rem` are dropped). Read it before writing a rule you have not already seen work here. PDF templates are dedicated `*-pdf.html` variants (`report-export-pdf.html`, the CSS-2.1 rebuild of `report-export.html`'s look) with print CSS 2.1 + paged-media (`@page` margin boxes, `counter(page)/counter(pages)`, `-fs-table-paginate`) — Bootstrap view templates can't be reused (no flexbox/JS). Parsing is lenient (bundled neko-htmlunit repairs sloppy HTML) but keep templates well-formed. Fonts: `creed.report.pdf.font-paths` (comma-separated Spring resource patterns, default `classpath:/fonts/*.ttf,*.otf`; registered IDENTITY_H + embedded; `addFont` accepts file paths, `file:`/`jar:` URLs and classpath-resource paths natively, and `BaseFont`'s static cache makes per-render re-registration a cache hit). Bundled Noto faces in `src/main/resources/fonts/`: Noto Sans + Noto Sans SC/TC/Thai, Regular+Bold each. **Font gotchas (cost a debugging session):** CFF-flavored OTFs (official noto-cjk builds) embed but silently drop all CJK glyphs — use static glyf TTFs (SC/TC are cut from Google Fonts variable TTFs via `fonttools varLib.instancer wght=N --update-name-table`; plain variable TTFs fail to register); Flying Saucer doesn't synthesize bold, so without a Bold face bold CJK text (headings/th) silently disappears; no per-glyph fallback across families, so each locale's `pdf.font.family` stack must lead with the face covering its script — **and that face must also carry the Latin** the table is full of (host names, IPs). The bundled `NotoSansThai-*.ttf` are the **Google Fonts** build (Thai *plus* Latin-1), instanced at wght 400/700; the `notofonts.github.io` release is Thai-only (101 glyphs) and would blank every host name in a Thai PDF. Malay and Vietnamese add no script — Noto Sans covers Vietnamese diacritics — so only `_th` overrides `pdf.font.family`.
 - **Excel export (strategy pattern)** — `GET /export/excel?type=<code>` on `ReportController`, package `com.creed.report.export`, POI (`org.apache.poi:poi-ooxml`, version pinned in the module pom — Boot's BOM doesn't manage it). `ReportType` enum (wire codes `server` / `environment`) is the strategy key; `ExcelReportExporter` is the strategy (`reportType()` + `write(Workbook, ExcelExportRequest)`); `ExcelExportService` is the context — Spring injects every exporter bean, it builds the `EnumMap` (duplicate type ⇒ startup failure), owns the `XSSFWorkbook` lifecycle (exporters must not write/close it) and the download filename. **A new report type = one enum constant + one `@Component` exporter**; the `/report` page's Excel dropdown is driven by the `reportTypes` model attribute (`ExcelExportService.supportedTypes()`), so it lists new types automatically. Implementations: `ServerInventoryExcelExporter` (one sheet, same columns as the page/PDF), `EnvironmentExcelExporter` (Summary / Effective Properties / Property Sources / All Properties, the last flagging which occurrence of a shadowed key won). All request query params are passed through in `ExcelExportRequest.parameters` — that is how the environment report picks up `spring.profiles.active` / `spring.config.location` / `spring.config.additional-location` from the URL (defaults from `EnvironmentInspectionService`). Shared helpers: `ExcelStyles` (workbook-scoped cell styles — POI caps a workbook at 64k styles, so never per cell) and `ExcelSheetBuilder` (fluent title/caption/header/row + `finish()` doing merge, freeze pane, autofilter and capped autosize; sheet names go through `WorkbookUtil.createSafeSheetName`, 31-char limit). Localized like the rest: `report.type.*` and `excel.*` keys in the report bundle. Unknown `type` ⇒ `UnknownReportTypeException` (`@ResponseStatus(BAD_REQUEST)`), not a 500.
 - **Dynamic table report** — `controller/DynamicReportController` (`/dynamic`, `/dynamic/export`, `/dynamic/export/pdf`, `/dynamic/preview/pdf` — the PDF template rendered to a browser tab, see *Previewing a PDF template*), package `com.creed.report.dynamic`. The table's *shape* comes from the request: `headers` is split on commas into column **keys**, `data` is a JSON array of rows. Details in the *Caller-defined tables* section below.
+- **Approval-status listing** — `controller/ApprovalStatusReportController`
+  (`/approval-status/export/pdf`, `/approval-status/preview/pdf`), template
+  `approval-status-export-pdf.html`, model `model/ApprovalStatusReport`. A PDF facsimile of
+  `docs/template.jpg`. **Input-less by design**: the payload is a JSON literal in the controller
+  (`SAMPLE_JSON`), parsed by Jackson into the record — the endpoint pins a *layout* down, so two
+  calls a week apart differ only in the export timestamp, which is what makes it usable as a
+  reference render and a regression test. Thirteen rows on purpose: the document has to be two pages
+  for the repeated chrome and the page counter to be observable at all. It wears the statement
+  chrome whole and adds exactly two things of its own — the **criteria block** (a `<table>` of
+  labelled pairs four to a row, because this renderer has neither grid nor flexbox; ordered list,
+  not a map, since the order *is* the layout) and a table whose **account cell is a list of lines**
+  (one `<p>` each: the breaks are data, not the renderer's guess). Both are why it is not a
+  `DynamicTable` with different data — a rectangle of strings can express neither. Rendered under
+  Creed's own logo and seal, never the sample bank's. `ApprovalStatusPdfTest` renders the
+  controller's own payload, not a copy.
 - **Environment Inspector** — `controller/EnvironmentInspectionController` (REST: `GET /api/environment`, `/api/environment/rendered`) + `controller/EnvironmentViewController` (Thymeleaf: `GET /environment`, `/environment/rendered`), backed by `service/EnvironmentInspectionService`. Models `EnvironmentSnapshot`, `PropertySourceView`, `PropertyEntry`, `RenderedEnvironment`. **For anything in this feature, use the [[env-inspector]] skill** — it has the full requirements/design (replays Spring Boot's config-loading pipeline standalone, renders effective properties to YAML/.properties).
 
 ### Previewing a PDF template
@@ -85,17 +125,17 @@ refresh — devtools live-editing does not. `PdfPreviewHtmlTest` pins the guaran
 region and the preview equals the export's markup byte for byte; a PDF render contains no `<link>`,
 no `--preview-*`.
 
-`PdfSampleDumpTest` is the iteration loop — it renders `report-export-pdf` **and**
-`dynamic-report-export-pdf` for every country × language through the real engine, bundles and fonts,
-without starting Tomcat:
+`PdfSampleDumpTest` is the iteration loop — it renders `report-export-pdf` **and every**
+`DynamicReportTemplate` for every country × language through the real engine, bundles and fonts,
+without starting Tomcat (files land as `dynamic-<layout>-<country>-<locale>.pdf`):
 
 ```bash
-mvn -pl creed-report test -Dtest=PdfSampleDumpTest -Dpdf.sample.dir=/tmp/pdf && open /tmp/pdf
+mvn -pl creed-report test -Dtest=PdfSampleDumpTest -Dpdf.sample.dir="$PWD/tmp/pdf" && open tmp/pdf
 ```
 
-Skipped unless `-Dpdf.sample.dir` is set. Its `generatedAt`/`total` go through `CountryFormatter`
+Skipped unless `-Dpdf.sample.dir` is set; point it at the repo's git-ignored `tmp/`, not `/tmp`. Its `generatedAt`/`total` go through `CountryFormatter`
 like the endpoints', so a sample is a faithful preview rather than a lookalike. To eyeball one
-without a viewer: `sips -s format png -Z 1600 /tmp/pdf/x.pdf --out /tmp/x.png`.
+without a viewer: `sips -s format png -Z 1600 tmp/pdf/x.pdf --out tmp/x.png`.
 
 ### Provisioning the PDF fonts
 
@@ -182,6 +222,21 @@ A report whose columns and rows the caller supplies, sharing every piece of the 
 - **Every endpoint answers GET and POST**, and `/export/excel` was widened to POST for the same reason: `data` is caller-sized and outgrows a query string. The page's three export buttons are therefore forms re-posting the definition (`fragments/dynamic-table :: definitionFields`), not links — cookies still carry the country and language, but the table exists only in that form.
 - **`ReportType.linkable()`** is false for `DYNAMIC`. The report page's Excel dropdown is model-driven off `ExcelExportService.linkableTypes()`; without the flag it would offer a `?type=dynamic` link that can only answer 400.
 - **Bad input is 400, never 500** — `InvalidTableDefinitionException` (`@ResponseStatus(BAD_REQUEST)`), like `UnknownReportTypeException`. `creed.report.dynamic.max-columns` / `max-rows` cap the payload, because POI and openpdf-html lay the whole table out in memory.
+- **A layout is one enum constant + one `*-pdf.html` + one chrome set.** `DynamicReportTemplate`
+  maps a wire code to a template name and a `report.template.<code>` label key; the controller never
+  branches, it asks for `pdfTemplate()`, and the page's picker iterates `values()`, so a new layout
+  appears in the dropdown by existing. The code lives on `DynamicTableRequest` (4th component, with
+  a 3-arg convenience constructor so older call sites still compile) **because the page's export
+  forms re-post one block of hidden fields** — a layout chosen beside the definition rather than in
+  it would be dropped by every export button. Unknown code ⇒ `InvalidTableDefinitionException`
+  (400), never a fallback: silently printing different paper than asked for is worse than refusing.
+  **Only the PDF varies** — the offline HTML export is the live page's twin and has no pages to lay
+  out, so it ignores `template=` rather than growing a second look nothing would distinguish.
+- **`CountryFormatter.date()` / `.time()`** exist for the statement footnote, which prints the two
+  halves either side of a divider. They are `FormatStyle.MEDIUM` **localized** formats, not a split
+  of `CountryProfile.datePattern()` — splitting a pattern string is a guess — and they keep the
+  country's calendar, so Thailand's footnote dates in the Buddhist era too. MEDIUM not SHORT because
+  SHORT is `9/1/26` in English.
 - The Excel side needed **no new plumbing**: `headers`/`data`/`title` ride in on `ExcelExportRequest.parameters`, which is exactly what that pass-through map is for, and `DynamicTableRequest.from(...)` makes the controller and the exporter read the same names.
 
 ## Conventions

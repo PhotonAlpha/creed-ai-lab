@@ -34,6 +34,9 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
   resolves to nothing. Config-server and gateway `cloud` ship certs on the classpath and don't need it.
 - mTLS material: `.support/scripts/CA-Generation.sh` → `.support/scripts/pki/`. A new HTTPS service
   must be added to that script's `SERVICES` array.
+- **Scratch files go in `tmp/` at the repo root**, never `/tmp` — test scripts, curl output, heap/log
+  dumps, generated exports. The directory is git-ignored (`tmp/.gitignore`) and inside the working
+  tree, so writing there needs no approval prompt.
 - Monitoring: `docker compose -f monitoring/docker-compose.yml up -d` (Grafana 3000, Prometheus 9090,
   collector 4318/8889, Tempo 3200, Loki 3100).
 

@@ -50,6 +50,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code @top-left} at all, so the brand IS proof of the running header there; the meta line moved
  * into the footnote and is asserted as footer text. Its footnote is text only, like the sample's,
  * so a page carries one image, not two.</li>
+ * <li>{@code dynamic-report-statement-pdf} (statement chrome, modelled on docs/template.jpg) has a
+ * header of <b>pure image</b> — the logo and nothing else — so there is no header text to assert;
+ * what proves that header repeats is the image count, two per page, the second image being the seal
+ * in the footnote. That footnote is <b>not</b> in the frame: it is a running element drawn in the
+ * {@code @bottom-center} margin box, so these assertions are also what proves that mechanism
+ * repeats — text, seal and the "1 of 3" counter it carries, on every page.</li>
  * </ul>
  */
 class PdfRunningChromeTest {
@@ -72,7 +78,8 @@ class PdfRunningChromeTest {
         engine.setTemplateEngineMessageSource(new MessageSourceConfig().messageSource());
         service = new PdfExportService(engine, new PathMatchingResourcePatternResolver(),
                 "classpath:/fonts/*.ttf", "classpath:/static/img/creed-logo.png",
-                "classpath:/static/img/creed-logo-inverse.png");
+                "classpath:/static/img/creed-logo-inverse.png",
+                "classpath:/static/img/creed-stamp.png");
     }
 
     @Test
@@ -88,7 +95,8 @@ class PdfRunningChromeTest {
     void aMissingLogoDegradesToNoImageRatherThanFailing() {
         PdfExportService missing = new PdfExportService(new SpringTemplateEngine(),
                 new PathMatchingResourcePatternResolver(), "",
-                "classpath:/static/img/does-not-exist.png", "classpath:/static/img/nor-does-this.png");
+                "classpath:/static/img/does-not-exist.png", "classpath:/static/img/nor-does-this.png",
+                "classpath:/static/img/no-stamp.png");
         assertThat(missing.logo()).isEmpty();
         assertThat(missing.logoInverse()).isEmpty();
     }
@@ -98,7 +106,8 @@ class PdfRunningChromeTest {
     void anAbsentInverseLogoFallsBackToThePlainOne() {
         PdfExportService oneLogo = new PdfExportService(new SpringTemplateEngine(),
                 new PathMatchingResourcePatternResolver(), "",
-                "classpath:/static/img/creed-logo.png", "classpath:/static/img/does-not-exist.png");
+                "classpath:/static/img/creed-logo.png", "classpath:/static/img/does-not-exist.png",
+                "classpath:/static/img/no-stamp.png");
         assertThat(oneLogo.logoInverse()).isEqualTo(oneLogo.logo()).isNotEmpty();
     }
 
@@ -110,7 +119,7 @@ class PdfRunningChromeTest {
     void anSvgLogoIsRejectedBecauseTheRendererCannotDrawOne() {
         PdfExportService svg = new PdfExportService(new SpringTemplateEngine(),
                 new PathMatchingResourcePatternResolver(), "",
-                "classpath:/static/css/report.css", "");
+                "classpath:/static/css/report.css", "", "");
         assertThat(svg.logo()).isEmpty();
     }
 
@@ -124,6 +133,17 @@ class PdfRunningChromeTest {
         assertRunningChrome(dynamicPdf(160), "dynamic-report-export-pdf",
                 List.of("SERVER INVENTORY REPORT"),
                 List.of(FOOTER_NOTE, GENERATED_AT, "PDF snapshot"), 1);
+    }
+
+    @Test
+    void theStatementReportRepeatsHeaderFooterAndSealOnEveryPage() throws IOException {
+        // Statement chrome: no header TEXT at all, so the header's proof is the image count --
+        // two per page means both the <thead> logo and the <tfoot> seal made it onto every one.
+        // "Date of Export" is printed only by the running footnote.
+        byte[] pdf = statementPdf(160);
+        assertRunningChrome(pdf, "dynamic-report-statement-pdf", List.of(),
+                List.of("Date of Export", "Time of Export", "Ad hoc"), 2);
+        assertPageCounter(pdf);
     }
 
     @Test
@@ -142,13 +162,38 @@ class PdfRunningChromeTest {
             PdfTextExtractor extractor = new PdfTextExtractor(reader);
             for (int page = 1; page <= reader.getNumberOfPages(); page++) {
                 String text = extractor.getTextFromPage(page);
-                assertThat(text).as("%s running header on page %d", template, page)
-                        .contains(header);
+                // An empty list means the layout's header carries no text at all (the statement
+                // chrome's is a bare logo); its repetition is proved by the image count below.
+                if (!header.isEmpty()) {
+                    assertThat(text).as("%s running header on page %d", template, page)
+                            .contains(header);
+                }
                 assertThat(text).as("%s running footer on page %d", template, page)
                         .contains(footer);
                 assertThat(imagesOn(reader, page))
                         .as("%s running logo(s) on page %d", template, page)
                         .isGreaterThanOrEqualTo(logos);
+            }
+        }
+        finally {
+            reader.close();
+        }
+    }
+
+    /**
+     * The statement chrome's second footer storey: {@code @bottom-center} prints "<page> of
+     * <pages>" — the sample's wording, and the reason that chrome uses only {@code pdf.page.middle}
+     * and none of the prefix/suffix keys the other two wrap their counter in.
+     */
+    private static void assertPageCounter(byte[] pdf) throws IOException {
+        PdfReader reader = new PdfReader(pdf);
+        try {
+            PdfTextExtractor extractor = new PdfTextExtractor(reader);
+            int pages = reader.getNumberOfPages();
+            for (int page = 1; page <= pages; page++) {
+                assertThat(extractor.getTextFromPage(page))
+                        .as("statement page counter on page %d", page)
+                        .contains(page + " of " + pages);
             }
         }
         finally {
@@ -170,6 +215,31 @@ class PdfRunningChromeTest {
     }
 
     private byte[] dynamicPdf(int rows) {
+        CountryProfile profile = CountryProfile.of(ReportCountry.GLOBAL, Locale.ENGLISH);
+        DynamicTable table = table(rows, profile);
+        return service.renderTemplate("dynamic-report-export-pdf", Map.of(
+                "profile", profile,
+                "pdfCss", countryStyles.pdf(profile.country()),
+                "table", table,
+                "total", String.valueOf(table.size()),
+                "generatedAt", GENERATED_AT), profile.locale());
+    }
+
+    /** The same table on statement paper: the second layout of the same endpoint. */
+    private byte[] statementPdf(int rows) {
+        CountryProfile profile = CountryProfile.of(ReportCountry.GLOBAL, Locale.ENGLISH);
+        DynamicTable table = table(rows, profile);
+        return service.renderTemplate("dynamic-report-statement-pdf", Map.of(
+                "profile", profile,
+                "pdfCss", countryStyles.pdf(profile.country()),
+                "table", table,
+                "total", String.valueOf(table.size()),
+                "generatedAt", GENERATED_AT,
+                "exportDate", "02/09/2026",
+                "exportTime", "12:00:00"), profile.locale());
+    }
+
+    private static DynamicTable table(int rows, CountryProfile profile) {
         DynamicTableService tables = new DynamicTableService(new ObjectMapper(),
                 new MessageSourceConfig().messageSource(), new DynamicTableProperties());
         StringBuilder data = new StringBuilder("[");
@@ -179,16 +249,9 @@ class PdfRunningChromeTest {
                     .append("\",\"ip\":\"10.0.0.").append(i % 250)
                     .append("\",\"uptimeDays\":").append(i).append("}");
         }
-        CountryProfile profile = CountryProfile.of(ReportCountry.GLOBAL, Locale.ENGLISH);
-        DynamicTable table = tables.build(
+        return tables.build(
                 new DynamicTableRequest("Ad hoc", "host,ip,uptimeDays", data.append("]").toString()),
                 profile, profile.locale());
-        return service.renderTemplate("dynamic-report-export-pdf", Map.of(
-                "profile", profile,
-                "pdfCss", countryStyles.pdf(profile.country()),
-                "table", table,
-                "total", String.valueOf(table.size()),
-                "generatedAt", GENERATED_AT), profile.locale());
     }
 
     private byte[] serverPdf(int rows) {

@@ -56,7 +56,8 @@ class PdfExportServiceTest {
         service = new PdfExportService(engine, new PathMatchingResourcePatternResolver(),
                 "classpath:/fonts/*.ttf,classpath:/fonts/*.otf",
                 "classpath:/static/img/creed-logo.png",
-                "classpath:/static/img/creed-logo-inverse.png");
+                "classpath:/static/img/creed-logo-inverse.png",
+                "classpath:/static/img/creed-stamp.png");
     }
 
     @Test

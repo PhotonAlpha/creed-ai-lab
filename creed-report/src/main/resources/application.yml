@@ -52,6 +52,10 @@ creed:
       # variant for the dark header bar and falls back to `logo` when absent.
       logo: "${CREED_REPORT_PDF_LOGO:classpath:/static/img/creed-logo.png}"
       logo-inverse: "${CREED_REPORT_PDF_LOGO_INVERSE:classpath:/static/img/creed-logo-inverse.png}"
+      # Seal stamped into the statement layout's running footnote (template=statement). Same rules
+      # as the logos -- PNG/JPEG/GIF, inlined as a data: URI -- but NO fallback to the logo: a
+      # missing seal prints nothing rather than putting the brand mark where a seal belongs.
+      stamp: "${CREED_REPORT_PDF_STAMP:classpath:/static/img/creed-stamp.png}"
     # Country axis: ?country=global|th|my|vn, remembered in the creed-report-country cookie and
     # folded into the request locale's region subtag by CountryLocaleResolver. The per-country
     # presentation defaults live in the ReportCountry enum; `profiles` below overrides individual

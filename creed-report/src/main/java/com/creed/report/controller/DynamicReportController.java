@@ -1,5 +1,6 @@
 package com.creed.report.controller;
 
+import com.creed.report.dynamic.DynamicReportTemplate;
 import com.creed.report.dynamic.DynamicTable;
 import com.creed.report.dynamic.DynamicTableRequest;
 import com.creed.report.dynamic.DynamicTableService;
@@ -38,18 +39,22 @@ import java.util.Map;
  * which is also why the page's export buttons are forms that re-post the current definition rather
  * than links that would have to re-encode it.
  *
+ * <p><b>Multiple layouts.</b> {@code template=} picks the paper the PDF is printed on — see
+ * {@link DynamicReportTemplate}. It rides in with the rest of the definition, so the page's export
+ * buttons re-post it like everything else, and an unknown code is 400 rather than a silent
+ * fallback. The offline HTML export deliberately ignores it: it is the live page's twin and has no
+ * pages to lay out.
+ *
  * <p><b>Debugging the PDF.</b> {@code /dynamic/preview/pdf} serves the PDF template's own XHTML
  * as {@code text/html}, so the paged-media markup can be opened in devtools instead of guessed at
- * from the finished bytes. Same endpoint parameters, same model, same string.
+ * from the finished bytes. Same endpoint parameters — {@code template=} included — same model,
+ * same string.
  *
  * <p>Excel is not here: it goes through the existing {@code /export/excel?type=dynamic} strategy,
  * which reads the same three parameters off the request.
  */
 @Controller
 public class DynamicReportController {
-
-    /** Rendered to bytes by /dynamic/export/pdf and to a browser tab by /dynamic/preview/pdf. */
-    private static final String PDF_TEMPLATE = "dynamic-report-export-pdf";
 
     /** Context-path-relative; the preview resolves it against the request. */
     private static final String PREVIEW_STYLESHEET = "/css/report-pdf-preview.css";
@@ -88,6 +93,11 @@ public class DynamicReportController {
         model.addAttribute("countries", countryCatalog.countries());
         model.addAttribute("generatedAt", CountryFormatter.timestamp(LocalDateTime.now(), profile));
         model.addAttribute("definition", request);
+        // Model-driven like the country switcher and the Excel dropdown: a new layout shows up in
+        // the picker by existing, with no template edit. Resolving here also means a bad
+        // template= is refused on the page, where the caller can see it, not only on the download.
+        model.addAttribute("templates", DynamicReportTemplate.values());
+        model.addAttribute("template", request.reportTemplate());
 
         if (!request.isBlank()) {
             DynamicTable table = tableService.build(request, profile, locale);
@@ -120,14 +130,15 @@ public class DynamicReportController {
                 filename(profile, now, "html"));
     }
 
-    /** PDF of the same table, through the paged-media template. */
+    /** PDF of the same table, through the paged-media template {@code template=} asked for. */
     @RequestMapping(value = "/dynamic/export/pdf", method = { RequestMethod.GET, RequestMethod.POST },
             produces = MediaType.APPLICATION_PDF_VALUE)
     public ResponseEntity<byte[]> exportPdf(@RequestParam Map<String, String> parameters, Locale locale) {
         LocalDateTime now = LocalDateTime.now();
         CountryProfile profile = countryCatalog.profileFor(locale);
+        DynamicReportTemplate template = DynamicReportTemplate.from(parameters);
 
-        byte[] body = pdfExportService.renderTemplate(PDF_TEMPLATE,
+        byte[] body = pdfExportService.renderTemplate(template.pdfTemplate(),
                 pdfModel(parameters, profile, locale, now), locale);
         return download(body, MediaType.APPLICATION_PDF, filename(profile, now, "pdf"));
     }
@@ -166,7 +177,8 @@ public class DynamicReportController {
         // Only the preview sets this; its presence is what switches the shim on in the template.
         variables.put("previewCss", request.getContextPath() + PREVIEW_STYLESHEET);
 
-        String html = pdfExportService.renderTemplateHtml(PDF_TEMPLATE, variables, locale);
+        String html = pdfExportService.renderTemplateHtml(
+                DynamicReportTemplate.from(parameters).pdfTemplate(), variables, locale);
         // Inline, not an attachment: the point is to look at it in a tab.
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("text/html; charset=UTF-8"))
@@ -187,6 +199,11 @@ public class DynamicReportController {
         variables.put("table", table);
         variables.put("total", CountryFormatter.number(table.size(), profile));
         variables.put("generatedAt", CountryFormatter.timestamp(now, profile));
+        // The statement chrome prints the two halves apart ("Date of Export: ... | Time of
+        // Export: ..."); built here, not in that template, so both layouts date a report from the
+        // same instant and neither can format it its own way.
+        variables.put("exportDate", CountryFormatter.date(now, profile));
+        variables.put("exportTime", CountryFormatter.time(now, profile));
         return variables;
     }
 

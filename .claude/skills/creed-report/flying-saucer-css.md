@@ -36,7 +36,8 @@ Recipe for re-probing at the bottom.
 | `float`, `position: relative/absolute/fixed` | ✅ probed | — |
 | `:nth-child()`, `[attr^="x"]`, `:first-child` | ✅ probed | — |
 | repeated header/footer with an image | ✅ two ways | `.page-frame` + `-fs-table-paginate`, or `position: running()` (§6) |
-| page counter | ✅ `counter(page)` in an `@page` margin box | — |
+| footer pinned to the page bottom on a short page | ✅ only via `position: running()` (§6) | a frame `<tfoot>` reaches the content's foot, not the page's |
+| page counter | ✅ `counter(page)` in an `@page` margin box — **and inside a running element drawn in one** (§6) | — |
 | mixed page orientation in one PDF | ✅ probed | named `@page` + `page:` (§5) |
 
 ---
@@ -160,15 +161,31 @@ Four mechanisms, ranked by what this project learned:
 1. **`.page-frame` table + `-fs-table-paginate: paginate`** — the `<thead>`/`<tfoot>` repeat on every
    page and may contain arbitrary markup, **images included**. This is what both PDF templates use.
    Trap: putting a `<tfoot>` on the *data* table instead once turned a 60-row table into 122 pages.
-2. **`position: running(name)` + `content: element(name)` in a margin box** — ✅ **probed, and it
-   works, image and all**: a `<div id="rh" style="position: running(rh)">` containing an `<img
-   src="data:…">`, pulled in by `@page { @top-center { content: element(rh) } }`, rendered the logo
-   inside the top page margin on every page. This is the standards-track mechanism and the one thing
-   that can put markup in the *margin* rather than the content box. The existing `.page-frame`
-   approach is not wrong — it predates this finding and is well tested (`PdfRunningChromeTest`) — but
-   `PdfExportService`'s javadoc, `HANDOFF.md` and `SKILL.md` all say the table is *the only*
-   mechanism for a repeated image. Read that as "the only one of the three we probed": margin-box
-   `content: url()` and `position: fixed` were, running elements were not.
+2. **`position: running(name)` + `content: element(name)` in a margin box** — ✅ works, image and
+   all, and is now **in production**: the statement chrome's footnote
+   (`report-chrome-pdf :: statementFooter`, `.statement-footer`) is a running element drawn by
+   `@page { @bottom-center { content: element(statementfoot) } }`, seal included.
+
+   It is the only mechanism that reaches the page *margin* rather than the content box, which makes
+   it the only way to **pin a footer to the bottom of a page the content does not fill** — a
+   `.page-frame` `<tfoot>` only ever reaches the foot of the *content*, and both ways of stretching
+   that frame fail: `height: 100%` is ignored (no resolvable containing block in paged media) and an
+   explicit `height: 247mm` turned a three-row report into three pages with the first one blank.
+
+   Three things it needs, all found by rendering:
+   - **`counter(page)` resolves INSIDE the running element.** The element is laid out in a margin
+     box, and that is where those counters live — so a `:after { content: counter(page) … }` on a
+     child works, which is how that one footnote carries both its text and its own centred page
+     counter. Two margin boxes cannot stack vertically, so without this the "footnote above the page
+     number" layout would not be expressible at all.
+   - **A bottom `@page` margin deep enough for the whole block** (34mm there: two text lines beside
+     a 12mm seal, then the counter). The margin box does not grow the margin — it clips.
+   - **`vertical-align: top` on the margin box.** Bottom-aligned, a float taller than the text
+     beside it (the seal) hung below the block's last line and was cut off by the page edge.
+
+   A browser understands none of this: `position: running()` is an invalid value, so the block
+   renders wherever it sits in the markup. `report-pdf-preview.css` parks `.statement-footer` in the
+   sheet's bottom margin band to compensate.
 3. **`position: fixed`** — ✅ repeats on every page, but it is positioned against the page's
    **content** box and clipped to it, so a negative offset meant to reach the margin renders nothing.
 4. **`@page { @top-x { content: url(…) } }`** — ❌ silently draws nothing. Margin boxes are text-only.

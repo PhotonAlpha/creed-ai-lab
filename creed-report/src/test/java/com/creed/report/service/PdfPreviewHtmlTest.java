@@ -34,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PdfPreviewHtmlTest {
 
     private static final String TEMPLATE = "dynamic-report-export-pdf";
+    private static final String STATEMENT_TEMPLATE = "dynamic-report-statement-pdf";
     private static final String PREVIEW_CSS = "/report/css/report-pdf-preview.css";
     private static final String HEADERS = "host,ip,app,uptimeDays";
     private static final String DATA = """
@@ -58,7 +59,8 @@ class PdfPreviewHtmlTest {
         service = new PdfExportService(engine, new PathMatchingResourcePatternResolver(),
                 "classpath:/fonts/*.ttf,classpath:/fonts/*.otf",
                 "classpath:/static/img/creed-logo.png",
-                "classpath:/static/img/creed-logo-inverse.png");
+                "classpath:/static/img/creed-logo-inverse.png",
+                "classpath:/static/img/creed-stamp.png");
     }
 
     @Test
@@ -99,6 +101,35 @@ class PdfPreviewHtmlTest {
     }
 
     @Test
+    void theStatementPreviewMirrorsItsOwnPageRuleAndNotTheFormChromes() {
+        // Each chrome set owns its page geometry, so the preview numbers must follow the template
+        // being previewed -- a portrait layout measured against the landscape sheet would put every
+        // column and every wrap point in the wrong place, which is the one thing this shim exists
+        // to get right.
+        String preview = render(STATEMENT_TEMPLATE, ReportCountry.GLOBAL, Locale.ENGLISH, true);
+
+        assertThat(preview).contains("size: A4;").contains("margin: 14mm 14mm 34mm 14mm;");
+        assertThat(preview).contains("--preview-page-width: 210mm;")
+                .contains("--preview-page-height: 297mm;")
+                .contains("--preview-page-margin: 14mm 14mm 34mm 14mm;")
+                .contains("--preview-content-height: 249mm;")
+                .doesNotContain("--preview-page-width: 297mm;");
+        // The shim parks the running footer in the bottom margin band, which it can only do if the
+        // chrome hands it that band's size along with the page box.
+        assertThat(preview).contains("--preview-margin-bottom: 34mm;")
+                .contains("--preview-margin-side: 14mm;");
+    }
+
+    @Test
+    void theStatementLayoutPrintsItsSealAndNoPreviewMarkup() {
+        String export = render(STATEMENT_TEMPLATE, ReportCountry.GLOBAL, Locale.ENGLISH, false);
+
+        // The seal comes from the same render funnel the logos do -- no controller passes it.
+        assertThat(export).contains("statement-stamp").contains("data:image/png;base64,");
+        assertThat(export).doesNotContain("<link rel=").doesNotContain("--preview-page-width");
+    }
+
+    @Test
     void thePreviewKeepsTheEmbeddedLogoAndTheLocalesFontStack() {
         // Both come from the render funnel, not the controller: a preview missing either would
         // still look plausible and measure differently from the PDF.
@@ -131,6 +162,10 @@ class PdfPreviewHtmlTest {
     }
 
     private String render(ReportCountry country, Locale language, boolean preview) {
+        return render(TEMPLATE, country, language, preview);
+    }
+
+    private String render(String template, ReportCountry country, Locale language, boolean preview) {
         CountryProfile profile = CountryProfile.of(country, language);
         DynamicTable table = tableService.build(
                 new DynamicTableRequest("Preview", HEADERS, DATA), profile, language);
@@ -141,9 +176,11 @@ class PdfPreviewHtmlTest {
         variables.put("table", table);
         variables.put("total", "1");
         variables.put("generatedAt", "2026-09-10 12:00:00");
+        variables.put("exportDate", "10/09/2026");
+        variables.put("exportTime", "12:00:00");
         if (preview) {
             variables.put("previewCss", PREVIEW_CSS);
         }
-        return service.renderTemplateHtml(TEMPLATE, variables, profile.locale());
+        return service.renderTemplateHtml(template, variables, profile.locale());
     }
 }

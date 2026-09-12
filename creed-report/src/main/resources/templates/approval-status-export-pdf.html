@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<!-- The APPROVAL-STATUS LISTING -- a reproduction of the printed document in docs/template.jpg,
+     served by ApprovalStatusReportController (/approval-status/export/pdf). Its data is the JSON
+     literal in that controller, parsed into ${report}; this file takes no caller input at all.
+     Model: profile / pdfCss / report / exportDate / exportTime.
+
+         +--------------------------------------------------+
+         |  [logo]                                          |   <- statementHeader  (every page)
+         |  ------------------------------------------------|
+         |  Approval Status All List                        |   <- statementTitle   (body, once)
+         |  ------------------------------------------------|
+         |  Transaction/Deposit Type   Bank Reference   ...  |   <- the criteria block, 4 per row
+         |  --                         --                    |
+         |                                                  |
+         |  13 Record(s) (Note: This is a filtered table.)   |
+         |  +--------------+----------+-----------+-------+  |
+         |  | header band (light blue)                    |  |
+         |  | Bulk MEPS | BK26.. | VASA COMPANY 3 ... | Processing
+         |  +--------------+----------+-----------+-------+  |
+         |                                                  |
+         |  Date of Export: ... | Time of Export: ...  (())  |   <- statementFooter  (page margin,
+         |  Approval Status All List                  seal   |      every page)
+         |                     1 of 2                        |   <- both storeys live in the one
+         +--------------------------------------------------+      @bottom-center margin box
+         +--------------------------------------------------+
+
+     What this file adds over dynamic-report-statement-pdf.html, which wears the same chrome: the
+     CRITERIA BLOCK and a fixed four-column table whose account cell is several lines. Both are the
+     reason this is a template of its own rather than a dynamic table with different data -- a
+     rectangle of strings cannot express "labelled pairs, four to a row" or "this cell is four lines
+     that belong together".
+
+     Debugging: GET /approval-status/preview/pdf renders this file to the browser instead of to
+     bytes -- same string, same model, devtools available -- and Cmd+P there paginates it for real.
+
+     CSS 2.1 only (openpdf-html): the criteria block is a table, not a grid, and the column widths
+     are percentages on the header cells, because this renderer has neither grid nor calc(). -->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title th:text="${report.title}">Approval Status All List</title>
+    <th:block th:replace="~{fragments/report-chrome-pdf :: statementStyles}"></th:block>
+<!-- The static CSS 2.1 rules, inlined by CountryStyles as one string (openpdf-html renders from a
+     string, so there is no base URL for a <link>): the shared static/css/report-pdf.css followed by
+     this country's static/css/country/<code>/style-pdf.css. The .statement-* rules this document
+     lives on are fixed brand chrome and are not among what a country overrides. -->
+<style th:utext="${pdfCss}">/* base + country pdf css inlined here */</style>
+<!-- Browser preview only: /approval-status/preview/pdf serves this very markup as text/html and
+     passes ${previewCss}. A PDF render passes nothing, the th:if is false and Flying Saucer sees
+     the file unchanged. The th:if sits on an OUTER block on purpose -- th:replace on the same tag
+     outranks th:if and would include the fragment (and its ${previewCss}-less <link>) on the PDF
+     path too. -->
+<th:block th:if="${previewCss != null}">
+    <th:block th:replace="~{fragments/report-chrome-pdf :: statementPreview(${previewCss})}"></th:block>
+</th:block>
+</head>
+<body th:class="${profile.styleClass()}">
+
+<!-- The .page-frame wrapper is not decoration: its <thead>/<tfoot> are what repeat the header
+     (logo included) on every page, via -fs-table-paginate. The
+     document body goes in the single <tbody> cell. tfoot before tbody is deliberate -- it is the
+     order the renderer was verified with. -->
+<!-- The running footer, declared OUTSIDE the frame: `position: running(statementfoot)` takes it out
+     of the flow entirely and the @page's @bottom-center box draws it, so it sits at the foot of
+     every PAGE rather than the foot of the content. It is emitted here, before the frame, purely
+     because a running element has to be somewhere in the document; nothing renders at this point. -->
+<div th:replace="~{fragments/report-chrome-pdf :: statementFooter(${report.title}, ${exportDate}, ${exportTime})}"></div>
+
+<table class="page-frame">
+    <thead th:replace="~{fragments/report-chrome-pdf :: statementHeader}"></thead>
+    <tbody>
+    <tr><td>
+
+    <div th:replace="~{fragments/report-chrome-pdf :: statementTitle(${report.title})}"></div>
+
+    <!-- The filter block. Four criteria to a row, laid out by walking the list in steps of four --
+         the sample's own arrangement, and the reason the model keeps the criteria ORDERED rather
+         than in a map. A short last row simply ends early; the cells are percentage-width, so the
+         remaining ones keep their columns instead of stretching.
+
+         An unset filter prints "--" rather than disappearing: the reader has to be able to tell a
+         filter that was not applied from one that was never offered. That is the payload's job --
+         the value arrives as "--" -- so nothing here has to decide it. -->
+    <table class="statement-criteria">
+        <tr th:each="row : ${#numbers.sequence(0, report.criteria.size() - 1, 4)}">
+            <td th:each="column : ${#numbers.sequence(0, 3)}"
+                th:with="index=${row + column}">
+                <th:block th:if="${index < report.criteria.size()}">
+                    <p class="criteria-label" th:text="${report.criteria[__${index}__].label()}">Bank Reference</p>
+                    <p class="criteria-value" th:text="${report.criteria[__${index}__].value()}">--</p>
+                </th:block>
+            </td>
+        </tr>
+    </table>
+
+    <!-- Under the criteria, where the sample writes "13 Record(s) (Note: ...)". Part of the
+         payload, not computed from rows.size(): the sample's own count describes the filtered set,
+         and a document that silently renumbered it would be saying something different. -->
+    <p class="statement-count" th:text="${report.note}">13 Record(s)</p>
+
+    <table class="report-table statement-table">
+        <thead>
+        <tr>
+            <th style="width: 26%">Transaction / Deposit Type</th>
+            <th style="width: 22%">Bank Reference</th>
+            <th style="width: 34%">Account</th>
+            <th style="width: 18%">Status</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="row : ${report.rows}">
+            <td th:text="${row.type()}">Bulk MEPS</td>
+            <td th:text="${row.bankReference()}">BK2600000001</td>
+            <!-- One <p> per line rather than <br>: the cell's lines are data (name, number,
+                 currency), and paragraphs keep their leading under the country sheets that change
+                 row padding for Thai. -->
+            <td class="account-cell">
+                <p class="account-line" th:each="line : ${row.account()}"
+                   th:text="${line}">VASA COMPANY 3 WITH ACCOUNT</p>
+            </td>
+            <td class="status-cell" th:text="${row.status()}">Processing</td>
+        </tr>
+        </tbody>
+    </table>
+
+    </td></tr>
+    </tbody>
+</table>
+
+</body>
+</html>

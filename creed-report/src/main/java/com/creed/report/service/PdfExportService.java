@@ -59,24 +59,35 @@ import java.util.Map;
  * <p><b>Images.</b> {@code setDocumentFromString} is called with no base URL, so a relative or
  * absolute-path {@code src} resolves to nothing — every image has to arrive as a {@code data:} URI.
  * This service therefore reads {@code creed.report.pdf.logo} (and the knockout variant
- * {@code creed.report.pdf.logo-inverse}, for the dark header bar) once, base64-encodes them and
- * injects {@code ${logo}} / {@code ${logoInverse}} into <b>every</b> template render: it is the
+ * {@code creed.report.pdf.logo-inverse}, for the dark header bar) and {@code creed.report.pdf.stamp}
+ * (the seal the statement chrome prints in its footnote) once, base64-encodes them and injects
+ * {@code ${logo}} / {@code ${logoInverse}} / {@code ${stamp}} into <b>every</b> template render: it is the
  * single funnel for all PDF output, so a template can rely on the variables existing and no
  * controller can forget to pass them. A missing or unreadable file degrades to an empty string —
  * the templates skip the {@code <img>} — and logs a warning, like a missing font does. Formats are
  * PNG/JPEG/GIF; <b>SVG does not render</b> (Flying Saucer has no SVG support), which is why the
  * bundled logo is a PNG.
  *
- * <p>Three renderer limits shaped the header/footer markup, all of them established by trying:
+ * <p>Four mechanisms for repeating a block on every page were probed; two work, two do not:
  * (1) an {@code @page} margin box cannot hold an image — {@code content: url(...)} silently draws
  * nothing, so margin boxes stay text-only (the page counter);
  * (2) {@code position: fixed} <i>does</i> repeat on every page, but it is positioned against the
  * page's <b>content</b> box and clipped to it, so the negative offsets that would park a logo in
  * the page margin render nothing at all;
- * (3) what works is a wrapper table with {@code -fs-table-paginate: paginate} — its {@code <thead>}
- * and {@code <tfoot>} repeat on every page and can contain arbitrary markup, images included. That
- * is {@code .page-frame} in the PDF templates. Note the trap: putting a {@code <tfoot>} on the
- * <i>data</i> table instead blew a 60-row table up to 122 pages.
+ * (3) a wrapper table with {@code -fs-table-paginate: paginate} works — its {@code <thead>} and
+ * {@code <tfoot>} repeat on every page and can contain arbitrary markup, images included. That is
+ * {@code .page-frame} in the PDF templates. Note the trap: putting a {@code <tfoot>} on the
+ * <i>data</i> table instead blew a 60-row table up to 122 pages;
+ * (4) {@code position: running(name)} + {@code content: element(name)} in an {@code @page} margin
+ * box also works, images included, and is the <b>only</b> way to reach the page <i>margin</i> — so
+ * it is the only way to pin a footer to the bottom of a page the content does not fill. The
+ * statement chrome's footnote uses it; the frame's {@code <tfoot>} can only reach the foot of the
+ * <i>content</i>. Two things it needs: a bottom {@code @page} margin deep enough for the whole
+ * block (the box does not grow the margin, it clips), and {@code vertical-align: top} on that box
+ * so a float taller than the text beside it grows downward into the band instead of hanging below
+ * the page edge. Worth knowing: {@code counter(page)} <b>does</b> resolve inside the running
+ * element, because the element is laid out inside a margin box — which is how that footnote carries
+ * its own page counter.
  *
  * <p>Font loading cost: {@code addFont} takes a file path, a {@code file:}/{@code jar:} URL or a
  * bare classpath-resource path (OpenPDF's {@code RandomAccessFileOrArray} tries disk, then URL
@@ -96,9 +107,11 @@ public class PdfExportService {
     private final String[] fontLocations;
     private final String logoLocation;
     private final String logoInverseLocation;
+    private final String stampLocation;
     private volatile List<String> fontFiles;
     private volatile String logo;
     private volatile String logoInverse;
+    private volatile String stamp;
 
     public PdfExportService(TemplateEngine templateEngine,
                             ResourceLoader resourceLoader,
@@ -107,12 +120,15 @@ public class PdfExportService {
                             @Value("${creed.report.pdf.logo:classpath:/static/img/creed-logo.png}")
                             String logoPath,
                             @Value("${creed.report.pdf.logo-inverse:classpath:/static/img/creed-logo-inverse.png}")
-                            String logoInversePath) {
+                            String logoInversePath,
+                            @Value("${creed.report.pdf.stamp:classpath:/static/img/creed-stamp.png}")
+                            String stampPath) {
         this.templateEngine = templateEngine;
         this.resourceResolver = ResourcePatternUtils.getResourcePatternResolver(resourceLoader);
         this.fontLocations = fontPaths.isBlank() ? new String[0] : fontPaths.split("\\s*,\\s*");
         this.logoLocation = logoPath;
         this.logoInverseLocation = logoInversePath;
+        this.stampLocation = stampPath;
     }
 
     /**
@@ -150,6 +166,7 @@ public class PdfExportService {
         // makes a logo-less header impossible to ship by forgetting a model attribute.
         context.setVariable("logo", logo());
         context.setVariable("logoInverse", logoInverse());
+        context.setVariable("stamp", stamp());
         variables.forEach(context::setVariable);
         return templateEngine.process(templateName, context);
     }
@@ -195,6 +212,21 @@ public class PdfExportService {
         return uri;
     }
 
+    /**
+     * The seal the statement chrome stamps into its footnote, as a {@code data:} URI, or
+     * {@code ""} when none could be read. Unlike {@link #logoInverse()} it does <b>not</b> fall
+     * back to the logo: a missing seal is a missing seal, and printing the brand mark where a seal
+     * belongs would say something the document cannot back up. The template skips the image.
+     */
+    String stamp() {
+        String uri = this.stamp;
+        if (uri == null) {
+            uri = dataUri(stampLocation);
+            this.stamp = uri;
+        }
+        return uri;
+    }
+
     private String dataUri(String location) {
         if (location == null || location.isBlank()) {
             return "";
@@ -204,12 +236,12 @@ public class PdfExportService {
         try {
             Resource resource = resourceResolver.getResource(resolvable);
             if (!resource.exists()) {
-                log.warn("PDF logo '{}' not found; the PDF header/footer will render without it", location);
+                log.warn("PDF image '{}' not found; the PDF header/footer will render without it", location);
                 return "";
             }
             String mediaType = imageMediaType(resource.getFilename());
             if (mediaType == null) {
-                log.warn("PDF logo '{}' is not a PNG/JPEG/GIF; openpdf-html cannot render it "
+                log.warn("PDF image '{}' is not a PNG/JPEG/GIF; openpdf-html cannot render it "
                         + "(SVG in particular is unsupported)", location);
                 return "";
             }
@@ -218,7 +250,7 @@ public class PdfExportService {
             }
         }
         catch (IOException ex) {
-            log.warn("PDF logo '{}' could not be read: {}", location, ex.toString());
+            log.warn("PDF image '{}' could not be read: {}", location, ex.toString());
             return "";
         }
     }

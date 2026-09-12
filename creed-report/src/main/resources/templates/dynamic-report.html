@@ -36,7 +36,21 @@
                     <input class="form-control form-control-sm" id="title" name="title"
                            th:value="${definition.title}">
                 </div>
-                <div class="col-md-8">
+                <!-- The PDF layout. Options come from DynamicReportTemplate itself (${templates}),
+                     so adding a layout adds an option here without touching this file; the label is
+                     the enum's message key, translated like everything else. It rides along in the
+                     definition, so the PDF buttons below re-post whatever is chosen here. -->
+                <div class="col-md-3">
+                    <label class="form-label" for="template"
+                           th:text="#{report.dynamic.templateLabel}">PDF layout</label>
+                    <select class="form-select form-select-sm" id="template" name="template">
+                        <option th:each="option : ${templates}"
+                                th:value="${option.code()}"
+                                th:selected="${option == template}"
+                                th:text="#{${option.labelKey()}}">Form</option>
+                    </select>
+                </div>
+                <div class="col-md-5">
                     <label class="form-label" for="headers" th:text="#{report.dynamic.headersLabel}">Headers</label>
                     <input class="form-control form-control-sm" id="headers" name="headers"
                            th:value="${definition.headers}" placeholder="host,ip,app,country">

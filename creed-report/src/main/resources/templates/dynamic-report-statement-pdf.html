@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<!-- The dynamic report on STATEMENT paper -- the second layout of /dynamic/export/pdf, reached with
+     template=statement (DynamicReportTemplate.STATEMENT); dynamic-report-export-pdf.html is the
+     first, and the two differ ONLY in the chrome set they wear and the @page they inherit with it.
+     Model: profile / pdfCss / table / total / generatedAt / exportDate / exportTime.
+
+     Modelled on docs/template.jpg, a printed bank transaction listing:
+
+         +--------------------------------------------------+
+         |  [logo]                                          |   <- statementHeader  (every page)
+         |  ------------------------------------------------|
+         |  Approval Status All List                        |   <- statementTitle   (body, once)
+         |  ------------------------------------------------|
+         |  13 Record(s)                                    |
+         |  +--------+--------+--------+--------+           |
+         |  | header band (light blue)          |           |   <- the caller's table
+         |  | rows ...                          |           |
+         |  +--------+--------+--------+--------+           |
+         |                                                  |
+         |  Date of Export: ... | Time of Export: ...  (())  |   <- statementFooter  (page margin,
+         |  Approval Status All List                  seal   |      every page)
+         |                     1 of 2                        |   <- both storeys live in the one
+         +--------------------------------------------------+      @bottom-center margin box
+         +--------------------------------------------------+
+
+     A4 PORTRAIT, unlike the other two PDF reports: this is a listing read down the page. A very
+     wide caller-defined table is the one thing this layout handles worse than the form one -- that
+     is the trade the caller makes by picking it, and why template= exists rather than one layout
+     being replaced by the other.
+
+     Debugging: GET /dynamic/preview/pdf?template=statement renders this file to the browser
+     instead of to bytes -- same string, same model, devtools available -- and Cmd+P there
+     paginates it for real.
+
+     The table is rebuilt here rather than shared with fragments/dynamic-table for the same reason
+     the form template rebuilds it: that one is Bootstrap markup, and Flying Saucer has no flexbox
+     or utility classes. It keeps the .report-table hook (so a country's row density still applies)
+     and adds .statement-table for the light-blue header band. -->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title th:text="${table.title}">Creed Dynamic Report (Statement)</title>
+    <th:block th:replace="~{fragments/report-chrome-pdf :: statementStyles}"></th:block>
+<!-- The static CSS 2.1 rules, inlined by CountryStyles as one string (openpdf-html renders from a
+     string, so there is no base URL for a <link>): the shared static/css/report-pdf.css followed by
+     this country's static/css/country/<code>/style-pdf.css, so the country's palette wins. The
+     .statement-* rules are fixed brand chrome and are not among what a country overrides. -->
+<style th:utext="${pdfCss}">/* base + country pdf css inlined here */</style>
+<!-- Browser preview only: /dynamic/preview/pdf serves this very markup as text/html and passes
+     ${previewCss}, so the block below draws the A4 PORTRAIT page box and @font-face's the embedded
+     fonts. A PDF render passes nothing, the th:if is false and Flying Saucer sees the file
+     unchanged. The th:if sits on an OUTER block on purpose -- th:replace on the same tag outranks
+     th:if and would include the fragment (and its ${previewCss}-less <link>) on the PDF path too. -->
+<th:block th:if="${previewCss != null}">
+    <th:block th:replace="~{fragments/report-chrome-pdf :: statementPreview(${previewCss})}"></th:block>
+</th:block>
+</head>
+<body th:class="${profile.styleClass()}">
+
+<!-- The .page-frame wrapper is not decoration: its <thead>/<tfoot> are what repeat the header
+     (logo included) on every page, via -fs-table-paginate. The
+     report body goes in the single <tbody> cell. tfoot before tbody is deliberate -- it is the
+     order the renderer was verified with.
+
+     Note there is no <tfoot> here: the footnote is a RUNNING ELEMENT in the page margin (see the
+     block above the table), which is what pins it to the bottom of every page including a
+     half-empty last one. The frame still owns the header. -->
+<!-- The running footer, declared OUTSIDE the frame: `position: running(statementfoot)` takes it out
+     of the flow entirely and the @page's @bottom-center box draws it, so it sits at the foot of
+     every PAGE rather than the foot of the content. It is emitted here, before the frame, purely
+     because a running element has to be somewhere in the document; nothing renders at this point. -->
+<div th:replace="~{fragments/report-chrome-pdf :: statementFooter(${table.title}, ${exportDate}, ${exportTime})}"></div>
+
+<table class="page-frame">
+    <thead th:replace="~{fragments/report-chrome-pdf :: statementHeader}"></thead>
+    <tbody>
+    <tr><td>
+
+    <div th:replace="~{fragments/report-chrome-pdf :: statementTitle(${table.title})}"></div>
+
+    <!-- Under the rule: this report's count line. The chrome does not print it -- see statementTitle. -->
+    <p class="statement-count">
+        <span th:text="#{report.total}">Total</span>: <span th:text="${total}">0</span>
+    </p>
+
+    <!-- The country's own line, below the count where the sample carries its filter criteria. -->
+    <div th:replace="~{${profile.pdfContentTemplate} :: notice}"></div>
+
+    <table class="report-table statement-table">
+        <thead>
+        <tr>
+            <th>#</th>
+            <th th:each="column : ${table.columns}" th:text="${column.label}">Column</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="row, iter : ${table.rows}">
+            <th th:text="${iter.count}">1</th>
+            <td th:each="cell : ${row}" th:text="${cell.text}">value</td>
+        </tr>
+        <tr th:if="${table.empty}" class="empty-row">
+            <td th:attr="colspan=${table.columns.size() + 1}" th:text="#{report.empty}">No records.</td>
+        </tr>
+        </tbody>
+    </table>
+
+    </td></tr>
+    </tbody>
+</table>
+
+</body>
+</html>

@@ -83,6 +83,23 @@ body::before {
             rgba(0, 92, 185, 0.35) var(--preview-content-height));
 }
 
+/* --- the running footer -------------------------------------------------------------------------
+ * `position: running(statementfoot)` is meaningless to a browser: the declaration is dropped, and
+ * the block -- which sits at the top of <body> in the markup, because a running element has to be
+ * somewhere -- would render as the first thing on the page. So park it where the PDF's
+ * @bottom-center margin box draws it: the bottom margin band of the sheet, side margins matched.
+ *
+ * Approximate in the same way the page rules above are: on screen the sheet grows instead of
+ * paginating, so this shows the footer ONCE, at the foot of the whole sheet, rather than on every
+ * page. Cmd+P is the honest check. */
+.statement-footer {
+    position: absolute;
+    left: var(--preview-margin-side, 14mm);
+    right: var(--preview-margin-side, 14mm);
+    bottom: calc(var(--preview-margin-bottom, 34mm) / 4);
+    width: auto;
+}
+
 /* A standing reminder that this is not the PDF itself. CSS-only, so no template carries a word of
    preview chrome. */
 body::after {

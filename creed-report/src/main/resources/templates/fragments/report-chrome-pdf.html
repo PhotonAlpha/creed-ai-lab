@@ -10,6 +10,9 @@
        formStyles / formHeader / formFooter / formSection the printed-bank-form chrome modelled on
                                                           pdf-template/sample-form-uob-infinity-standard-registration.pdf
                                                           (dynamic-report-export-pdf.html)
+       statementStyles / statementHeader / statementTitle the transaction-statement chrome modelled
+                       / statementFooter                  on docs/template.jpg
+                                                          (dynamic-report-statement-pdf.html)
      Pick one set per template and use it whole -- the two disagree about what the @page margin
      boxes print and about where the meta line lives, so mixing them duplicates or drops text.
 
@@ -73,6 +76,46 @@
                 font-size: 7.5pt;
                 color: #414042;
             }
+        }
+
+        /* Flying Saucer has no per-glyph fallback, so this stack -- not the base sheet's -- is
+           what makes a locale's script render at all. */
+        body { font-family: [(#{pdf.font.family})]; }
+</style>
+
+<!-- The statement chrome's paged-media block. Two things separate it from the two above:
+     PORTRAIT -- the source document is a transaction listing, read down the page, not a wide
+     inventory table -- and the page counter sits in @bottom-CENTER, the storey below the running
+     footnote, exactly as docs/template.jpg has it. It also drops the "Page" wrapper the other two
+     print: the sample says "1 of 2", so only pdf.page.middle is used and the prefix/suffix keys
+     are deliberately left out. The bottom margin is the deepest of the three (20mm) because that
+     footnote is two lines tall AND has a seal beside it. -->
+<style th:fragment="statementStyles" th:inline="css">
+        @page {
+            size: A4;
+            /* Deep bottom margin: it has to hold BOTH footer storeys, because both now live in the
+               margin box below -- two lines of footnote beside a 14mm seal, then the counter. */
+            margin: 14mm 14mm 34mm 14mm;
+            @bottom-center {
+                /* The running element, not text: `statementFooter` declares
+                   `position: running(statementfoot)` and is pulled in here, seal included. This is
+                   what pins the footnote to the FOOT OF THE PAGE on a half-empty page -- a <tfoot>
+                   in the frame only reaches the foot of the content. */
+                content: element(statementfoot);
+                /* TOP, not bottom: the box is a fixed 34mm band and the block grows downward into
+                   it. Bottom-aligned, the seal -- a float, taller than the text beside it -- hung
+                   below the block's last line and was clipped by the page edge. */
+                vertical-align: top;
+                font-family: [(#{pdf.font.family})];
+            }
+        }
+
+        /* The counter, inside that running element (see .statement-page-number in the markup).
+           counter(page) resolves here because the element is laid out INSIDE a margin box -- the
+           only place those counters exist at all. The text around it is a message key, which is why
+           this rule is in the templated block and not in report-pdf.css. */
+        .statement-page-number:after {
+            content: counter(page) "[(#{pdf.page.middle})]" counter(pages);
         }
 
         /* Flying Saucer has no per-glyph fallback, so this stack -- not the base sheet's -- is
@@ -222,6 +265,101 @@
     </div>
 </td></tr>
 </tfoot>
+
+
+<!-- ================================================================================================
+     STATEMENT CHROME -- the look of docs/template.jpg: a bank transaction listing on white A4
+     portrait. Four bands, and the split between them is the point of this set:
+
+       HEADER   the logo, alone, above a hairline rule                     (running, every page)
+       TITLE    the report name in bold brand blue, under its own rule     (body, once)
+       BODY     the caller's table, light-blue header band                 (body, flows)
+       FOOTER   storey 1: export date/time + report name | seal, right     (running, every page)
+                storey 2: the page counter, centred                        (@page margin box)
+
+     Storey 2 cannot be part of storey 1: counter(page) exists only inside an @page margin box, and
+     a margin box cannot hold an image, which is why the seal has to travel in the <tfoot> instead.
+     The two storeys therefore live in different mechanisms by necessity, not by taste -- see
+     PdfExportService's javadoc for the full result of probing that.
+
+     Like the form chrome, the palette is FIXED here rather than delegated to the country sheet:
+     a statement is the same document in every edition. It shares the form's brand blue (#005cb9)
+     and footnote grey (#414042), with #dbe5f1 for the table's header band, sampled off the sample
+     page. The rules are in static/css/report-pdf.css with the rest of the static PDF CSS. -->
+
+<!-- RUNNING page header, statement flavour: the logo and nothing else. The document identifies
+     itself in the body title (once) and in the footnote (every page), so repeating the name up
+     here as well would say it three times a page. ${logo} -- this header sits on white. -->
+<thead th:fragment="statementHeader">
+<tr><td>
+    <div class="statement-header">
+        <img class="statement-logo" th:if="${!#strings.isEmpty(logo)}" th:src="${logo}" alt=""/>
+        <div class="clearfix"></div>
+    </div>
+</td></tr>
+</thead>
+
+<!-- The title band, in the BODY rather than the running header: it belongs to the report, not to
+     the page, and the sample prints it once. The rule under it is the band's own border, so the
+     title is fenced between the header's hairline above and this one below -- the two-rule
+     sandwich the layout is built around.
+
+     Title ONLY. What comes under the rule differs per report -- a record count, a filter block,
+     both -- so the body prints it, in a .statement-count paragraph. Putting it in here would have
+     forced every caller to have a "total", which the approval-status listing does not: its line is
+     "13 Record(s) (Note: This is a filtered table.)". -->
+<div th:fragment="statementTitle(heading)" class="statement-title-band">
+    <h1 class="statement-title" th:text="${heading}">Approval Status All List</h1>
+</div>
+
+<!-- RUNNING page footer, statement flavour -- storey 1 of the two. Left: when the report was
+     exported, then its name in bold blue (the sample repeats the title down there, and on a
+     printed page that is what tells a reader which document a loose sheet came from). Right: the
+     seal, floated, from ${stamp} -- injected by PdfExportService like the logos, empty when no
+     file could be read, in which case the <img> disappears and the text keeps its place.
+
+     Date and time arrive pre-formatted and separate (CountryFormatter.date/time), because this
+     chrome prints them either side of a divider and the country's one datePattern covers both at
+     once. Storey 2, the centred page counter, is the @bottom-center margin box in statementStyles. -->
+<div th:fragment="statementFooter(title, exportDate, exportTime)" class="statement-footer">
+    <img class="statement-stamp" th:if="${!#strings.isEmpty(stamp)}" th:src="${stamp}" alt=""/>
+    <p class="statement-footer-line">
+        <span th:text="#{report.statement.exportDate}">Date of Export:</span>
+        <span th:text="${exportDate}">11/09/2026</span>
+        &#160;|&#160;
+        <span th:text="#{report.statement.exportTime}">Time of Export:</span>
+        <span th:text="${exportTime}">17:52:27</span>
+    </p>
+    <p class="statement-footer-title" th:text="${title}">Approval Status All List</p>
+    <div class="clearfix"></div>
+    <!-- Storey 2: the page counter, centred under the footnote. Its text comes from the :after rule
+         in statementStyles, because counter(page) is only available inside a margin box and this
+         block is rendered in one. -->
+    <p class="statement-page-number"></p>
+</div>
+
+<!-- BROWSER PREVIEW of the statement chrome -- the twin of formPreview, and the reason that
+     fragment's geometry lives with its @page rule rather than in the template: these numbers
+     MIRROR statementStyles above (A4 portrait, margins 14/14/20/14) and must be changed with it.
+     Included only when the caller passed ${previewCss}, i.e. by /dynamic/preview/pdf. -->
+<th:block th:fragment="statementPreview(previewCss)">
+    <style th:inline="css">
+        /* A4 portrait, minus statementStyles' @page margins. Keep in step with that rule. */
+        :root {
+            --preview-page-width: 210mm;
+            --preview-page-height: 297mm;
+            --preview-page-margin: 14mm 14mm 34mm 14mm;
+            --preview-margin-top: 14mm;      /* where the content area starts */
+            --preview-content-height: 249mm; /* 297 - 14 - 34: one page's worth of flow */
+            /* The bottom margin band and the side margins, so the shim can park the running footer
+               where the @bottom-center margin box draws it. Only this set needs them: it is the
+               only chrome whose footer lives in the page margin. */
+            --preview-margin-bottom: 34mm;
+            --preview-margin-side: 14mm;
+        }
+    </style>
+    <link rel="stylesheet" th:href="${previewCss}"/>
+</th:block>
 
 </body>
 </html>

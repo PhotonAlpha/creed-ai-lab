@@ -233,3 +233,121 @@ code.ip { font-family: Courier, monospace; font-size: 8.5pt; }
 }
 .country-notice-table { font-size: 9pt; border-collapse: collapse; margin-top: 3px; }
 .country-notice-term  { font-weight: bold; padding-right: 12px; white-space: nowrap; }
+
+/* --- statement chrome (fragments/report-chrome-pdf :: statement*) -----------------------------
+ * The transaction-statement look of docs/template.jpg: white A4 portrait, the logo alone above a
+ * hairline, the title fenced between that hairline and its own, a light-blue table header band,
+ * and a two-line footnote with a seal beside it.
+ *
+ * Palette shared with the form chrome (#005cb9 brand blue, #414042 footnote grey) plus #dbe5f1 for
+ * the header band and #c9ccd1 for the rules, sampled off the sample page. FIXED here rather than
+ * delegated to country/<code>/style-pdf.css, for the same reason the form's is: a statement is the
+ * same document in every edition. What a country DOES still reach is the row density, because the
+ * table keeps the shared .report-table hook -- Thai rows stay tall here too.
+ */
+.statement-header {
+    border-bottom: 1px solid #c9ccd1;
+    padding-bottom: 6px;
+    margin: 0 2px 10px 2px;
+}
+.statement-header .statement-logo { height: 11mm; float: left; }
+
+/* The title band: name, then the rule that closes the header/title sandwich. */
+.statement-title-band {
+    border-bottom: 1px solid #c9ccd1;
+    padding-bottom: 7px;
+    margin: 0 2px 8px 2px;
+}
+.statement-title {
+    color: #005cb9;
+    font-size: 14pt;
+    font-weight: bold;
+    margin: 0;
+}
+.statement-count {
+    font-size: 9pt;
+    color: #414042;
+    margin: 10px 2px 6px 2px;
+}
+
+/* The table: a light-blue header band instead of the base sheet's near-black one. Same
+ * specificity as `table.report-table thead th` above and declared after it, so it wins -- and no
+ * country sheet sets a background on that selector, so nothing downstream takes it back. */
+table.statement-table {
+    border: 1px solid #c9ccd1;
+}
+table.statement-table thead th {
+    background-color: #dbe5f1;
+    color: #1f3864;
+    border-bottom: 1px solid #c9ccd1;
+}
+table.statement-table tbody th,
+table.statement-table tbody td {
+    border-bottom: 1px solid #e3e6ea;
+}
+
+/* The filter-criteria block above the table (approval-status-export-pdf.html): labelled pairs,
+ * four to a row. A TABLE, because this renderer has no grid and no flexbox -- percentage columns
+ * are the only way to keep the four captions aligned down the page. Label small and grey over a
+ * darker value, the way the sample prints them. */
+table.statement-criteria {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 2px 4px 2px;
+}
+table.statement-criteria td {
+    width: 25%;
+    vertical-align: top;
+    padding: 0 10px 9px 0;
+}
+.criteria-label {
+    font-size: 8.5pt;
+    color: #6c757d;
+    margin: 0 0 2px 0;
+}
+.criteria-value {
+    font-size: 9pt;
+    color: #212529;
+    margin: 0;
+}
+
+/* A cell that is several lines of data rather than one wrapped string: no bullet leading, just a
+ * tight stack. The lines come from the payload, so nothing here decides where they break. */
+.account-cell .account-line { margin: 0; line-height: 1.35; }
+
+/* The status column, printed in the accent colour like the sample's. */
+table.statement-table tbody td.status-cell { color: #005cb9; }
+
+/* The running footer: BOTH storeys, drawn inside the @page's @bottom-center margin box.
+ *
+ * position:running() takes the block out of the flow and the margin box pulls it back in with
+ * content:element() -- the standards-track mechanism, and the only one that reaches the page MARGIN
+ * rather than the content box. That is what pins this footnote to the foot of every page including
+ * a half-empty last one; a <tfoot> in the .page-frame only ever reaches the foot of the content.
+ * The margin box is as wide as the page's content area, so the seal still floats right against the
+ * same edge the table ends at. Keep the @page's bottom margin deep enough for both storeys
+ * (34mm: two text lines beside a 14mm seal, then the counter) -- the box does not grow the margin.
+ */
+.statement-footer {
+    position: running(statementfoot);
+    width: 100%;
+    font-size: 8pt;
+    color: #414042;
+}
+
+/* Storey 2. Empty in the markup: its text is a :after rule in report-chrome-pdf :: statementStyles,
+ * because counter(page) resolves only inside a margin box and its wording is a message key. */
+.statement-page-number {
+    margin: 6px 0 0 0;
+    text-align: center;
+    font-size: 8pt;
+    color: #414042;
+}
+.statement-footer .statement-stamp { height: 12mm; float: right; margin-left: 10px; }
+.statement-footer-line  { margin: 0; line-height: 1.5; }
+.statement-footer-title {
+    color: #005cb9;
+    font-size: 8.5pt;
+    font-weight: bold;
+    margin: 1px 0 0 0;
+}

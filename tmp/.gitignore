@@ -1,0 +1,4 @@
+# Scratch area for test/verification artifacts (scripts, logs, dumps, exports).
+# Everything here is ignored except this file, so the directory itself survives a clean checkout.
+*
+!.gitignore

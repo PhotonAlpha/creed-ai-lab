@@ -59,6 +59,40 @@ class CountryFormatterTest {
         assertThat(number(ReportCountry.GLOBAL, 1234)).isEqualTo("1,234");
     }
 
+    @Test
+    void theDateAndTimeHalvesFollowTheSameCountryRulesAsTheWholeTimestamp() {
+        // The statement layout prints the two apart; they must still date a document the way the
+        // country does -- the Buddhist era included, which is the half a naive split would lose.
+        assertThat(date(ReportCountry.TH, Locale.ENGLISH)).contains("2569").doesNotContain("2026");
+        assertThat(date(ReportCountry.GLOBAL, Locale.ENGLISH)).contains("2026");
+        assertThat(time(ReportCountry.VN, Locale.forLanguageTag("vi"))).isEqualTo("14:05:30");
+        // 12-hour countries keep their day-period marker here too.
+        assertThat(time(ReportCountry.MY, Locale.forLanguageTag("ms"))).contains("PTG");
+    }
+
+    @Test
+    void theDateHalfIsNotTheTwoDigitYearShortFormat() {
+        // FormatStyle.SHORT would render 9/1/26 in English: a two-digit year, and an order that
+        // reads as 9 January outside the US. A document dates itself unambiguously or not at all.
+        assertThat(date(ReportCountry.GLOBAL, Locale.ENGLISH)).contains("2026").doesNotContain("/26");
+    }
+
+    @Test
+    void theDateAndTimeHalvesStayInAsciiDigits() {
+        // Same pinned DecimalStyle as the whole timestamp: the PDF font stack may not carry a
+        // locale's own numerals.
+        assertThat(date(ReportCountry.TH, Locale.forLanguageTag("th"))).containsPattern("\\d{4}");
+        assertThat(time(ReportCountry.TH, Locale.forLanguageTag("th"))).containsPattern("\\d{2}");
+    }
+
+    private String date(ReportCountry country, Locale language) {
+        return CountryFormatter.date(WHEN, catalog.profile(country, language));
+    }
+
+    private String time(ReportCountry country, Locale language) {
+        return CountryFormatter.time(WHEN, catalog.profile(country, language));
+    }
+
     private String timestamp(ReportCountry country, Locale language) {
         return CountryFormatter.timestamp(WHEN, catalog.profile(country, language));
     }

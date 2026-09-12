@@ -1,6 +1,7 @@
 package com.creed.report.service;
 
 import com.creed.report.config.MessageSourceConfig;
+import com.creed.report.dynamic.DynamicReportTemplate;
 import com.creed.report.dynamic.DynamicTable;
 import com.creed.report.dynamic.DynamicTableProperties;
 import com.creed.report.dynamic.DynamicTableRequest;
@@ -27,12 +28,13 @@ import java.util.Map;
 
 /**
  * Throwaway sample dump for eyeballing the PDF templates without starting the app — the fastest way
- * to iterate on {@code report-export-pdf} / {@code dynamic-report-export-pdf}, since it renders
+ * to iterate on {@code report-export-pdf} and on <b>both</b> dynamic layouts
+ * ({@code dynamic-report-export-pdf}, {@code dynamic-report-statement-pdf}), since it renders
  * through the real engine, the real bundles and the real fonts but skips Tomcat entirely.
  *
  * <pre>
  * mvn -pl creed-report test -Dtest=PdfSampleDumpTest -Dpdf.sample.dir=/tmp/pdf
- * open /tmp/pdf/dynamic-th-th-TH.pdf
+ * open /tmp/pdf/dynamic-statement-th-th-TH.pdf
  * </pre>
  *
  * Disabled unless {@code -Dpdf.sample.dir} names an existing directory, so a normal build never
@@ -53,7 +55,8 @@ class PdfSampleDumpTest {
         PdfExportService service = new PdfExportService(engine,
                 new PathMatchingResourcePatternResolver(), "classpath:/fonts/*.ttf,classpath:/fonts/*.otf",
                 "classpath:/static/img/creed-logo.png",
-                "classpath:/static/img/creed-logo-inverse.png");
+                "classpath:/static/img/creed-logo-inverse.png",
+                "classpath:/static/img/creed-stamp.png");
 
         List<ServerInfo> servers = List.of(
                 new ServerInfo("creed-auth-01", "10.10.1.11", "creed-author-server",
@@ -94,18 +97,24 @@ class PdfSampleDumpTest {
                  {"host":"creed-th-pay-01","ip":"10.30.2.21","app":"creed-resource-payment","env":"prod","uptimeDays":7,"cost":12.25},
                  {"host":"creed-th-pay-02","ip":"10.30.2.22","app":"creed-resource-payment","env":"staging","uptimeDays":56789,"cost":4.5}]
                 """);
-        for (ReportCountry country : ReportCountry.values()) {
-            for (String tag : country.languages()) {
-                CountryProfile profile = CountryProfile.of(country, Locale.forLanguageTag(tag));
-                DynamicTable table = tables.build(definition, profile, profile.locale());
-                byte[] pdf = service.renderTemplate("dynamic-report-export-pdf", Map.of(
-                        "profile", profile,
-                        "pdfCss", countryStyles.pdf(country),
-                        "table", table,
-                        "total", CountryFormatter.number(table.size(), profile),
-                        "generatedAt", CountryFormatter.timestamp(generatedAt, profile)), profile.locale());
-                Files.write(dir.resolve("dynamic-" + country.code() + "-"
-                        + profile.locale().toLanguageTag() + ".pdf"), pdf);
+        // Every layout, for every edition: the whole point of a second template is that the two
+        // can be put side by side, and a sample of only one of them hides exactly that.
+        for (DynamicReportTemplate layout : DynamicReportTemplate.values()) {
+            for (ReportCountry country : ReportCountry.values()) {
+                for (String tag : country.languages()) {
+                    CountryProfile profile = CountryProfile.of(country, Locale.forLanguageTag(tag));
+                    DynamicTable table = tables.build(definition, profile, profile.locale());
+                    byte[] pdf = service.renderTemplate(layout.pdfTemplate(), Map.of(
+                            "profile", profile,
+                            "pdfCss", countryStyles.pdf(country),
+                            "table", table,
+                            "total", CountryFormatter.number(table.size(), profile),
+                            "generatedAt", CountryFormatter.timestamp(generatedAt, profile),
+                            "exportDate", CountryFormatter.date(generatedAt, profile),
+                            "exportTime", CountryFormatter.time(generatedAt, profile)), profile.locale());
+                    Files.write(dir.resolve("dynamic-" + layout.code() + "-" + country.code() + "-"
+                            + profile.locale().toLanguageTag() + ".pdf"), pdf);
+                }
             }
         }
     }

@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.time.chrono.ThaiBuddhistChronology;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DecimalStyle;
+import java.time.format.FormatStyle;
 
 /**
  * The country half of "same content, slightly different format": timestamps and counts rendered
@@ -35,6 +36,36 @@ public final class CountryFormatter {
             formatter = formatter.withChronology(ThaiBuddhistChronology.INSTANCE);
         }
         return formatter.format(when);
+    }
+
+    /**
+     * The date half of a timestamp, for layouts that print the two apart — the statement chrome's
+     * footnote writes "Date of Export: … | Time of Export: …" the way the sample document does.
+     *
+     * <p>Localized rather than pattern-driven: {@link CountryProfile#datePattern()} is one pattern
+     * covering both halves, and splitting a pattern string is a guess. A localized style gives each
+     * locale its own field order without one, and the country's calendar still applies, so Thailand
+     * dates in the Buddhist era here too. {@link FormatStyle#MEDIUM} rather than {@code SHORT}
+     * because {@code SHORT} is {@code 7/24/26} in English — a two-digit year and an order that
+     * reads differently on either side of the Atlantic is not what a document dates itself with.
+     */
+    public static String date(LocalDateTime when, CountryProfile profile) {
+        return format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM), when, profile);
+    }
+
+    /** The time half of the same timestamp, to the second ({@code 17:52:27}). */
+    public static String time(LocalDateTime when, CountryProfile profile) {
+        return format(DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM), when, profile);
+    }
+
+    private static String format(DateTimeFormatter formatter, LocalDateTime when, CountryProfile profile) {
+        DateTimeFormatter localized = formatter
+                .withLocale(profile.locale())
+                .withDecimalStyle(DecimalStyle.STANDARD);
+        if (profile.calendar() == ReportCountry.Calendar.BUDDHIST) {
+            localized = localized.withChronology(ThaiBuddhistChronology.INSTANCE);
+        }
+        return localized.format(when);
     }
 
     /** Formats a count with the country's grouping separators ({@code 1.234} in vi-VN). */
