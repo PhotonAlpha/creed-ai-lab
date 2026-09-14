@@ -1,6 +1,6 @@
 ---
 name: creed-simple-metrics
-description: The creed-simple-metrics module — a Camel-on-Spring-Boot servlet gateway on HTTPS 8096 (context-path /camel/*), routes defined in the classic <camelContext> Spring XML DSL, aggregating creed-resource-catalog/order/payment via camel-http + a custom Spring Cloud LoadBalancer route planner (plus a @LoadBalanced RestClient path for bulk/legacy calls), cookie-based sticky routing for payment, a three-layer audit/timing/observability design, and local-baggage (non-header) trace correlation. Use when working on camel-context.xml routes, the LB route planner / sticky LB, the audit-and-timing layers, or MDC/baggage tracing in this module.
+description: The creed-simple-metrics module — a Camel-on-Spring-Boot servlet gateway on HTTPS 8096 (context-path /camel/*), routes defined in the classic <camelContext> Spring XML DSL, aggregating creed-resource-catalog/order/payment via camel-http + a custom Spring Cloud LoadBalancer route planner (plus a @LoadBalanced RestClient path for bulk/legacy calls), cookie-based sticky routing for payment, a three-layer audit/timing/observability design, local-baggage (non-header) trace correlation, and mod_cluster node registration with an Apache HTTP Server balancer via the upstream JBoss listener. Use when working on camel-context.xml routes, the LB route planner / sticky LB, the audit-and-timing layers, MDC/baggage tracing, or the mod_cluster registration in this module.
 ---
 
 # creed-simple-metrics
@@ -158,6 +158,44 @@ buggy `Cookie` header. Compares that against the fix (plain `name=value` join) b
 same downstream `/echo` and showing what the server-side actually parsed. Uses a dedicated
 `cookieRelayRestClient` (`CookieRelayRestClientConfiguration`) with cookie management disabled — the
 business client would silently absorb/mask the bug.
+
+## mod_cluster node registration (`modcluster/`, `creed.mod-cluster.*`, OFF by default)
+
+Registers this process as a node of an Apache HTTP Server `mod_cluster` balancer using the **upstream
+container integration** `org.jboss.mod_cluster:mod_cluster-container-tomcat-10.1` — the library JBoss
+Web Server 6.x ships in `$JWS_HOME/tomcat/lib` and wires with `<Listener
+className="org.jboss.modcluster.container.tomcat.ModClusterListener" .../>` in `server.xml`. There is no
+`server.xml` here, so `ModClusterListenerConfiguration` does that element's three jobs in code. The
+library owns the protocol (MCMP `CONFIG`→`ENABLE-APP`→`STATUS`, dynamic `LoadMetric` load factor,
+context discovery, re-registration, session draining, shutdown removal); this module only adds the
+verdict. Full design, httpd config and verification recipe: `docs/mod-cluster-registration.md`.
+
+- **The listener must be added to the `Server`, before the Server initialises.**
+  `TomcatEventHandlerAdapter` only handles `Server`-sourced `AFTER_INIT`/`START`/`AFTER_START`/
+  `BEFORE_STOP`/`STOP`; on a Context or Host it receives nothing and registers nothing, silently. In
+  Boot the window is a `TomcatContextCustomizer` (the Context→Host→Engine→Service→Server chain is wired
+  by then, and `tomcat.start()` has not run).
+- **`JVMRoute` comes from `Engine.getJvmRoute()`** (else a generated UUID), so the customizer sets it —
+  `<app-name>-<port>` by default. **`STATUS` cadence is
+  `Engine.backgroundProcessorDelay × org.jboss.modcluster.container.catalina.status-frequency`**
+  (system property, default 1), so `status-interval` maps onto the Engine delay, not a timer of ours.
+- **`setProxyList(String)` resolves DNS at bean-creation time and throws** — from a `@Bean` method that
+  is a failed context, contradicting `fail-fast: false`. `parseProxies` builds `InetSocketAddress`es by
+  hand and skips (loudly) the ones that cannot resolve.
+- **The registered context is Tomcat's ROOT `/`, not `/camel`** — contexts come from what the container
+  has deployed; `/camel/*` is only the `CamelHttpTransportServlet` mapping. `excluded-contexts` is the
+  only lever. Likewise the sticky-session cookie/path come from Tomcat's session config, not from
+  `creed.mod-cluster.balancer.*`.
+- **Registration success is not in the library's logs** (MCMP traffic is DEBUG; refused and unreachable
+  look alike). `ModClusterListenerStatusReporter` asks each proxy with MCMP `INFO`
+  (`ModClusterServiceMBean#getProxyInfo()`) and looks for `Name: <JVMRoute>`; it polls up to
+  `startup-timeout` because registration happens asynchronously on the Server's `AFTER_START`. The
+  banner's **log level is the verdict** (INFO all / WARN partial / ERROR none, plus one INFO line when
+  disabled), and `fail-fast` turns "none" into a startup failure.
+- **The banner prints the address the proxy reports, not the locally computed one** — mod_cluster picks
+  the advertised address from the Tomcat connector, and the two really do differ on a multi-homed host
+  (measured: local `192.168.5.9` vs advertised `127.0.0.1`). `node.host`/`node.port` only override what
+  is published (`externalConnector*`), they do not select the connector.
 
 ## SSL / mTLS
 

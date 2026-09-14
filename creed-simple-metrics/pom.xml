@@ -16,6 +16,8 @@
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <logbook.version>3.9.0</logbook.version>
+        <!-- Not managed by any BOM; must match the embedded Tomcat's major/minor (10.1). -->
+        <mod-cluster.version>2.1.0.Final</mod-cluster.version>
     </properties>
 
     <dependencies>
@@ -48,6 +50,17 @@
             <groupId>org.zalando</groupId>
             <artifactId>logbook-httpclient5</artifactId>
             <version>${logbook.version}</version>
+        </dependency>
+
+        <!-- ===== mod_cluster node registration (creed.mod-cluster.*) =====
+             The upstream Tomcat container integration — the same library JBoss Web Server ships in
+             $JWS_HOME/tomcat/lib and wires with a <Listener> in server.xml; here it is attached to the
+             embedded Tomcat's Server (modcluster/ModClusterListenerConfiguration). Its Tomcat
+             dependencies are `provided`, so nothing collides with Boot's tomcat-embed-core. -->
+        <dependency>
+            <groupId>org.jboss.mod_cluster</groupId>
+            <artifactId>mod_cluster-container-tomcat-10.1</artifactId>
+            <version>${mod-cluster.version}</version>
         </dependency>
 
         <!-- ===== Apache Camel (Spring Boot) ===== -->

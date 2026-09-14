@@ -26,8 +26,13 @@ HTTPS `8096`, Camel REST under `/camel/*`. Needs the downstream resource servers
   outgoing request → `LoadBalancerRoutePlanner`'s three-arg `determineRoute` turns it into a
   `RequestDataContext` → an instance-list supplier that filters on `metadata.stickyId`.
 - **Runtime-toggleable health checks**: `GET/PUT /admin/lb/health-check`.
-- HTTP-client plumbing is factored into `lb/ManagedHttpClientPool` — one `@Bean(destroyMethod="close")`
-  that is both `Closeable` and a `MeterBinder`, replacing the pool + factory + binder trio.
+- **mod_cluster node registration** (`modcluster/`, `creed.mod-cluster.*`, OFF by default): the
+  upstream `mod_cluster-container-tomcat-10.1` listener (the library JWS 6.x ships and wires with
+  `<Listener>` in `server.xml`) attached to the embedded Tomcat `Server`. The library owns the MCMP
+  handshake, dynamic load metrics, context discovery, re-registration and shutdown removal;
+  `ModClusterListenerStatusReporter` adds the one thing it does not report — a startup banner saying
+  whether each proxy actually holds this node (MCMP `INFO` → look for `Name: <JVMRoute>`), with
+  optional `fail-fast`. Design + httpd config + gotchas: `docs/mod-cluster-registration.md`.
 - Metrics are **pull-mode**: this module exposes `/actuator/prometheus` itself and Prometheus scrapes
   it directly, unlike every other module (which pushes via OTLP).
 
@@ -54,6 +59,17 @@ HTTPS `8096`, Camel REST under `/camel/*`. Needs the downstream resource servers
   propagation because it looks up the parent span through its own mechanism rather than Brave's
   ambient context. The documented cost is losing route-level Prometheus timers. Do not add it back
   without reading `docs/camel-observation-baggage-loss.md`.
+- **mod_cluster: the listener must go on the `Server`, before it initialises.**
+  `TomcatEventHandlerAdapter` only reacts to `Server`-sourced lifecycle events — on a Context or Host it
+  silently registers nothing. A `TomcatContextCustomizer` is the right window in Boot (parent chain
+  wired, server not yet started). `JVMRoute` comes from the Engine, and `STATUS` cadence is
+  `Engine.backgroundProcessorDelay × status-frequency`, not a timer of ours.
+- **mod_cluster: `setProxyList(String)` resolves DNS at bean-creation time and throws** — from a
+  `@Bean` method that is a failed context, contradicting `fail-fast: false`. The proxies are parsed into
+  `InetSocketAddress`es by hand, unresolvable ones logged and skipped.
+- **mod_cluster registers Tomcat's ROOT context, not `/camel`** (`/camel/*` is only the Camel servlet
+  mapping) — httpd-side routing must be configured for `/`. And registration success is not visible in
+  the library's own logs: the banner's verdict comes from an MCMP `INFO` per proxy.
 - **Prometheus must scrape this module directly** with its own job: `scheme: https`,
   `tls_config.insecure_skip_verify: true`, target `host.docker.internal:8096`, path
   `/actuator/prometheus` (**not** under the `/camel/*` context-path). After editing
@@ -64,5 +80,9 @@ HTTPS `8096`, Camel REST under `/camel/*`. Needs the downstream resource servers
 
 - Route-level Prometheus timers are gone with `camel-observation-starter` — an accepted, documented
   tradeoff, not a bug, but still an observability gap if anyone wants per-route latency.
+- `RestClientSuppliersTest.connectionManagerWithBundleInstallsBundleTlsMaterial` and
+  `LoadBalancedRestClientConfigurationTest.clusterPoolUsesTheResolvedMtlsBundle` fail on `master-spring-boot-3`
+  (pre-existing): they stub `SslBundle.createSslContext()`, but `RestClientSuppliers` now builds the
+  context from `getStores()`/`getKey()` — the mock returns `null` for `getKey()`.
 - The static discovery registry here duplicates the ones in `creed-gateway-partner` and
   `creed-config-server`; three copies will drift.

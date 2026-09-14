@@ -55,6 +55,20 @@ LoadBalancer 轮询健康实例。
    `<choice>` 走 `FailureResponseProcessor` 返回失败响应体并设置对应 HTTP 状态码。
    下游 bulk 端点支持 `?fail=true` 故障注入，可用请求体 `{"failOrder":true}` 触发该分支。
 
+**本节点可注册到 Apache HTTP Server 的 mod_cluster**（`creed.mod-cluster.*`，默认关）：用的是上游官方的
+`mod_cluster-container-tomcat-10.1` 监听器——JWS 6.x 放在 `$JWS_HOME/tomcat/lib` 里、用 `server.xml` 的
+`<Listener className="org.jboss.modcluster.container.tomcat.ModClusterListener" .../>` 挂的同一个库；
+这里没有 `server.xml`，由 `ModClusterListenerConfiguration` 把它挂到嵌入式 Tomcat 的 **Server** 上，
+并给 Engine 设 `jvmRoute`、用 `status-interval` 设 backgroundProcessorDelay。MCMP 握手、动态负载因子、
+context 发现、session draining、停机摘除全由库负责；本模块补的是它唯一不给的东西——
+`ModClusterListenerStatusReporter` 在启动后对每个代理发 MCMP `INFO`，按 dump 里有没有
+`Name: <JVMRoute>` 判定，**打印一个 banner 明确说明每个代理注册成功与否**（全绿 INFO / 部分 WARN /
+全失败 ERROR，未启用也打印一行；`fail-fast=true` 可让注册失败直接终止启动）。
+httpd 侧最小配置、四个坑（MCMP 端点是 VirtualHost 的 `/` 而不是 `/mod_cluster_manager`、listener 必须挂
+`Server` 且赶在 init 前、`setProxyList` 会在建 bean 时做 DNS 解析并抛异常、注册的 context 是 Tomcat 的
+**ROOT `/`** 而不是 `/camel`）与本地验证步骤见
+**[docs/mod-cluster-registration.md](docs/mod-cluster-registration.md)**。
+
 ---
 
 # `<camelContext>` Spring XML 在 camel-spring-boot 4.18 下的注意事项

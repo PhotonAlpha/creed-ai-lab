@@ -160,6 +160,65 @@ creed:
       minimum-status: 500
   https:
     bundle: creed-partner-server
+  # ===== Apache HTTP Server mod_cluster node registration =====
+  # Registers this process as a node of an httpd mod_cluster balancer, using the upstream
+  # mod_cluster-container-tomcat-10.1 listener — the same library JBoss Web Server ships and wires with
+  # <Listener className="org.jboss.modcluster.container.tomcat.ModClusterListener" .../> in server.xml;
+  # here it is attached to the embedded Tomcat's Server (see modcluster/ModClusterListenerConfiguration).
+  # ModClusterListenerStatusReporter then prints, at startup, whether each proxy actually holds us.
+  #
+  # OFF by default: a local run has no httpd in front of it, and an always-on listener would only log a
+  # failing banner and retry.
+  #
+  # The httpd side must expose an MCMP-receiving VirtualHost (the node always posts MCMP to its "/",
+  # NOT to the human-readable /mod_cluster_manager status page):
+  #   <VirtualHost *:6666>
+  #     EnableMCPMReceive
+  #     ManagerBalancerName mycluster
+  #     <Location /mod_cluster_manager> SetHandler mod_cluster-manager  Require ip 127.0.0.1 </Location>
+  #   </VirtualHost>
+  mod-cluster:
+    enabled: ${CREED_MODCLUSTER_ENABLED:false}
+    # true = a startup where no proxy ended up holding this node aborts the application.
+    fail-fast: ${CREED_MODCLUSTER_FAIL_FAST:false}
+    # Comma-separated MCMP listeners (host:port; a scheme is accepted but ignored — see manager-scheme).
+    # An entry whose host cannot be resolved is logged and skipped, not fatal.
+    proxies: "${CREED_MODCLUSTER_PROXIES:127.0.0.1:6666}"
+    # https here turns on mod_cluster's "SSL to the proxy" mode (an MCMP VirtualHost is usually plain).
+    manager-scheme: ${CREED_MODCLUSTER_SCHEME:http}
+    socket-timeout: ${CREED_MODCLUSTER_SOCKET_TIMEOUT:10s}
+    # STATUS heartbeat. Mapped onto the Tomcat Engine's backgroundProcessorDelay; the real period is that
+    # delay × the org.jboss.modcluster.container.catalina.status-frequency system property (default 1).
+    # Keep it well below node.ttl so the proxy never expires a live node.
+    status-interval: ${CREED_MODCLUSTER_STATUS_INTERVAL:10s}
+    # Multicast proxy discovery. Needs httpd's `ServerAdvertise On` AND multicast reachability; when
+    # either is missing nothing happens and nothing is reported — hence off, with the static `proxies`
+    # list above as the reliable path.
+    advertise: ${CREED_MODCLUSTER_ADVERTISE:false}
+    advertise-interface: ${CREED_MODCLUSTER_ADVERTISE_INTERFACE:}
+    advertise-security-key: ${CREED_MODCLUSTER_ADVERTISE_KEY:}
+    # Blank = mod_cluster's default LoadMetric (busy connectors). node.load below is then only the
+    # INITIAL load; from the first STATUS on, the metric drives it.
+    load-metric-class: ${CREED_MODCLUSTER_LOAD_METRIC:}
+    # host:/path,... never registered with the proxy. Contexts are otherwise discovered from the
+    # container — with this integration that means Tomcat's ROOT context, not the /camel servlet mapping.
+    excluded-contexts: ${CREED_MODCLUSTER_EXCLUDED_CONTEXTS:}
+    session-draining-strategy: ${CREED_MODCLUSTER_SESSION_DRAINING:DEFAULT}
+    # How long the startup banner waits for the proxies to confirm they hold this node (registration
+    # happens asynchronously on the Tomcat Server's AFTER_START; advertise can be slower still).
+    startup-timeout: ${CREED_MODCLUSTER_STARTUP_TIMEOUT:10s}
+    node:
+      # Blank/0 = whatever the Tomcat connector reports. Set these only when the proxy must dial an
+      # address the connector does not bind (containers, NAT, multi-NIC) — they override what
+      # mod_cluster advertises, they do not select the connector.
+      host: ${CREED_MODCLUSTER_NODE_HOST:}
+      port: ${CREED_MODCLUSTER_NODE_PORT:0}
+      # Set on the Tomcat Engine. Blank = "<spring.application.name>-<port>".
+      jvm-route: ${CREED_MODCLUSTER_JVMROUTE:}
+      # Virtual-host aliases shown on the startup banner before/unless the proxy reports its own.
+      aliases: ${CREED_MODCLUSTER_ALIASES:}
+      # INITIAL load factor (1..100; 0 = standby). Dynamic from the first STATUS on.
+      load: ${CREED_MODCLUSTER_LOAD:100}
   partner:
     # SSL bundle whose client cert + CA truststore back the @LoadBalanced RestClient's mTLS request
     # factory (see LoadBalancedRestClientConfiguration) used by RemoteClusterProcessor.
