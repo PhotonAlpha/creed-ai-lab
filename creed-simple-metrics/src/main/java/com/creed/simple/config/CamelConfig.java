@@ -47,8 +47,18 @@ import java.util.concurrent.ExecutorService;
  * missing. The pool bean declares {@code destroyMethod=""}: {@code HttpComponent.doStop()} closes the
  * pool it was handed, so Camel owns the shutdown (endpoints mark it {@code connectionManagerShared} and
  * never close it themselves).
+ *
+ * <h2>This is the Camel half of an either/or</h2>
+ * Active only when Camel is on the classpath <em>and</em> {@code creed.camel.enabled} is not
+ * {@code false} (the default is on, so nothing changes unless you ask). Switching it off takes the
+ * routes with it ({@link com.creed.simple.config.CamelRoutesConfiguration}) and hands the same REST
+ * surface to {@link com.creed.simple.rest.RestConfig}'s plain Spring MVC + RestClient implementation.
+ * The class-level condition matters as much as the property one: every bean below is typed against
+ * Camel, so the configuration must not even be <em>read</em> when the dependency is gone.
  */
 @Configuration(proxyBeanMethods = false)
+//@ConditionalOnClass({CamelContext.class, HttpComponent.class})
+//@ConditionalOnProperty(prefix = "creed.camel", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CamelConfig {
 
     private static final Logger log = LoggerFactory.getLogger(CamelConfig.class);
