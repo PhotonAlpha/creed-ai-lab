@@ -77,6 +77,10 @@ class ApprovalStatusJasperPdfTest {
                         .contains("Approval Status All List");
                 assertThat(text).as("centred page counter on page %d", page)
                         .contains(page + " of " + pages);
+                // The <jr:table> repeats its own caption row on every page it spills onto -- what
+                // a `columnHeader` band used to give, now the component's business.
+                assertThat(text).as("the table's caption row on page %d", page)
+                        .contains("Bank Reference").contains("Account").contains("Status");
                 // The page header is a bare logo -- no text at all -- so the image count is the
                 // only evidence it repeats. Two: the header logo and the footer's seal.
                 assertThat(imagesOn(reader, page)).as("logo + seal on page %d", page)

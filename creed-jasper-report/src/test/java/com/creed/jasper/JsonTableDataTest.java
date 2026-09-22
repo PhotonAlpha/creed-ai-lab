@@ -5,8 +5,10 @@ import com.creed.jasper.dynamic.TableColumn;
 import com.creed.jasper.dynamic.TableDesign;
 import com.creed.jasper.export.ExportFormat;
 import com.creed.jasper.i18n.ReportLanguage;
+import com.creed.jasper.render.JasperTableRenderer;
 import com.creed.jasper.render.TableData;
 import com.creed.jasper.service.JasperReportService;
+import net.sf.jasperreports.engine.JREmptyDataSource;
 import net.sf.jasperreports.engine.JRParameter;
 import net.sf.jasperreports.engine.JasperReport;
 import org.junit.jupiter.api.Test;
@@ -73,16 +75,16 @@ class JsonTableDataTest {
      * checked is the binding, and a text format shows it without a PDF reader in the way.
      */
     private byte[] render(List<TableColumn> columns, String path) {
-        TableData data = TableData.json(JSON, path);
-        ReportShape shape = ReportShape.tableOnly(TEMPLATE, LAYOUT, columns).fedByJson(data.jsonQuery());
-        JasperReport report = jasper.compile(shape);
+        JasperReport report = jasper.compile(ReportShape.tableOnly(TEMPLATE, LAYOUT, columns));
 
         Map<String, Object> parameters = new HashMap<>();
         parameters.put(JRParameter.REPORT_LOCALE, ReportLanguage.EN.locale());
         parameters.put(JRParameter.IS_IGNORE_PAGINATION, Boolean.TRUE);
-        data.contributeTo(parameters);
+        // The JSON is the TABLE's data source, handed to its datasetRun through the `rows`
+        // parameter; the report around it still gets one empty record so its detail band -- which
+        // holds the table -- runs once.
+        parameters.put(JasperTableRenderer.ROWS_PARAMETER, TableData.json(JSON, path).rows());
 
-        // No data source: the query executer builds one from the stream the TableData contributed.
-        return jasper.export(report, parameters, data.dataSource(), ExportFormat.CSV);
+        return jasper.export(report, parameters, new JREmptyDataSource(1), ExportFormat.CSV);
     }
 }

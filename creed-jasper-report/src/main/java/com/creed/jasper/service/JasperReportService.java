@@ -10,7 +10,6 @@ import net.sf.jasperreports.engine.JasperCompileManager;
 import net.sf.jasperreports.engine.JasperFillManager;
 import net.sf.jasperreports.engine.JasperPrint;
 import net.sf.jasperreports.engine.JasperReport;
-import net.sf.jasperreports.engine.design.JRDesignQuery;
 import net.sf.jasperreports.engine.design.JasperDesign;
 import net.sf.jasperreports.engine.export.HtmlExporter;
 import net.sf.jasperreports.engine.export.JRCsvExporter;
@@ -112,11 +111,7 @@ public class JasperReportService {
     public byte[] export(JasperReport report, Map<String, Object> parameters, JRDataSource dataSource,
                          ExportFormat format) {
         try {
-            // A null data source is not an oversight: a JSON-fed shape carries a query, and the
-            // engine builds the source itself from JSON_INPUT_STREAM.
-            JasperPrint print = dataSource == null
-                    ? JasperFillManager.fillReport(report, parameters)
-                    : JasperFillManager.fillReport(report, parameters, dataSource);
+            JasperPrint print = JasperFillManager.fillReport(report, parameters, dataSource);
             return export(print, report.getName(), format);
         }
         catch (JRException ex) {
@@ -227,20 +222,12 @@ public class JasperReportService {
                 TableDesigner.stripChrome(design);
             }
             if (shape.columns() != null) {
+                // The template's <jr:table> is an empty skeleton until this runs.
                 TableDesigner.write(design, shape.layout(), shape.columns());
-            }
-            if (shape.jsonQuery() != null) {
-                // A query turns the fill around: instead of being handed a JRDataSource the engine
-                // builds one from JsonQueryExecuterFactory.JSON_INPUT_STREAM. The text is the
-                // JSONPath of the array the rows live in.
-                JRDesignQuery query = new JRDesignQuery();
-                query.setLanguage("json");
-                query.setText(shape.jsonQuery());
-                design.setQuery(query);
             }
             JasperReport report = JasperCompileManager.compileReport(design);
             log.debug("Compiled Jasper template {}{}{}", location,
-                    shape.columns() == null ? "" : " with " + shape.columns().size() + " generated columns",
+                    shape.columns() == null ? "" : " with " + shape.columns().size() + " table columns",
                     shape.chrome() ? "" : " (table only)");
             return report;
         }

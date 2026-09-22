@@ -16,12 +16,9 @@ import java.util.List;
  *                         (the criteria subreport is compiled that way)
  * @param chrome           keep the template's title, page header and page footer. False strips the
  *                         document down to its table — what a CSV or a spreadsheet is
- * @param jsonQuery        a JSONPath naming the array the rows come from, e.g. {@code rows}, when
- *                         the fill is fed JSON rather than a {@code JRDataSource}; {@code null}
- *                         otherwise. See {@link com.creed.jasper.render.TableData}
  */
 public record ReportShape(String templateLocation, TableDesign layout, List<TableColumn> columns,
-                          boolean chrome, String jsonQuery) {
+                          boolean chrome) {
 
     public ReportShape {
         if (templateLocation == null || templateLocation.isBlank()) {
@@ -30,25 +27,20 @@ public record ReportShape(String templateLocation, TableDesign layout, List<Tabl
         columns = columns == null ? null : List.copyOf(columns);
     }
 
-    /** A template compiled exactly as written — no generated table, no stripping. */
+    /** A template compiled exactly as written — no columns written in, no stripping. */
     public static ReportShape of(String templateLocation) {
-        return new ReportShape(templateLocation, null, null, true, null);
+        return new ReportShape(templateLocation, null, null, true);
     }
 
-    /** The full document: the template's chrome plus a generated table. */
+    /** The full document: the template's chrome, and its table given columns. */
     public static ReportShape document(String templateLocation, TableDesign layout,
                                        List<TableColumn> columns) {
-        return new ReportShape(templateLocation, layout, columns, true, null);
+        return new ReportShape(templateLocation, layout, columns, true);
     }
 
     /** The table alone, for an extract format — same template, chrome stripped. */
     public static ReportShape tableOnly(String templateLocation, TableDesign layout,
                                         List<TableColumn> columns) {
-        return new ReportShape(templateLocation, layout, columns, false, null);
-    }
-
-    /** The same shape, filled from JSON at {@code path} instead of from a data source. */
-    public ReportShape fedByJson(String path) {
-        return new ReportShape(templateLocation, layout, columns, chrome, path);
+        return new ReportShape(templateLocation, layout, columns, false);
     }
 }

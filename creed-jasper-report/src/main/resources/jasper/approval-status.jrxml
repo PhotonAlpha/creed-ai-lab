@@ -94,15 +94,12 @@
     <style name="StatementTitle" style="Base" fontSize="14" isBold="true" forecolor="#005CB9"/>
     <style name="CountLine" style="Base" forecolor="#414042"/>
 
-    <!-- THE TABLE'S LOOK LIVES HERE; ITS SHAPE DOES NOT. The columnHeader and detail bands are
-         generated at fill time by com.creed.jasper.dynamic.TableDesigner from a list of
-         TableColumns, so this file declares no table bands and no fields. What it keeps is every
-         style those generated cells name — font, palette, padding, the rule under each row —
-         because that is the half that must not move into Java: the per-locale face and the
-         conditional weights already live in styles, and a generated element that carried its own
-         colours would put half the document's look somewhere it cannot be read.
-         The one thing the generator does set itself is the table's outer left/right rule, which
-         belongs to being the first or last column and so cannot be a style at all. -->
+    <!-- THE TABLE'S LOOK LIVES HERE; ITS SHAPE DOES NOT. The <jr:table> in the detail band gets
+         its columns at compile time (com.creed.jasper.dynamic.TableDesigner), and a generated cell
+         names one of these styles rather than carrying a colour of its own — which is why the box,
+         the padding and the rule under each row are declared here and not in Java. The generator
+         adds exactly one thing these cannot: the table's outer left/right rule, which belongs to
+         being the first or last column and is not something a style can know. -->
     <style name="TableHeader" style="Base" mode="Opaque" backcolor="#DBE5F1" forecolor="#1F3864"
            isBold="true" vTextAlign="Middle">
         <box leftPadding="8" rightPadding="4">
@@ -145,6 +142,11 @@
         </conditionalStyle>
     </style>
 
+    <!-- The listing's own dataset, and the table's. It declares NO fields: they are the table's
+         columns, added at compile time beside them by com.creed.jasper.dynamic.TableDesigner — a
+         field the table has no column for would still be asked of the data source. -->
+    <subDataset name="listing"/>
+
     <parameter name="reportTitle" class="java.lang.String"/>
     <parameter name="note" class="java.lang.String"/>
     <parameter name="exportDate" class="java.lang.String"/>
@@ -159,6 +161,12 @@
          stream would be consumed by page one. -->
     <parameter name="logo" class="java.lang.String"/>
     <parameter name="stamp" class="java.lang.String"/>
+
+    <!-- The listing's rows, handed to the table's datasetRun below. The MAIN dataset is filled
+         with a single empty record so this band runs once and the table prints once; the rows
+         belong to the table, not to the report around it — which is why there are no <field>s
+         here at all. -->
+    <parameter name="rows" class="net.sf.jasperreports.engine.JRDataSource"/>
 
     <!-- Bands are declared in the SCHEMA's order (background, title, pageHeader, columnHeader,
          detail, columnFooter, pageFooter, ...), and a band out of sequence fails the schema at
@@ -228,10 +236,34 @@
         </band>
     </pageHeader>
 
-    <!-- columnHeader and detail are GENERATED — see the note beside the table styles above and
-         com.creed.jasper.dynamic.TableDesigner. The caption row repeats on every page by itself
-         (a columnHeader does), and the detail band is written with splitType="Prevent" so a row's
-         four lines move to the next page whole or not at all. -->
+    <!-- THE LISTING. A <jr:table> component, and the one thing in this file that is not laid out
+         here: its <jr:column>s are added at compile time from a List<TableColumn>
+         (com.creed.jasper.dynamic.TableDesigner), so the table's SHAPE is data while everything
+         around it — page box, chrome, and every style those generated cells name — stays in the
+         jrxml where it can be read. A table with no columns is valid on purpose: this is the
+         skeleton, and the columns arrive before it is compiled.
+
+         Why the component rather than a generated columnHeader + detail pair: the table owns its
+         own pagination and repeats its own caption row per page, so the report keeps ONE ordinary
+         detail band and the caption row is the table's business rather than a second band to keep
+         in step. The band runs once — the main dataset is a single empty record — and
+         splitType="Stretch" lets the table flow onto the next page from inside it.
+
+         The height is a minimum, not the table's: it grows with its rows. -->
+    <detail>
+        <band height="24" splitType="Stretch">
+            <componentElement>
+                <reportElement key="listing" x="0" y="0" width="515" height="24"/>
+                <jr:table xmlns:jr="http://jasperreports.sourceforge.net/jasperreports/components"
+                          xsi:schemaLocation="http://jasperreports.sourceforge.net/jasperreports/components http://jasperreports.sourceforge.net/xsd/components.xsd"
+                          whenNoDataType="Blank">
+                    <datasetRun subDataset="listing">
+                        <dataSourceExpression><![CDATA[$P{rows}]]></dataSourceExpression>
+                    </datasetRun>
+                </jr:table>
+            </componentElement>
+        </band>
+    </detail>
 
     <!-- Both storeys of the footnote, in ONE band — the thing the HTML twin cannot do.
          Storey 1: when the report was exported, then its name in bold blue, with the seal floated

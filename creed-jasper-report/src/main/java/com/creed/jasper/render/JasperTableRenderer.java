@@ -7,6 +7,7 @@ import com.creed.jasper.export.ExportFormat;
 import com.creed.jasper.export.ExportRequest;
 import com.creed.jasper.i18n.ReportLanguage;
 import com.creed.jasper.service.JasperReportService;
+import net.sf.jasperreports.engine.JREmptyDataSource;
 import net.sf.jasperreports.engine.JRParameter;
 import net.sf.jasperreports.engine.JasperReport;
 
@@ -42,6 +43,8 @@ import java.util.Map;
  *     getCustomViewColumns(...) for PDF      the same rule, in customViewColumns(...)
  *   generateBaseColumn(.., first, last)    TableDesigner's first/last edge pens
  *     four Style variants per position       one style per column + two pens
+ *   the table, concatenated as a subreport a &lt;jr:table&gt; in the template's own detail band,
+ *                                            given its columns at compile time
  *   IS_IGNORE_PAGINATION for non-PDF       ExportFormat.paginated()
  *   exportReport(builder, params, type)    JasperReportService.export(..., format)
  *     CSV BOM property                       SimpleCsvExporterConfiguration.setWriteBOM
@@ -67,6 +70,9 @@ import java.util.Map;
  * code that reads it.
  */
 public abstract class JasperTableRenderer {
+
+    /** The template parameter the table's {@code datasetRun} reads its rows from. */
+    public static final String ROWS_PARAMETER = "rows";
 
     private final JasperReportService jasper;
 
@@ -106,15 +112,13 @@ public abstract class JasperTableRenderer {
     /** The report, in the requested format. */
     public final byte[] render(ExportRequest request) {
         List<TableColumn> columns = columnsFor(request);
-        TableData data = data(columns, request);
+        JasperReport report = jasper.compile(shape(request, columns));
 
-        ReportShape shape = shape(request, columns);
-        if (data.jsonQuery() != null) {
-            shape = shape.fedByJson(data.jsonQuery());
-        }
-        JasperReport report = jasper.compile(shape);
-
-        return jasper.export(report, parameters(request, data), data.dataSource(), request.format());
+        // ONE empty record for the MAIN dataset: the detail band holds the table and has to run
+        // exactly once. The rows belong to the table's own datasetRun, which reads them from the
+        // `rows` parameter -- the report around the table has no rows of its own.
+        return jasper.export(report, parameters(request, data(columns, request)),
+                new JREmptyDataSource(1), request.format());
     }
 
     /**
@@ -166,13 +170,13 @@ public abstract class JasperTableRenderer {
     private Map<String, Object> parameters(ExportRequest request, TableData data) {
         Map<String, Object> parameters = new HashMap<>(reportParameters(request));
         parameters.put(JRParameter.REPORT_LOCALE, request.language().locale());
+        parameters.put(ROWS_PARAMETER, data.rows());
         if (!request.format().paginated()) {
             // Without this a spreadsheet carries a page break, a repeated caption row and a page
             // footer into the middle of the data -- the paper's furniture, in a file that has no
             // pages.
             parameters.put(JRParameter.IS_IGNORE_PAGINATION, Boolean.TRUE);
         }
-        data.contributeTo(parameters);
         return parameters;
     }
 

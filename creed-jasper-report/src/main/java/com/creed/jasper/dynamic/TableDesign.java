@@ -25,6 +25,11 @@ import java.awt.Color;
 public record TableDesign(int headerHeight, int rowHeight, Color edgeColor,
                           String headerStyle, String cellStyle) {
 
+    /** The style a column's detail cell takes: its own if it names one, else this layout's. */
+    public String cellStyle(TableColumn column) {
+        return column.cellStyle() == null ? cellStyle : column.cellStyle();
+    }
+
     public TableDesign {
         if (headerHeight <= 0 || rowHeight <= 0) {
             throw new IllegalArgumentException("A table needs positive header and row heights");

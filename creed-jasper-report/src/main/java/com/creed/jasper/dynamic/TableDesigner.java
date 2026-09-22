@@ -1,18 +1,21 @@
 package com.creed.jasper.dynamic;
 
-import net.sf.jasperreports.engine.JRBand;
+import net.sf.jasperreports.components.table.DesignCell;
+import net.sf.jasperreports.components.table.StandardColumn;
+import net.sf.jasperreports.components.table.StandardTable;
+import net.sf.jasperreports.engine.JRDataset;
+import net.sf.jasperreports.engine.JRElement;
 import net.sf.jasperreports.engine.JRException;
 import net.sf.jasperreports.engine.JRField;
-import net.sf.jasperreports.engine.design.JRDesignBand;
+import net.sf.jasperreports.engine.design.JRDesignComponentElement;
+import net.sf.jasperreports.engine.design.JRDesignDataset;
 import net.sf.jasperreports.engine.design.JRDesignExpression;
 import net.sf.jasperreports.engine.design.JRDesignField;
-import net.sf.jasperreports.engine.design.JRDesignSection;
 import net.sf.jasperreports.engine.design.JRDesignStaticText;
 import net.sf.jasperreports.engine.design.JRDesignTextElement;
 import net.sf.jasperreports.engine.design.JRDesignTextField;
 import net.sf.jasperreports.engine.design.JasperDesign;
 import net.sf.jasperreports.engine.type.HorizontalTextAlignEnum;
-import net.sf.jasperreports.engine.type.SplitTypeEnum;
 import net.sf.jasperreports.engine.type.StretchTypeEnum;
 import net.sf.jasperreports.engine.type.TextAdjustEnum;
 
@@ -22,70 +25,70 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Writes a table's {@code columnHeader} and {@code detail} bands into a {@link JasperDesign} at
- * runtime, from a list of {@link TableColumn}s — <b>the columns are data, not markup</b>.
+ * Adds the columns to the {@code <jr:table>} in a template's {@code <detail>} band, at compile
+ * time, from a list of {@link TableColumn}s — <b>the columns are data, the rest of the report is
+ * not</b>.
  *
- * <h2>Why this exists rather than DynamicJasper</h2>
+ * <h2>What is dynamic, and what deliberately is not</h2>
  *
- * DynamicJasper is the library that normally does this, and it is the shape the reference photos
- * in {@code docs/} show: a jrxml supplies the page, the chrome and the styles, and the table is
- * built in Java and concatenated in. It has not had a release in years, it carries its own layout
- * managers and style model on top of JasperReports' own, and it pulls a second API surface into
- * the build for what is, underneath, a few dozen calls to JasperReports' <b>design API</b>
- * ({@code JRDesignBand}, {@code JRDesignTextField}, {@code JRDesignField}). This class is those
- * calls. It has no dependency of its own, it fails at compile time with JasperReports' own
- * messages, and there is nothing between the column model and the engine to go stale.
- *
- * <h2>The division of labour</h2>
+ * The jrxml lays out the whole document — page box, page header, title, criteria block, page
+ * footer, every style — and declares the table as an empty skeleton: a {@code <componentElement>}
+ * holding a {@code <jr:table>} with a {@code datasetRun} and no columns. (A table with no columns
+ * is schema-valid; that is what makes the skeleton legal.) This class fills in the one hole:
  *
  * <pre>
- *   the jrxml   page box, bands, chrome, and every STYLE -- fonts, palette, padding, row rules,
- *               the locale-conditional weights. Read the look there, as before.
- *   the columns what fields exist, what they are called, how wide they are, which style a cell
- *               takes. Supplied by the caller, at runtime.
+ *   the jrxml        the page, the chrome, the subDataset, the empty table, and every STYLE
+ *   the column list  which columns the table has: field, caption, width share, cell style
  * </pre>
  *
- * A generated element therefore carries no colour and no font of its own: it names a style
+ * A generated cell therefore carries no colour and no font — it names a style
  * ({@link TableDesign#headerStyle()}, {@link TableDesign#cellStyle()} or
  * {@link TableColumn#cellStyle()}) and the template answers. The one exception is the table's
- * outer left/right rule, which is a property of being the first or last column and so cannot live
- * in a style at all; it is {@link TableDesign#edgeColor()}.
+ * outer left/right rule, which belongs to <i>being</i> the first or last column and so cannot live
+ * in a style at all.
  *
- * <h2>What it does</h2>
+ * <h2>Why the table component rather than generated bands</h2>
  *
- * <ol>
- *   <li>declares one {@code JRDesignField} per column, replacing any field of the same name, so
- *       the design can be re-tabled and a template that declares its own fields is not fought
- *       over;</li>
- *   <li>normalises the weights over the design's {@code columnWidth}, giving the rounding
- *       remainder to the last column — the columns fill the page exactly rather than leaving a
- *       one-point gap the eye finds immediately;</li>
- *   <li>builds the caption row as {@code JRDesignStaticText} and the detail row as
- *       {@code JRDesignTextField}, with the first/last outer rules and the stretch rules below;</li>
- *   <li>replaces the design's {@code columnHeader} band and its whole detail section.</li>
- * </ol>
+ * Because the component already is a table: it paginates itself and repeats its own caption row on
+ * every page. Generating a {@code columnHeader} band and a {@code detail} band instead means two
+ * bands to keep in step, a report whose detail band is the row, and a template you cannot read the
+ * layout out of. Here the report keeps one ordinary detail band that runs <b>once</b> — the main
+ * dataset is a single empty record — and everything about rows is the table's business.
  *
- * <h2>Stretch, and why every cell needs it</h2>
+ * <h2>The two invariants</h2>
  *
- * A multiline column's cell gets {@code textAdjust="StretchHeight"} so the row grows to its
- * content. Every <b>other</b> cell then gets {@code stretchType="RelativeToTallestObject"}, or its
- * bottom rule stops at the designed height and the table looks torn across the row. That is the
- * design-API spelling of what a CSS table cell does for free.
+ * <ul>
+ *   <li><b>The subDataset's fields are exactly the columns.</b> JasperReports asks a data source
+ *       for every field the dataset declares, not only the ones an expression references, so a
+ *       field left over from another shape is requested at fill time and answered by a source
+ *       built from the current columns. The contract in the other direction: the template declares
+ *       no fields of its own.</li>
+ *   <li><b>The widths fill the table exactly.</b> The weights are normalised over the component
+ *       element's width and the rounding remainder goes to the last column, so the row ends where
+ *       the table does instead of leaving a gap the eye finds immediately.</li>
+ * </ul>
  *
  * <p>Stateless; the design it is handed is mutated in place and then compiled by the caller.
  */
 public final class TableDesigner {
 
+    /** The {@code key} on the {@code <componentElement>} the columns are written into. */
+    public static final String TABLE_KEY = "listing";
+
+    /** The {@code <subDataset>} that table runs over, and whose fields are the columns. */
+    public static final String SUBDATASET = "listing";
+
     private TableDesigner() {
     }
 
     /**
-     * Writes {@code columns} into {@code design}, replacing whatever table was there.
+     * Writes {@code columns} into the template's table, replacing whatever was there.
      *
      * @throws IllegalArgumentException if the columns are empty or two share a field name — a
      *                                  duplicate would silently make one column shadow the other,
      *                                  which is the kind of thing a generated table has to refuse
      *                                  rather than render
+     * @throws IllegalStateException    if the template has no table skeleton to fill in
      */
     public static void write(JasperDesign design, TableDesign layout, List<TableColumn> columns) {
         if (columns == null || columns.isEmpty()) {
@@ -99,38 +102,121 @@ public final class TableDesigner {
             }
         }
 
-        declareFields(design, columns);
-        int[] widths = widths(design.getColumnWidth(), columns);
-        boolean stretching = columns.stream().anyMatch(TableColumn::stretches);
+        JRDesignComponentElement element = tableElement(design);
+        StandardTable table = (StandardTable) element.getComponent();
 
-        design.setColumnHeader(headerBand(layout, columns, widths));
-        setDetail(design, detailBand(layout, columns, widths, stretching));
+        // The table fills the content area, which the chrome-stripped design widens by both
+        // margins -- so this is read now rather than trusted from the jrxml.
+        element.setWidth(design.getColumnWidth());
+
+        declareFields(design, columns);
+        int[] widths = widths(element.getWidth(), columns);
+
+        table.setColumns(new ArrayList<>());
+        for (int i = 0; i < columns.size(); i++) {
+            table.addColumn(column(layout, columns.get(i), widths[i], i, columns.size()));
+        }
+    }
+
+    /** One column: a caption cell and a detail cell, each holding one element that fills it. */
+    private static StandardColumn column(TableDesign layout, TableColumn column, int width,
+                                         int index, int count) {
+        StandardColumn standard = new StandardColumn();
+        standard.setWidth(width);
+
+        JRDesignStaticText caption = new JRDesignStaticText();
+        caption.setText(column.header());
+        standard.setColumnHeader(cell(layout.headerHeight(),
+                place(caption, width, layout.headerHeight(), layout.headerStyle(), column, layout,
+                        index, count)));
+
+        JRDesignTextField value = new JRDesignTextField();
+        JRDesignExpression expression = new JRDesignExpression("$F{" + column.property() + "}");
+        expression.setValueClass(column.valueClass());
+        value.setExpression(expression);
+        // A null field prints as an empty cell rather than as the string "null" -- for a
+        // caller-shaped table a missing value is normal, not an error.
+        value.setBlankWhenNull(true);
+        if (column.stretches()) {
+            value.setTextAdjust(TextAdjustEnum.STRETCH_HEIGHT);
+        }
+        else {
+            // Or this cell's rules stop at the designed height while the tallest cell in the row
+            // grows past it, and the table looks torn across the row.
+            value.setStretchType(StretchTypeEnum.CONTAINER_HEIGHT);
+        }
+        standard.setDetailCell(cell(layout.rowHeight(),
+                place(value, width, layout.rowHeight(), layout.cellStyle(column), column, layout,
+                        index, count)));
+        return standard;
     }
 
     /**
-     * Makes the dataset's fields <b>exactly</b> the column list: every existing field is dropped
-     * first, then one is declared per column.
+     * A cell wrapping one element.
+     *
+     * <p>The cell carries only a height; the element inside carries the style, and with it the
+     * box, the padding and the row's rule. Putting the style on both would draw the border twice,
+     * once around the cell and once around the element filling it.
+     */
+    private static DesignCell cell(int height, JRDesignTextElement element) {
+        DesignCell cell = new DesignCell();
+        cell.setHeight(height);
+        cell.addElement(element);
+        return cell;
+    }
+
+    /** Fills the cell, names a style, aligns, and draws the table's outer rule where it applies. */
+    private static JRDesignTextElement place(JRDesignTextElement element, int width, int height,
+                                             String style, TableColumn column, TableDesign layout,
+                                             int index, int count) {
+        element.setX(0);
+        element.setY(0);
+        element.setWidth(width);
+        element.setHeight(height);
+        // By NAME, not by JRStyle: the style is resolved when the report is filled, so this works
+        // whether the template declares it inline or pulls it from a shared style template.
+        element.setStyleNameReference(style);
+        element.setHorizontalTextAlign(switch (column.align()) {
+            case LEFT -> HorizontalTextAlignEnum.LEFT;
+            case CENTER -> HorizontalTextAlignEnum.CENTER;
+            case RIGHT -> HorizontalTextAlignEnum.RIGHT;
+        });
+        // The one thing that cannot be delegated to a style: a style is resolved per element and
+        // has no way to know which column it landed in.
+        if (index == 0) {
+            element.getLineBox().getLeftPen().setLineWidth(0.5f);
+            element.getLineBox().getLeftPen().setLineColor(layout.edgeColor());
+        }
+        if (index == count - 1) {
+            element.getLineBox().getRightPen().setLineWidth(0.5f);
+            element.getLineBox().getRightPen().setLineColor(layout.edgeColor());
+        }
+        return element;
+    }
+
+    /**
+     * Makes the table's subDataset declare <b>exactly</b> the column list.
      *
      * <p>Replacing rather than merging, because JasperReports asks the data source for every field
      * the dataset declares, not only the ones an expression references. A field left over from a
-     * previous shape would therefore be requested at fill time and answered by a data source built
-     * from the <i>current</i> columns — which is a fill that fails on a column nobody can see, or
-     * worse, a silent null.
-     *
-     * <p>The contract that follows: <b>a template handed to this designer declares no fields of
-     * its own.</b> The columns are the fields. {@code approval-status.jrxml} honours it and
-     * {@code TableDesignerTest} asserts that it does.
+     * previous shape would be requested at fill time and answered by a data source built from the
+     * <i>current</i> columns — a fill that fails on a column nobody can see.
      */
     private static void declareFields(JasperDesign design, List<TableColumn> columns) {
-        for (JRField existing : design.getFields()) {
-            design.removeField(existing);
+        JRDataset dataset = design.getDatasetMap().get(SUBDATASET);
+        if (!(dataset instanceof JRDesignDataset listing)) {
+            throw new IllegalStateException("The template declares no <subDataset name=\"" + SUBDATASET
+                    + "\"> for its table to run over");
+        }
+        for (JRField existing : listing.getFields()) {
+            listing.removeField(existing);
         }
         for (TableColumn column : columns) {
             JRDesignField field = new JRDesignField();
             field.setName(column.property());
             field.setValueClass(column.valueClass());
             try {
-                design.addField(field);
+                listing.addField(field);
             }
             catch (JRException ex) {
                 throw new IllegalStateException("Field '" + column.property() + "' could not be declared", ex);
@@ -139,12 +225,11 @@ public final class TableDesigner {
     }
 
     /**
-     * The weights, normalised over the available width.
+     * The weights, normalised over the table's width.
      *
-     * <p>Relative weights rather than absolute widths because the page's content width is the
-     * template's business, not the caller's: a column list built for one page box then lays out on
-     * any other. The remainder goes to the last column so the row always ends exactly on the right
-     * margin.
+     * <p>Relative weights rather than absolute widths because the content width is the template's
+     * business, not the caller's: a column list built for one page box then lays out on any other,
+     * and on the chrome-stripped design an extract widens by both margins.
      */
     private static int[] widths(int available, List<TableColumn> columns) {
         int total = columns.stream().mapToInt(TableColumn::weight).sum();
@@ -162,88 +247,27 @@ public final class TableDesigner {
         return widths;
     }
 
-    private static JRDesignBand headerBand(TableDesign layout, List<TableColumn> columns, int[] widths) {
-        JRDesignBand band = new JRDesignBand();
-        band.setHeight(layout.headerHeight());
-        int x = 0;
-        for (int i = 0; i < columns.size(); i++) {
-            JRDesignStaticText caption = new JRDesignStaticText();
-            caption.setText(columns.get(i).header());
-            place(caption, x, widths[i], layout.headerHeight(), layout.headerStyle(), columns.get(i));
-            edges(caption, layout, i, columns.size());
-            band.addElement(caption);
-            x += widths[i];
-        }
-        return band;
-    }
-
-    private static JRDesignBand detailBand(TableDesign layout, List<TableColumn> columns,
-                                           int[] widths, boolean stretching) {
-        JRDesignBand band = new JRDesignBand();
-        band.setHeight(layout.rowHeight());
-        // A row's lines belong together: it moves to the next page whole or not at all. The design
-        // API's spelling of `page-break-inside: avoid`.
-        band.setSplitType(SplitTypeEnum.PREVENT);
-        int x = 0;
-        for (int i = 0; i < columns.size(); i++) {
-            TableColumn column = columns.get(i);
-            JRDesignTextField cell = new JRDesignTextField();
-            JRDesignExpression expression = new JRDesignExpression("$F{" + column.property() + "}");
-            expression.setValueClass(column.valueClass());
-            cell.setExpression(expression);
-            // A null field prints as an empty cell rather than as the string "null" -- for a
-            // caller-supplied table a missing value is normal, not an error.
-            cell.setBlankWhenNull(true);
-            if (column.stretches()) {
-                cell.setTextAdjust(TextAdjustEnum.STRETCH_HEIGHT);
-            }
-            else if (stretching) {
-                // Only needed when something else in the row can grow; harmless otherwise, but
-                // left off so a plain table's XML says what it means.
-                cell.setStretchType(StretchTypeEnum.RELATIVE_TO_TALLEST_OBJECT);
-            }
-            place(cell, x, widths[i], layout.rowHeight(),
-                    column.cellStyle() == null ? layout.cellStyle() : column.cellStyle(), column);
-            edges(cell, layout, i, columns.size());
-            band.addElement(cell);
-            x += widths[i];
-        }
-        return band;
-    }
-
-    /** Position, size, style reference and alignment — everything both bands' cells share. */
-    private static void place(JRDesignTextElement element, int x, int width, int height,
-                              String style, TableColumn column) {
-        element.setX(x);
-        element.setY(0);
-        element.setWidth(width);
-        element.setHeight(height);
-        // By NAME, not by JRStyle: the style is looked up when the report is filled, so this works
-        // whether the template declares it inline or pulls it from a shared style template.
-        element.setStyleNameReference(style);
-        element.setHorizontalTextAlign(switch (column.align()) {
-            case LEFT -> HorizontalTextAlignEnum.LEFT;
-            case CENTER -> HorizontalTextAlignEnum.CENTER;
-            case RIGHT -> HorizontalTextAlignEnum.RIGHT;
-        });
-    }
-
     /**
-     * The table's outer rule, on the first and last column only.
-     *
-     * <p>The one thing that cannot be delegated to a style: a style is resolved per element and has
-     * no way to know which column it landed in. Everything else about the box — padding, the rule
-     * under each row, the header band's own rules — is in the jrxml styles.
+     * The template's table, for anything that needs to look at the columns it was given — a test,
+     * or a caller checking what a shape compiled to.
      */
-    private static void edges(JRDesignTextElement element, TableDesign layout, int index, int count) {
-        if (index == 0) {
-            element.getLineBox().getLeftPen().setLineWidth(0.5f);
-            element.getLineBox().getLeftPen().setLineColor(layout.edgeColor());
+    public static StandardTable tableIn(JasperDesign design) {
+        return (StandardTable) tableElement(design).getComponent();
+    }
+
+    /** The {@code <componentElement key="listing">} holding the table, found in the detail band. */
+    private static JRDesignComponentElement tableElement(JasperDesign design) {
+        for (var band : design.getDetailSection().getBands()) {
+            for (JRElement element : band.getElements()) {
+                if (element instanceof JRDesignComponentElement component
+                        && TABLE_KEY.equals(component.getKey())
+                        && component.getComponent() instanceof StandardTable) {
+                    return component;
+                }
+            }
         }
-        if (index == count - 1) {
-            element.getLineBox().getRightPen().setLineWidth(0.5f);
-            element.getLineBox().getRightPen().setLineColor(layout.edgeColor());
-        }
+        throw new IllegalStateException("The template's detail band has no <componentElement key=\""
+                + TABLE_KEY + "\"> holding a <jr:table> to write columns into");
     }
 
     /**
@@ -254,14 +278,10 @@ public final class TableDesigner {
      * and the captions; a logo, a filter-criteria block and a two-storey footnote with a seal are
      * a printed document's furniture and would land in the middle of the data as stray cells.
      *
-     * <p>The reference implementation reaches the same place from the other end — it builds the
-     * table report from nothing and only attaches the jrxml <i>for PDF</i>. Starting from the
-     * template and removing the chrome keeps one file as the source of truth for both paths: the
-     * <b>styles survive</b>, so a spreadsheet's caption row is still the document's caption row,
-     * and there is no second design to keep in step.
-     *
-     * <p>The default style survives too, which is what keeps the locale's embedded face on the
-     * cells — a stripped design is still this document, just without its covers.
+     * <p>Starting from the template and removing the chrome, rather than building a second report
+     * from nothing, keeps one file as the source of truth for both paths: the <b>styles survive</b>,
+     * so a spreadsheet's caption row is still the document's caption row, and the default style
+     * survives with them, which is what keeps the locale's embedded face on the cells.
      */
     public static void stripChrome(JasperDesign design) {
         design.setTitle(null);
@@ -270,6 +290,7 @@ public final class TableDesigner {
         design.setLastPageFooter(null);
         design.setSummary(null);
         design.setBackground(null);
+        design.setColumnHeader(null);
         design.setColumnFooter(null);
         design.setTopMargin(0);
         design.setBottomMargin(0);
@@ -278,13 +299,5 @@ public final class TableDesigner {
         // The content width was the page minus the margins that are now gone; without this the
         // table would keep its old width and leave the difference blank at the right.
         design.setColumnWidth(design.getPageWidth());
-    }
-
-    /** Replaces the whole detail section with one band. */
-    private static void setDetail(JasperDesign design, JRDesignBand band) {
-        JRDesignSection detail = (JRDesignSection) design.getDetailSection();
-        List<JRBand> bands = new ArrayList<>(detail.getBandsList());
-        bands.forEach(detail::removeBand);
-        detail.addBand(band);
     }
 }
