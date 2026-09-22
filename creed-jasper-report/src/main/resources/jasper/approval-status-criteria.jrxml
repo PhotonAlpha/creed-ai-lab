@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The FILTER-CRITERIA BLOCK of the approval-status listing: labelled pairs, FOUR TO A ROW.
+
+     A subreport of its own, and a MULTI-COLUMN one, because "four to a row" is a page-layout
+     property and Jasper only offers it on a report: columnCount="4" + printOrder="Horizontal" fills
+     left to right and wraps, which is exactly the sample's arrangement. The main template has one
+     column and cannot also have four.
+       (creed-report reaches the same layout with a <table> of percentage-width cells, because
+        openpdf-html has neither grid nor flexbox. Same picture, opposite reasons.)
+
+     A short last row simply ends early and the remaining columns stay empty — the columns are
+     fixed-width, so the captions stay aligned down the page either way.
+
+     The criteria arrive in PAYLOAD ORDER from a FieldDataSource; the order is the layout, so this
+     file looks nothing up by name. An unset filter arrives as "—" rather than as an empty string:
+     the reader has to be able to tell a filter that was not applied from one never offered, and
+     that is the payload's job, not this template's.
+
+     REPORT_LOCALE is inherited from the main report, so $P{REPORT_LOCALE} in the conditional styles
+     below is the same locale the parent is filling in. -->
+<jasperReport xmlns="http://jasperreports.sourceforge.net/jasperreports"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xsi:schemaLocation="http://jasperreports.sourceforge.net/jasperreports
+                                  http://jasperreports.sourceforge.net/xsd/jasperreport.xsd"
+              name="approval-status-criteria"
+              pageWidth="515" pageHeight="842"
+              columnWidth="128" columnCount="4" columnSpacing="1"
+              printOrder="Horizontal"
+              leftMargin="0" rightMargin="0" topMargin="0" bottomMargin="0"
+              whenNoDataType="AllSectionsNoDetail">
+
+    <!-- The caption. Small and grey, the way the sample prints it, in the LOCALE'S OWN FACE:
+         "Creed Sans" resolves to Noto Sans / Thai / SC / TC by REPORT_LOCALE (fonts/creed-fonts.xml).
+         The conditional styles are this module's answer to creed-report's locale CSS overlay —
+         the same class, a different weight per script, and the one thing a message key cannot say:
+           zh  BOLD    Han carries many more strokes per em, so at 8.5pt Regular reads lighter than
+                       the Latin beside it and a grey caption sinks into the page.
+           th  REGULAR Noto Sans Thai fills its loops (ก ถ ผ) in when it goes bold; at this size a
+                       bold caption is a smudge rather than emphasis.
+         JasperReports does NOT synthesize bold, so the zh rule only works because the SC/TC Bold
+         faces are registered — without them the text would not stay regular, it would vanish. -->
+    <style name="CriteriaLabel" fontName="Creed Sans" fontSize="8.5" forecolor="#6C757D"
+           isBold="false" pdfEncoding="Identity-H" isPdfEmbedded="true">
+        <conditionalStyle>
+            <conditionExpression><![CDATA["zh".equals($P{REPORT_LOCALE}.getLanguage())]]></conditionExpression>
+            <style isBold="true"/>
+        </conditionalStyle>
+    </style>
+
+    <!-- The value. "Creed Sans Data" is ALWAYS the Latin face, whatever the locale — the split
+         creed-report spells out as pdf.font.family.criteriaLabel / .criteriaValue.
+         Safe here only because this document's values are references, amounts and dates. Neither
+         engine does per-glyph fallback: a value carrying Thai or Han under this family comes out
+         BLANK, not substituted. A report over real data must point this at "Creed Sans". -->
+    <style name="CriteriaValue" fontName="Creed Sans Data" fontSize="9" forecolor="#212529"
+           pdfEncoding="Identity-H" isPdfEmbedded="true"/>
+
+    <field name="label" class="java.lang.String"/>
+    <field name="value" class="java.lang.String"/>
+
+    <!-- Both elements are ~1.6x their font size tall, NOT the 12pt the Latin line fits in: a text
+         element shorter than the face's line height prints nothing at all, so a 12pt caption is
+         fine in English and blank in Chinese (12.31pt) and Thai (12.84pt). The main template's
+         header comment has the table of line heights. -->
+    <detail>
+        <band height="36">
+            <textField>
+                <reportElement style="CriteriaLabel" x="0" y="0" width="128" height="15"/>
+                <textElement verticalAlignment="Top"/>
+                <textFieldExpression><![CDATA[$F{label}]]></textFieldExpression>
+            </textField>
+            <textField>
+                <reportElement style="CriteriaValue" x="0" y="16" width="128" height="15"/>
+                <textElement verticalAlignment="Top"/>
+                <textFieldExpression><![CDATA[$F{value}]]></textFieldExpression>
+            </textField>
+        </band>
+    </detail>
+</jasperReport>

@@ -1,0 +1,31 @@
+server:
+  # Plain HTTP and its own port, like creed-report: this is a document renderer, not part of the
+  # OAuth2 mesh -- no TLS listener, no mTLS, no config server.
+  port: ${CREED_JASPER_PORT:9110}
+  servlet:
+    context-path: /jasper-report
+
+spring:
+  application:
+    name: creed-jasper-report
+  messages:
+    # Spring's own MessageSource is unused here -- the report's strings come from the bundle the
+    # jrxml names (resourceBundle="i18n/jasper-messages"), loaded by JasperReports itself. Listed
+    # so the next reader does not go looking for a MessageSourceConfig that is not there.
+    basename: i18n/jasper-messages
+  web:
+    locale-resolver: accept-header
+
+creed:
+  jasper:
+    # false while developing: an edited .jrxml then takes effect on the next request instead of on
+    # the next restart, the bargain spring.thymeleaf.cache: false makes in creed-report. The cost
+    # is one Eclipse-compiler run (~100ms) per template per request, which is fine for a renderer
+    # nobody calls in a loop. Flip it to true (the code default) for anything load-bearing.
+    cache-templates: ${CREED_JASPER_CACHE_TEMPLATES:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

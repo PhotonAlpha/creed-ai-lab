@@ -125,22 +125,108 @@ class ApprovalStatusPdfTest {
         }
     }
 
-    /** Same escape hatch as {@code PdfSampleDumpTest}: {@code -Dpdf.sample.dir} to eyeball it. */
+    @Test
+    void theCriteriaBlockTakesItsTwoFacesFromTheLocaleOverTheBodyDefault() {
+        // English: both keys are `inherit`, which is the mechanism doing nothing -- the criteria
+        // are set in whatever body got, i.e. pdf.font.family stays the document-wide default.
+        assertThat(markup(ReportCountry.GLOBAL, Locale.ENGLISH))
+                .contains(".criteria-label { font-family: inherit; }")
+                .contains(".criteria-value { font-family: inherit; }")
+                .contains("body { font-family: 'Noto Sans', Helvetica, sans-serif; }");
+
+        // Thai: caption in the Thai face, value in the Latin one -- two different families inside
+        // one block, and body still carrying the default everything else inherits.
+        assertThat(markup(ReportCountry.TH, Locale.forLanguageTag("th")))
+                .contains(".criteria-label { font-family: 'Noto Sans Thai', 'Noto Sans', Helvetica, sans-serif; }")
+                .contains(".criteria-value { font-family: 'Noto Sans', 'Noto Sans Thai', Helvetica, sans-serif; }")
+                .contains("body { font-family: 'Noto Sans Thai', 'Noto Sans', Helvetica, sans-serif; }");
+
+        // Simplified Chinese, on a country that has no Thai/Chinese edition of its own: the faces
+        // follow the LANGUAGE, so the country axis does not enter into it.
+        assertThat(markup(ReportCountry.GLOBAL, Locale.forLanguageTag("zh-CN")))
+                .contains(".criteria-label { font-family: 'Noto Sans SC', 'Noto Sans', Helvetica, sans-serif; }")
+                .contains(".criteria-value { font-family: 'Noto Sans', 'Noto Sans SC', Helvetica, sans-serif; }");
+    }
+
+    @Test
+    void theCriteriaFontRulesComeBeforeTheStylesheetsTheyShareTheirSelectorsWith() {
+        // The cascade this document is built on runs least- to most-specific: message-key CSS,
+        // then base, country, locale. Nothing downstream sets font-family on these two selectors
+        // (report-pdf.css says so beside them), so the keys are what the renderer sees -- but the
+        // order is what makes that true, and it is one edit away from silently inverting.
+        String markup = markup(ReportCountry.TH, Locale.forLanguageTag("th"));
+        assertThat(markup.indexOf(".criteria-label { font-family:"))
+                .isLessThan(markup.indexOf("Thai LOCALE overlay"));
+        assertThat(markup.indexOf("Thailand edition"))
+                .isLessThan(markup.indexOf("Thai LOCALE overlay"));
+    }
+
+    @Test
+    void everyLocaleStillRendersTheWholeDocument() throws IOException {
+        // The faces and the weight overlay only mean anything if the document still lays out; a
+        // face that failed to register would take the text with it rather than fall back.
+        for (ReportCountry country : ReportCountry.values()) {
+            for (String tag : country.languages()) {
+                CountryProfile profile = CountryProfile.of(country, Locale.forLanguageTag(tag));
+                PdfReader reader = new PdfReader(render(profile));
+                try {
+                    assertThat(reader.getNumberOfPages())
+                            .as("%s / %s", country.code(), profile.languageTag()).isGreaterThan(1);
+                    // Latin survives in every locale: the criteria VALUES are references and dates,
+                    // which is the assumption the Latin-faced criteriaValue key rests on.
+                    assertThat(new PdfTextExtractor(reader).getTextFromPage(1))
+                            .as("%s / %s", country.code(), profile.languageTag())
+                            .contains("05/07/2026 - 02/09/2026").contains("BK2600000001");
+                }
+                finally {
+                    reader.close();
+                }
+            }
+        }
+    }
+
+    /**
+     * Same escape hatch as {@code PdfSampleDumpTest}: {@code -Dpdf.sample.dir} to eyeball it.
+     *
+     * <p>One file per country edition in each language it offers, because what this document now
+     * varies by locale — the criteria block's two faces and whether the small chrome is bold — can
+     * only be judged by looking at the editions side by side.
+     */
     @Test
     @EnabledIfSystemProperty(named = "pdf.sample.dir", matches = ".+")
     void dumpSample() throws IOException {
-        Files.write(Path.of(System.getProperty("pdf.sample.dir"), "approval-status.pdf"), render());
+        Path dir = Path.of(System.getProperty("pdf.sample.dir"));
+        for (ReportCountry country : ReportCountry.values()) {
+            for (String tag : country.languages()) {
+                CountryProfile profile = CountryProfile.of(country, Locale.forLanguageTag(tag));
+                Files.write(dir.resolve("approval-status-" + country.code() + "-"
+                        + profile.languageTag() + ".pdf"), render(profile));
+            }
+        }
     }
 
     private byte[] render() {
-        CountryProfile profile = CountryProfile.of(ReportCountry.GLOBAL, Locale.ENGLISH);
+        return render(CountryProfile.of(ReportCountry.GLOBAL, Locale.ENGLISH));
+    }
+
+    private byte[] render(CountryProfile profile) {
+        return service.renderTemplate("approval-status-export-pdf", model(profile), profile.locale());
+    }
+
+    /** The XHTML the renderer would have been handed — {@code render} stopped one step early. */
+    private String markup(ReportCountry country, Locale language) {
+        CountryProfile profile = CountryProfile.of(country, language);
+        return service.renderTemplateHtml("approval-status-export-pdf", model(profile), profile.locale());
+    }
+
+    private Map<String, Object> model(CountryProfile profile) {
         Map<String, Object> variables = new HashMap<>();
         variables.put("profile", profile);
-        variables.put("pdfCss", countryStyles.pdf(profile.country()));
+        variables.put("pdfCss", countryStyles.pdf(profile.country(), profile.locale()));
         variables.put("report", ApprovalStatusReportController.sampleReport(objectMapper));
         variables.put("exportDate", "Sep 11, 2026");
         variables.put("exportTime", "5:52:27 PM");
-        return service.renderTemplate("approval-status-export-pdf", variables, profile.locale());
+        return variables;
     }
 
     /** How many image XObjects the page's resources reference. */

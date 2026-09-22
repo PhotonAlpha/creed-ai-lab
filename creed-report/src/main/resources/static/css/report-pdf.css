@@ -2,7 +2,10 @@
  *
  * Inlined (never linked): openpdf-html renders from a string with no base URL. CountryStyles
  * reads this file once and prepends it to every country's sheet, so a PDF template gets
- * base + country in one ${pdfCss} block and a country edition cannot lose the base by accident.
+ * base + country + locale in one ${pdfCss} block and a country edition cannot lose the base by
+ * accident. The third layer, static/css/locale/<tag>/report-pdf.css, is optional and goes LAST: it
+ * carries the typography that follows the script rather than the edition (Thai captions drop the
+ * bold this sheet's chrome sets, Han captions take it on).
  *
  * What is NOT here, and cannot be: the @page margin boxes and the body font stack, whose content
  * comes from message keys and so has to stay a Thymeleaf template
@@ -300,6 +303,11 @@ table.statement-criteria td {
     vertical-align: top;
     padding: 0 10px 9px 0;
 }
+/* NO font-family on either of these, and none downstream: the two faces are a locale decision and
+ * arrive from the pdf.font.family.criteria* message keys, in the templated <style> that
+ * approval-status-export-pdf.html emits BEFORE this sheet. A rule here would outrank it silently.
+ * Weight is the other half of the same story and does live in CSS -- see
+ * static/css/locale/<tag>/report-pdf.css, the layer CountryStyles appends last. */
 .criteria-label {
     font-size: 8.5pt;
     color: #6c757d;

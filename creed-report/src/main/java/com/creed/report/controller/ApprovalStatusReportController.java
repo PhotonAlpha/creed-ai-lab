@@ -148,7 +148,7 @@ public class ApprovalStatusReportController {
         LocalDateTime now = LocalDateTime.now();
         CountryProfile profile = countryCatalog.profileFor(locale);
 
-        byte[] body = pdfExportService.renderTemplate(PDF_TEMPLATE, model(profile, now), locale);
+        byte[] body = pdfExportService.renderTemplate(PDF_TEMPLATE, model(profile, locale, now), locale);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_PDF);
@@ -170,7 +170,7 @@ public class ApprovalStatusReportController {
             produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> previewPdf(Locale locale, HttpServletRequest request) {
         CountryProfile profile = countryCatalog.profileFor(locale);
-        Map<String, Object> variables = model(profile, LocalDateTime.now());
+        Map<String, Object> variables = model(profile, locale, LocalDateTime.now());
         // Only the preview sets this; its presence is what switches the shim on in the template.
         variables.put("previewCss", request.getContextPath() + PREVIEW_STYLESHEET);
 
@@ -179,11 +179,18 @@ public class ApprovalStatusReportController {
                 .body(pdfExportService.renderTemplateHtml(PDF_TEMPLATE, variables, locale));
     }
 
-    /** One model for both endpoints — the two must not be able to disagree about the document. */
-    private Map<String, Object> model(CountryProfile profile, LocalDateTime now) {
+    /**
+     * One model for both endpoints — the two must not be able to disagree about the document.
+     *
+     * <p>{@code locale} is the one the template will be rendered in, and it is passed to
+     * {@link CountryStyles#pdf} for exactly that reason: the stylesheet's locale layer (whether
+     * this script's captions go bold) and the message bundle the faces come from then cannot
+     * resolve to different languages.
+     */
+    private Map<String, Object> model(CountryProfile profile, Locale locale, LocalDateTime now) {
         Map<String, Object> variables = new HashMap<>();
         variables.put("profile", profile);
-        variables.put("pdfCss", countryStyles.pdf(profile.country()));
+        variables.put("pdfCss", countryStyles.pdf(profile.country(), locale));
         variables.put("report", sampleReport(objectMapper));
         // The footnote prints the two halves either side of a divider, so they arrive formatted and
         // separate -- the country's single datePattern covers both at once and cannot be split.

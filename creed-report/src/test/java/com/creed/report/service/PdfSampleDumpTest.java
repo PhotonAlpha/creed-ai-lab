@@ -76,7 +76,7 @@ class PdfSampleDumpTest {
                 CountryProfile profile = CountryProfile.of(country, Locale.forLanguageTag(tag));
                 byte[] pdf = service.renderTemplate("report-export-pdf", Map.of(
                         "profile", profile,
-                        "pdfCss", countryStyles.pdf(country),
+                        "pdfCss", countryStyles.pdf(country, profile.locale()),
                         "servers", servers,
                         "total", CountryFormatter.number(servers.size(), profile),
                         "generatedAt", CountryFormatter.timestamp(generatedAt, profile)), profile.locale());
@@ -106,7 +106,7 @@ class PdfSampleDumpTest {
                     DynamicTable table = tables.build(definition, profile, profile.locale());
                     byte[] pdf = service.renderTemplate(layout.pdfTemplate(), Map.of(
                             "profile", profile,
-                            "pdfCss", countryStyles.pdf(country),
+                            "pdfCss", countryStyles.pdf(country, profile.locale()),
                             "table", table,
                             "total", CountryFormatter.number(table.size(), profile),
                             "generatedAt", CountryFormatter.timestamp(generatedAt, profile),

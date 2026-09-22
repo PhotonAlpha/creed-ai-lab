@@ -82,11 +82,22 @@ Standalone **Spring MVC + Thymeleaf** reporting/visualization app. Plain HTTP `9
   for the repeated chrome and the page counter to be observable at all. It wears the statement
   chrome whole and adds exactly two things of its own — the **criteria block** (a `<table>` of
   labelled pairs four to a row, because this renderer has neither grid nor flexbox; ordered list,
-  not a map, since the order *is* the layout) and a table whose **account cell is a list of lines**
+  not a map, since the order *is* the layout — and the module's one showcase of locale typography:
+  caption and datum take separate faces from `pdf.font.family.criteria*`, and whether the caption
+  goes bold comes from the locale CSS overlay, both under *The locale axis of the PDF stylesheet*)
+  and a table whose **account cell is a list of lines**
   (one `<p>` each: the breaks are data, not the renderer's guess). Both are why it is not a
   `DynamicTable` with different data — a rectangle of strings can express neither. Rendered under
   Creed's own logo and seal, never the sample bank's. `ApprovalStatusPdfTest` renders the
-  controller's own payload, not a copy.
+  controller's own payload, not a copy, and dumps one PDF per country × language under
+  `-Dpdf.sample.dir` so the editions can be compared side by side.
+  **The same document is rendered a second time by [[creed-jasper-report]]**, from a JasperReports
+  `.jrxml` instead of from this template — same payload (byte-for-byte), same Noto faces, same logo
+  and seal, shared at build time, so a difference between the two PDFs is the layout engine and not
+  the inputs. Change `SAMPLE_JSON` here and you must change `ApprovalStatusSamples` there. That
+  module is also where the *Jasper* answers to this template's two locale mechanisms live: a
+  locale-resolved font family in place of `pdf.font.family.criteria*`, and `<conditionalStyle>` in
+  place of the locale CSS overlay.
 - **Environment Inspector** — `controller/EnvironmentInspectionController` (REST: `GET /api/environment`, `/api/environment/rendered`) + `controller/EnvironmentViewController` (Thymeleaf: `GET /environment`, `/environment/rendered`), backed by `service/EnvironmentInspectionService`. Models `EnvironmentSnapshot`, `PropertySourceView`, `PropertyEntry`, `RenderedEnvironment`. **For anything in this feature, use the [[env-inspector]] skill** — it has the full requirements/design (replays Spring Boot's config-loading pipeline standalone, renders effective properties to YAML/.properties).
 
 ### Previewing a PDF template
@@ -192,12 +203,13 @@ fragment — and `country/default/` is the *country* half's stand-in, **not** th
 (that is `report-pdf.css`, always applied) — and `default` is not a country: no enum constant, not
 in the switcher, `?country=default` does nothing.
 
-Two layers, shared then country: `static/css/report.css` (browser, linked by the page) and
-`static/css/report-pdf.css` (PDF). `CountryStyles.pdf()` returns base + country **already
-concatenated**, so the PDF templates take one `${pdfCss}` block — deliberate: a second variable is
-something a caller can forget, and a silently unstyled PDF is exactly the failure this class exists
-to prevent. Only locale-dependent CSS stays a template (`report-chrome-pdf :: styles` = the `@page`
-margin boxes and `body { font-family }`, both fed by message keys).
+Shared then country then locale: `static/css/report.css` (browser, linked by the page) and
+`static/css/report-pdf.css` (PDF). `CountryStyles.pdf(country, locale)` returns base + country +
+locale **already concatenated**, so the PDF templates take one `${pdfCss}` block — deliberate: a
+second variable is something a caller can forget, and a silently unstyled PDF is exactly the failure
+this class exists to prevent, which is also why there is no `pdf(country)` overload. Only
+locale-dependent CSS stays a template (`report-chrome-pdf :: styles` = the `@page` margin boxes and
+`body { font-family }`, both fed by message keys).
 ```
 
 `ReportCountry.contentTemplate()` / `pdfContentTemplate()` / `styleSheet()` / `pdfStyleSheet()` are the **single definition** of that layout; templates and `CountryStyles` both go through them.
@@ -210,6 +222,50 @@ margin boxes and `body { font-family }`, both fed by message keys).
 - **The switcher must be told its page.** `report-chrome :: switcher(profile, countries, page)` builds its links from `page`, passed down from `header(..., page)` (`'/report'`, `'/dynamic'`, `null` in the offline exports, which render no switcher). It used to hard-code `@{/report(...)}`, which silently moved the reader off `/dynamic` on the first country or language switch.
 - **`th:replace` outranks `th:if`** — both on one tag includes the fragment regardless of the condition. The switcher's `th:if` therefore sits on an outer `<th:block>`; without it the switcher's `@{...}` links reach the offline export, which renders on a plain non-web `Context`, and 500 it.
 - **Adding a country** = one `ReportCountry` constant + its four files above + its region bundles (`_<lang>_<REGION>.properties` per language it offers). No shared block to edit anywhere.
+
+### The locale axis of the PDF stylesheet
+
+A **third** PDF layer sits after the country's, keyed on the **language** instead of the country:
+
+```
+static/css/locale/<tag>/report-pdf.css     OPTIONAL, appended LAST by CountryStyles
+```
+
+`<tag>` is the effective locale lower-cased, walked most- to least-specific: `th-TH` → `th-th` →
+`th`, `zh-CN` → `zh-cn` → `zh`. So one `locale/th/` serves every country that renders in Thai, and a
+rule only Traditional Chinese needs goes in a `locale/zh-tw/`, which resolves first. The candidate
+tags come from `ReportCountry` × its `languages()` — a directory no country claims is not loaded,
+the same rule the country half follows.
+
+- **Why a third layer and not a message key.** The key `pdf.font.family` answers *which face*, once,
+  for the whole document. It cannot answer *"this caption is bold in Chinese and not in Thai"* — a
+  rule, per selector, with nowhere to live in a `.properties` file. `locale/zh` bolds
+  `.criteria-label` (Han carries more strokes per em, so at 8.5pt Regular reads lighter than the
+  Latin beside it); `locale/th` un-bolds `.criteria-label`, `.statement-footer-title` and the
+  country-notice terms (Noto Sans Thai's loops — ก ถ ผ — close up bold at that size) and adds
+  leading for the tone marks. **Flying Saucer does not synthesize bold**, so a bold CJK rule only
+  works because `NotoSansSC/TC-Bold.ttf` are registered — without them the text does not stay
+  regular, it *vanishes*.
+- **Last on purpose**, after the country sheet: what it carries is typography that follows the
+  script, which an edition has no business overriding. Contrast `country/<code>/style-pdf.css` — the
+  *edition*: palette and row density, applied in whatever language it is read.
+- **A missing file is the normal case**, not a degradation like the country half's — the base sheet
+  *is* the right rendering for a locale that needs no adjustment (en/ms/vi ship none). No
+  `locale/default/`.
+- **Pass the same `Locale` the template is rendered in.** All three controllers pass the request
+  `locale` they hand `renderTemplate`, so the sheet and the message bundle cannot resolve to
+  different languages. `CountryStylesTest` pins the order, the language-keyed fallback and the
+  bold/not-bold pair.
+- **Per-element faces are still message keys**, because a face follows the language and a bundle is
+  what a language keys. `approval-status-export-pdf.html` emits
+  `.criteria-label`/`.criteria-value { font-family: … }` from `pdf.font.family.criteriaLabel` /
+  `.criteriaValue` in a templated `<style>` placed **before** `${pdfCss}`, so the cascade runs
+  strictly least- to most-specific (message keys → base → country → locale). Both default to
+  `inherit`, i.e. `body`'s `pdf.font.family` stays the global default and a locale that needs no
+  split says nothing; `report-pdf.css` deliberately sets no `font-family` on those two selectors and
+  says so beside them. The `_th`/`_zh*` bundles point `criteriaValue` at the **Latin** face — safe
+  only because this document's values are references, amounts and dates. **No per-glyph fallback**:
+  a value carrying Thai or Han under that stack renders blank, not substituted.
 
 ## Caller-defined tables (`/dynamic`)
 
@@ -242,7 +298,7 @@ A report whose columns and rows the caller supplies, sharing every piece of the 
 ## Conventions
 - **Shared chrome, per-report body.** Both reports' header/footer come from `fragments/report-chrome.html` (browser) and `fragments/report-chrome-pdf.html` (PDF — a chrome set is `*styles` with the `@page` boxes, plus `*Header`/`*Section`/`*Footer`; two sets live there, see above). Adding a report means a body and a choice of chrome set, not new chrome. The table CSS hook is `.report-table` (was `.servers-table`), so a country's stylesheet styles *any* report's table.
 - **Offline HTML export** is a recurring pattern: controllers produce `MediaType.TEXT_HTML_VALUE` with assets inlined (via `AssetService`) so the output renders with no server. Templates ending `-export.html` (`commit-export.html`, `report-export.html`) are the self-contained variants.
-- Templates: `commit.html`/`commit-export.html`, `report.html`/`report-export.html`/`report-export-pdf.html`, `dynamic-report.html`/`dynamic-report-export.html`/`dynamic-report-export-pdf.html`, `environment.html`/`environment-rendered.html`, plus `fragments/` (chrome, chrome-pdf, dynamic-table) and `country/<code>/`. Stylesheets: `report.css` (browser), `report-pdf.css` (PDF, inlined), `report-pdf-preview.css` (browser preview of a PDF template — linked, never inlined, never seen by the renderer).
+- Templates: `commit.html`/`commit-export.html`, `report.html`/`report-export.html`/`report-export-pdf.html`, `dynamic-report.html`/`dynamic-report-export.html`/`dynamic-report-export-pdf.html`, `environment.html`/`environment-rendered.html`, plus `fragments/` (chrome, chrome-pdf, dynamic-table) and `country/<code>/`. Stylesheets: `report.css` (browser), `report-pdf.css` (PDF, inlined), `country/<code>/style-pdf.css` and `locale/<tag>/report-pdf.css` (the two PDF overlay axes, inlined after it), `report-pdf-preview.css` (browser preview of a PDF template — linked, never inlined, never seen by the renderer).
 
 ## Notes
 - No config-server / SSL dependency; runs fully standalone. See [[creed-platform]] only for build/run basics (local Maven repo, JDK).

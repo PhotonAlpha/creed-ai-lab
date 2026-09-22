@@ -172,7 +172,7 @@ class PdfPreviewHtmlTest {
 
         Map<String, Object> variables = new HashMap<>();
         variables.put("profile", profile);
-        variables.put("pdfCss", countryStyles.pdf(country));
+        variables.put("pdfCss", countryStyles.pdf(country, profile.locale()));
         variables.put("table", table);
         variables.put("total", "1");
         variables.put("generatedAt", "2026-09-10 12:00:00");

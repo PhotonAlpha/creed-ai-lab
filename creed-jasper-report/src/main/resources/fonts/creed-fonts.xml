@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The embedded faces, and the ONE mechanism this module uses to make a font follow the locale.
+     Registered by jasperreports_extension.properties.
+
+     "Creed Sans" IS DECLARED FOUR TIMES. A font family may be restricted to a set of locales, and
+     FontUtil walks the registered families in order and takes the FIRST whose supportsLocale()
+     says yes and whose name matches. So the three script-specific declarations come first and the
+     unrestricted one comes LAST — a family with no <locales> supports every locale, so declared
+     first it would always win and the Thai and CJK faces would never be reached. That ordering is
+     load-bearing; it is not alphabetical by accident.
+
+     This is the Jasper-native answer to creed-report's per-locale `pdf.font.family` message key:
+     there the template asks the bundle which stack to use, here the template always says
+     "Creed Sans" and the engine resolves it against REPORT_LOCALE.
+
+     The <locale> codes are Locale.toString() form (underscore, not hyphen) — JRDataUtils.getLocaleCode
+     is literally Locale::toString. ReportLanguage normalises every request to one of six locales,
+     so only those codes can ever reach a fill; the regional variants are listed anyway so a caller
+     bypassing that normalisation still gets the right script rather than blank glyphs.
+
+     NO PER-GLYPH FALLBACK, exactly as in creed-report: a run is set in one face, and a glyph that
+     face lacks comes out blank rather than substituted. Two consequences, both already paid for
+     next door: the script face must also carry the LATIN the table is full of (host names, bank
+     references, dates) — the bundled NotoSansThai is the google/fonts build, Thai plus Latin, not
+     the Thai-only notofonts.github.io one — and "Creed Sans Data" must only ever be pointed at
+     values that are Latin.
+
+     A Bold face per family is not optional: JasperReports does not synthesize bold, so a bold
+     element in a family that has only a normal face renders NOTHING.
+
+     The TTFs themselves are creed-report's, shared at build time (see this module's pom) so the
+     two engines cannot be rendering differently-instanced fonts. -->
+<fontFamilies>
+
+    <!-- Thai. -->
+    <fontFamily name="Creed Sans">
+        <normal>fonts/NotoSansThai-Regular.ttf</normal>
+        <bold>fonts/NotoSansThai-Bold.ttf</bold>
+        <pdfEncoding>Identity-H</pdfEncoding>
+        <pdfEmbedded>true</pdfEmbedded>
+        <locales>
+            <locale>th</locale>
+            <locale>th_TH</locale>
+        </locales>
+    </fontFamily>
+
+    <!-- Simplified Chinese. -->
+    <fontFamily name="Creed Sans">
+        <normal>fonts/NotoSansSC-Regular.ttf</normal>
+        <bold>fonts/NotoSansSC-Bold.ttf</bold>
+        <pdfEncoding>Identity-H</pdfEncoding>
+        <pdfEmbedded>true</pdfEmbedded>
+        <locales>
+            <locale>zh</locale>
+            <locale>zh_CN</locale>
+            <locale>zh_SG</locale>
+        </locales>
+    </fontFamily>
+
+    <!-- Traditional Chinese. Separate from SC on purpose: collapsing the two onto one Han face is
+         the mistake that makes a Taiwanese document quietly wrong rather than visibly broken. -->
+    <fontFamily name="Creed Sans">
+        <normal>fonts/NotoSansTC-Regular.ttf</normal>
+        <bold>fonts/NotoSansTC-Bold.ttf</bold>
+        <pdfEncoding>Identity-H</pdfEncoding>
+        <pdfEmbedded>true</pdfEmbedded>
+        <locales>
+            <locale>zh_TW</locale>
+            <locale>zh_HK</locale>
+            <locale>zh_MO</locale>
+        </locales>
+    </fontFamily>
+
+    <!-- The default: every other locale, English, Malay and Vietnamese included (Noto Sans covers
+         Vietnamese diacritics as-is). UNRESTRICTED, therefore LAST. -->
+    <fontFamily name="Creed Sans">
+        <normal>fonts/NotoSans-Regular.ttf</normal>
+        <bold>fonts/NotoSans-Bold.ttf</bold>
+        <pdfEncoding>Identity-H</pdfEncoding>
+        <pdfEmbedded>true</pdfEmbedded>
+    </fontFamily>
+
+    <!-- The DATA face: Latin in every locale, never script-resolved. Used by the criteria block's
+         values, which in this document are references, amounts and dates — the same split
+         creed-report spells out as pdf.font.family.criteriaValue. See the warning above before
+         pointing anything else at it. -->
+    <fontFamily name="Creed Sans Data">
+        <normal>fonts/NotoSans-Regular.ttf</normal>
+        <bold>fonts/NotoSans-Bold.ttf</bold>
+        <pdfEncoding>Identity-H</pdfEncoding>
+        <pdfEmbedded>true</pdfEmbedded>
+    </fontFamily>
+
+</fontFamilies>

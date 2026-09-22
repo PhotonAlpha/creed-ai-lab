@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.creed</groupId>
+        <artifactId>spring-creed-auth-server</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>creed-jasper-report</artifactId>
+    <name>creed-jasper-report</name>
+    <description>The approval-status listing again, this time laid out by JasperReports from a .jrxml</description>
+
+    <properties>
+        <!-- Last of the 6.x line: one jar, PDF exporter included, and it renders onto the same
+             OpenPDF (1.3.32) creed-report's Flying Saucer fork uses — so a difference between the
+             two PDFs is the LAYOUT ENGINE, never the PDF writer. JasperReports 7 splits the PDF
+             exporter into jasperreports-pdf and moves it to net.sf.jasperreports.pdf.*; nothing
+             here needs that yet. Not managed by spring-boot-dependencies, hence the version. -->
+        <jasperreports.version>6.21.3</jasperreports.version>
+        <!-- JasperReports compiles a report's expressions at runtime with the Eclipse compiler.
+             The 3.21.0 (2019) ecj its POM pins cannot read a modern JDK's class files, so a fill
+             fails with "Unsupported class file major version" on JDK 21+. Overriding it here is
+             the fix; see JasperReportService's javadoc. -->
+        <ecj.version>3.42.0</ecj.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>net.sf.jasperreports</groupId>
+            <artifactId>jasperreports</artifactId>
+            <version>${jasperreports.version}</version>
+            <exclusions>
+                <!-- Spring Boot ships spring-jcl, which owns the org.apache.commons.logging
+                     package; keeping both puts the same classes on the classpath twice. -->
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+                <!-- Charts. This report has none, and jfreechart 1.0.19 (2014) is the oldest
+                     thing this module would otherwise carry. -->
+                <exclusion>
+                    <groupId>org.jfree</groupId>
+                    <artifactId>jfreechart</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.jfree</groupId>
+                    <artifactId>jcommon</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.eclipse.jdt</groupId>
+                    <artifactId>ecj</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.jdt</groupId>
+            <artifactId>ecj</artifactId>
+            <version>${ecj.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <!-- The embedded Noto faces and the brand images are SHARED WITH creed-report rather
+                 than copied: the two modules render the same document through different engines,
+                 so any visual difference between their PDFs has to be the engine and not a
+                 different logo or a differently-instanced font. ~36MB of TTF lives in exactly one
+                 place in git, and this module still packages a self-contained jar.
+                 If creed-report's fonts/ is empty (a fresh clone before the provisioning recipe),
+                 the build still succeeds and the PDF falls back to the built-in Helvetica —
+                 JasperFontsTest is what fails, loudly, rather than a user's download. -->
+            <resource>
+                <directory>${project.basedir}/../creed-report/src/main/resources/fonts</directory>
+                <targetPath>fonts</targetPath>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/../creed-report/src/main/resources/static/img</directory>
+                <targetPath>img</targetPath>
+                <includes>
+                    <include>creed-logo.png</include>
+                    <include>creed-stamp.png</include>
+                </includes>
+            </resource>
+        </resources>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

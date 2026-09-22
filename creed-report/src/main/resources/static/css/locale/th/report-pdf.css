@@ -1,0 +1,31 @@
+/* Thai LOCALE overlay for the PDF -- the third and last layer CountryStyles concatenates, after
+ * report-pdf.css and the country's style-pdf.css, so these rules win at equal specificity.
+ *
+ * Reached by any country rendering in Thai (th-TH resolves th-th -> th), which is why it is keyed
+ * on the LANGUAGE and not on ReportCountry.TH: country/th/style-pdf.css is the Thai *edition*
+ * -- flag red, taller rows -- and is applied even when that edition is read in English. This file
+ * is the opposite half: it applies to Thai TEXT, in whatever edition it is printed.
+ *
+ * What belongs here is typography a message key cannot express. The face itself is a key
+ * (pdf.font.family, plus pdf.font.family.criteria* for the criteria block); a RULE -- which
+ * selector goes bold, how tall a line is -- has nowhere to live in a .properties file.
+ *
+ * CSS 2.1 only: openpdf-html is not a browser -- no custom properties, no flexbox, no rem.
+ */
+
+/* NOT BOLD in Thai. Noto Sans Thai's loops (ก ถ ผ) close up when the face goes bold, and at the
+ * 8.5-9pt this document sets its small chrome in, a bold caption reads as a smudge rather than as
+ * emphasis. Size and colour already separate these from the text around them, so the weight is
+ * the one signal Thai can give up without losing the distinction. */
+.criteria-label,
+.statement-footer-title,
+.country-notice-title,
+.country-notice-term { font-weight: normal; }
+
+/* Thai stacks tone marks above and vowels below the line; the base sheet's leading clips them.
+ * Country th/style-pdf.css already does this for the TABLE -- these are the blocks it does not
+ * reach, because they are not rows. */
+.criteria-label,
+.criteria-value { line-height: 1.55; }
+.account-cell .account-line { line-height: 1.6; }
+table.statement-criteria td { padding-bottom: 11px; }

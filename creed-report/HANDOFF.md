@@ -136,11 +136,29 @@ every page, half-empty ones included, and carries its own centred page counter. 
   A country edition owns four files under its own code — `templates/country/<code>/report.html`
   and `report-pdf.html`, `static/css/country/<code>/style.css` and `style-pdf.css` — pulled in
   **by path** (`~{${profile.contentTemplate} :: notice}`, `@{${profile.styleSheet}}`), so fragment
-  names are identical across countries and there is no shared block to edit. Styling is two layers,
-  shared first and country last: `static/css/report.css` for the browser (the page links both) and
-  `static/css/report-pdf.css` for the PDF, which `CountryStyles.pdf()` concatenates in front of the
-  country sheet so a template gets base + country as one `${pdfCss}` string and cannot lose the base
-  by forgetting a variable. `CountryStyles` loads all of them eagerly and **fails startup** if one
+  names are identical across countries and there is no shared block to edit. Styling is layered,
+  shared first: `static/css/report.css` for the browser (the page links both) and
+  `static/css/report-pdf.css` for the PDF, which `CountryStyles.pdf(country, locale)` concatenates
+  in front of the country sheet and a **locale overlay**, so a template gets base + country + locale
+  as one `${pdfCss}` string and cannot lose a layer by forgetting a variable.
+  - **The locale overlay** is `static/css/locale/<tag>/report-pdf.css`, keyed on the **language**
+    (`th-TH` → `th`, `zh-CN`/`zh-TW` → `zh`) rather than on the country, and appended **last**: it
+    carries typography that follows the script rather than the edition, i.e. the same class going
+    bold in one language and not in another (`locale/zh` bolds `.criteria-label` because Han at
+    8.5pt reads lighter than the Latin beside it; `locale/th` un-bolds the small chrome because
+    Noto Sans Thai fills its loops in when it goes bold). Unlike the country half a **missing file
+    is the normal case**, not a degradation — English, Malay and Vietnamese ship none and render
+    the base sheet unchanged. Pass the **same** `Locale` the template is rendered in, so the sheet
+    and the message bundle cannot disagree about the language (`CountryStylesTest`).
+  - **The face, as opposed to the weight, stays a message key**, because it follows the language
+    and a bundle is what a language keys: `pdf.font.family` for `body` (the global default
+    everything inherits) and `pdf.font.family.criteriaLabel` / `.criteriaValue`, which
+    `approval-status-export-pdf.html` emits as a templated `<style>` **before** `${pdfCss}` so the
+    cascade runs strictly least- to most-specific. Both default to `inherit` — a locale that needs
+    no split says nothing. `report-pdf.css` sets no `font-family` on those two selectors, on
+    purpose, and says so beside them.
+
+  `CountryStyles` loads all of them eagerly and **fails startup** if one
   is missing — except the two PDF files, which **degrade**: a country shipping no
   `country/<code>/report-pdf.html` or `style-pdf.css` renders the `country/default/` edition
   (`templates/country/default/report-pdf.html`, `static/css/country/default/style-pdf.css`) instead, and the countries doing so are named in the startup log
@@ -181,8 +199,24 @@ every page, half-empty ones included, and carries its own centred page counter. 
   the layout down; a report over real data reuses `approval-status-export-pdf.html` with a model
   built elsewhere. Wears the statement chrome whole, so it defines none of its own.
   `ApprovalStatusPdfTest` renders the endpoint's own payload and asserts, per page, the footnote,
-  the `N of M` counter and two images (logo + seal), plus the page-one body. The document is
+  the `N of M` counter and two images (logo + seal), plus the page-one body, the criteria block's
+  two per-locale faces, and that every country × language still paginates. The document is
   rendered under **Creed's** logo and seal, not the sample's bank's.
+  - **The criteria block is the module's one locale-typography showcase**: its caption and its
+    datum take separate faces from `pdf.font.family.criteria*`, and whether the caption is bold
+    comes from the locale CSS overlay — see the country/language section above for both halves.
+    The Thai and Chinese bundles point `criteriaValue` at the **Latin** face, which is only safe
+    because this document's values are references, amounts and dates: Flying Saucer picks one
+    family for a whole run, so a value carrying Thai or Han under that stack would render **blank**,
+    not substituted. A report over real data must flip the key back.
+    `mvn -pl creed-report test -Dtest=ApprovalStatusPdfTest -Dpdf.sample.dir="$PWD/tmp/pdf"` dumps
+    one PDF per country × language to eyeball the editions side by side.
+  - **The same document has a second renderer**: `creed-jasper-report` (HTTP 9110) lays it out with
+    JasperReports from a `.jrxml`. It reuses this module's `SAMPLE_JSON` byte-for-byte and packages
+    **these** `fonts/` and `static/img/` files through `<resource>` entries in its pom, so the two
+    PDFs differ only by layout engine. Two consequences: changing `SAMPLE_JSON` means changing
+    `ApprovalStatusSamples` there in the same commit, and **moving or renaming `src/main/resources/fonts/`
+    or the two brand PNGs breaks that module's build**, not just this one's.
 - **Environment Inspector** — REST + Thymeleaf views over a standalone `ConfigurableEnvironment`
   replay. **Use the `env-inspector` skill for anything in this feature.**
 
@@ -191,7 +225,8 @@ every page, half-empty ones included, and carries its own centred page counter. 
 - **What CSS the PDF renderer supports is written down** — `.claude/skills/creed-report/flying-saucer-css.md`
   catalogues the properties, selectors, units and at-rules openpdf-html 2.2.2 actually implements,
   each behavioural claim rendered and eyeballed rather than remembered. Check it before adding a rule
-  to `report-pdf.css`, a `country/<code>/style-pdf.css`, or a `<style>` in a `*-pdf.html`.
+  to `report-pdf.css`, a `country/<code>/style-pdf.css`, a `locale/<tag>/report-pdf.css`, or a
+  `<style>` in a `*-pdf.html`.
 - **Never put `@media` in CSS that reaches the renderer.** Verified: the block never applies (`print`,
   `screen` and `all` all fail) **and every rule after it in that stylesheet is swallowed too** — a
   parser bug drops the whole media rule at EOF. Nothing silently degrades; a third of your sheet just

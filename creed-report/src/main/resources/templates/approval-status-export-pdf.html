@@ -40,11 +40,36 @@
     <meta charset="UTF-8"/>
     <title th:text="${report.title}">Approval Status All List</title>
     <th:block th:replace="~{fragments/report-chrome-pdf :: statementStyles}"></th:block>
+<!-- The criteria block's own faces, per locale. The chrome above sets `body { font-family }` from
+     pdf.font.family -- that is the GLOBAL default and everything in this document inherits it. The
+     two rules here are the one place that is deliberately overridden: a caption and the datum under
+     it are different kinds of text, and pdf.font.family.criteriaLabel / .criteriaValue let each
+     locale set them apart (or not -- both default to `inherit`, which is literally "whatever body
+     got", so a locale that says nothing changes nothing).
+
+     Why a message key and not the stylesheet: the face follows the LANGUAGE, and the language is
+     what a bundle is keyed on. What the stylesheet layer answers instead is the neighbouring
+     question a .properties file cannot -- whether a rule goes bold in this script
+     (static/css/locale/<tag>/report-pdf.css, appended last by CountryStyles).
+
+     This block sits BEFORE ${pdfCss} on purpose, so the cascade runs strictly least- to
+     most-specific: message-key CSS, then base, country, locale. Nothing downstream sets
+     font-family on these two selectors -- see the note beside them in report-pdf.css.
+
+     LANDMINE if you point one of these at a face that does not cover the locale's script: Flying
+     Saucer has no per-glyph fallback. It takes the first REGISTERED family in the stack and sets
+     the whole run in it, so the mismatched glyphs come out blank rather than substituted. -->
+    <style th:inline="css">
+        .criteria-label { font-family: [(#{pdf.font.family.criteriaLabel})]; }
+        .criteria-value { font-family: [(#{pdf.font.family.criteriaValue})]; }
+    </style>
 <!-- The static CSS 2.1 rules, inlined by CountryStyles as one string (openpdf-html renders from a
-     string, so there is no base URL for a <link>): the shared static/css/report-pdf.css followed by
-     this country's static/css/country/<code>/style-pdf.css. The .statement-* rules this document
-     lives on are fixed brand chrome and are not among what a country overrides. -->
-<style th:utext="${pdfCss}">/* base + country pdf css inlined here */</style>
+     string, so there is no base URL for a <link>): the shared static/css/report-pdf.css, then this
+     country's static/css/country/<code>/style-pdf.css, then this locale's
+     static/css/locale/<tag>/report-pdf.css. The .statement-* rules this document lives on are
+     fixed brand chrome and are not among what a country overrides; the locale layer does reach
+     them, because whether a caption goes bold is a property of the script, not of the edition. -->
+<style th:utext="${pdfCss}">/* base + country + locale pdf css inlined here */</style>
 <!-- Browser preview only: /approval-status/preview/pdf serves this very markup as text/html and
      passes ${previewCss}. A PDF render passes nothing, the th:if is false and Flying Saucer sees
      the file unchanged. The th:if sits on an OUTER block on purpose -- th:replace on the same tag

@@ -73,6 +73,11 @@ declaration is dropped (the rest of the rule survives, §7).
 **Other** `outline` (+ `-width/-style/-color`) · `cursor` (meaningless in PDF) · `src` (inside
 `@font-face`)
 
+**`inherit` works** as a value on a standalone declaration — `PrimitivePropertyBuilders` accepts
+`CSS_INHERIT` for every longhand, `font-family` included, which is what lets a rule say "take
+whatever `body` got" instead of repeating the stack. Not inside a shorthand: the builders pass
+`inheritAllowed = false` to each component, so `font: inherit 10pt` is a parse error.
+
 ### Proprietary `-fs-*`
 
 `-fs-table-paginate` (repeat a table's `thead`/`tfoot` per page — **the mechanism `.page-frame`

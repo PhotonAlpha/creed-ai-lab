@@ -119,7 +119,7 @@ class PdfExportServiceTest {
             byte[] pdf = renderReport(country, Locale.ENGLISH);
             assertThat(new String(pdf, 0, 5, StandardCharsets.US_ASCII))
                     .as("country %s", country.code()).isEqualTo("%PDF-");
-            assertThat(countryStyles.pdf(country)).as("pdf stylesheet for %s", country.code())
+            assertThat(countryStyles.pdf(country, Locale.ENGLISH)).as("pdf stylesheet for %s", country.code())
                     .contains(".total-badge");
         }
     }
@@ -128,9 +128,9 @@ class PdfExportServiceTest {
     void eachCountrysPdfStylesheetIsItsOwnFile() {
         // The refactor's payoff: one file per country instead of one shared block, so no country
         // can silently inherit another's palette.
-        assertThat(countryStyles.pdf(ReportCountry.TH)).contains("#a51931").doesNotContain("#010066");
-        assertThat(countryStyles.pdf(ReportCountry.MY)).contains("#010066").doesNotContain("#a51931");
-        assertThat(countryStyles.pdf(ReportCountry.VN)).contains("#da251d");
+        assertThat(countryStyles.pdf(ReportCountry.TH, Locale.ENGLISH)).contains("#a51931").doesNotContain("#010066");
+        assertThat(countryStyles.pdf(ReportCountry.MY, Locale.ENGLISH)).contains("#010066").doesNotContain("#a51931");
+        assertThat(countryStyles.pdf(ReportCountry.VN, Locale.ENGLISH)).contains("#da251d");
     }
 
     @Test
@@ -146,7 +146,7 @@ class PdfExportServiceTest {
 
             byte[] pdf = service.renderTemplate("dynamic-report-export-pdf", Map.of(
                     "profile", profile,
-                    "pdfCss", countryStyles.pdf(country),
+                    "pdfCss", countryStyles.pdf(country, profile.locale()),
                     "table", table,
                     "total", String.valueOf(table.size()),
                     "generatedAt", "2026-09-02 12:00:00"), profile.locale());
@@ -183,7 +183,7 @@ class PdfExportServiceTest {
         CountryProfile profile = CountryProfile.of(country, language);
         return service.renderTemplate("report-export-pdf", Map.of(
                 "profile", profile,
-                "pdfCss", countryStyles.pdf(country),
+                "pdfCss", countryStyles.pdf(country, profile.locale()),
                 "servers", servers,
                 "total", String.valueOf(servers.size()),
                 "generatedAt", "2026-07-22 12:00:00"), profile.locale());

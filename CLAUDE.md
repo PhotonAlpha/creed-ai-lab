@@ -1,7 +1,7 @@
 # creed-ai-lab — project conventions
 
 Multi-module OAuth2 mesh: authorization server, two edge gateways (reactive + servlet), four resource
-servers, config server, Camel gateway, reporting app, one React frontend, one Node mock server.
+servers, config server, Camel gateway, two reporting apps, one React frontend, one Node mock server.
 
 **Invariant conventions only** — this file loads in full every turn. Module-specific, changing, or
 narrative content belongs in a skill or a `HANDOFF.md` (§6).
@@ -9,7 +9,8 @@ narrative content belongs in a skill or a `HANDOFF.md` (§6).
 ## 1. Stack
 
 Java **21** source/target, built with **JDK 25** · Spring Boot **3.5.14** · Spring Cloud **2025.0.2**
-· Camel 4.18.2 (simple-metrics only) · Maven 3.9.16, local repo **`/Users/ethan/Desktop/workspace/repos`**
+· Camel 4.18.2 (simple-metrics only) · JasperReports 6.21.3 (jasper-report only)
+· Maven 3.9.16, local repo **`/Users/ethan/Desktop/workspace/repos`**
 (not `~/.m2`) · frontend React 19 + TS + Vite 8 + **antd 5** + Ant Design Pro 2 + AntV G6 5 ·
 PostgreSQL on the `creed-artifactory-db` container (env-matrix only; everything else is in-memory).
 
@@ -50,6 +51,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-gateway-partner` | 8095 | — | HTTPS, **servlet** |
 | `creed-simple-metrics` | 8096 | `/camel/*` | HTTPS, Camel; **pull-mode** metrics |
 | `creed-report` | 9100 | `/report` | HTTP, standalone (outside the mesh) |
+| `creed-jasper-report` | 9110 | `/jasper-report` | HTTP, standalone; **JasperReports jrxml** twin of creed-report's approval-status PDF |
 | `creed-resource-catalog` | 18081 / 18082 | `/api/catalog` | primary / secondary |
 | `creed-resource-order` | 18091 / 18092 | `/api/order` | primary / secondary |
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |

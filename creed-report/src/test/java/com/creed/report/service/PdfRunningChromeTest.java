@@ -219,7 +219,7 @@ class PdfRunningChromeTest {
         DynamicTable table = table(rows, profile);
         return service.renderTemplate("dynamic-report-export-pdf", Map.of(
                 "profile", profile,
-                "pdfCss", countryStyles.pdf(profile.country()),
+                "pdfCss", countryStyles.pdf(profile.country(), profile.locale()),
                 "table", table,
                 "total", String.valueOf(table.size()),
                 "generatedAt", GENERATED_AT), profile.locale());
@@ -231,7 +231,7 @@ class PdfRunningChromeTest {
         DynamicTable table = table(rows, profile);
         return service.renderTemplate("dynamic-report-statement-pdf", Map.of(
                 "profile", profile,
-                "pdfCss", countryStyles.pdf(profile.country()),
+                "pdfCss", countryStyles.pdf(profile.country(), profile.locale()),
                 "table", table,
                 "total", String.valueOf(table.size()),
                 "generatedAt", GENERATED_AT,
@@ -262,7 +262,7 @@ class PdfRunningChromeTest {
         CountryProfile profile = CountryProfile.of(ReportCountry.GLOBAL, Locale.ENGLISH);
         return service.renderTemplate("report-export-pdf", Map.of(
                 "profile", profile,
-                "pdfCss", countryStyles.pdf(profile.country()),
+                "pdfCss", countryStyles.pdf(profile.country(), profile.locale()),
                 "servers", servers,
                 "total", String.valueOf(servers.size()),
                 "generatedAt", GENERATED_AT), profile.locale());

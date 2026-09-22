@@ -1,0 +1,344 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The APPROVAL-STATUS LISTING, laid out by JasperReports — the same printed document as
+     creed-report/docs/template.jpg and as creed-report's approval-status-export-pdf.html, from a
+     .jrxml instead of from Thymeleaf + CSS 2.1.
+
+         +──────────────────────────────────────────────────+
+         |  [logo]                                          |   <- pageHeader    (every page)
+         |  ────────────────────────────────────────────────|
+         |  Approval Status All List                        |   <- title         (once)
+         |  ────────────────────────────────────────────────|
+         |  Transaction/Deposit Type   Bank Reference   ...  |   <- criteria subreport, 4 per row
+         |  —                         —                    |
+         |                                                  |
+         |  13 Record(s) (Note: This is a filtered table.)   |   <- still the title band
+         |  +──────────────+──────────+───────────+───────+  |
+         |  | header band (light blue)                    |  |   <- columnHeader  (every page)
+         |  | Bulk MEPS | BK26.. | VASA COMPANY 3 ... | Processing
+         |  +──────────────+──────────+───────────+───────+  |   <- detail        (per row)
+         |                                                  |
+         |  Date of Export: ... | Time of Export: ...  (())  |   <- pageFooter    (every page)
+         |  Approval Status All List                  seal   |
+         |                     1 of 2                        |
+         +──────────────────────────────────────────────────+
+
+     WHERE THE TWO ENGINES DIFFER, and why this file is short where the HTML one is long:
+
+     * REPEATING CHROME IS FREE HERE. pageHeader and pageFooter repeat on every page and pageFooter
+       sits at the foot of the PAGE, including a last page the content does not fill. The HTML twin
+       needs a wrapper table with -fs-table-paginate for the header and a `position: running()`
+       element pulled into an @page margin box for the footer, because Flying Saucer offers nothing
+       else that reaches the page margin. Four mechanisms were probed there; two work.
+     * counter(page) IS NOT SPECIAL. $V{PAGE_NUMBER} evaluated at Report time gives the total, so
+       the "N of M" counter is two ordinary text fields and can sit in the same band as the seal.
+       In the HTML that counter can only exist inside an @page margin box, a margin box cannot hold
+       an image, and two margin boxes cannot stack — which is the whole reason that footer is a
+       running element rather than a table foot.
+     * FOUR TO A ROW IS A REPORT PROPERTY. The criteria block is a multi-column SUBREPORT
+       (columnCount=4, printOrder=Horizontal); the main report has one column and cannot also have
+       four. The HTML uses a <table> of percentage cells, because that renderer has no grid.
+     * A ROW THAT GROWS. stretchType="RelativeToTallestObject" makes the three short cells match
+       the four-line account cell; CSS table cells do that by themselves.
+     * THE PAGE BOX IS POINTS, NOT MILLIMETRES. A4 is 595x842pt; the margins below are the HTML's
+       14mm/14mm/14mm sides and top, and the deep bottom band it needs for the two-storey footer.
+
+     WHAT IS THE SAME, deliberately: the payload (byte-for-byte the JSON creed-report serves), the
+     embedded Noto faces, the logo and the seal (shared at build time — see the pom), the palette
+     (#005CB9 brand blue, #DBE5F1 header band, #C9CCD1 rules, #414042 footnote grey, sampled off the
+     sample page), and the per-locale typography: the face follows REPORT_LOCALE, and a caption's
+     WEIGHT changes with the script (see the conditional styles below).
+
+     Fields come from com.creed.jasper.service.ApprovalStatusPdfService via a FieldDataSource, not
+     from bean introspection: the domain is a record, whose accessors JasperReports' own
+     JRBeanCollectionDataSource cannot see.
+
+     ELEMENT HEIGHTS ARE A LOCALE PROBLEM, and this is the landmine that cost a debugging session
+     here. A text element shorter than the line the FACE needs prints NOTHING — no warning, no
+     clipped glyph, no ellipsis; the line simply does not fit vertically and is dropped. The faces
+     are not interchangeable in height:
+
+         font size   Noto Sans   Noto Sans SC/TC   Noto Sans Thai
+           8pt         10.90         11.58            12.09
+           8.5pt       11.58         12.31            12.84
+           9pt         12.26         13.03            13.60
+          14pt         19.07         20.27            21.15
+
+     So a 12pt-tall caption at 8.5pt is fine in English, blank in Chinese and blank in Thai, and a
+     document proof-read in English ships with its title and every criteria caption missing in two
+     languages. Every single-line element below is therefore sized at ~1.6x its font size, the Thai
+     line plus headroom — not at the Latin line it looked right at.
+       (creed-report cannot hit this: a CSS line box grows to fit its content, and its locale
+        overlay only has to adjust the leading.) -->
+<jasperReport xmlns="http://jasperreports.sourceforge.net/jasperreports"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xsi:schemaLocation="http://jasperreports.sourceforge.net/jasperreports
+                                  http://jasperreports.sourceforge.net/xsd/jasperreport.xsd"
+              name="approval-status"
+              pageWidth="595" pageHeight="842"
+              columnWidth="515"
+              leftMargin="40" rightMargin="40" topMargin="40" bottomMargin="28"
+              resourceBundle="i18n/jasper-messages"
+              whenNoDataType="AllSectionsNoDetail">
+
+    <!-- THE GLOBAL DEFAULT FACE. isDefault="true" makes this the font every element inherits unless
+         it says otherwise — the exact job `body { font-family: ... }` does in the HTML twin.
+         "Creed Sans" is one family name that resolves to Noto Sans / Noto Sans Thai / Noto Sans SC /
+         Noto Sans TC by REPORT_LOCALE: fonts/creed-fonts.xml declares the family four times, three
+         of them restricted to locales, and the engine picks the first that supports the fill's
+         locale (so the unrestricted one is declared LAST, or it would always win).
+         Identity-H + embedded, for the same reason creed-report registers its TTFs that way:
+         without it the CJK and Thai glyphs do not reach the PDF. -->
+    <style name="Base" isDefault="true" fontName="Creed Sans" fontSize="9" forecolor="#212529"
+           pdfEncoding="Identity-H" isPdfEmbedded="true"/>
+
+    <style name="StatementTitle" style="Base" fontSize="14" isBold="true" forecolor="#005CB9"/>
+    <style name="CountLine" style="Base" forecolor="#414042"/>
+
+    <style name="TableHeader" style="Base" mode="Opaque" backcolor="#DBE5F1" forecolor="#1F3864"
+           isBold="true" vTextAlign="Middle"/>
+    <style name="TableCell" style="Base" vTextAlign="Middle"/>
+    <style name="AccountCell" style="Base" vTextAlign="Top"/>
+    <!-- The status column, in the accent colour like the sample's. -->
+    <style name="StatusCell" style="Base" forecolor="#005CB9" vTextAlign="Middle"/>
+
+    <style name="FooterLine" style="Base" fontSize="8" forecolor="#414042"/>
+    <style name="PageNumber" style="Base" fontSize="8" forecolor="#414042"/>
+
+    <!-- The document name repeated at the foot of every page, so a loose sheet says which document
+         it came from. BOLD — except in Thai, where Noto Sans Thai's loops close up at this size.
+         This is the same rule creed-report's static/css/locale/th/report-pdf.css carries for
+         .statement-footer-title, and the reason that rule cannot be a message key: it is a weight
+         per selector, not a string. -->
+    <style name="FooterTitle" style="Base" fontSize="8.5" isBold="true" forecolor="#005CB9">
+        <conditionalStyle>
+            <conditionExpression><![CDATA["th".equals($P{REPORT_LOCALE}.getLanguage())]]></conditionExpression>
+            <style isBold="false"/>
+        </conditionalStyle>
+    </style>
+
+    <parameter name="reportTitle" class="java.lang.String"/>
+    <parameter name="note" class="java.lang.String"/>
+    <parameter name="exportDate" class="java.lang.String"/>
+    <parameter name="exportTime" class="java.lang.String"/>
+    <!-- Compiled by JasperReportService and handed in, rather than named as a path the engine's
+         repository would resolve during the fill: a broken criteria template then fails when the
+         main one does, not on a user's download. -->
+    <parameter name="criteriaReport" class="net.sf.jasperreports.engine.JasperReport"/>
+    <parameter name="criteriaData" class="net.sf.jasperreports.engine.JRDataSource"/>
+    <!-- Classpath names, not streams: a String image expression is loaded through the engine's
+         repository and CACHED, so the logo is read once however many pages it is drawn on. A
+         stream would be consumed by page one. -->
+    <parameter name="logo" class="java.lang.String"/>
+    <parameter name="stamp" class="java.lang.String"/>
+
+    <field name="type" class="java.lang.String"/>
+    <field name="bankReference" class="java.lang.String"/>
+    <!-- Already newline-joined by the model. The breaks are data (name, number, currency), so the
+         cell prints them rather than wrapping wherever the column happens to end. -->
+    <field name="account" class="java.lang.String"/>
+    <field name="status" class="java.lang.String"/>
+
+    <!-- Bands are declared in the SCHEMA's order (background, title, pageHeader, columnHeader,
+         detail, columnFooter, pageFooter, ...), and a band out of sequence fails the schema at
+         compile time in a message that names only the element it tripped over.
+
+         THE TITLE BAND PRINTS BEFORE THE PAGE HEADER, not under it. JRVerticalFiller fills title
+         then pageHeader, so a logo that lives only in the page header lands BELOW the title — in
+         this document, between the record count and the table, which is exactly where it first
+         turned up. The fix is the one below: page one's logo is part of the title band, and the
+         page header prints from page two on (printWhenExpression). The four lines of <image> are
+         duplicated on purpose; the alternative is a document whose first page is upside down.
+           (creed-report's twin has the opposite problem and solves it with a wrapper table whose
+            <thead> repeats: there, getting a repeated image onto a page at all is the hard part.)
+
+         Everything below belongs to the REPORT rather than to the page and prints once: the logo
+         above its hairline, the title fenced between that rule and its own, the criteria block,
+         and the record count.
+
+         The subreport stretches with the number of criteria, so the count line under it carries
+         positionType="Float" — without it Jasper leaves the element at its designed y and the
+         criteria block prints straight over it. -->
+    <title>
+        <band height="152">
+            <image scaleImage="RetainShape" hAlign="Left" isUsingCache="true">
+                <reportElement x="0" y="0" width="120" height="31"/>
+                <imageExpression><![CDATA[$P{logo}]]></imageExpression>
+            </image>
+            <line>
+                <reportElement x="0" y="39" width="515" height="1"/>
+                <graphicElement><pen lineWidth="0.5" lineColor="#C9CCD1"/></graphicElement>
+            </line>
+            <textField>
+                <reportElement style="StatementTitle" x="0" y="47" width="515" height="26"/>
+                <textFieldExpression><![CDATA[$P{reportTitle}]]></textFieldExpression>
+            </textField>
+            <line>
+                <reportElement x="0" y="78" width="515" height="1"/>
+                <graphicElement><pen lineWidth="0.5" lineColor="#C9CCD1"/></graphicElement>
+            </line>
+            <subreport isUsingCache="false">
+                <reportElement x="0" y="86" width="515" height="40"/>
+                <dataSourceExpression><![CDATA[$P{criteriaData}]]></dataSourceExpression>
+                <subreportExpression><![CDATA[$P{criteriaReport}]]></subreportExpression>
+            </subreport>
+            <textField>
+                <reportElement style="CountLine" positionType="Float" x="0" y="132" width="515" height="16"/>
+                <textFieldExpression><![CDATA[$P{note}]]></textFieldExpression>
+            </textField>
+        </band>
+    </title>
+
+    <!-- The logo, alone, above a hairline, on every page FROM THE SECOND — page one gets it from
+         the title band above, because that band prints first (see the note there). No text: the
+         document names itself in the title band (once) and in the footer (every page), so
+         repeating it here as well would say it three times a page. -->
+    <pageHeader>
+        <band height="46">
+            <printWhenExpression><![CDATA[$V{PAGE_NUMBER} > 1]]></printWhenExpression>
+            <image scaleImage="RetainShape" hAlign="Left" isUsingCache="true">
+                <reportElement x="0" y="0" width="120" height="31"/>
+                <imageExpression><![CDATA[$P{logo}]]></imageExpression>
+            </image>
+            <line>
+                <reportElement x="0" y="39" width="515" height="1"/>
+                <graphicElement><pen lineWidth="0.5" lineColor="#C9CCD1"/></graphicElement>
+            </line>
+        </band>
+    </pageHeader>
+
+    <!-- The table's header band. A columnHeader repeats on every page by itself, which is what
+         -fs-table-paginate buys next door. Light blue rather than the near-black the other Creed
+         reports use: this is statement chrome, and it is the sample's. -->
+    <columnHeader>
+        <band height="22">
+            <staticText>
+                <reportElement style="TableHeader" x="0" y="0" width="134" height="22"/>
+                <box leftPadding="8" rightPadding="4">
+                    <topPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                    <leftPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                    <bottomPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                </box>
+                <text><![CDATA[Transaction / Deposit Type]]></text>
+            </staticText>
+            <staticText>
+                <reportElement style="TableHeader" x="134" y="0" width="113" height="22"/>
+                <box leftPadding="8" rightPadding="4">
+                    <topPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                    <bottomPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                </box>
+                <text><![CDATA[Bank Reference]]></text>
+            </staticText>
+            <staticText>
+                <reportElement style="TableHeader" x="247" y="0" width="175" height="22"/>
+                <box leftPadding="8" rightPadding="4">
+                    <topPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                    <bottomPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                </box>
+                <text><![CDATA[Account]]></text>
+            </staticText>
+            <staticText>
+                <reportElement style="TableHeader" x="422" y="0" width="93" height="22"/>
+                <box leftPadding="8" rightPadding="4">
+                    <topPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                    <bottomPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                    <rightPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                </box>
+                <text><![CDATA[Status]]></text>
+            </staticText>
+        </band>
+    </columnHeader>
+
+    <!-- One listed transaction.
+         splitType="Prevent" is `page-break-inside: avoid`: a row's four lines stay on one page.
+         The account cell is the only element that grows (textAdjust="StretchHeight"); the other
+         three carry stretchType="RelativeToTallestObject" so their borders reach the bottom of the
+         row it makes, and vTextAlign="Middle" so they sit centred against it, as the sample has
+         them. Without the stretchType the row's rules stop short and the table looks torn. -->
+    <detail>
+        <band height="46" splitType="Prevent">
+            <textField>
+                <reportElement style="TableCell" stretchType="RelativeToTallestObject"
+                               x="0" y="0" width="134" height="46"/>
+                <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
+                    <leftPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                    <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
+                </box>
+                <textFieldExpression><![CDATA[$F{type}]]></textFieldExpression>
+            </textField>
+            <textField>
+                <reportElement style="TableCell" stretchType="RelativeToTallestObject"
+                               x="134" y="0" width="113" height="46"/>
+                <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
+                    <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
+                </box>
+                <textFieldExpression><![CDATA[$F{bankReference}]]></textFieldExpression>
+            </textField>
+            <textField textAdjust="StretchHeight">
+                <reportElement style="AccountCell" stretchType="RelativeToTallestObject"
+                               x="247" y="0" width="175" height="46"/>
+                <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
+                    <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
+                </box>
+                <textElement><paragraph lineSpacing="Proportional" lineSpacingSize="1.35"/></textElement>
+                <textFieldExpression><![CDATA[$F{account}]]></textFieldExpression>
+            </textField>
+            <textField>
+                <reportElement style="StatusCell" stretchType="RelativeToTallestObject"
+                               x="422" y="0" width="93" height="46"/>
+                <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
+                    <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
+                    <rightPen lineWidth="0.5" lineColor="#C9CCD1"/>
+                </box>
+                <textFieldExpression><![CDATA[$F{status}]]></textFieldExpression>
+            </textField>
+        </band>
+    </detail>
+
+    <!-- Both storeys of the footnote, in ONE band — the thing the HTML twin cannot do.
+         Storey 1: when the report was exported, then its name in bold blue, with the seal floated
+         right. Storey 2: the page counter, centred under it. $V{PAGE_NUMBER} evaluated Now is the
+         current page and evaluated at Report time is the last one, which is the whole trick; in
+         the HTML that counter can only exist inside an @page margin box, a margin box cannot hold
+         an image and two of them cannot stack, which is why that footer has to be a running
+         element instead.
+
+         THREE fields, not two, and the separator gets its own CENTRED box. The two-field idiom
+         ("N" right-aligned | " of M" left-aligned) loses the gap: Jasper's line wrapper strips
+         leading whitespace at the start of a line, so " of " renders as "of" and the counter reads
+         "1of 2". Centring the word in a box of its own gives the space back on both sides and does
+         not care that the separator is " of ", " 页，共 " or " จาก ". The three boxes meet at 237 and 278, either side of 257.5,
+         the centre of the content area, so the whole thing stays centred whatever the digits.
+         Only pdf.page.middle is used — the sample prints "1 of 2", with no "Page" prefix. -->
+    <pageFooter>
+        <band height="62">
+            <image scaleImage="RetainShape" hAlign="Right" isUsingCache="true">
+                <reportElement x="481" y="0" width="34" height="34"/>
+                <imageExpression><![CDATA[$P{stamp}]]></imageExpression>
+            </image>
+            <textField>
+                <reportElement style="FooterLine" x="0" y="0" width="440" height="14"/>
+                <textFieldExpression><![CDATA[$R{report.statement.exportDate} + " " + $P{exportDate}
+                        + "  |  " + $R{report.statement.exportTime} + " " + $P{exportTime}]]></textFieldExpression>
+            </textField>
+            <textField>
+                <reportElement style="FooterTitle" x="0" y="16" width="440" height="15"/>
+                <textFieldExpression><![CDATA[$P{reportTitle}]]></textFieldExpression>
+            </textField>
+            <textField>
+                <reportElement style="PageNumber" x="137" y="44" width="100" height="14"/>
+                <textElement textAlignment="Right"/>
+                <textFieldExpression><![CDATA[String.valueOf($V{PAGE_NUMBER})]]></textFieldExpression>
+            </textField>
+            <textField>
+                <reportElement style="PageNumber" x="237" y="44" width="41" height="14"/>
+                <textElement textAlignment="Center"/>
+                <textFieldExpression><![CDATA[$R{pdf.page.middle}]]></textFieldExpression>
+            </textField>
+            <textField evaluationTime="Report">
+                <reportElement style="PageNumber" x="278" y="44" width="100" height="14"/>
+                <textElement textAlignment="Left"/>
+                <textFieldExpression><![CDATA[String.valueOf($V{PAGE_NUMBER})]]></textFieldExpression>
+            </textField>
+        </band>
+    </pageFooter>
+</jasperReport>

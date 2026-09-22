@@ -1,0 +1,27 @@
+/* Chinese LOCALE overlay for the PDF -- the third and last layer CountryStyles concatenates,
+ * after report-pdf.css and the country's style-pdf.css, so these rules win at equal specificity.
+ *
+ * Keyed on the LANGUAGE, so it is reached by zh-CN and zh-TW alike (zh-cn -> zh); a rule only
+ * Traditional Chinese needs would go in a locale/zh-tw/ of its own, which resolves first.
+ * Compare country/<code>/style-pdf.css, which is the *edition* -- palette and row density -- and
+ * applies whatever language that edition is read in.
+ *
+ * What belongs here is typography a message key cannot express. The face itself is a key
+ * (pdf.font.family, plus pdf.font.family.criteria* for the criteria block); a RULE -- which
+ * selector goes bold, how tall a line is -- has nowhere to live in a .properties file.
+ *
+ * CSS 2.1 only: openpdf-html is not a browser -- no custom properties, no flexbox, no rem.
+ */
+
+/* BOLD in Chinese, where the Latin editions leave it regular -- the mirror image of locale/th.
+ * Han glyphs carry many more strokes in the same em, so at 8.5pt Noto Sans SC/TC Regular renders
+ * lighter than the Latin beside it and a grey caption sinks into the page. Bold is what brings it
+ * back to the weight the sample's Latin caption has. Flying Saucer does not synthesize bold, so
+ * this only works because NotoSansSC/TC-Bold.ttf are registered -- without them the text would
+ * not merely stay regular, it would VANISH. */
+.criteria-label { font-weight: bold; }
+
+/* Han needs the extra leading at this size, and the criteria block is set tighter than the table. */
+.criteria-label,
+.criteria-value { line-height: 1.5; }
+.account-cell .account-line { line-height: 1.5; }
