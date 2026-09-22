@@ -1,7 +1,6 @@
 package com.creed.jasper;
 
 import com.creed.jasper.api.ApprovalStatusJasperController;
-import com.creed.jasper.service.ApprovalStatusPdfService;
 import com.creed.jasper.service.JasperReportService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -27,7 +26,7 @@ class ApprovalStatusJasperEndpointTest {
 
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(new ApprovalStatusJasperController(new ObjectMapper(),
-                    new ApprovalStatusPdfService(new JasperReportService(true))))
+                    new JasperReportService(true)))
             .build();
 
     @Test
@@ -62,6 +61,43 @@ class ApprovalStatusJasperEndpointTest {
         // whatever the JVM default locale happens to be. Length is the cheap proxy: the Thai
         // edition embeds a second font subset and is substantially larger.
         assertThat(unsupported.length).isCloseTo(english.length, org.assertj.core.data.Offset.offset(2048));
+    }
+
+    @Test
+    void theFormatParameterPicksTheFileType() throws Exception {
+        assertThat(bytesOf("/approval-status/export?format=csv", MediaType.parseMediaType("text/csv; charset=UTF-8")))
+                .startsWith((byte) 0xEF, (byte) 0xBB, (byte) 0xBF);
+        assertThat(bytesOf("/approval-status/export?format=xlsx",
+                MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")))
+                .startsWith('P', 'K');
+        // The old PDF path stays an alias, so the side-by-side comparison with creed-report's
+        // /approval-status/export/pdf keeps working unchanged.
+        assertThat(bytesOf("/approval-status/export/pdf", MediaType.APPLICATION_PDF))
+                .startsWith('%', 'P', 'D', 'F', '-');
+    }
+
+    @Test
+    void theFilenameCarriesTheFormatsExtension() throws Exception {
+        mockMvc.perform(get("/approval-status/export").param("format", "xlsx"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        org.hamcrest.Matchers.endsWith(".xlsx\"")));
+    }
+
+    @Test
+    void badInputIsFourHundredNotFiveHundred() throws Exception {
+        // The two things a caller can get wrong here, and the repo's rule about both.
+        mockMvc.perform(get("/approval-status/export").param("format", "pdff"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/approval-status/export").param("columns", "type,nope"))
+                .andExpect(status().isBadRequest());
+    }
+
+    private byte[] bytesOf(String uri, MediaType expected) throws Exception {
+        return mockMvc.perform(get(uri))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, expected.toString()))
+                .andReturn().getResponse().getContentAsByteArray();
     }
 
     private byte[] render(Locale locale) throws Exception {

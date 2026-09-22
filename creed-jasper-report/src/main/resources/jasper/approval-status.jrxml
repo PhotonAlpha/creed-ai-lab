@@ -94,12 +94,41 @@
     <style name="StatementTitle" style="Base" fontSize="14" isBold="true" forecolor="#005CB9"/>
     <style name="CountLine" style="Base" forecolor="#414042"/>
 
+    <!-- THE TABLE'S LOOK LIVES HERE; ITS SHAPE DOES NOT. The columnHeader and detail bands are
+         generated at fill time by com.creed.jasper.dynamic.TableDesigner from a list of
+         TableColumns, so this file declares no table bands and no fields. What it keeps is every
+         style those generated cells name — font, palette, padding, the rule under each row —
+         because that is the half that must not move into Java: the per-locale face and the
+         conditional weights already live in styles, and a generated element that carried its own
+         colours would put half the document's look somewhere it cannot be read.
+         The one thing the generator does set itself is the table's outer left/right rule, which
+         belongs to being the first or last column and so cannot be a style at all. -->
     <style name="TableHeader" style="Base" mode="Opaque" backcolor="#DBE5F1" forecolor="#1F3864"
-           isBold="true" vTextAlign="Middle"/>
-    <style name="TableCell" style="Base" vTextAlign="Middle"/>
-    <style name="AccountCell" style="Base" vTextAlign="Top"/>
+           isBold="true" vTextAlign="Middle">
+        <box leftPadding="8" rightPadding="4">
+            <topPen lineWidth="0.5" lineColor="#C9CCD1"/>
+            <bottomPen lineWidth="0.5" lineColor="#C9CCD1"/>
+        </box>
+    </style>
+    <style name="TableCell" style="Base" vTextAlign="Middle">
+        <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
+            <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
+        </box>
+    </style>
+    <!-- A cell that is several lines of data rather than one wrapped string: the generator gives
+         it textAdjust="StretchHeight" and the rest of the row stretches to match. -->
+    <style name="AccountCell" style="Base" vTextAlign="Top">
+        <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
+            <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
+        </box>
+        <paragraph lineSpacing="Proportional" lineSpacingSize="1.35"/>
+    </style>
     <!-- The status column, in the accent colour like the sample's. -->
-    <style name="StatusCell" style="Base" forecolor="#005CB9" vTextAlign="Middle"/>
+    <style name="StatusCell" style="Base" forecolor="#005CB9" vTextAlign="Middle">
+        <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
+            <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
+        </box>
+    </style>
 
     <style name="FooterLine" style="Base" fontSize="8" forecolor="#414042"/>
     <style name="PageNumber" style="Base" fontSize="8" forecolor="#414042"/>
@@ -130,13 +159,6 @@
          stream would be consumed by page one. -->
     <parameter name="logo" class="java.lang.String"/>
     <parameter name="stamp" class="java.lang.String"/>
-
-    <field name="type" class="java.lang.String"/>
-    <field name="bankReference" class="java.lang.String"/>
-    <!-- Already newline-joined by the model. The breaks are data (name, number, currency), so the
-         cell prints them rather than wrapping wherever the column happens to end. -->
-    <field name="account" class="java.lang.String"/>
-    <field name="status" class="java.lang.String"/>
 
     <!-- Bands are declared in the SCHEMA's order (background, title, pageHeader, columnHeader,
          detail, columnFooter, pageFooter, ...), and a band out of sequence fails the schema at
@@ -206,93 +228,10 @@
         </band>
     </pageHeader>
 
-    <!-- The table's header band. A columnHeader repeats on every page by itself, which is what
-         -fs-table-paginate buys next door. Light blue rather than the near-black the other Creed
-         reports use: this is statement chrome, and it is the sample's. -->
-    <columnHeader>
-        <band height="22">
-            <staticText>
-                <reportElement style="TableHeader" x="0" y="0" width="134" height="22"/>
-                <box leftPadding="8" rightPadding="4">
-                    <topPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                    <leftPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                    <bottomPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                </box>
-                <text><![CDATA[Transaction / Deposit Type]]></text>
-            </staticText>
-            <staticText>
-                <reportElement style="TableHeader" x="134" y="0" width="113" height="22"/>
-                <box leftPadding="8" rightPadding="4">
-                    <topPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                    <bottomPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                </box>
-                <text><![CDATA[Bank Reference]]></text>
-            </staticText>
-            <staticText>
-                <reportElement style="TableHeader" x="247" y="0" width="175" height="22"/>
-                <box leftPadding="8" rightPadding="4">
-                    <topPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                    <bottomPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                </box>
-                <text><![CDATA[Account]]></text>
-            </staticText>
-            <staticText>
-                <reportElement style="TableHeader" x="422" y="0" width="93" height="22"/>
-                <box leftPadding="8" rightPadding="4">
-                    <topPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                    <bottomPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                    <rightPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                </box>
-                <text><![CDATA[Status]]></text>
-            </staticText>
-        </band>
-    </columnHeader>
-
-    <!-- One listed transaction.
-         splitType="Prevent" is `page-break-inside: avoid`: a row's four lines stay on one page.
-         The account cell is the only element that grows (textAdjust="StretchHeight"); the other
-         three carry stretchType="RelativeToTallestObject" so their borders reach the bottom of the
-         row it makes, and vTextAlign="Middle" so they sit centred against it, as the sample has
-         them. Without the stretchType the row's rules stop short and the table looks torn. -->
-    <detail>
-        <band height="46" splitType="Prevent">
-            <textField>
-                <reportElement style="TableCell" stretchType="RelativeToTallestObject"
-                               x="0" y="0" width="134" height="46"/>
-                <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
-                    <leftPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                    <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
-                </box>
-                <textFieldExpression><![CDATA[$F{type}]]></textFieldExpression>
-            </textField>
-            <textField>
-                <reportElement style="TableCell" stretchType="RelativeToTallestObject"
-                               x="134" y="0" width="113" height="46"/>
-                <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
-                    <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
-                </box>
-                <textFieldExpression><![CDATA[$F{bankReference}]]></textFieldExpression>
-            </textField>
-            <textField textAdjust="StretchHeight">
-                <reportElement style="AccountCell" stretchType="RelativeToTallestObject"
-                               x="247" y="0" width="175" height="46"/>
-                <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
-                    <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
-                </box>
-                <textElement><paragraph lineSpacing="Proportional" lineSpacingSize="1.35"/></textElement>
-                <textFieldExpression><![CDATA[$F{account}]]></textFieldExpression>
-            </textField>
-            <textField>
-                <reportElement style="StatusCell" stretchType="RelativeToTallestObject"
-                               x="422" y="0" width="93" height="46"/>
-                <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
-                    <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
-                    <rightPen lineWidth="0.5" lineColor="#C9CCD1"/>
-                </box>
-                <textFieldExpression><![CDATA[$F{status}]]></textFieldExpression>
-            </textField>
-        </band>
-    </detail>
+    <!-- columnHeader and detail are GENERATED — see the note beside the table styles above and
+         com.creed.jasper.dynamic.TableDesigner. The caption row repeats on every page by itself
+         (a columnHeader does), and the detail band is written with splitType="Prevent" so a row's
+         four lines move to the next page whole or not at all. -->
 
     <!-- Both storeys of the footnote, in ONE band — the thing the HTML twin cannot do.
          Storey 1: when the report was exported, then its name in bold blue, with the seal floated

@@ -51,7 +51,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-gateway-partner` | 8095 | — | HTTPS, **servlet** |
 | `creed-simple-metrics` | 8096 | `/camel/*` | HTTPS, Camel; **pull-mode** metrics |
 | `creed-report` | 9100 | `/report` | HTTP, standalone (outside the mesh) |
-| `creed-jasper-report` | 9110 | `/jasper-report` | HTTP, standalone; **JasperReports jrxml** twin of creed-report's approval-status PDF |
+| `creed-jasper-report` | 9110 | `/jasper-report` | HTTP, standalone; **JasperReports jrxml** twin of creed-report's approval-status PDF (+ xlsx/csv/html) |
 | `creed-resource-catalog` | 18081 / 18082 | `/api/catalog` | primary / secondary |
 | `creed-resource-order` | 18091 / 18092 | `/api/order` | primary / secondary |
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |

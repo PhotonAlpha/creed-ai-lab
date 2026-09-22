@@ -2,7 +2,9 @@ package com.creed.jasper;
 
 import com.creed.jasper.domain.ApprovalStatusReport;
 import com.creed.jasper.i18n.ReportLanguage;
-import com.creed.jasper.service.ApprovalStatusPdfService;
+import com.creed.jasper.export.ExportFormat;
+import com.creed.jasper.export.ExportRequest;
+import com.creed.jasper.render.ApprovalStatusRenderer;
 import com.creed.jasper.service.ApprovalStatusSamples;
 import com.creed.jasper.service.JasperReportService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,9 +40,9 @@ class ApprovalStatusJasperPdfTest {
     private static final LocalDateTime EXPORTED_AT = LocalDateTime.of(2026, 9, 11, 17, 52, 27);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    // cacheTemplates=true: the fixture compiles each jrxml once for the whole class.
-    private final ApprovalStatusPdfService service =
-            new ApprovalStatusPdfService(new JasperReportService(true));
+    // cacheTemplates=true: the ENGINE is shared across the class, so each jrxml is compiled
+    // once; the renderers over it are per-report values and cost nothing.
+    private final JasperReportService jasper = new JasperReportService(true);
 
     @Test
     void theHardCodedSampleIsValidJsonAndComplete() {
@@ -245,7 +247,8 @@ class ApprovalStatusJasperPdfTest {
     }
 
     private byte[] render(ReportLanguage language) {
-        return service.exportPdf(ApprovalStatusSamples.report(objectMapper), language, EXPORTED_AT);
+        return new ApprovalStatusRenderer(jasper, ApprovalStatusSamples.report(objectMapper), EXPORTED_AT)
+                .render(ExportRequest.of(ExportFormat.PDF, language));
     }
 
     /** How many image XObjects the page's resources reference. */
