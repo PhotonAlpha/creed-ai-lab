@@ -1,0 +1,14 @@
+###
+http://localhost:9110/jasper-report/approval-status/export/pdf?columns=status
+
+###
+http://localhost:9110/jasper-report/approval-status/export/pdf?columns=type,bankReference,status
+
+###
+http://localhost:9110/jasper-report/approval-status/export/pdf?columns=type,bankReference,account,status
+
+###
+http://localhost:9110/jasper-report/approval-status/export/pdf?columns=status,amount,account,bankReference,type
+
+###
+http://localhost:9110/jasper-report/approval-status/export/pdf

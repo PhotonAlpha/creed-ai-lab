@@ -4,11 +4,10 @@ package com.creed.jasper.dynamic;
  * One generated table column — the unit {@link TableDesigner} turns into a header cell, a detail
  * cell and a report field.
  *
- * <p>This is the whole column model, and it is deliberately small: what a column <b>is</b> (a
- * field, a caption, a share of the width) lives here, while what it <b>looks like</b> stays a named
- * style in the jrxml. That split is the point of generating the band rather than hand-writing it —
- * the shape can come from a caller at runtime without the look leaving the template, where the
- * per-locale font family and the conditional weights already are.
+ * <p>This is the whole column model: what a column <b>is</b> (a field, a caption, a share of the
+ * width) and, for a column that does not take the table's default, what it <b>looks like</b> — a
+ * {@link CellStyle}, not the name of a style in the jrxml. The look used to stay in the template
+ * and arrive here as a {@code String}; {@link CellStyle} says what moved and why.
  *
  * @param property   the field name; the detail cell's expression is {@code $F{property}} and the
  *                   data source is asked for exactly this name
@@ -23,13 +22,13 @@ package com.creed.jasper.dynamic;
  * @param stretches  whether the cell holds several lines that belong together (an address, an
  *                   account block). A multiline column stretches the row and every other cell
  *                   stretches with it; a single-line one does not
- * @param cellStyle  the jrxml style the detail cell takes, or {@code null} for the layout's
+ * @param cellStyle  the style this column's detail cell takes, or {@code null} for the layout's
  *                   default. The caption always takes the layout's header style
  * @param valueClass the field's declared type; {@code String} unless a column needs a pattern or
  *                   a spreadsheet export to keep it numeric
  */
 public record TableColumn(String property, String header, int weight, Align align,
-                          boolean stretches, String cellStyle, Class<?> valueClass) {
+                          boolean stretches, CellStyle cellStyle, Class<?> valueClass) {
 
     /** Horizontal alignment, kept as our own enum so callers never import a JasperReports type. */
     public enum Align {
@@ -58,8 +57,8 @@ public record TableColumn(String property, String header, int weight, Align alig
         return new TableColumn(property, header, weight, align, true, cellStyle, valueClass);
     }
 
-    /** This column's cell takes a named jrxml style instead of the layout's default. */
-    public TableColumn styled(String style) {
+    /** This column's cell takes its own style instead of the layout's default. */
+    public TableColumn styled(CellStyle style) {
         return new TableColumn(property, header, weight, align, stretches, style, valueClass);
     }
 

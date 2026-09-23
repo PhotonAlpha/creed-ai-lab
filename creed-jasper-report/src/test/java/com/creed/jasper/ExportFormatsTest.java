@@ -1,6 +1,7 @@
 package com.creed.jasper;
 
 import com.creed.jasper.domain.ApprovalStatusReport;
+import com.creed.jasper.export.ColumnWidths;
 import com.creed.jasper.export.ExportFormat;
 import com.creed.jasper.export.ExportRequest;
 import com.creed.jasper.i18n.ReportLanguage;
@@ -64,8 +65,10 @@ class ExportFormatsTest {
                 .contains("Transaction / Deposit Type");
         // The chrome is gone: no title band, no criteria block, no footnote. An extract is the
         // table, and these would arrive as stray cells in the middle of it.
+        // "Payer / Payee" is the one criterion with no column of its own, so it can only come
+        // from the criteria block -- which is what makes it evidence the chrome is gone.
         assertThat(text).doesNotContain("13 Record(s)").doesNotContain("Date of Export")
-                .doesNotContain("Customer Reference");
+                .doesNotContain("Payer / Payee");
     }
 
     @Test
@@ -74,7 +77,7 @@ class ExportFormatsTest {
         PdfReader reader = new PdfReader(render(ExportFormat.PDF));
         try {
             String page = new com.lowagie.text.pdf.parser.PdfTextExtractor(reader).getTextFromPage(1);
-            assertThat(page).contains("Approval Status All List").contains("Customer Reference")
+            assertThat(page).contains("Approval Status All List").contains("Payer / Payee")
                     .contains("13 Record(s)").contains("Date of Export");
         }
         finally {
@@ -94,7 +97,7 @@ class ExportFormatsTest {
     @Test
     void aCustomViewPicksAndReordersColumns() throws IOException {
         byte[] pdf = renderer.render(
-                new ExportRequest(ExportFormat.PDF, ReportLanguage.EN, List.of("status", "type")));
+                new ExportRequest(ExportFormat.PDF, ReportLanguage.EN, ColumnWidths.AUTO, List.of("status", "type")));
 
         PdfReader reader = new PdfReader(pdf);
         try {
@@ -120,7 +123,7 @@ class ExportFormatsTest {
         // The rule carried over from the reference implementation: a spreadsheet or a CSV is a
         // data extract and carries every column, whatever a screen happens to be showing.
         String csv = text(renderer.render(
-                new ExportRequest(ExportFormat.CSV, ReportLanguage.EN, List.of("status"))));
+                new ExportRequest(ExportFormat.CSV, ReportLanguage.EN, ColumnWidths.AUTO, List.of("status"))));
         assertThat(csv).contains("Bank Reference").contains("BK2600000001");
     }
 
@@ -128,7 +131,7 @@ class ExportFormatsTest {
     void anUnknownColumnIsRefusedRatherThanDropped() {
         // A silently dropped column is a report that is wrong in a way nobody notices.
         assertThatThrownBy(() -> renderer.render(
-                new ExportRequest(ExportFormat.PDF, ReportLanguage.EN, List.of("type", "nope"))))
+                new ExportRequest(ExportFormat.PDF, ReportLanguage.EN, ColumnWidths.AUTO, List.of("type", "nope"))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unknown column 'nope'");
     }

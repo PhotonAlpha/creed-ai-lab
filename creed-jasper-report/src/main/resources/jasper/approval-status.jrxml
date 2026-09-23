@@ -12,10 +12,10 @@
          |  —                         —                    |
          |                                                  |
          |  13 Record(s) (Note: This is a filtered table.)   |   <- still the title band
-         |  +──────────────+──────────+───────────+───────+  |
-         |  | header band (light blue)                    |  |   <- columnHeader  (every page)
-         |  | Bulk MEPS | BK26.. | VASA COMPANY 3 ... | Processing
-         |  +──────────────+──────────+───────────+───────+  |   <- detail        (per row)
+         |  +────+────+────+──────+──+────+────+────+        |
+         |  | header band (light blue), 8 captions, 48pt   |  |   <- columnHeader  (every page)
+         |  | Bulk MEPS | BK26.. | CUST26.. | VASA ... | SGD | 12,345.67 | 05/07/2026 | Processing
+         |  +────+────+────+──────+──+────+────+────+        |   <- detail        (per row)
          |                                                  |
          |  Date of Export: ... | Time of Export: ...  (())  |   <- pageFooter    (every page)
          |  Approval Status All List                  seal   |
@@ -37,18 +37,29 @@
      * FOUR TO A ROW IS A REPORT PROPERTY. The criteria block is a multi-column SUBREPORT
        (columnCount=4, printOrder=Horizontal); the main report has one column and cannot also have
        four. The HTML uses a <table> of percentage cells, because that renderer has no grid.
-     * A ROW THAT GROWS. stretchType="RelativeToTallestObject" makes the three short cells match
-       the four-line account cell; CSS table cells do that by themselves.
+     * A ROW THAT GROWS. stretchType="RelativeToTallestObject" makes the seven short cells match
+       the account cell, which is the only one whose height is data; CSS table cells do that by
+       themselves.
+     * EIGHT COLUMNS IN 515pt IS A TYPE-SIZE PROBLEM, not a layout one. See ApprovalStatusRenderer,
+       which holds the table's styles: the cells print at 8pt rather than the document's 9pt, and
+       the caption band is 48pt
+       deep, because at ~64pt a column the captions wrap and the references would otherwise break
+       inside the token. The HTML twin would solve the same problem with table-layout: auto, which
+       measures the content — JasperReports gives every column the width it is told.
      * THE PAGE BOX IS POINTS, NOT MILLIMETRES. A4 is 595x842pt; the margins below are the HTML's
        14mm/14mm/14mm sides and top, and the deep bottom band it needs for the two-storey footer.
 
-     WHAT IS THE SAME, deliberately: the payload (byte-for-byte the JSON creed-report serves), the
-     embedded Noto faces, the logo and the seal (shared at build time — see the pom), the palette
-     (#005CB9 brand blue, #DBE5F1 header band, #C9CCD1 rules, #414042 footnote grey, sampled off the
-     sample page), and the per-locale typography: the face follows REPORT_LOCALE, and a caption's
-     WEIGHT changes with the script (see the conditional styles below).
+     WHAT IS THE SAME as the HTML twin, deliberately: the embedded Noto faces, the logo and the seal
+     (shared at build time — see the pom), the chrome (title band, criteria block, footnote, page
+     counter), the palette (#005CB9 brand blue, #DBE5F1 header band, #C9CCD1 rules, #414042 footnote
+     grey, sampled off the sample page), and the per-locale typography: the face follows
+     REPORT_LOCALE, and a caption's WEIGHT changes with the script (see the conditional styles
+     below).
+     WHAT IS NO LONGER: the table. This side prints eight columns and creed-report prints four, so
+     the two PDFs are comparable on their chrome and not row for row until that payload grows the
+     same four fields.
 
-     Fields come from com.creed.jasper.service.ApprovalStatusPdfService via a FieldDataSource, not
+     Fields come from com.creed.jasper.render.ApprovalStatusRenderer via a FieldDataSource, not
      from bean introspection: the domain is a record, whose accessors JasperReports' own
      JRBeanCollectionDataSource cannot see.
 
@@ -94,38 +105,24 @@
     <style name="StatementTitle" style="Base" fontSize="14" isBold="true" forecolor="#005CB9"/>
     <style name="CountLine" style="Base" forecolor="#414042"/>
 
-    <!-- THE TABLE'S LOOK LIVES HERE; ITS SHAPE DOES NOT. The <jr:table> in the detail band gets
-         its columns at compile time (com.creed.jasper.dynamic.TableDesigner), and a generated cell
-         names one of these styles rather than carrying a colour of its own — which is why the box,
-         the padding and the rule under each row are declared here and not in Java. The generator
-         adds exactly one thing these cannot: the table's outer left/right rule, which belongs to
-         being the first or last column and is not something a style can know. -->
-    <style name="TableHeader" style="Base" mode="Opaque" backcolor="#DBE5F1" forecolor="#1F3864"
-           isBold="true" vTextAlign="Middle">
-        <box leftPadding="8" rightPadding="4">
-            <topPen lineWidth="0.5" lineColor="#C9CCD1"/>
-            <bottomPen lineWidth="0.5" lineColor="#C9CCD1"/>
-        </box>
-    </style>
-    <style name="TableCell" style="Base" vTextAlign="Middle">
-        <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
-            <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
-        </box>
-    </style>
-    <!-- A cell that is several lines of data rather than one wrapped string: the generator gives
-         it textAdjust="StretchHeight" and the rest of the row stretches to match. -->
-    <style name="AccountCell" style="Base" vTextAlign="Top">
-        <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
-            <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
-        </box>
-        <paragraph lineSpacing="Proportional" lineSpacingSize="1.35"/>
-    </style>
-    <!-- The status column, in the accent colour like the sample's. -->
-    <style name="StatusCell" style="Base" forecolor="#005CB9" vTextAlign="Middle">
-        <box leftPadding="8" rightPadding="4" topPadding="4" bottomPadding="4">
-            <bottomPen lineWidth="0.5" lineColor="#E3E6EA"/>
-        </box>
-    </style>
+    <!-- THE TABLE HAS NO STYLES HERE, AND THAT IS THE POINT OF LOOKING FOR THEM AND NOT FINDING
+         THEM. The <jr:table> in the detail band is generated at compile time by
+         com.creed.jasper.dynamic.TableDesigner, and its cells now carry a
+         com.creed.jasper.dynamic.CellStyle written straight onto the element — face, size, weight,
+         colours, padding and rules — instead of naming a <style> declared here.
+
+         WHY IT MOVED: a style reference is a string, and JasperReports resolves an unknown one to
+         NOTHING. A renamed or deleted style is not a compile error and not a fill error; it is a
+         table that quietly prints in the default face at the default size, which on this document
+         means eight columns of 9pt text in cells measured for 8pt. In Java the same mistake does
+         not build.
+
+         WHAT IT COSTS: creed.jasper.cache-templates=false makes an edited jrxml take effect on the
+         next request, and that no longer covers the table's look — only its chrome. The palette
+         is in ApprovalStatusRenderer, beside the column widths it has to agree with.
+
+         Everything below IS still the template's: these are the chrome's own elements, and nothing
+         generates them. -->
 
     <style name="FooterLine" style="Base" fontSize="8" forecolor="#414042"/>
     <style name="PageNumber" style="Base" fontSize="8" forecolor="#414042"/>
@@ -249,7 +246,12 @@
          in step. The band runs once — the main dataset is a single empty record — and
          splitType="Stretch" lets the table flow onto the next page from inside it.
 
-         The height is a minimum, not the table's: it grows with its rows. -->
+         The height is a minimum, not the table's: it grows with its rows. The WIDTH is not even
+         that: TableDesigner.write overwrites it with the design's columnWidth on every compile, so
+         the 515 below is documentation, not a setting. What decides how far the table sits from
+         the paper's edge is leftMargin/rightMargin on the page box above; what decides the space
+         between two columns is the cell padding in ApprovalStatusRenderer's CellStyles, because a
+         jr:table column has no margin of its own. -->
     <detail>
         <band height="24" splitType="Stretch">
             <componentElement>

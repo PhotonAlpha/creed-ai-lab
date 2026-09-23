@@ -1,6 +1,7 @@
 package com.creed.jasper.render;
 
 import com.creed.jasper.domain.ApprovalStatusReport;
+import com.creed.jasper.dynamic.CellStyle;
 import com.creed.jasper.dynamic.TableColumn;
 import com.creed.jasper.dynamic.TableDesign;
 import com.creed.jasper.export.ExportRequest;
@@ -11,6 +12,7 @@ import com.creed.jasper.service.JasperReportService;
 
 import java.awt.Color;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,6 +36,12 @@ import java.util.function.Function;
  * {@code columnHeader}, no {@code detail} and no fields — {@link #COLUMNS} does, and the generator
  * writes the bands into the design before it is compiled. The template still owns every style
  * those generated cells name, so the look has not moved into Java; only the column list has.
+ *
+ * <p><b>The split is not clean when the column COUNT changes.</b> Going from four columns to eight
+ * is a change to {@link #COLUMNS}, but the type size the cells print at and the depth of the
+ * caption band are the template's, and both had to move with it. A column list can be reordered or
+ * subset — that is what {@code ?columns=} does — without touching the jrxml; making it longer
+ * cannot be.
  *
  * <p>What the base class does with that: picks the columns (honouring a custom view for PDF),
  * compiles the template with or without its chrome depending on the format, and exports. What this
@@ -74,35 +82,122 @@ public final class ApprovalStatusRenderer extends JasperTableRenderer {
     private static final String STAMP = "img/creed-stamp.png";
 
     /**
-     * The listing's four columns — the <b>shape</b> of the table, supplied to the generator instead
+     * The one family name every element in this document asks for. It resolves to Noto Sans, Noto
+     * Sans Thai, Noto Sans SC or Noto Sans TC by {@code REPORT_LOCALE} — four declarations of the
+     * same name in {@code fonts/creed-fonts.xml}, of which the engine takes the first whose
+     * {@code <locales>} accept the fill's locale. That indirection stays in the font extension,
+     * which is where a locale-resolved family belongs; what has moved into Java is only which
+     * family, size and weight each table cell asks for.
+     */
+    private static final String FONT = "Creed Sans";
+
+    /** The table's palette, sampled off {@code creed-report/docs/template.jpg}. */
+    private static final Color HEADER_TEXT = Color.decode("#1F3864");
+    private static final Color HEADER_FILL = Color.decode("#DBE5F1");
+    private static final Color TEXT = Color.decode("#212529");
+    private static final Color ACCENT = Color.decode("#005CB9");
+    private static final Color GRID = Color.decode("#C9CCD1");
+    private static final Color ROW_RULE = Color.decode("#E3E6EA");
+
+    /**
+     * The table's four cell styles — in Java, and no longer four {@code <style>} elements in the
+     * jrxml reached by name.
+     *
+     * <p><b>8pt, not the document's 9.</b> 515pt of content over eight columns is ~64pt each, and
+     * at 9pt a bank reference needs about 71pt with its padding — so it breaks <i>inside</i> the
+     * token, {@code BK260000000} then {@code 1}, which is unreadable in a way a wrapped caption is
+     * not. 8pt buys about 11% and the narrower padding buys 4pt more; together they are the
+     * difference between eight columns fitting and not.
+     *
+     * <p>The chrome's styles — the title, the count line, the footnote, the page counter, the
+     * conditional per-script weights — are still declared in {@code approval-status.jrxml}: those
+     * are the template's own elements, and nothing generates them.
+     */
+    private static final CellStyle HEADER = CellStyle.of(FONT, 8f).bold(true)
+            .forecolor(HEADER_TEXT).backcolor(HEADER_FILL)
+            .padding(6, 3, 3, 3).rules(GRID, GRID);
+
+    private static final CellStyle CELL = CellStyle.of(FONT, 8f)
+            .forecolor(TEXT).padding(6, 3, 4, 4).rules(null, ROW_RULE);
+
+    /**
+     * The account block: several lines that belong together, top-aligned, and the only cell whose
+     * height is data. 1.25 rather than the 1.35 the four-column table used — it wraps to five lines
+     * at 103pt instead of four, and proportional leading multiplies by every one of them.
+     */
+    private static final CellStyle ACCOUNT_CELL = CELL.vAlign(CellStyle.VAlign.TOP).lineSpacing(1.25f);
+
+    /** The status column, in the accent colour like the sample's. */
+    private static final CellStyle STATUS_CELL = CELL.forecolor(ACCENT);
+
+    /**
+     * The listing's eight columns — the <b>shape</b> of the table, supplied to the generator instead
      * of being written into the jrxml.
      *
-     * <p>Weights, not widths: 26/22/34/18 are the percentages the sample's columns occupy, and the
-     * generator normalises them over whatever content width the template's page box leaves, so this
+     * <p>Weights, not widths: these are the percentages of the content area each column takes, and
+     * the generator normalises them over whatever width the template's page box leaves, so this
      * list survives a change of paper — and survives the chrome being stripped for a spreadsheet,
      * which widens the content area by both margins.
      *
+     * <p><b>Eight columns is what A4 portrait holds, and only just.</b> 515pt of content over eight
+     * columns is ~64pt each, so the weights below are not decoration — they were measured against
+     * the longest string each column actually carries, at the 8pt the table styles now set:
+     *
+     * <pre>
+     *   bankReference     13 -> 67pt   "BK2600000001"   ~62pt with padding
+     *   customerReference 13 -> 67pt   "CUST26000013"   ~66pt with padding
+     *   amount            12 -> 62pt   "310,750.25"     ~53pt, right-aligned
+     *   valueDate         12 -> 62pt   "02/09/2026"     ~53pt
+     *   status            11 -> 57pt   "Processing"     ~53pt
+     *   type              12 -> 62pt   wraps: "Telegraphic" / "Transfer"
+     *   currency           7 -> 36pt   "SGD", and the caption is "CCY" for the same reason:
+     *                                    "Currency" needs 47pt and would break as "Curre" / "ncy"
+     *   account           20 -> 103pt  wraps to five lines, and sets the row's height
+     * </pre>
+     *
+     * <p>Take weight off any of the first five and its cell breaks <b>inside the token</b> —
+     * {@code BK260000000} / {@code 1} — which is the failure mode of a too-narrow column here: a
+     * reference split across two lines is unreadable in a way a wrapped caption is not. The table
+     * font size and the header band height are the other half of that bargain; both live in the
+     * jrxml and both are sized for eight columns.
+     *
      * <p>The captions are English literals rather than message keys, exactly as they are in
-     * creed-report's HTML twin — localising them means four keys on both sides at once, or the two
+     * creed-report's HTML twin — localising them means eight keys on both sides at once, or the two
      * documents drift.
      */
     private static final List<TableColumn> COLUMNS = List.of(
-            TableColumn.of("type", "Transaction / Deposit Type", 26),
-            TableColumn.of("bankReference", "Bank Reference", 22),
-            TableColumn.of("account", "Account", 34).multiline().styled("AccountCell"),
-            TableColumn.of("status", "Status", 18).styled("StatusCell"));
+            TableColumn.of("type", "Transaction / Deposit Type", 12),
+            TableColumn.of("bankReference", "Bank Reference", 13),
+            TableColumn.of("customerReference", "Customer Reference", 13),
+            TableColumn.of("account", "Account", 20).multiline().styled(ACCOUNT_CELL),
+            TableColumn.of("currency", "CCY", 7),
+            TableColumn.of("amount", "Amount", 12).aligned(TableColumn.Align.RIGHT),
+            TableColumn.of("valueDate", "Value / Placement Date", 12),
+            TableColumn.of("status", "Status", 11).styled(STATUS_CELL));
 
     /**
      * The table's geometry. Both heights are sized for the <b>Thai</b> line, not the Latin one —
-     * a text element shorter than its face's line height prints nothing at all — and 46pt is the
-     * four-line account block plus its padding.
+     * a text element shorter than its face's line height prints nothing at all.
      *
-     * <p>{@code #C9CCD1} is the sample's grid, and the only colour on this side of the split: it
-     * draws the table's outer left and right rules, which belong to being the first or last column
-     * rather than to any one style.
+     * <p><b>48pt of header, not 22.</b> At eight columns every caption but three wraps, and a
+     * caption cell too short for its last line does not clip it, it <i>drops</i> it: the 22pt band
+     * that was right for four columns silently printed "Transaction /", "Bank", "Customer" and
+     * "Value /" and nothing told anyone.
+     *
+     * <p>The number is the <b>Thai</b> arithmetic, not the Latin: "Value / Placement Date" is the
+     * deepest caption these widths can produce at three lines, and three 8pt Noto Sans Thai lines
+     * are 3 x 12.09 = 36.3pt against the style's 3 + 3 of padding — 42.3pt, which is how 42 came
+     * to print "Value /" and "Placement" in Thai and all three lines in English, on the same page
+     * of the same document. 48 is that plus headroom. {@code ApprovalStatusJasperPdfTest} asserts
+     * the whole caption row in th/zh-CN/zh-TW for exactly this reason.
+     *
+     * <p>46pt of row is the minimum, not the row: the account cell stretches and the rest of the
+     * row follows it, which at 103pt of width is five lines and about 85pt.
+     *
+     * <p>{@code GRID} draws the table's outer left and right rules, which belong to being the first
+     * or last column rather than to any one cell — the one thing a {@link CellStyle} cannot say.
      */
-    private static final TableDesign TABLE = new TableDesign(22, 46, Color.decode("#C9CCD1"),
-            "TableHeader", "TableCell");
+    private static final TableDesign TABLE = new TableDesign(48, 46, GRID, HEADER, CELL);
 
     private final ApprovalStatusReport report;
     private final LocalDateTime exportedAt;
@@ -140,6 +235,43 @@ public final class ApprovalStatusRenderer extends JasperTableRenderer {
         return TableData.source(rows(report));
     }
 
+    /**
+     * The same rows the fill gets, as text, for the content fit — read straight off the payload
+     * rather than through the data source, which a fill consumes.
+     *
+     * <p>Column order, not field order: the caller may have subset and reordered the columns
+     * ({@code ?columns=}), and the fit measures what this request will actually print.
+     */
+    @Override
+    protected List<List<String>> rowText(List<TableColumn> columns, ExportRequest request) {
+        Map<String, Function<ApprovalStatusReport.Row, Object>> fields = fields();
+        List<List<String>> text = new ArrayList<>(report.rows().size());
+        for (ApprovalStatusReport.Row row : report.rows()) {
+            List<String> cells = new ArrayList<>(columns.size());
+            for (TableColumn column : columns) {
+                Function<ApprovalStatusReport.Row, Object> accessor = fields.get(column.property());
+                Object value = accessor == null ? null : accessor.apply(row);
+                cells.add(value == null ? "" : String.valueOf(value));
+            }
+            text.add(cells);
+        }
+        return text;
+    }
+
+    /**
+     * The template's content area: A4 at 595pt wide, less the 40pt margins the page box declares.
+     *
+     * <p>Duplicated from the jrxml on purpose rather than read back out of the loaded design: the
+     * fit happens before the template is compiled, and loading a design to ask it one number would
+     * put an I/O round trip in front of every export. It only decides which branch of the fit
+     * applies — the widths themselves are re-normalised over the real content width, whichever
+     * format is being written.
+     */
+    @Override
+    protected int contentWidth() {
+        return 515;
+    }
+
     @Override
     protected Map<String, Object> reportParameters(ExportRequest request) {
         Map<String, Object> parameters = new HashMap<>();
@@ -160,12 +292,24 @@ public final class ApprovalStatusRenderer extends JasperTableRenderer {
      * field; the breaks are the payload's, not the engine's guess about where they belong.
      */
     private static FieldDataSource<ApprovalStatusReport.Row> rows(ApprovalStatusReport report) {
+        return FieldDataSource.of(report.rows(), fields());
+    }
+
+    /**
+     * The one field-name-to-accessor map, used by both the fill's data source and the fit's
+     * measurement — so a column can never be measured off one value and printed from another.
+     */
+    private static Map<String, Function<ApprovalStatusReport.Row, Object>> fields() {
         Map<String, Function<ApprovalStatusReport.Row, Object>> fields = new LinkedHashMap<>();
         fields.put("type", ApprovalStatusReport.Row::type);
         fields.put("bankReference", ApprovalStatusReport.Row::bankReference);
+        fields.put("customerReference", ApprovalStatusReport.Row::customerReference);
         fields.put("account", ApprovalStatusReport.Row::accountText);
+        fields.put("currency", ApprovalStatusReport.Row::currency);
+        fields.put("amount", ApprovalStatusReport.Row::amount);
+        fields.put("valueDate", ApprovalStatusReport.Row::valueDate);
         fields.put("status", ApprovalStatusReport.Row::status);
-        return FieldDataSource.of(report.rows(), fields);
+        return fields;
     }
 
     /**

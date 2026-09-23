@@ -9,7 +9,7 @@ import java.util.List;
  * document <i>is</i>.
  *
  * <p>A printed bank transaction listing: a filter-criteria block of labelled pairs laid out four to
- * a row, above a four-column table whose account cell is several lines that belong together.
+ * a row, above an eight-column table whose account cell is several lines that belong together.
  *
  * <p>Filled by Jackson from the JSON literal in {@link com.creed.jasper.service.ApprovalStatusSamples}
  * — a typo there fails at parse time rather than rendering a blank cell.
@@ -44,14 +44,30 @@ public record ApprovalStatusReport(String title, List<Criterion> criteria, Strin
     /**
      * One listed transaction.
      *
-     * @param type          transaction / deposit type
-     * @param bankReference the bank's reference
-     * @param account       the account block, one entry per printed line (name, number, currency) —
-     *                      a list, not a joined string, because the cell breaks on <b>its</b> lines
-     *                      and not where the renderer would wrap it
-     * @param status        the approval status; printed in the accent colour like the sample's
+     * <p>The component order is the <b>printed</b> column order, so the record, the column list in
+     * {@code ApprovalStatusRenderer} and the table read the same way — a listing whose model and
+     * whose layout disagree about order is the first thing to go wrong when a column is added.
+     *
+     * <p>Every money and date component is a <b>String</b>, already formatted. The document is a
+     * reproduction of a printed page: the amounts arrive grouped and the dates arrive in the
+     * payload's own format, and reformatting them per locale would make the two engines' PDFs
+     * differ for a reason that is not the layout engine. Only the export stamp in the footer is
+     * formatted here, because only that one is generated rather than transcribed.
+     *
+     * @param type              transaction / deposit type
+     * @param bankReference     the bank's reference
+     * @param customerReference the customer's own reference for the same transaction
+     * @param account           the account block, one entry per printed line (name, number,
+     *                          currency) — a list, not a joined string, because the cell breaks on
+     *                          <b>its</b> lines and not where the renderer would wrap it
+     * @param currency          the transaction's currency, which is not always the account's
+     * @param amount            the amount, already grouped and to two decimals; right-aligned in
+     *                          the table so the decimal points line up down the column
+     * @param valueDate         the value / placement date
+     * @param status            the approval status; printed in the accent colour like the sample's
      */
-    public record Row(String type, String bankReference, List<String> account, String status) {
+    public record Row(String type, String bankReference, String customerReference, List<String> account,
+                      String currency, String amount, String valueDate, String status) {
 
         public Row {
             account = account == null ? List.of() : List.copyOf(account);

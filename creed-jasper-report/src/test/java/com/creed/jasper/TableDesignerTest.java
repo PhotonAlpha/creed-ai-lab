@@ -1,5 +1,6 @@
 package com.creed.jasper;
 
+import com.creed.jasper.dynamic.CellStyle;
 import com.creed.jasper.dynamic.ReportShape;
 import com.creed.jasper.dynamic.TableColumn;
 import com.creed.jasper.dynamic.TableDesign;
@@ -11,13 +12,16 @@ import com.creed.jasper.service.JasperReportService;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import net.sf.jasperreports.components.table.BaseColumn;
+import net.sf.jasperreports.components.table.StandardColumn;
 import net.sf.jasperreports.engine.JREmptyDataSource;
 import net.sf.jasperreports.engine.JRException;
 import net.sf.jasperreports.engine.JRParameter;
 import net.sf.jasperreports.engine.JasperFillManager;
 import net.sf.jasperreports.engine.JasperPrint;
 import net.sf.jasperreports.engine.JasperReport;
+import net.sf.jasperreports.engine.JRElement;
 import net.sf.jasperreports.engine.design.JRDesignDataset;
+import net.sf.jasperreports.engine.design.JRDesignTextElement;
 import net.sf.jasperreports.engine.design.JasperDesign;
 import net.sf.jasperreports.engine.xml.JRXmlLoader;
 import org.junit.jupiter.api.Test;
@@ -47,9 +51,23 @@ class TableDesignerTest {
 
     private static final String TEMPLATE = "jasper/approval-status.jrxml";
 
+    private static final Color GRID = Color.decode("#C9CCD1");
+    private static final Color ROW_RULE = Color.decode("#E3E6EA");
+    private static final Color HEADER_FILL = Color.decode("#DBE5F1");
+
+    /**
+     * The listing's own styles, in Java — where they live now. The template declares none of these,
+     * which is why {@link #theCellsCarryTheirStyleRatherThanAStyleName()} is the test that used to
+     * be unwritable: there was nothing on the element to assert on but a string.
+     */
+    private static final CellStyle HEADER = CellStyle.of("Creed Sans", 8f).bold(true)
+            .forecolor(Color.decode("#1F3864")).backcolor(HEADER_FILL)
+            .padding(6, 3, 3, 3).rules(GRID, GRID);
+    private static final CellStyle CELL = CellStyle.of("Creed Sans", 8f)
+            .forecolor(Color.decode("#212529")).padding(6, 3, 4, 4).rules(null, ROW_RULE);
+
     /** Same geometry the real listing uses; the heights are sized for the Thai line. */
-    private static final TableDesign LAYOUT =
-            new TableDesign(22, 46, Color.decode("#C9CCD1"), "TableHeader", "TableCell");
+    private static final TableDesign LAYOUT = new TableDesign(22, 46, GRID, HEADER, CELL);
 
     private final JasperReportService jasper = new JasperReportService(false);
 
@@ -73,6 +91,53 @@ class TableDesignerTest {
 
         assertThat(TableDesigner.tableIn(bare).getColumns()).hasSize(3);
         assertThat(listing(bare).getFields()).extracting("name").containsExactly("host", "ip", "env");
+    }
+
+    @Test
+    void theCellsCarryTheirStyleRatherThanAStyleName() throws JRException, IOException {
+        // What replaced setStyleNameReference("TableHeader"). The face, the size, the weight, the
+        // fill and the rules are written onto the generated element, so they are readable off the
+        // design -- and, more to the point, a style that does not exist cannot compile. A style
+        // NAME could not be checked at all: JasperReports resolves an unknown one to nothing and
+        // prints the cell in the default face.
+        CellStyle accent = CELL.forecolor(Color.decode("#005CB9"));
+        JasperDesign design = load();
+        TableDesigner.write(design, LAYOUT, List.of(
+                TableColumn.of("a", "A", 1),
+                TableColumn.of("b", "B", 1).styled(accent)));
+
+        List<BaseColumn> columns = TableDesigner.tableIn(design).getColumns();
+
+        JRDesignTextElement caption = elementIn(((StandardColumn) columns.get(0)).getColumnHeader());
+        assertThat(caption.getStyleNameReference()).as("no style name is left to resolve").isNull();
+        assertThat(caption.getFontName()).isEqualTo("Creed Sans");
+        assertThat(caption.getFontsize()).isEqualTo(8f);
+        assertThat(caption.isBold()).isTrue();
+        assertThat(caption.getBackcolor()).isEqualTo(HEADER_FILL);
+        // A backcolor on a transparent element paints nothing, which is the silent half of this.
+        assertThat(caption.getModeValue()).isEqualTo(net.sf.jasperreports.engine.type.ModeEnum.OPAQUE);
+        assertThat(caption.getLineBox().getLeftPadding()).isEqualTo(6);
+        assertThat(caption.getLineBox().getTopPen().getLineColor()).isEqualTo(GRID);
+        // Identity-H + embedded on every cell: without them the CJK and Thai glyphs never reach
+        // the PDF, and the cell is blank rather than substituted.
+        assertThat(caption.getPdfEncoding()).isEqualTo("Identity-H");
+        assertThat(caption.isPdfEmbedded()).isTrue();
+
+        // The layout's cell style for a column that names none, its own for a column that does.
+        assertThat(elementIn(((StandardColumn) columns.get(0)).getDetailCell()).getForecolor())
+                .isEqualTo(Color.decode("#212529"));
+        assertThat(elementIn(((StandardColumn) columns.get(1)).getDetailCell()).getForecolor())
+                .isEqualTo(Color.decode("#005CB9"));
+        assertThat(elementIn(((StandardColumn) columns.get(1)).getDetailCell()).getLineBox()
+                .getBottomPen().getLineColor()).as("inherited from the style it was narrowed from")
+                .isEqualTo(ROW_RULE);
+    }
+
+    /** The one element a generated cell holds. */
+    private static JRDesignTextElement elementIn(net.sf.jasperreports.components.table.Cell cell) {
+        JRElement[] elements = cell.getElements();
+        assertThat(elements).hasSize(1);
+        return (JRDesignTextElement) elements[0];
     }
 
     @Test

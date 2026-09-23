@@ -4,6 +4,7 @@ import net.sf.jasperreports.components.table.DesignCell;
 import net.sf.jasperreports.components.table.StandardColumn;
 import net.sf.jasperreports.components.table.StandardTable;
 import net.sf.jasperreports.engine.JRDataset;
+import net.sf.jasperreports.engine.JRLineBox;
 import net.sf.jasperreports.engine.JRElement;
 import net.sf.jasperreports.engine.JRException;
 import net.sf.jasperreports.engine.JRField;
@@ -16,8 +17,11 @@ import net.sf.jasperreports.engine.design.JRDesignTextElement;
 import net.sf.jasperreports.engine.design.JRDesignTextField;
 import net.sf.jasperreports.engine.design.JasperDesign;
 import net.sf.jasperreports.engine.type.HorizontalTextAlignEnum;
+import net.sf.jasperreports.engine.type.LineSpacingEnum;
+import net.sf.jasperreports.engine.type.ModeEnum;
 import net.sf.jasperreports.engine.type.StretchTypeEnum;
 import net.sf.jasperreports.engine.type.TextAdjustEnum;
+import net.sf.jasperreports.engine.type.VerticalTextAlignEnum;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -32,20 +36,25 @@ import java.util.Set;
  * <h2>What is dynamic, and what deliberately is not</h2>
  *
  * The jrxml lays out the whole document — page box, page header, title, criteria block, page
- * footer, every style — and declares the table as an empty skeleton: a {@code <componentElement>}
- * holding a {@code <jr:table>} with a {@code datasetRun} and no columns. (A table with no columns
- * is schema-valid; that is what makes the skeleton legal.) This class fills in the one hole:
+ * footer and the styles those bands use — and declares the table as an empty skeleton: a
+ * {@code <componentElement>} holding a {@code <jr:table>} with a {@code datasetRun} and no
+ * columns. (A table with no columns is schema-valid; that is what makes the skeleton legal.) This
+ * class fills in the one hole:
  *
  * <pre>
- *   the jrxml        the page, the chrome, the subDataset, the empty table, and every STYLE
+ *   the jrxml        the page, the chrome, the chrome's styles, the subDataset, the empty table
  *   the column list  which columns the table has: field, caption, width share, cell style
+ *   the TableDesign  what the table LOOKS like: two CellStyles, the two heights, the outer rule
  * </pre>
  *
- * A generated cell therefore carries no colour and no font — it names a style
- * ({@link TableDesign#headerStyle()}, {@link TableDesign#cellStyle()} or
- * {@link TableColumn#cellStyle()}) and the template answers. The one exception is the table's
- * outer left/right rule, which belongs to <i>being</i> the first or last column and so cannot live
- * in a style at all.
+ * <p><b>The table's look is written here, not resolved from the template.</b> A generated cell used
+ * to carry {@code setStyleNameReference("TableHeader")} and let the engine find that style in the
+ * jrxml at fill time; it now carries a {@link CellStyle} and {@link #apply} writes the face, the
+ * size, the weight, the colours, the padding and the rules straight onto the element. What that
+ * buys and what it costs is on {@link CellStyle} — the short version is that a style name is a
+ * string nothing checks, and an unresolvable one prints a cell in the default face rather than
+ * failing. The table's outer left/right rule stays out of the style, because it belongs to
+ * <i>being</i> the first or last column rather than to any cell.
  *
  * <h2>Why the table component rather than generated bands</h2>
  *
@@ -78,6 +87,12 @@ public final class TableDesigner {
     /** The {@code <subDataset>} that table runs over, and whose fields are the columns. */
     public static final String SUBDATASET = "listing";
 
+    /**
+     * Written onto every generated cell. Identity-H plus an embedded face is what puts the CJK and
+     * Thai glyphs in the PDF at all — the alternative is not a fallback face, it is nothing.
+     */
+    private static final String PDF_ENCODING = "Identity-H";
+
     private TableDesigner() {
     }
 
@@ -106,7 +121,10 @@ public final class TableDesigner {
         StandardTable table = (StandardTable) element.getComponent();
 
         // The table fills the content area, which the chrome-stripped design widens by both
-        // margins -- so this is read now rather than trusted from the jrxml.
+        // margins -- so this is read now rather than trusted from the jrxml. The width the template
+        // declares on the <componentElement> is a skeleton value that never survives this line:
+        // editing it there changes nothing, and the number that decides how wide the table is is
+        // the page box's columnWidth (or, for a stripped design, the whole page).
         element.setWidth(design.getColumnWidth());
 
         declareFields(design, columns);
@@ -165,33 +183,95 @@ public final class TableDesigner {
         return cell;
     }
 
-    /** Fills the cell, names a style, aligns, and draws the table's outer rule where it applies. */
+    /**
+     * Fills the cell, writes the style onto it, aligns, and draws the table's outer rule.
+     *
+     * <p><b>x=0 and the cell's full width: a column has no margin, and neither has this.</b> The
+     * column widths already sum to the table's width, so a cell inset here would show as a gap the
+     * table does not account for. Everything that looks like spacing between two columns is the
+     * style's left/right <i>padding</i> (see {@link #apply}) or the outer rule below — there is no
+     * third source, which is worth knowing before anyone goes looking for a gutter to adjust.
+     */
     private static JRDesignTextElement place(JRDesignTextElement element, int width, int height,
-                                             String style, TableColumn column, TableDesign layout,
+                                             CellStyle style, TableColumn column, TableDesign layout,
                                              int index, int count) {
         element.setX(0);
         element.setY(0);
         element.setWidth(width);
         element.setHeight(height);
-        // By NAME, not by JRStyle: the style is resolved when the report is filled, so this works
-        // whether the template declares it inline or pulls it from a shared style template.
-        element.setStyleNameReference(style);
+        apply(element, style);
         element.setHorizontalTextAlign(switch (column.align()) {
             case LEFT -> HorizontalTextAlignEnum.LEFT;
             case CENTER -> HorizontalTextAlignEnum.CENTER;
             case RIGHT -> HorizontalTextAlignEnum.RIGHT;
         });
-        // The one thing that cannot be delegated to a style: a style is resolved per element and
-        // has no way to know which column it landed in.
+        // Not part of the CellStyle: the same style lands in every column, and "am I the first or
+        // the last one" is not something it can know.
         if (index == 0) {
-            element.getLineBox().getLeftPen().setLineWidth(0.5f);
+            element.getLineBox().getLeftPen().setLineWidth(CellStyle.RULE_WIDTH);
             element.getLineBox().getLeftPen().setLineColor(layout.edgeColor());
         }
         if (index == count - 1) {
-            element.getLineBox().getRightPen().setLineWidth(0.5f);
+            element.getLineBox().getRightPen().setLineWidth(CellStyle.RULE_WIDTH);
             element.getLineBox().getRightPen().setLineColor(layout.edgeColor());
         }
         return element;
+    }
+
+    /**
+     * Writes a {@link CellStyle} onto a generated element — the replacement for
+     * {@code setStyleNameReference("TableHeader")} and the jrxml {@code <style>} behind it.
+     *
+     * <p><b>Identity-H, embedded, on every cell.</b> Not a style choice: without them the CJK and
+     * Thai glyphs never reach the PDF, and the symptom is a table of blanks in three languages
+     * while the English proof reads perfectly. The report's own default style declares the same
+     * two for the chrome; a generated cell no longer inherits from it, so it says so itself.
+     *
+     * <p><b>A backcolor also turns the element opaque.</b> An element is transparent by default and
+     * paints no background at all, so a backcolor on its own is silently nothing — the caption
+     * row's light blue is exactly that case.
+     *
+     * <p>Only what the style actually carries is written. A {@code null} colour is left alone
+     * rather than set to null, so the report's default style still answers for it.
+     */
+    private static void apply(JRDesignTextElement element, CellStyle style) {
+        element.setFontName(style.fontName());
+        element.setFontSize(style.fontSize());
+        element.setBold(style.bold());
+        element.setPdfEncoding(PDF_ENCODING);
+        element.setPdfEmbedded(Boolean.TRUE);
+
+        if (style.forecolor() != null) {
+            element.setForecolor(style.forecolor());
+        }
+        if (style.backcolor() != null) {
+            element.setBackcolor(style.backcolor());
+            element.setMode(ModeEnum.OPAQUE);
+        }
+        element.setVerticalTextAlign(switch (style.vAlign()) {
+            case TOP -> VerticalTextAlignEnum.TOP;
+            case MIDDLE -> VerticalTextAlignEnum.MIDDLE;
+        });
+
+        JRLineBox box = element.getLineBox();
+        CellStyle.Padding padding = style.padding();
+        box.setLeftPadding(padding.left());
+        box.setRightPadding(padding.right());
+        box.setTopPadding(padding.top());
+        box.setBottomPadding(padding.bottom());
+        if (style.topRule() != null) {
+            box.getTopPen().setLineWidth(CellStyle.RULE_WIDTH);
+            box.getTopPen().setLineColor(style.topRule());
+        }
+        if (style.bottomRule() != null) {
+            box.getBottomPen().setLineWidth(CellStyle.RULE_WIDTH);
+            box.getBottomPen().setLineColor(style.bottomRule());
+        }
+
+        if (style.lineSpacing() != null) {
+            element.getParagraph().setLineSpacing(LineSpacingEnum.PROPORTIONAL);
+            element.getParagraph().setLineSpacingSize(style.lineSpacing());
+        }
     }
 
     /**

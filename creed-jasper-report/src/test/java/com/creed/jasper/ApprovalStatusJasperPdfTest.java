@@ -56,6 +56,14 @@ class ApprovalStatusJasperPdfTest {
         // only way the repeated chrome and the page counter can be observed at all.
         assertThat(report.rows()).hasSize(13);
         assertThat(report.rows().get(0).account()).hasSize(4).last().isEqualTo("SGD");
+        // The four columns the listing grew: every one of them has to be in the payload, or the
+        // table prints a blank cell where a generated column found no field.
+        assertThat(report.rows().get(0).customerReference()).isEqualTo("CUST26000001");
+        assertThat(report.rows().get(0).amount()).isEqualTo("12,345.67");
+        assertThat(report.rows().get(0).valueDate()).isEqualTo("05/07/2026");
+        // The transaction's currency is not the account's on every row -- rows 3, 6 and 12 are FX,
+        // which is the only thing that makes a currency COLUMN worth the width it costs.
+        assertThat(report.rows().get(2).currency()).isEqualTo("USD");
         // The join is the model's, not the template's -- the breaks are data.
         assertThat(report.rows().get(0).accountText())
                 .isEqualTo("VASA COMPANY 3 WITH ACCOUNT\nNAME MO\n1013672712\nSGD");
@@ -79,8 +87,11 @@ class ApprovalStatusJasperPdfTest {
                         .contains(page + " of " + pages);
                 // The <jr:table> repeats its own caption row on every page it spills onto -- what
                 // a `columnHeader` band used to give, now the component's business.
-                assertThat(text).as("the table's caption row on page %d", page)
-                        .contains("Bank Reference").contains("Account").contains("Status");
+                // FLATTENED, because at eight columns every caption but three wraps: the assertion
+                // is that the whole caption printed, not that it printed on one line.
+                assertThat(flat(text)).as("the table's caption row on page %d", page)
+                        .contains("Bank Reference").contains("Customer Reference")
+                        .contains("Account").contains("Status");
                 // The page header is a bare logo -- no text at all -- so the image count is the
                 // only evidence it repeats. Two: the header logo and the footer's seal.
                 assertThat(imagesOn(reader, page)).as("logo + seal on page %d", page)
@@ -96,7 +107,7 @@ class ApprovalStatusJasperPdfTest {
     void thePageOneBodyIsTheDocumentInTheSample() throws IOException {
         PdfReader reader = new PdfReader(render(ReportLanguage.EN));
         try {
-            String page = new PdfTextExtractor(reader).getTextFromPage(1);
+            String page = flat(new PdfTextExtractor(reader).getTextFromPage(1));
             assertThat(page)
                     // title band + the criteria block, captions and values
                     .contains("Approval Status All List")
@@ -104,9 +115,11 @@ class ApprovalStatusJasperPdfTest {
                     .contains("Application Date").contains("05/07/2026 - 02/09/2026")
                     // the count line, verbatim from the payload rather than recomputed
                     .contains("13 Record(s) (Note: This is a filtered table.)")
-                    // the table, including the account cell's separate lines
-                    .contains("Bulk MEPS").contains("BK2600000001")
+                    // the table, including the account cell's separate lines and the four columns
+                    // the listing grew
+                    .contains("Bulk MEPS").contains("BK2600000001").contains("CUST26000001")
                     .contains("VASA COMPANY 3 WITH ACCOUNT").contains("1013672712").contains("SGD")
+                    .contains("12,345.67").contains("05/07/2026")
                     .contains("Processing");
         }
         finally {
@@ -177,14 +190,23 @@ class ApprovalStatusJasperPdfTest {
         // while the English proof read perfectly. Only a non-Latin render can catch it.
         for (ReportLanguage language : new ReportLanguage[] {
                 ReportLanguage.TH, ReportLanguage.ZH_CN, ReportLanguage.ZH_TW }) {
-            String page = firstPageText(render(language));
+            String page = flat(firstPageText(render(language)));
             // The 14pt title, which prints in the title band AND in the footer -- so two
             // occurrences, and one of them going missing is exactly the failure being pinned.
             assertThat(page.split("Approval Status All List", -1).length - 1)
                     .as("title band + footer in %s", language).isEqualTo(2);
-            // An 8.5pt criteria caption. "Customer Reference" appears nowhere else: the table's
-            // own header says "Bank Reference", so this cannot pass on the header alone.
-            assertThat(page).as("criteria captions in %s", language).contains("Customer Reference");
+            // An 8.5pt criteria caption. "Payer / Payee" appears nowhere else -- it is the one
+            // criterion the eight-column table has no column for, so this cannot pass on a table
+            // caption. ("Customer Reference" used to play this part and is now a column too.)
+            assertThat(page).as("criteria captions in %s", language).contains("Payer / Payee");
+            // THE TABLE'S OWN CAPTIONS, which the generated header band sizes rather than the
+            // jrxml. Eight columns wrap most of them, and a Thai line is 12.09pt against Latin's
+            // 10.90 at 8pt -- so a band deep enough for three lines in English is short of three
+            // in Thai and drops the last one. That shipped here: "Value / Placement Date" printed
+            // as "Value /" + "Placement" in th and in full in en, in the same document.
+            assertThat(page).as("the table's caption row in %s", language)
+                    .contains("Transaction / Deposit Type").contains("Bank Reference")
+                    .contains("Customer Reference").contains("Value / Placement Date");
             // The 8pt footer line and page counter, the shortest elements in the document.
             assertThat(page).as("footer and counter in %s", language)
                     .contains("13 Record(s)").contains("1");
@@ -214,6 +236,18 @@ class ApprovalStatusJasperPdfTest {
             Files.write(dir.resolve("approval-status-jasper-"
                     + language.locale().toLanguageTag() + ".pdf"), render(language));
         }
+    }
+
+    /**
+     * Extracted text with every run of whitespace collapsed to one space.
+     *
+     * <p>At eight columns a 64pt cell wraps, and the extractor reports a wrapped caption as two
+     * lines — "Bank" and "Reference". Asserting on the raw text would then pin the LINE BREAKS of
+     * the layout rather than its content, i.e. it would fail every time a column was re-weighted
+     * while the document was still correct. What has to be true is that the whole string printed.
+     */
+    private static String flat(String text) {
+        return text.replaceAll("\\s+", " ");
     }
 
     /** Page one's extracted text. */

@@ -14,9 +14,16 @@ Standalone **Spring MVC** app, plain HTTP `9110`, context-path `/jasper-report`.
 ```
 GET|POST /jasper-report/approval-status/export        ?format=pdf|xlsx|csv|html   (default pdf)
                                                       &columns=type,status        (PDF only)
+                                                      &widths=auto|fixed          (default auto)
 GET|POST /jasper-report/approval-status/export/pdf    alias, so the side-by-side with
                                                       creed-report keeps working unchanged
+GET|POST /jasper-report/approval-status/layout        ?columns=…&widths=…  the column plan as JSON:
+                                                      min, max, width, %, wraps, breaksTokens
 ```
+
+The module's own `README.md` documents this surface in full — parameters, media types, the layout
+JSON field by field, and the error model; `ApprovalStatusJasperEndpointTest` is what keeps it true,
+so change the two together.
 
 **Input-less by design**, like its twin: the payload is a JSON literal in `ApprovalStatusSamples` and the endpoint pins a *layout* down, so two calls a week apart differ only in the export timestamp. What the query string chooses is the **rendering** — format, columns, `Accept-Language` — never the data. Bad values are **400**, never 500. Thirteen rows on purpose — the document has to be two pages for the repeated chrome and the page counter to be observable at all.
 
@@ -26,6 +33,9 @@ GET|POST /jasper-report/approval-status/export/pdf    alias, so the side-by-side
 |---|---|
 | `api/ApprovalStatusJasperController` | the one endpoint; normalises the locale before the fill |
 | `dynamic/TableColumn` · `TableDesign` · `TableDesigner` | the table, generated into the design at compile time |
+| `dynamic/CellStyle` | what a generated cell looks like — in Java, not a jrxml `<style>` name |
+| `dynamic/ColumnFit` · `TextMetrics` | widths measured from the content — `table-layout: auto`, weighted |
+| `export/ColumnWidths` | `auto` (measured, the default) or `fixed` (the declared weights) |
 | `dynamic/ReportShape` | template + columns + chrome + JSON query: what a compiled report *is*, and the cache key |
 | `dynamic/TableRows` | the data source for a generated table, built from the same column list |
 | `export/ExportFormat` · `ExportRequest` | the four formats, and what a caller asks for |
@@ -64,7 +74,7 @@ A 1:1 map onto the HTML twin's chrome — worth reading next to it, because the 
 writes them into the `JasperDesign` before it is compiled, from a `List<TableColumn>`:
 
 ```java
-TableColumn.of("account", "Account", 34).multiline().styled("AccountCell")
+TableColumn.of("account", "Account", 20).multiline().styled(ACCOUNT_CELL)   // a CellStyle, not a name
 ```
 
 DynamicJasper is the library that normally does this, and it is the architecture the reference
@@ -74,18 +84,34 @@ build — for what is underneath a few dozen calls to the **JasperReports design
 (`JRDesignBand`, `JRDesignTextField`, `JRDesignField`). `TableDesigner` is those calls: no
 dependency, JasperReports' own compile-time errors, nothing in between to go stale.
 
-**The division of labour is the whole point.** The jrxml keeps the page box, the chrome bands and
-every **style** — fonts, palette, padding, the rule under each row, the locale-conditional weights;
-the column list carries only what a caller could reasonably choose: fields, captions, widths, which
-style a cell takes. A generated cell has no colour and no font of its own — it calls
-`setStyleNameReference` and the template answers. The one exception is the table's outer left/right
-rule (`TableDesign.edgeColor`), which belongs to *being the first or last column*, something a
-style cannot know.
+**The division of labour.** The jrxml keeps the page box, the chrome bands and the **chrome's**
+styles — the title, the count line, the footnote, the counter, the locale-conditional weights. The
+table is Java on both axes: the column list carries fields, captions and widths, and
+`dynamic/CellStyle` carries what a cell looks like — face, size, weight, colours, padding, rules —
+which `TableDesigner.apply` writes onto the generated element.
+
+**The styles used to be names.** A cell carried `setStyleNameReference("TableHeader")` and the
+template answered at fill time. That was reversed deliberately: **a style reference is a string
+nothing checks**, and JasperReports resolves an unknown one to *nothing* — it prints the cell in
+the default face, so a renamed or deleted style is not a compile error, not a fill error, just a
+table quietly rendered at the wrong size in cells measured for another. `TableHeader`, `TableCell`,
+`AccountCell` and `StatusCell` no longer exist in `approval-status.jrxml`; the palette is in
+`ApprovalStatusRenderer` beside the column widths it has to agree with. The price: an edited jrxml
+still takes effect on the next request (`cache-templates=false`) but that no longer covers the
+table's look, only its chrome.
+
+Two things stay out of `CellStyle`: the table's outer left/right rule (`TableDesign.edgeColor`),
+which belongs to *being the first or last column* — something a per-element style cannot know — and
+Identity-H + embedding, written onto every cell because without them the CJK and Thai glyphs never
+reach the PDF. The **family name** is still engine-resolved: a cell asks for `"Creed Sans"` and the
+font extension picks the face by locale.
 
 Three things it does that are easy to get wrong by hand:
 
 - **Weights, not widths** — normalised over the design's `columnWidth` with the rounding remainder
-  to the last column, so the row ends exactly on the right margin whatever the paper.
+  to the last column, so the row ends exactly on the right margin whatever the paper. Since the fit
+  arrived (below) a weight is no longer a width at all: `ColumnFit` measures the content and hands
+  the designer the fitted widths *as* weights, so nothing under it changed.
 - **Stretch** — a `multiline()` column gets `textAdjust="StretchHeight"`, and every *other* cell
   gets `stretchType="RelativeToTallestObject"` or its bottom rule stops at the designed height and
   the row looks torn. The design-API spelling of what a CSS table cell does for free.
@@ -114,14 +140,14 @@ of columns, so a column model would not express it.
 | `setReportLocale(locale)` | the `REPORT_LOCALE` parameter |
 | `generateBaseTable()` — margins 0, full page width, no detail split | `TableDesign` + `TableDesigner.stripChrome` + normalised weights + `splitType="Prevent"` |
 | `generateTable(locale, req)` + `getCustomViewColumns(...)` for PDF | `columnsFor(request)`, same rule |
-| `generateBaseColumn(.., firstCol, lastCol)` — four `Style` variants per position | one named jrxml style per column + two edge pens |
+| `generateBaseColumn(.., firstCol, lastCol)` — four `Style` variants per position | one `CellStyle` per column + two edge pens |
 | `IS_IGNORE_PAGINATION` for non-PDF | `ExportFormat.paginated()` |
 | `exportReport(...)` + CSV BOM property | `JasperReportService.export(..., format)` + `setWriteBOM` |
 | `JsonQueryExecuterFactory.JSON_INPUT_STREAM` | `TableData.json(...)` |
 
 **A renderer is a value over one report, not a bean** — `new ApprovalStatusRenderer(jasper, report, now).render(request)`. Payload and export instant are final fields, so the hooks just read them; the object is immutable, needs no synchronisation, and one per request costs nothing because the only expensive thing in the pipeline is the compiled report, cached in the shared `JasperReportService`. (The reference puts the payload on the parameter map instead.)
 
-**Changed on purpose.** The reference builds the table's *look* in Java — four `Style` objects per column position, because DynamicJasper has no other way to draw a table's outer border. Here the look stays in the jrxml and the generator adds two pens, so a column says which style it takes and never what colour it is. And the non-PDF path starts from the **same** template with its chrome stripped, not from a second report built from nothing — one file to keep in step instead of two.
+**Changed on purpose.** The reference builds a table's look out of four `Style` objects *per column position*, because DynamicJasper has no other way to draw a table's outer border. Here a column carries one `CellStyle` whatever position it lands in and the generator adds the two edge pens — the same end result from a model a caller can reason about. (The look lived in the jrxml as named styles for a while; see "The division of labour" above for why it moved into Java.) And the non-PDF path starts from the **same** template with its chrome stripped, not from a second report built from nothing — one file to keep in step instead of two.
 
 **Two flags hang off the format, and both are silent when wrong:**
 
@@ -136,11 +162,64 @@ Pagination on in a spreadsheet carries a page break, a repeated caption row and 
 
 **JSON straight into the fill** (`TableData.json`): payload on `JSON_INPUT_STREAM`, a `json` query on the design naming the array, `$F{host}` bound to the JSON property. With a generated table *and* a JSON source there is no Java type for the row anywhere. Limit: a field binds to a *property*, so an array or object value has no useful rendering — the `account` block is four lines that must arrive joined, a decision only Java can make, so that document keeps a `JRDataSource`.
 
+## A column's left/right spacing — three layers, and no margin among them
+
+**A `<jr:table>` column has no margin.** Column widths sum to exactly the table width
+(`StandardColumn.setWidth`) and each cell's text element is `x=0` filling the cell
+(`TableDesigner.place`), so there is no gutter. Everything visible between two columns is one of:
+
+| layer | set by | value lives in |
+|---|---|---|
+| cell inner padding | `TableDesigner.apply` → `setLeftPadding`/`setRightPadding` | `CellStyle.padding(l, r, t, b)` — `ApprovalStatusRenderer.HEADER`/`.CELL`, **6 left / 3 right** |
+| table's outer rules (first column's left, last column's right) | `TableDesigner.place`, `index == 0` / `index == count - 1` | `CellStyle.RULE_WIDTH` 0.5pt + `TableDesign.edgeColor` |
+| table's distance from the paper | the jrxml page box | `leftMargin="40" rightMargin="40"`, `columnWidth="515"` |
+
+- Padding is **not** free width: `ColumnFit` adds `left + right` to every measured min and max, so
+  changing it moves the fitted widths.
+- `AccountCell`/`StatusCell` inherit the padding — they are withers off `CELL`.
+- The `width="515"` on the jrxml's `<componentElement key="listing">` is a skeleton value
+  `TableDesigner.write` overwrites with `design.getColumnWidth()` on every compile (a stripped
+  design has zeroed margins and a full-page column width). Editing it changes nothing.
+- The outer rules stay out of `CellStyle` on purpose: one style lands in every column, and "am I
+  first or last" is not something a per-element style can know.
+
+## Column widths — `table-layout: auto`, which JasperReports does not have
+
+A column's `weight` was a share of the page, hand-measured once against the longest string it
+happened to carry — and wrong the moment the shape changed: weights tuned for eight columns make
+three of them a third of the page each, and a payload whose references grew two characters breaks
+inside a token with nobody the wiser. `ColumnFit` measures instead, and `?widths=auto|fixed` picks
+which answer is used (auto is the default; `/approval-status/layout` returns the plan as JSON so the
+two can be compared without reading a PDF).
+
+- **The measurement is the real face.** `TextMetrics` pulls the AWT font out of the same extension
+  the fill resolves `Creed Sans` through (`FontUtil.getAwtFontFromBundles`), so the numbers are what
+  the PDF will draw. A per-character average is wrong exactly where the Noto faces differ, which is
+  where this module's bugs live. A clone without the TTFs falls back to `SansSerif` and still
+  renders — the same bargain `JasperFonts` makes.
+- **min is the number that matters.** Below its widest unbreakable token a cell does not wrap, it
+  breaks *inside* a word: `BK260000000` / `1`. Whitespace is the only assumed break opportunity,
+  which is conservative for CJK and Thai (Jasper wraps those between characters) and therefore safe.
+- **Distribution is CSS's, times the weight.** Everything fits → each gets its max, slack shared by
+  weight. Needs squeezing → each gets its min, the rest shared by `(max − min) × weight`. Nothing
+  fits → mins scaled down. The `× weight` is the one departure: a browser has no notion of a column
+  mattering more, and plain CSS gives this document's account block 11pt less, a sixth line and an
+  extra page. **Weights stopped being widths and became priorities**; equal weights give the
+  browser's answer exactly.
+- **Fitting is a pre-pass.** `ColumnFit.columns()` returns the same columns with the fitted widths
+  in the `weight` slot, so `TableDesigner`, `ReportShape` and the cache are untouched — and a
+  chrome-stripped spreadsheet gets the same proportions re-normalised over its wider content area
+  rather than a second fit.
+- **It needs the rows before the compile**, which is why `JasperTableRenderer.rowText` sits beside
+  `data`: a `JRDataSource` is single-pass and measuring through it would hand the fill an exhausted
+  source. The fitted widths are part of the compile-cache key, so changing data means compiling per
+  distinct layout — the reason `fixed` is kept rather than deprecated.
+
 ## Per-locale typography — the Jasper-native answer
 
 Both halves of what creed-report splits between a message key and a CSS overlay:
 
-- **The face follows `REPORT_LOCALE`, in the extension, not the template.** `fonts/creed-fonts.xml` declares the family **`Creed Sans` four times** — Thai, SC, TC, then unrestricted — and `FontUtil` takes the first whose `supportsLocale()` says yes. Every element just says `fontName="Creed Sans"`; the `Base` style carries it as `isDefault="true"`, which is the exact job `body { font-family }` does in the twin. `Creed Sans Data` is a second family that is **always Latin** — the criteria *values*, i.e. creed-report's `pdf.font.family.criteriaValue`.
+- **The face follows `REPORT_LOCALE`, in the extension, not the template.** `fonts/creed-fonts.xml` declares the family **`Creed Sans` four times** — Thai, SC, TC, then unrestricted — and `FontUtil` takes the first whose `supportsLocale()` says yes. Every element just asks for `Creed Sans` — the chrome by inheriting the `Base` style's `isDefault="true"`, which is the exact job `body { font-family }` does in the twin, and a generated table cell by carrying the name in its `CellStyle`. `Creed Sans Data` is a second family that is **always Latin** — the criteria *values*, i.e. creed-report's `pdf.font.family.criteriaValue`.
 - **The weight follows the script, in `<conditionalStyle>`.** `"zh".equals($P{REPORT_LOCALE}.getLanguage())` bolds `.criteria-label`; `"th"` un-bolds the footer title. That is creed-report's `static/css/locale/<tag>/report-pdf.css` said in jrxml, and the same reason applies: a weight per selector has nowhere to live in a `.properties` file.
 - **One axis, not two.** creed-report varies on country × language; the approval-status listing is fixed brand chrome there, so the only axis it really varies on is the language. Consequence: the Buddhist era is keyed on the **country** next door (`?country=th&lang=en` still shows 2569) and on the **language** here.
 

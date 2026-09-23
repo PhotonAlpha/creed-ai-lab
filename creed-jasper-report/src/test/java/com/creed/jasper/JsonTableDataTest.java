@@ -1,6 +1,7 @@
 package com.creed.jasper;
 
 import com.creed.jasper.dynamic.ReportShape;
+import com.creed.jasper.dynamic.CellStyle;
 import com.creed.jasper.dynamic.TableColumn;
 import com.creed.jasper.dynamic.TableDesign;
 import com.creed.jasper.export.ExportFormat;
@@ -34,7 +35,9 @@ class JsonTableDataTest {
 
     private static final String TEMPLATE = "jasper/approval-status.jrxml";
     private static final TableDesign LAYOUT =
-            new TableDesign(22, 24, Color.decode("#C9CCD1"), "TableHeader", "TableCell");
+            new TableDesign(22, 24, Color.decode("#C9CCD1"),
+                    CellStyle.of("Creed Sans", 8f).bold(true).backcolor(Color.decode("#DBE5F1")),
+                    CellStyle.of("Creed Sans", 8f));
 
     private static final String JSON = """
             { "servers": [

@@ -1,8 +1,10 @@
 package com.creed.jasper.render;
 
+import com.creed.jasper.dynamic.ColumnFit;
 import com.creed.jasper.dynamic.ReportShape;
 import com.creed.jasper.dynamic.TableColumn;
 import com.creed.jasper.dynamic.TableDesign;
+import com.creed.jasper.export.ColumnWidths;
 import com.creed.jasper.export.ExportFormat;
 import com.creed.jasper.export.ExportRequest;
 import com.creed.jasper.i18n.ReportLanguage;
@@ -51,12 +53,14 @@ import java.util.Map;
  *   JsonQueryExecuterFactory.JSON_INPUT_STREAM  TableData.json(...)
  * </pre>
  *
- * <p><b>What the migration changes on purpose.</b> The reference builds the table's <i>look</i> in
- * Java — four {@code Style} objects per column position, because DynamicJasper has no other way to
- * draw a table's outer border. Here the look stays in the jrxml as named styles and the generator
- * adds two pens; a column says which style it takes, never what colour it is. The other change is
- * that the non-PDF path starts from the <b>same</b> template with its chrome stripped rather than
- * from a second report built from nothing, so there is one file to keep in step instead of two.
+ * <p><b>What the migration changes on purpose.</b> The reference builds a table's look out of four
+ * {@code Style} objects <i>per column position</i>, because DynamicJasper has no other way to draw
+ * a table's outer border; here a column carries one {@link com.creed.jasper.dynamic.CellStyle}
+ * whatever position it lands in and the generator adds the two edge pens. The non-PDF path starts
+ * from the <b>same</b> template with its chrome stripped rather than from a second report built
+ * from nothing, so there is one file to keep in step instead of two. And the column widths can be
+ * <b>measured from the content</b> ({@link com.creed.jasper.dynamic.ColumnFit}) rather than taken
+ * from hand-tuned weights — the reference has no equivalent, and neither does JasperReports.
  *
  * <p>Subclasses supply the document; this class supplies the pipeline. {@link #render} is final.
  *
@@ -99,6 +103,34 @@ public abstract class JasperTableRenderer {
     protected abstract TableData data(List<TableColumn> columns, ExportRequest request);
 
     /**
+     * The rows as <b>text</b>, row-major in the column list's order — what a content fit measures.
+     *
+     * <p>Separate from {@link #data} on purpose: a {@link net.sf.jasperreports.engine.JRDataSource}
+     * is single-pass and a fill consumes it, so measuring through it would leave the fill with an
+     * exhausted source. A subclass that has its payload in hand (all of them do — the payload is
+     * why a renderer is a value) answers this from the payload directly.
+     *
+     * <p>The default is empty, which is not a failure: a fit with no rows measures the captions
+     * alone, so a report that does not implement this still lays its headings out sensibly.
+     */
+    protected List<List<String>> rowText(List<TableColumn> columns, ExportRequest request) {
+        return List.of();
+    }
+
+    /**
+     * The content width the fit is made against, in points — the template's page box minus its
+     * margins.
+     *
+     * <p>Only the <i>relative</i> result survives: {@link ColumnFit} hands back the fitted widths
+     * as weights and {@link com.creed.jasper.dynamic.TableDesigner} re-normalises them over the
+     * real content area, which differs between a PDF (515pt here) and a chrome-stripped extract
+     * (the full page). What this number decides is which branch of the fit applies — whether the
+     * content fits, has to be squeezed, or overflows — so it has to be the width of the format
+     * people actually read, i.e. the PDF's.
+     */
+    protected abstract int contentWidth();
+
+    /**
      * Anything else the template's own bands need — the title it prints, the export stamp, the
      * logo. Called for every format; a stripped design simply ignores the ones its bands no longer
      * reference.
@@ -111,7 +143,7 @@ public abstract class JasperTableRenderer {
 
     /** The report, in the requested format. */
     public final byte[] render(ExportRequest request) {
-        List<TableColumn> columns = columnsFor(request);
+        List<TableColumn> columns = layoutFor(request).columns();
         JasperReport report = jasper.compile(shape(request, columns));
 
         // ONE empty record for the MAIN dataset: the detail band holds the table and has to run
@@ -119,6 +151,22 @@ public abstract class JasperTableRenderer {
         // `rows` parameter -- the report around the table has no rows of its own.
         return jasper.export(report, parameters(request, data(columns, request)),
                 new JREmptyDataSource(1), request.format());
+    }
+
+    /**
+     * The columns this request prints, measured — the fit, not just the widths, so a caller can be
+     * shown <i>why</i> a column came out the width it did.
+     *
+     * <p>{@link ColumnWidths#FIXED} does not skip the measurement, it skips the <b>result</b>: the
+     * declared weights are kept, and the mins and maxes are still measured so the same report can
+     * be inspected either way. Measuring is cheap next to a fill; being unable to compare the two
+     * modes is not.
+     */
+    public final ColumnFit layoutFor(ExportRequest request) {
+        List<TableColumn> columns = columnsFor(request);
+        ColumnFit fit = ColumnFit.measure(columns, rowText(columns, request), tableDesign(),
+                contentWidth(), request.language().locale());
+        return request.fitsColumns() ? fit : ColumnFit.declared(fit, columns, contentWidth());
     }
 
     /**
