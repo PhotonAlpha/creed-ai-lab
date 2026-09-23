@@ -5,75 +5,57 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Column widths measured from the content — {@code table-layout: auto}, for a report engine that
- * has no such thing.
+ * Column widths measured from the content — {@code table-layout: auto}, for an engine that has no
+ * such thing.
  *
- * <p><b>The problem this solves.</b> A {@link TableColumn} declares a {@code weight}: a share of
- * the page, hand-tuned against the longest string the column happens to carry. That works until the
- * shape changes. Three columns and the same weights leave two of them absurdly wide; eight and the
- * references break <i>inside</i> the token. Every column count needs its own set of magic numbers,
- * each of which is a measurement someone took once and nobody re-takes when the payload changes.
- * The HTML twin has never had this problem: a {@code <table>} without fixed widths measures its own
- * content, and its {@code <colgroup>} only nudges the result.
+ * <p>A {@link TableColumn}'s {@code weight} is a share of the page, hand-tuned against the longest
+ * string the column happened to carry when someone last looked. It does not survive a change of
+ * shape: weights tuned for eight columns make three of them a third of the page each, and a payload
+ * whose references grew two characters breaks <i>inside</i> a token with nobody the wiser.
  *
- * <p><b>The algorithm is CSS's</b>, because it is the one whose output people already recognise:
+ * <p>Per column: <b>min</b> = its widest unbreakable token ({@link TextMetrics#minTokenWidth}),
+ * <b>max</b> = its widest full line, caption measured in the header style and cells in theirs,
+ * padding included. Then CSS's algorithm, with one departure:
  *
- * <ol>
- *   <li>Measure every column's <b>min</b> (its widest unbreakable token — see
- *       {@link TextMetrics#minTokenWidth}) and <b>max</b> (its widest full line), caption included
- *       and padding added, in the styles the cells will actually print in.</li>
- *   <li><b>Everything fits</b> (Σmax ≤ available): give each column its max and share the surplus
- *       out in proportion to {@link TableColumn#weight()} — which is what the weights are for now:
- *       not a width, a claim on the <i>slack</i>. A wide column stays wide, a date column does not
- *       stretch to twice the date.</li>
- *   <li><b>Some wrapping is needed</b> (Σmin ≤ available &lt; Σmax): every column gets its min, and
- *       what is left is shared in proportion to how much each still wants (max − min). Columns that
- *       cannot wrap ask for nothing extra and keep their content intact; the account block absorbs
- *       the squeeze, which is exactly where the wrapping belongs.</li>
- *   <li><b>Nothing fits</b> (available &lt; Σmin): scale the mins down proportionally. Something
- *       will break inside a token — the table is wider than the paper — and this at least spreads
- *       the damage instead of destroying the last column.</li>
- * </ol>
+ * <ul>
+ *   <li>Σmax ≤ available — everyone gets their content, the slack is shared <b>by weight</b>.</li>
+ *   <li>Σmin ≤ available &lt; Σmax — everyone gets their min, the rest is shared by
+ *       {@code (max − min) × weight}. <b>The × weight is the departure.</b> A browser has no notion
+ *       of one column mattering more, so plain CSS gives this document's account block 11pt less, a
+ *       sixth line and an extra page. Weights stopped being widths and became priorities; equal
+ *       weights give the browser's answer exactly.</li>
+ *   <li>available &lt; Σmin — mins scaled down. The table is wider than the paper and something
+ *       will break; this spreads the damage instead of destroying the last column.</li>
+ * </ul>
  *
- * <p><b>The result is a column list, not a layout.</b> {@link #columns()} hands back the same
- * columns with their weights <i>replaced by the fitted point widths</i>, so everything downstream
- * is untouched: {@link TableDesigner} normalises weights over the real content width exactly as
- * before, {@link ReportShape} still keys the compile cache on the columns, and a chrome-stripped
- * spreadsheet — whose content area is wider by both margins — gets the same proportions rather than
- * a second fit. Fitting is a <b>pre-pass</b>, and nothing below it knows it happened.
+ * <p><b>Fitting is a pre-pass.</b> {@link #columns()} returns the same columns with their weights
+ * <i>replaced by the fitted widths</i>, so nothing below knows it happened: {@link TableDesigner}
+ * normalises weights over the real content width as before, {@link ReportShape} still keys the
+ * compile cache on the columns, and a chrome-stripped export gets the same proportions over its
+ * wider content area rather than a second fit.
  *
- * <p><b>What it costs.</b> The fit measures every cell, so it wants the rows as text before the
- * report is compiled, and two payloads of different lengths are two different compiled reports
- * (different fitted widths → different columns → a different cache key). For this module's fixed
- * sample that is one entry; for a report served over changing data it is a cache that grows with
- * the data, which is the reason {@code fixed} stays available and is not deprecated.
+ * <p><b>What it costs:</b> the rows must be measured before the report is compiled, and the fitted
+ * widths are part of the cache key — a report over changing data compiles per distinct layout.
+ * That is why {@code fixed} stays.
  *
- * @param available    the content width the fit was made against, in points
- * @param measurements one entry per column, in order, carrying what was measured and what it got
+ * @param available    the content width fitted against, in points
+ * @param measurements one entry per column, in order
  */
 public record ColumnFit(int available, List<Measured> measurements) {
 
     /**
-     * One column's measurements and its fitted width — the whole reason this type is public rather
-     * than an {@code int[]} returned from a static method. A layout that cannot be inspected is a
-     * layout nobody can argue with, and "why is that column 36pt?" is the first question anyone
-     * asks of an automatic one.
+     * One column's measurements and its fitted width. Public because "why is that column 36pt?" is
+     * the first question anyone asks of an automatic layout, and {@code /approval-status/layout}
+     * answers it out of this.
      *
-     * @param column the column as declared, weight and all
-     * @param min    the width below which its content breaks inside a token
-     * @param max    the width at which nothing in it wraps
-     * @param width  what it was actually given
+     * @param min the width below which the content breaks inside a token
+     * @param max the width at which nothing in it wraps
      */
     public record Measured(TableColumn column, int min, int max, int width) {
 
         /** Whether this column got everything it wanted. */
         public boolean fits() {
             return width >= max;
-        }
-
-        /** Whether this column is at the width below which its content starts to break. */
-        public boolean squeezed() {
-            return width <= min;
         }
     }
 
@@ -84,13 +66,10 @@ public record ColumnFit(int available, List<Measured> measurements) {
     /**
      * Fits {@code columns} to {@code available} points against the text they will carry.
      *
-     * @param columns the declared columns; their weights become a claim on the surplus
-     * @param rows    the cell text, row-major, in the same order as {@code columns}. A short row is
-     *                padded with blanks rather than refused: measuring is a layout hint, and a
-     *                report that renders a missing cell as empty must not fail to lay it out
-     * @param layout  the styles the cells print in — the measurement is only as good as the face
-     *                and size it is taken in
-     * @param locale  the fill's locale, which is what selects the face inside the family
+     * @param rows   the cell text, row-major, in the column list's order. A short row is a blank
+     *               cell, not an error — the same rule the data source follows
+     * @param layout the styles the cells print in; a measurement is only as good as its face
+     * @param locale the fill's locale, which selects the face inside the family
      */
     public static ColumnFit measure(List<TableColumn> columns, List<List<String>> rows,
                                     TableDesign layout, int available, Locale locale) {
@@ -101,58 +80,45 @@ public record ColumnFit(int available, List<Measured> measurements) {
             throw new IllegalArgumentException("A fit needs a positive width, not " + available);
         }
         Locale fillLocale = locale == null ? Locale.ENGLISH : locale;
+        List<List<String>> content = rows == null ? List.of() : rows;
+
         int count = columns.size();
         int[] min = new int[count];
         int[] max = new int[count];
 
         for (int i = 0; i < count; i++) {
             TableColumn column = columns.get(i);
-            CellStyle headerStyle = layout.headerStyle();
-            CellStyle cellStyle = layout.cellStyle(column);
+            // The caption in the HEADER style and the cells in the cell style: different sizes and
+            // weights, and a caption measured at the cell's weight is a column that fits its data
+            // and clips its own heading.
+            CellStyle header = layout.headerStyle();
+            CellStyle cell = layout.cellStyle(column);
+            float columnMin = TextMetrics.minTokenWidth(column.header(), header, fillLocale) + pad(header);
+            float columnMax = TextMetrics.maxLineWidth(column.header(), header, fillLocale) + pad(header);
 
-            // The caption is measured in the HEADER style and the cells in the cell style: they are
-            // different sizes and weights, and a caption measured at the cell's weight is a column
-            // that fits its data and clips its own heading.
-            float columnMin = TextMetrics.minTokenWidth(column.header(), headerStyle, fillLocale)
-                    + padding(headerStyle);
-            float columnMax = TextMetrics.maxLineWidth(column.header(), headerStyle, fillLocale)
-                    + padding(headerStyle);
-
-            for (List<String> row : rows == null ? List.<List<String>>of() : rows) {
-                // A row shorter than the column list is a blank cell, not an error -- the same rule
-                // the data source follows for a key a row does not carry.
+            for (List<String> row : content) {
                 String text = row != null && i < row.size() ? row.get(i) : null;
-                columnMin = Math.max(columnMin,
-                        TextMetrics.minTokenWidth(text, cellStyle, fillLocale) + padding(cellStyle));
-                columnMax = Math.max(columnMax,
-                        TextMetrics.maxLineWidth(text, cellStyle, fillLocale) + padding(cellStyle));
+                columnMin = Math.max(columnMin, TextMetrics.minTokenWidth(text, cell, fillLocale) + pad(cell));
+                columnMax = Math.max(columnMax, TextMetrics.maxLineWidth(text, cell, fillLocale) + pad(cell));
             }
             // Ceil, not round: half a point short of the content is still short of it.
             min[i] = (int) Math.ceil(columnMin);
-            max[i] = (int) Math.ceil(columnMax);
-            if (max[i] < min[i]) {
-                max[i] = min[i];
-            }
+            max[i] = Math.max(min[i], (int) Math.ceil(columnMax));
         }
-
         return new ColumnFit(available, distribute(columns, min, max, available));
     }
 
     /**
-     * The same measurements, but with the columns' <b>declared weights</b> normalised over
-     * {@code available} instead of the fitted widths — what {@link ColumnWidths#FIXED} prints.
+     * The same measurements with the columns' <b>declared weights</b> normalised over
+     * {@code available} — what {@link com.creed.jasper.export.ColumnWidths#FIXED} prints.
      *
-     * <p>Built from a fit rather than instead of one, so the two modes can be compared on the same
-     * numbers: the mins and maxes are the measurement, and the widths are what each mode does with
-     * it. The normalisation is {@code TableDesigner}'s own, remainder to the last column included,
-     * so what this reports is what will actually be drawn.
+     * <p>Built from a fit rather than instead of one, so both modes can be compared on the same
+     * mins and maxes. The normalisation is {@link TableDesigner}'s own, remainder to the last column
+     * included, so this reports what will actually be drawn.
      */
     public static ColumnFit declared(ColumnFit measured, List<TableColumn> columns, int available) {
         int count = columns.size();
-        int totalWeight = 0;
-        for (TableColumn column : columns) {
-            totalWeight += column.weight();
-        }
+        int totalWeight = sum(weights(columns));
         List<Measured> fixed = new ArrayList<>(count);
         int used = 0;
         for (int i = 0; i < count; i++) {
@@ -166,7 +132,7 @@ public record ColumnFit(int available, List<Measured> measurements) {
         return new ColumnFit(available, fixed);
     }
 
-    /** The fitted columns: the same list, with each weight replaced by its fitted width. */
+    /** The fitted columns: the same list, each weight replaced by its fitted width. */
     public List<TableColumn> columns() {
         List<TableColumn> fitted = new ArrayList<>(measurements.size());
         for (Measured measured : measurements) {
@@ -189,42 +155,31 @@ public record ColumnFit(int available, List<Measured> measurements) {
 
     private static List<Measured> distribute(List<TableColumn> columns, int[] min, int[] max, int available) {
         int count = columns.size();
-        int totalMin = sum(min);
-        int totalMax = sum(max);
+        int[] weights = weights(columns);
         int[] width = new int[count];
+        int[] claims = new int[count];
 
-        if (totalMax <= available) {
-            // Room to spare: everyone gets their content, and the WEIGHTS decide the slack. This is
-            // the step that keeps three columns from each being a third of the page.
+        if (sum(max) <= available) {
+            // Room to spare: everyone gets their content and the WEIGHTS decide the slack -- the
+            // step that keeps three columns from being a third of the page each.
             System.arraycopy(max, 0, width, 0, count);
-            share(width, available - totalMax, weights(columns));
+            claims = weights;
         }
-        else if (totalMin <= available) {
-            // The interesting case, and CSS's: mins first, then the shortfall shared in proportion
-            // to what each column still wants -- WEIGHTED, which is the one place this departs from
-            // the browser. CSS has no notion of a column mattering more than another, so it gives
-            // the account block and the value date the same claim per point wanted. Multiplying by
-            // the declared weight says which column should be the last to give way, and without it
-            // this document's account block loses 11pt to the columns around it, wraps to a sixth
-            // line and takes the whole listing onto another page. A caller who does not care leaves
-            // the weights equal and gets the browser's answer exactly.
+        else if (sum(min) <= available) {
             System.arraycopy(min, 0, width, 0, count);
-            int[] claims = new int[count];
-            int[] weights = weights(columns);
             for (int i = 0; i < count; i++) {
                 // A column already at its max wants nothing, whatever its weight.
                 claims[i] = (max[i] - min[i]) * weights[i];
             }
-            share(width, available - totalMin, claims);
         }
         else {
-            // Wider than the paper. Scale the mins so the overflow is spread rather than dumped on
-            // the last column, which is where the designer's rounding remainder would put it.
+            // Wider than the paper: scale the mins, and let the rounding fall to the widest column
+            // rather than to the last one.
             for (int i = 0; i < count; i++) {
-                width[i] = Math.max(1, (int) Math.floor((double) available * min[i] / totalMin));
+                width[i] = Math.max(1, (int) Math.floor((double) available * min[i] / sum(min)));
             }
-            settle(width, available);
         }
+        share(width, available - sum(width), claims);
 
         List<Measured> measured = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
@@ -234,40 +189,23 @@ public record ColumnFit(int available, List<Measured> measurements) {
     }
 
     /**
-     * Hands {@code surplus} out in proportion to {@code shares}, and puts the rounding remainder on
-     * the column with the largest share rather than on the last one — the last column is wherever
-     * the caller happened to put it, and a stray point there is the one place the eye lands.
+     * Hands {@code surplus} out in proportion to {@code claims}, then puts the rounding remainder on
+     * the largest claim — never on the last column, which is wherever the caller happened to put it
+     * and the one place a stray point is noticed. With no claims (the overflow case) the whole
+     * remainder goes to the widest column.
      */
-    private static void share(int[] width, int surplus, int[] shares) {
+    private static void share(int[] width, int surplus, int[] claims) {
         if (surplus <= 0) {
             return;
         }
-        int total = sum(shares);
-        if (total <= 0) {
-            // Nothing wants the space (every column already at its max and no weights to go by):
-            // spread it evenly rather than leave the table short of the right margin.
-            int each = surplus / width.length;
-            for (int i = 0; i < width.length; i++) {
-                width[i] += each;
-            }
-            width[widest(width)] += surplus - each * width.length;
-            return;
-        }
+        int total = sum(claims);
         int handed = 0;
-        for (int i = 0; i < width.length; i++) {
-            int give = (int) Math.floor((double) surplus * shares[i] / total);
+        for (int i = 0; total > 0 && i < width.length; i++) {
+            int give = (int) Math.floor((double) surplus * claims[i] / total);
             width[i] += give;
             handed += give;
         }
-        width[widest(shares)] += surplus - handed;
-    }
-
-    /** Corrects a rounded distribution so the widths sum to exactly {@code available}. */
-    private static void settle(int[] width, int available) {
-        int difference = available - sum(width);
-        if (difference != 0) {
-            width[widest(width)] += difference;
-        }
+        width[widest(total > 0 ? claims : width)] += surplus - handed;
     }
 
     private static int[] weights(List<TableColumn> columns) {
@@ -296,7 +234,8 @@ public record ColumnFit(int available, List<Measured> measurements) {
         return total;
     }
 
-    private static float padding(CellStyle style) {
+    /** A cell style's horizontal padding — width the content cannot use. */
+    private static float pad(CellStyle style) {
         return style.padding().left() + style.padding().right();
     }
 }
