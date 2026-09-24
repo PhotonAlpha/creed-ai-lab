@@ -191,3 +191,52 @@ sample
 页眉页脚直接复用对账单 chrome（`fragments/report-chrome-pdf.html` 的 `statement*` 片段），
 自己不定义任何 chrome。原件是 UOB 的文件，这里用的是项目自己的 CREED logo 和印章 ——
 交付的是版式，不是别家的标识。
+
+## 合并导出（`/export/pdf/merged`）
+
+把同一份文档渲染多次、合并成一个 PDF，**并把页脚的页码改成合并后的**：
+
+    GET|POST /report/approval-status/export/pdf/merged                 # 默认 2 份 → 4 页
+    GET|POST /report/approval-status/export/pdf/merged?copies=3        # 3 份 → 6 页
+    GET|POST /report/approval-status/export/pdf/merged?langs=en,th     # 英文 + 泰文各一份
+
+    curl -o merged.pdf 'http://localhost:48080/report/approval-status/export/pdf/merged?copies=2'
+    curl -o mixed.pdf  'http://localhost:48080/report/approval-status/export/pdf/merged?langs=en,th'
+
+`copies` 范围 2..10，越界是 **400**（`InvalidMergeRequestException`），不是静默截断 ——
+悄悄改成别的份数等于返回了一份没人要的文档。`langs` 给出就按语言逐份渲染并忽略 `copies`；
+不带 region 的标签按全模块同一套规则解析（`th` → 泰国版），所以 `langs=en,th` 真的是一份英文
+加一份泰文，而不是两份英文（GLOBAL 版只出 en/zh）。
+
+要点在页码而不在内容。两次渲染各自都是「1 of 2」「2 of 2」，直接拼起来就是一份四页、却数了两遍
+二的文件 —— 比没有页码更糟：读者既不能相信它，也看不出少了哪一页。`PdfMergeService` 因此做两件事：
+
+1. **合并**用 `PdfSmartCopy`，它会去重相同的嵌入资源。这里省得不少：每份渲染都嵌了同一套 Noto
+   字体，换成普通的 `PdfCopy` 会一份带一套。
+2. **改页码**：逐页找出那一页原本印的那串字（合并时知道每一部分有几页，所以知道第 3 页原来写的是
+   「1 of 2」），用背景色矩形盖掉，再用同样的字体、字号、颜色在同一条基线上重画。分隔符和字体都取自
+   模板渲染时用的那个 message bundle（`pdf.page.middle` / `pdf.font.family`），所以英文页脚是
+   「3 of 4」，泰文页脚是「3 จาก 4」，字形也对。
+
+### 混合语言合并
+
+每一部分的分隔符**各自记录**（`PdfMergeService.Part(bytes, separator)`）：英文那份印的是「1 of 2」，
+泰文那份印的是「1 จาก 2」，而定位靠的就是这串字 —— 只告诉它一种分隔符，另一半会找不到、打日志、
+**原样留着**（宁可不改也不瞎盖，一份一半准一半猜的文档比没改过更难信）。
+
+合并后的文档用**发起请求时那个语言**的页码：由英文和泰文各一半拼成的文件没有自己固有的语言，
+这是调用方的决定而不是查表能查出来的。所以 `?langs=en,th` 出来的四页全是「N of 4」，
+包括那两页泰文内容的页 —— 它们的正文、佛历日期和字体都还是泰文版的。
+
+**盖白底的宽度不能拿新字体去量旧字符串**：解析出的 end point 停在最后一个字形的原点而不是它的
+advance 之后（一串字体量得 20.9pt 的「1 of 2」解析出来只有 16.3pt），所以要补一个字形；而补多少
+只能用**数字的宽度**——页码永远以数字结尾，且这几个 Noto 字面的数字 advance 几乎一致。第一版拿
+Noto Sans（拉丁）去量「1 จาก 2」，泰文字形量出来是 0，白底盖窄了，泰文那个「2」就露在新的「4」旁边。
+
+**已知代价，一并说清楚**：旧页码是被**盖住**的，不是被删除的。页面上看不到它，但它仍在文本层里
+—— 复制粘贴、文本提取、读屏软件都会同时看到两串。要彻底去掉得改写页面的内容流；或者换一条路：
+两份都由本模块自己渲染时，把两段 XHTML 拼成一个文档只渲染一次，页码由 Flying Saucer 自己算，
+一个 PDF 都不用改。这个接口走的是通用的那条路（任何来源的 `byte[]` 都能合），所以留着这个代价。
+
+`PdfMergeServiceTest` 钉住的就是这些：四页各自的页码、泰文 locale 的分隔符和字体、页脚与印章
+在盖章后完好、单份合并不改动任何东西，以及上面那条「旧串还在文本层」的事实。

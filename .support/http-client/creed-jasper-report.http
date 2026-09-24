@@ -12,3 +12,11 @@ http://localhost:9110/jasper-report/approval-status/export/pdf?columns=status,am
 
 ###
 http://localhost:9110/jasper-report/approval-status/export/pdf
+
+
+
+###
+http://localhost:48080/report/approval-status/export/pdf
+
+### merge
+http://localhost:48080/report/approval-status/export/pdf/merged

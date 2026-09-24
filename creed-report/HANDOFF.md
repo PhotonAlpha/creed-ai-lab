@@ -44,6 +44,8 @@ The fixed-layout listing needs no parameters at all:
 
 ```bash
 curl -o tmp/approval.pdf 'http://localhost:9100/report/approval-status/export/pdf'
+curl -o tmp/merged.pdf   'http://localhost:9100/report/approval-status/export/pdf/merged?copies=2'
+curl -o tmp/mixed.pdf    'http://localhost:9100/report/approval-status/export/pdf/merged?langs=en,th'
 ```
 
 **In the browser, with devtools**: swap `/dynamic/export/pdf` for **`/dynamic/preview/pdf`**
@@ -198,6 +200,36 @@ every page, half-empty ones included, and carries its own centred page counter. 
   and the repeated chrome is observable), parsed into `model/ApprovalStatusReport`. It exists to pin
   the layout down; a report over real data reuses `approval-status-export-pdf.html` with a model
   built elsewhere. Wears the statement chrome whole, so it defines none of its own.
+- **Merged export** (`/approval-status/export/pdf/merged?copies=2..10`, `service/PdfMergeService`) —
+  the same document rendered N times and bound into one file, **with the footer's page counter
+  corrected for the document it has become**. Two renders both say "1 of 2" and "2 of 2", so a naive
+  concatenation counts to two twice, which is worse than carrying no counter at all: the reader can
+  neither trust it nor tell which page is missing. The merge is `PdfSmartCopy` (it de-duplicates the
+  identical embedded Noto faces — a plain `PdfCopy` carries one set per part); the correction finds
+  each page's old counter by the string it must have printed (the merge knows how many pages each
+  part had), paints it out and redraws it. The separator and the face come from the same bundle keys
+  the template printed from (`pdf.page.middle`, `pdf.font.family`), so Thai reads "3 จาก 4" in the
+  Thai face. `copies` outside the range is `InvalidMergeRequestException` → **400**, never a
+  silently clamped document.
+  **Mixed languages** (`?langs=en,th`) go through `mergeParts`, where every `Part` carries the
+  separator *it* printed: the correction finds the old counter by that exact string, so a merge told
+  only about " of " finds nothing on the Thai pages, warns, and leaves them counting for their part.
+  The merged file counts in the **request's** language — a document made of an English half and a
+  Thai half has no third one of its own, so that is a decision rather than a lookup.
+  **Two things worth knowing before extending it.** (1) The old counter is *covered*, not deleted:
+  it is gone from the page and still in the text layer, so an extractor or a copy-paste sees both
+  strings — removing it means rewriting the page's content stream, and rendering the parts without
+  a counter in the first place (or concatenating the XHTML and rendering once) would avoid it
+  entirely. This route was taken because it merges any `byte[]`, not only our own renders.
+  (2) The stamping font is **ours**, read from the TTF by `PdfExportService.stampingFont`, not the
+  one embedded in the page: Flying Saucer embeds a *subset* carrying only the glyphs that were
+  drawn, so a two-page part has no "3" to renumber with.
+  (3) The cover's width cannot be measured by asking the stamping font for the width of the *old*
+  string — in a mixed-language merge that string was drawn in another face, and Noto Sans answers
+  for "1 จาก 2" with the Thai glyphs missing, which left a Thai "2" showing beside the new "4". It
+  is the parsed extent plus **one digit's advance** instead: the parser stops at the last glyph's
+  origin, and a page counter always ends in a digit. `PdfMergeServiceTest` and
+  `ApprovalStatusMergedPdfTest` pin all of it, the text-layer leftover included.
   `ApprovalStatusPdfTest` renders the endpoint's own payload and asserts, per page, the footnote,
   the `N of M` counter and two images (logo + seal), plus the page-one body, the criteria block's
   two per-locale faces, and that every country × language still paginates. The document is

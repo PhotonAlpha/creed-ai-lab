@@ -269,6 +269,63 @@ public class PdfExportService {
         return null;
     }
 
+    /**
+     * A {@link BaseFont} for the first family in a CSS font stack — for code that draws on a
+     * finished PDF instead of laying one out, i.e. {@link PdfMergeService}'s page counter.
+     *
+     * <p>Takes the stack the templates already use ({@code pdf.font.family}, e.g.
+     * {@code 'Noto Sans Thai', 'Noto Sans', Helvetica, sans-serif}) rather than a second piece of
+     * configuration, so a stamped counter is drawn in the same face the page around it was: the
+     * leading quoted family is de-spaced and matched against the registered file names
+     * ({@code Noto Sans Thai} → {@code NotoSansThai-Regular.ttf}).
+     *
+     * <p><b>Registered here, not lifted off the page.</b> Flying Saucer embeds a <i>subset</i> —
+     * only the glyphs the document drew — so a font taken from a two-page PDF has no "3" to
+     * renumber with. This reads the TTF itself, which has every digit.
+     *
+     * <p>Falls back to Helvetica when no file matches, like every other font failure here: the
+     * counter then renders in the built-in face rather than not at all. Latin only, which is fine
+     * for digits and wrong for a Thai or CJK separator — a missing font file is already a warning
+     * at startup, and this is the same degradation.
+     */
+    public BaseFont stampingFont(String cssFontStack) {
+        String wanted = leadingFamily(cssFontStack);
+        if (wanted != null) {
+            String needle = wanted.replace(" ", "").toLowerCase(Locale.ROOT);
+            for (String file : fontFiles()) {
+                String name = file.substring(file.lastIndexOf('/') + 1).toLowerCase(Locale.ROOT);
+                // Regular, not Bold: the counter is not bold, and both faces match the family.
+                if (name.startsWith(needle + "-regular")) {
+                    try {
+                        return BaseFont.createFont(file, BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
+                    }
+                    catch (Exception ex) {
+                        log.warn("Stamping font '{}' could not be loaded: {}", file, ex.toString());
+                    }
+                }
+            }
+            log.warn("No registered font file matches family '{}'; stamping in Helvetica", wanted);
+        }
+        try {
+            return BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED);
+        }
+        catch (Exception ex) {
+            throw new IllegalStateException("The built-in Helvetica could not be loaded", ex);
+        }
+    }
+
+    /** {@code 'Noto Sans Thai', 'Noto Sans', sans-serif} → {@code Noto Sans Thai}. */
+    private static String leadingFamily(String cssFontStack) {
+        if (cssFontStack == null || cssFontStack.isBlank()) {
+            return null;
+        }
+        String first = cssFontStack.split(",")[0].trim();
+        if (first.length() > 1 && (first.startsWith("'") || first.startsWith("\""))) {
+            first = first.substring(1, first.length() - 1).trim();
+        }
+        return first.isEmpty() ? null : first;
+    }
+
     private void registerFonts(ITextFontResolver fontResolver) {
         for (String file : fontFiles()) {
             try {

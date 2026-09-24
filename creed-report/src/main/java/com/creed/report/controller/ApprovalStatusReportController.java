@@ -5,19 +5,27 @@ import com.creed.report.i18n.CountryFormatter;
 import com.creed.report.i18n.CountryProfile;
 import com.creed.report.i18n.CountryStyles;
 import com.creed.report.model.ApprovalStatusReport;
+import com.creed.report.service.InvalidMergeRequestException;
 import com.creed.report.service.PdfExportService;
+import com.creed.report.service.PdfMergeService;
+import com.lowagie.text.pdf.BaseFont;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.context.MessageSource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -125,17 +133,27 @@ public class ApprovalStatusReportController {
             }
             """;
 
+    /** How many copies {@code /export/pdf/merged} will bind together. */
+    private static final int MIN_COPIES = 2;
+    private static final int MAX_COPIES = 10;
+
     private final ObjectMapper objectMapper;
     private final PdfExportService pdfExportService;
+    private final PdfMergeService pdfMergeService;
+    private final MessageSource messageSource;
     private final CountryCatalog countryCatalog;
     private final CountryStyles countryStyles;
 
     public ApprovalStatusReportController(ObjectMapper objectMapper,
                                           PdfExportService pdfExportService,
+                                          PdfMergeService pdfMergeService,
+                                          MessageSource messageSource,
                                           CountryCatalog countryCatalog,
                                           CountryStyles countryStyles) {
         this.objectMapper = objectMapper;
         this.pdfExportService = pdfExportService;
+        this.pdfMergeService = pdfMergeService;
+        this.messageSource = messageSource;
         this.countryStyles = countryStyles;
         this.countryCatalog = countryCatalog;
     }
@@ -165,6 +183,62 @@ public class ApprovalStatusReportController {
      * {@link PdfExportService#renderTemplate} stopped before the renderer, so what the browser
      * shows and what Flying Saucer laid out cannot drift.
      */
+    /**
+     * The same listing <b>twice over in one file</b>, with the footer's page counter corrected to
+     * run across the whole document.
+     *
+     * <p>What it demonstrates is the correction, not the payload: two renders of a two-page
+     * statement both say "1 of 2" and "2 of 2", so a naive concatenation is a four-page document
+     * that counts to two twice. {@link PdfMergeService} finds each page's old counter, paints it
+     * out and redraws it, so the merged file reads 1, 2, 3, 4 of 4.
+     *
+     * <p>Both halves are rendered exactly as {@code /approval-status/export/pdf} renders its one —
+     * same template, same model, same locale — because a merge whose parts are built differently
+     * from the real export proves nothing about the real export.
+     *
+     * @param copies how many to bind together, 2..10. Out of range is a <b>400</b>, like every
+     *               other bad input here: a silently clamped count answers a document nobody asked
+     *               for
+     */
+    @RequestMapping(value = "/approval-status/export/pdf/merged",
+            method = { RequestMethod.GET, RequestMethod.POST },
+            produces = MediaType.APPLICATION_PDF_VALUE)
+    public ResponseEntity<byte[]> exportMergedPdf(Locale locale,
+                                                  @RequestParam(defaultValue = "2") int copies,
+                                                  @RequestParam(required = false) List<String> langs) {
+        LocalDateTime now = LocalDateTime.now();
+        List<Locale> languages = languagesFor(locale, copies, langs);
+
+        // Each part carries the separator IT printed, because that is the string the correction
+        // looks for on its pages -- an English part says "1 of 2" and a Thai one "1 จาก 2", and a
+        // merge that assumed one of them would silently leave the other half counting for itself.
+        List<PdfMergeService.Part> parts = new ArrayList<>(languages.size());
+        for (Locale language : languages) {
+            CountryProfile profile = countryCatalog.profile(
+                    countryCatalog.resolve(null, null, language), language);
+            byte[] part = pdfExportService.renderTemplate(PDF_TEMPLATE,
+                    model(profile, profile.locale(), now), profile.locale());
+            parts.add(new PdfMergeService.Part(part,
+                    messageSource.getMessage("pdf.page.middle", null, profile.locale())));
+        }
+
+        // The MERGED document reads in the request's own language. A file assembled from an English
+        // half and a Thai half has no intrinsic one, so this is a decision rather than a lookup:
+        // the caller asked in a language, and the counter answers in it.
+        String separator = messageSource.getMessage("pdf.page.middle", null, locale);
+        BaseFont font = pdfExportService.stampingFont(
+                messageSource.getMessage("pdf.font.family", null, locale));
+        byte[] body = pdfMergeService.mergeParts(parts,
+                PdfMergeService.PageNumbering.statement(separator, font));
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_PDF);
+        headers.setContentDispositionFormData("attachment",
+                "creed-approval-status-merged-" + now.format(ReportController.FILE_TS) + ".pdf");
+        headers.setContentLength(body.length);
+        return ResponseEntity.ok().headers(headers).body(body);
+    }
+
     @RequestMapping(value = "/approval-status/preview/pdf",
             method = { RequestMethod.GET, RequestMethod.POST },
             produces = MediaType.TEXT_HTML_VALUE)
@@ -187,6 +261,39 @@ public class ApprovalStatusReportController {
      * this script's captions go bold) and the message bundle the faces come from then cannot
      * resolve to different languages.
      */
+    /**
+     * Which language each part is rendered in: the {@code langs} list if one was given, otherwise
+     * {@code copies} copies of the request's own.
+     *
+     * <p>A tag with no region is resolved the way the rest of the module resolves one — to the
+     * country whose default language it is, so {@code langs=en,th} really does produce an English
+     * part and a <b>Thai</b> one rather than two English ones (the GLOBAL edition renders en/zh
+     * only).
+     */
+    private List<Locale> languagesFor(Locale locale, int copies, List<String> langs) {
+        if (langs == null || langs.isEmpty()) {
+            if (copies < MIN_COPIES || copies > MAX_COPIES) {
+                // 400, like every other bad input here -- a bare IllegalArgumentException is a 500.
+                throw new InvalidMergeRequestException("copies must be between " + MIN_COPIES
+                        + " and " + MAX_COPIES + ", not " + copies);
+            }
+            return Collections.nCopies(copies, locale);
+        }
+        if (langs.size() < MIN_COPIES || langs.size() > MAX_COPIES) {
+            throw new InvalidMergeRequestException("langs must name between " + MIN_COPIES + " and "
+                    + MAX_COPIES + " languages, not " + langs.size());
+        }
+        List<Locale> languages = new ArrayList<>(langs.size());
+        for (String tag : langs) {
+            Locale language = Locale.forLanguageTag(tag.trim());
+            if (language.getLanguage().isEmpty()) {
+                throw new InvalidMergeRequestException("'" + tag + "' is not a language tag");
+            }
+            languages.add(language);
+        }
+        return languages;
+    }
+
     private Map<String, Object> model(CountryProfile profile, Locale locale, LocalDateTime now) {
         Map<String, Object> variables = new HashMap<>();
         variables.put("profile", profile);
@@ -200,10 +307,11 @@ public class ApprovalStatusReportController {
     }
 
     /**
-     * The hard-coded sample, parsed. Package-private so the layout test renders <b>this</b> payload
-     * rather than a copy of it that could drift from what the endpoint actually serves.
+     * The hard-coded sample, parsed. Public so every test that needs this document renders
+     * <b>this</b> payload rather than a copy of it that could drift from what the endpoint actually
+     * serves — the layout test in this package, and the merge test in {@code ..service}.
      */
-    static ApprovalStatusReport sampleReport(ObjectMapper objectMapper) {
+    public static ApprovalStatusReport sampleReport(ObjectMapper objectMapper) {
         try {
             return objectMapper.readValue(SAMPLE_JSON, ApprovalStatusReport.class);
         }

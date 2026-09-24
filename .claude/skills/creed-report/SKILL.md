@@ -98,6 +98,37 @@ Standalone **Spring MVC + Thymeleaf** reporting/visualization app. Plain HTTP `9
   module is also where the *Jasper* answers to this template's two locale mechanisms live: a
   locale-resolved font family in place of `pdf.font.family.criteria*`, and `<conditionalStyle>` in
   place of the locale CSS overlay.
+- **Merged PDF export** — `/approval-status/export/pdf/merged?copies=2..10` +
+  `service/PdfMergeService`: N renders of the same document bound into one file with the footer's
+  page counter **corrected for the merged document**. `PdfSmartCopy` concatenates (de-duplicating
+  the identical embedded Noto faces — plain `PdfCopy` carries one set per part), then each page's
+  old counter is located *by the string it must have printed* (the merge knows each part's page
+  count, so page 3 of four "was" `1 of 2`), covered with a background-coloured rectangle and redrawn
+  on the same baseline. Separator and face come from the bundle keys the template printed
+  (`pdf.page.middle`, `pdf.font.family`), so Thai reads `3 จาก 4` in the Thai face; `copies` out of
+  range is `InvalidMergeRequestException` → 400, never a clamped document.
+  **Three landmines it is built around.** (1) The stamping font must be **read from the TTF**
+  (`PdfExportService.stampingFont`), never lifted off the page: Flying Saucer embeds a *subset* with
+  only the glyphs that were drawn, so a two-page part has no `3` to renumber with. (2)
+  `ParsedText.getText()` **throws** on those subsets — `UnsupportedEncodingException: IDENTITY_H2`,
+  because it decodes the raw `PdfString` by the font's declared encoding name — so the text and its
+  position have to come from `getAsPartialWords()`, the path the engine's own assembler takes.
+  (3) The parser's *end* point stops at the last glyph's origin (16.3pt for a string the font
+  measures at 20.9), so the cover is the parsed extent **plus one digit's advance** — a counter
+  always ends in a digit, and that is the only correction that survives a mixed-language merge.
+  Measuring the *old* string with the stamping font looks right and is not: in `?langs=en,th` the
+  Thai half was drawn in another face, Noto Sans answers for `1 จาก 2` with the Thai glyphs missing,
+  and the cover came out short enough to leave that half's `2` sitting beside the new `4`.
+  **Mixed languages**: `mergeParts(List<Part>, PageNumbering)`, where each `Part` carries the
+  separator *it* printed — the old counter is found by that exact string, so one separator for a
+  mixed merge silently leaves half the document counting for its part (it warns and leaves the page
+  alone rather than stamping a guess). The merged file counts in the **request's** language; a
+  document made of two languages has no third one of its own, so the caller decides.
+  **Known cost**: the old counter is covered, not deleted — invisible on the page, still in the text
+  layer, so an extractor or copy-paste sees both strings. Concatenating the two XHTMLs and rendering
+  once avoids it entirely (Flying Saucer counts the pages itself) but only works for documents this
+  module renders; this route merges any `byte[]`. `PdfMergeServiceTest` /
+  `ApprovalStatusMergedPdfTest` pin all of it, the leftover included.
 - **Environment Inspector** — `controller/EnvironmentInspectionController` (REST: `GET /api/environment`, `/api/environment/rendered`) + `controller/EnvironmentViewController` (Thymeleaf: `GET /environment`, `/environment/rendered`), backed by `service/EnvironmentInspectionService`. Models `EnvironmentSnapshot`, `PropertySourceView`, `PropertyEntry`, `RenderedEnvironment`. **For anything in this feature, use the [[env-inspector]] skill** — it has the full requirements/design (replays Spring Boot's config-loading pipeline standalone, renders effective properties to YAML/.properties).
 
 ### Previewing a PDF template
