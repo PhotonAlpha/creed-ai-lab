@@ -28,7 +28,8 @@ scrape_configs:
   # runs in Docker, so reach the host app via host.docker.internal.
   - job_name: creed-simple-metrics
     scheme: https
-    metrics_path: /actuator/prometheus
+    # server.servlet.context-path=/simple moves the actuator under it.
+    metrics_path: /simple/actuator/prometheus
     tls_config:
       insecure_skip_verify: true
     static_configs:

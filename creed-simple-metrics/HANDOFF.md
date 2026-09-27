@@ -9,10 +9,11 @@ servers.
 
 ```bash
 mvn -pl creed-simple-metrics spring-boot:run -Dspring-boot.run.workingDirectory="$PWD"
-curl -k https://localhost:8096/camel/api/...
+curl -k https://localhost:8096/simple/camel/api/...          # direct
+curl -k https://localhost:9443/simple/camel/api/...          # via the httpd balancer (.support/httpd)
 ```
 
-HTTPS `8096`, Camel REST under `/camel/*`. Needs the downstream resource servers up to aggregate.
+HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Requests: `.support/http-client/creed-simple-metrics.http` (through httpd by default). Needs the downstream resource servers up to aggregate.
 
 ## Current state
 
@@ -33,10 +34,29 @@ HTTPS `8096`, Camel REST under `/camel/*`. Needs the downstream resource servers
   `ModClusterListenerStatusReporter` adds the one thing it does not report — a startup banner saying
   whether each proxy actually holds this node (MCMP `INFO` → look for `Name: <JVMRoute>`), with
   optional `fail-fast`. Design + httpd config + gotchas: `docs/mod-cluster-registration.md`.
+- **Context path `/simple`** (2026-09-27): `server.servlet.context-path`, so mod_cluster registers
+  `/simple` and httpd forwards `/simple/*`. Verified end to end on a second instance (8097):
+  hello/time/echo/admin/actuator all 200 via `https://localhost:9443/simple/...`.
+  `CamelRestObservationConvention` now tags with the path **within** the context, so metric `uri` tags
+  stay `/camel/api/...`; Prometheus scrapes `/simple/actuator/prometheus`.
+- **HTTPS registration against a real httpd** (`.support/httpd`, 2026-09-26): Apache 2.4.68 +
+  mod_proxy_cluster built from source in Docker; MCMP on 6666 over **mutual TLS**, traffic on 9443.
+  `manager-scheme` now defaults to `https` and `creed.mod-cluster.ssl.*` supplies the client identity
+  (`creed-gateway-partner-CLI`) + truststore. Verified end to end: node `Status: OK`, context `/`
+  ENABLED, `https://localhost:9443/...` → 200 via `https://192.168.65.254:8096`, automatic
+  re-registration after an httpd restart. Re-verified with `spring-boot:run` once the module compiled
+  again (2026-09-27, context path `/simple`).
 - Metrics are **pull-mode**: this module exposes `/actuator/prometheus` itself and Prometheus scrapes
   it directly, unlike every other module (which pushes via OTLP).
 
 ## Landmines
+
+- **mod_cluster over HTTPS** (details: `.support/httpd/README.md`):
+  `node.host` is resolved **on the node** — `host.docker.internal` fails on a Mac and the library then
+  NPEs on every `CONFIG` (proxy answers INFO/STATUS, never holds the node); use `192.168.65.254`.
+  `ssl=true` always loads a keystore (default `~/.keystore`), relative paths resolve against
+  `catalina.base` — both handled in `ModClusterListenerConfiguration`. On the httpd side
+  `SSLProxyEngine` must be server-level, not in a VirtualHost, or every request is a 503.
 
 - **`restConfiguration inlineRoutes="false"` is required.** The default `true` merges each REST
   route's `<to uri="direct:x"/>` into the same-named `direct:x` route and eats any other consumer —
@@ -67,17 +87,22 @@ HTTPS `8096`, Camel REST under `/camel/*`. Needs the downstream resource servers
 - **mod_cluster: `setProxyList(String)` resolves DNS at bean-creation time and throws** — from a
   `@Bean` method that is a failed context, contradicting `fail-fast: false`. The proxies are parsed into
   `InetSocketAddress`es by hand, unresolvable ones logged and skipped.
-- **mod_cluster registers Tomcat's ROOT context, not `/camel`** (`/camel/*` is only the Camel servlet
-  mapping) — httpd-side routing must be configured for `/`. And registration success is not visible in
+- **mod_cluster registers the Tomcat context, i.e. `server.servlet.context-path` — `/simple` since
+  2026-09-27** (before that it was ROOT `/`; `/camel/*` is only the Camel servlet mapping and never
+  registers). httpd routes on it: `/simple/*` reaches the node, anything else is a 404 from httpd — or
+  a 503 while a stale node registered with `/` is still in the table. And registration success is not visible in
   the library's own logs: the banner's verdict comes from an MCMP `INFO` per proxy.
 - **Prometheus must scrape this module directly** with its own job: `scheme: https`,
   `tls_config.insecure_skip_verify: true`, target `host.docker.internal:8096`, path
-  `/actuator/prometheus` (**not** under the `/camel/*` context-path). After editing
+  `/simple/actuator/prometheus` (under the Tomcat context path, not under the `/camel/*` servlet mapping). After editing
   `monitoring/prometheus.yml` you must **restart** Prometheus — the container has no
   `--web.enable-lifecycle`, so `/-/reload` is unavailable.
 
 ## Open items
 
+- **`rest/RestConfig.java` is staged for deletion** (it imported the never-committed
+  `com.creed.simple.pipeline.*`). With it gone the module compiles again (2026-09-27); `creed.camel.enabled=false`
+  (the Spring MVC variant of `/camel/api/*`) presumably has nothing behind it now — not checked.
 - Route-level Prometheus timers are gone with `camel-observation-starter` — an accepted, documented
   tradeoff, not a bug, but still an observability gap if anyone wants per-route latency.
 - `RestClientSuppliersTest.connectionManagerWithBundleInstallsBundleTlsMaterial` and

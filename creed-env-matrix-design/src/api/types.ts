@@ -252,3 +252,63 @@ export interface BatchSaveResponse {
 export type EndpointFilter = Partial<Record<DimensionKey, string[]>> & {
   keyword?: string;
 };
+
+/* ---- Splunk session broker (/splunk/*) ------------------------------------------------------- */
+
+export interface TotpInfo {
+  /** false ⇒ no secret on the server; every submission answers 503. */
+  configured: boolean;
+  periodSeconds: number;
+  digits: number;
+  allowedDriftSteps: number;
+  /** The server's clock when answered — the countdown follows the verifier, not the browser. */
+  serverTimeMillis: number;
+  /** Whether `GET /splunk/totp/current` serves the code. */
+  codeVisible: boolean;
+  splunkMode: 'real' | 'mock';
+  splunkConfigured: boolean;
+  loginUrl: string | null;
+  scriptCookieName: string;
+}
+
+export interface TotpCode {
+  code: string;
+  step: number;
+  secondsRemaining: number;
+  periodSeconds: number;
+  serverTimeMillis: number;
+}
+
+export interface SplunkSession {
+  /** The cookie read from Splunk's login response (`splunkd_8000`). */
+  sourceCookie: string;
+  /** The cookie the script sets (`splunkd_8089`). */
+  cookieName: string;
+  cookieValue: string;
+  script: string;
+  mode: 'real' | 'mock';
+  correlationId: string;
+  cookieFingerprint: string;
+  issuedAt: string;
+}
+
+export type SplunkAuditEventType = 'OTP_VERIFY' | 'SPLUNK_LOGIN';
+
+export interface SplunkAuditRow {
+  id: number;
+  correlationId: string;
+  eventType: SplunkAuditEventType;
+  outcome: 'SUCCESS' | 'FAILURE';
+  reason: string | null;
+  detail: string | null;
+  clientIp: string | null;
+  forwardedFor: string | null;
+  userAgent: string | null;
+  serverStep: number | null;
+  matchedStep: number | null;
+  splunkMode: string | null;
+  httpStatus: number | null;
+  cookieFingerprint: string | null;
+  durationMs: number | null;
+  createdAt: string;
+}

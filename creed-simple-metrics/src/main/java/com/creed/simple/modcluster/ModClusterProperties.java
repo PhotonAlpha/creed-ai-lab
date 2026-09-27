@@ -17,7 +17,7 @@ import java.util.List;
  *
  * <ul>
  *   <li><strong>contexts</strong> — mod_cluster registers what Tomcat actually has deployed (here: the
- *       ROOT context, not the {@code /camel} servlet mapping). Use {@link #excludedContexts()} to keep
+ *       {@code server.servlet.context-path}, {@code /simple} — never the {@code /camel} servlet mapping). Use {@link #excludedContexts()} to keep
  *       one out;</li>
  *   <li><strong>the sticky-session cookie/path</strong> — read off Tomcat's own session-cookie
  *       configuration; {@link #balancer()} only carries the policy flags.</li>
@@ -48,6 +48,8 @@ import java.util.List;
  *                             {@code ALWAYS} or {@code NEVER}
  * @param startupTimeout       how long the startup banner waits for the proxies to report holding this
  *                             node before printing what it has
+ * @param ssl                  key/trust material for MCMP over TLS — only read when
+ *                             {@code managerScheme} is {@code https}
  */
 @ConfigurationProperties("creed.mod-cluster")
 public record ModClusterProperties(
@@ -65,7 +67,8 @@ public record ModClusterProperties(
         @DefaultValue("DEFAULT") String sessionDrainingStrategy,
         @DefaultValue("10s") Duration startupTimeout,
         @DefaultValue Node node,
-        @DefaultValue Balancer balancer) {
+        @DefaultValue Balancer balancer,
+        @DefaultValue Ssl ssl) {
 
     public ModClusterProperties {
         // Normalise in the canonical constructor rather than with @DefaultValue: an empty @DefaultValue
@@ -138,5 +141,42 @@ public record ModClusterProperties(
             @DefaultValue("true") boolean stickySessionForce,
             @DefaultValue("0") int waitWorker,
             @DefaultValue("1") int maxAttempts) {
+    }
+
+    /**
+     * TLS for the MCMP channel itself ({@code managerScheme: https}) — node → proxy, not the traffic
+     * the proxy later sends to the node (that is decided by the Tomcat connector, reported as
+     * {@code Type=https}).
+     *
+     * <p>mod_cluster's {@code JSSESocketFactory} <strong>always</strong> loads a keystore once TLS is
+     * on, defaulting to {@code ~/.keystore}; a missing file fails the listener's init with an
+     * {@code IllegalStateException}. So both stores are set explicitly, and a relative path is
+     * resolved against the working directory here — the library would resolve it against
+     * {@code catalina.base}, which for embedded Tomcat is a temp directory.
+     *
+     * @param keyStore           client identity presented to the proxy (httpd's
+     *                           {@code SSLVerifyClient require}); a PKCS12 with one key entry
+     * @param keyStorePassword   its password (also the key-entry password, as for every Creed store)
+     * @param keyStoreType       {@code PKCS12} for the Creed PKI; the library's own default is JKS
+     * @param keyAlias           the entry to present; blank = the store's only key
+     * @param trustStore         CAs that may sign the proxy's certificate
+     * @param trustStorePassword its password
+     * @param protocol           {@code SSLContext} protocol, {@code TLS} = the JDK's negotiated best
+     */
+    public record Ssl(
+            @DefaultValue("") String keyStore,
+            @DefaultValue("changeit") String keyStorePassword,
+            @DefaultValue("PKCS12") String keyStoreType,
+            @DefaultValue("") String keyAlias,
+            @DefaultValue("") String trustStore,
+            @DefaultValue("changeit") String trustStorePassword,
+            @DefaultValue("TLS") String protocol) {
+
+        /** Passwords stay out of logs and exception messages. */
+        @Override
+        public String toString() {
+            return "Ssl[keyStore=" + keyStore + ", keyStoreType=" + keyStoreType + ", keyAlias=" + keyAlias
+                    + ", trustStore=" + trustStore + ", protocol=" + protocol + "]";
+        }
     }
 }

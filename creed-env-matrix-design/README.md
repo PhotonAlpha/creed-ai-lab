@@ -333,6 +333,38 @@ the layering somebody arranged. A participant added but not yet saved is still s
 the editor sends it as a `ref` that the save resolves to the new row's id. Declaring both `A → B`
 and `B → A` is rejected; that is what `BIDIRECTIONAL` is for.
 
+### Splunk session (`/splunk`)
+
+A credential broker: the Splunk account lives in the backend's `application.yml`
+(`env-matrix.splunk.*`), and a user gets a working Splunk Web session without ever seeing the
+password.
+
+1. **One-time code.** Standard TOTP (RFC 6238, HMAC-SHA1, 6 digits, 30-second step, one step of
+   drift accepted either side). The left card counts down on the **server's** clock and, because
+   `env-matrix.totp.expose-current-code` is on, shows the current code on rotation — anyone who can
+   open this page can therefore pass the check. Turn it off to make the code come from an
+   authenticator app enrolled with `env-matrix.totp.secret` instead. A code is accepted **once**;
+   five wrong codes from one address within a minute answer `429` for a minute.
+2. **Splunk login.** Checked **before** the code: if Splunk is not configured the answer is `503`
+   and the code is not used up. Once the code is accepted the backend — through Spring's
+   `RestClient` — `GET`s the login page for its `cval` cookie, then `POST`s `username=…&password=…&cval=…` as a form to `env-matrix.splunk.login-url`
+   **without following redirects** (the cookie is on the 303), and reads `splunkd_8000` from
+   `Set-Cookie`.
+3. **Script.** The value comes back as a script to paste into the Splunk tab's devtools console:
+   `document.cookie = "splunkd_8089=<value>; path=/; Secure; SameSite=Lax";` The name read and the
+   name written are separate settings (`session-cookie` / `script-cookie-name`).
+4. **Audit.** Every code check and every Splunk call is a row in `splunk_audit` — outcome, reason,
+   client address, `X-Forwarded-For`, user agent, time steps, Splunk status, duration. The two rows
+   of one request share a correlation id. The cookie is **never** stored — only the first 16 hex
+   characters of its SHA-256, enough to match a session in Splunk's own logs.
+
+**The real call is behind a switch.** `env-matrix.splunk.enabled` (`SPLUNK_ENABLED`) defaults to
+`false`: the client returns a fabricated `mock-…` value and sends nothing. Set it to `true` to log in
+to `login-url` for real. The node mock always fabricates. The page labels a mock value as such.
+
+A code is spent the moment it is verified, so after a replay or a Splunk failure the page clears the
+input and says to wait for the next code.
+
 ---
 
 ## 6. API
@@ -361,6 +393,10 @@ Base path `/api/env-matrix`. Filters are repeated query parameters —
 | `GET` | `/conflicts` | Conflict groups only |
 | `GET` | `/health` | Per-endpoint states + summary + probe mode |
 | `POST` | `/health/recheck` | Re-run the probe (rotates the mock seed) |
+| `GET` | `/splunk/totp` | TOTP period/digits/drift + server time, Splunk mode |
+| `GET` | `/splunk/totp/current` | Current code (only with `expose-current-code`; else `404`) |
+| `POST` | `/splunk/session` | `{code}` → cookie script; `401` bad/replayed code, `429` locked out, `502` Splunk failed, `503` not configured |
+| `GET` | `/splunk/audit` | Audit rows, newest first (`?limit=`, default 50) |
 
 Errors use one envelope: `{error, message, fields?, time}`.
 

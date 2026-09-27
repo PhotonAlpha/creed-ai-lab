@@ -1,5 +1,11 @@
 server:
   port: 8096
+  servlet:
+    # The Tomcat context this node is — and therefore the context mod_cluster registers with the httpd
+    # balancer (ENABLE-APP Context=/simple), so httpd forwards only /simple/* here. Everything moves
+    # under it: /simple/camel/api/*, /simple/admin/*, /simple/actuator/* (monitoring/prometheus.yml
+    # scrapes /simple/actuator/prometheus).
+    context-path: ${CREED_SIMPLE_CONTEXT_PATH:/simple}
   tomcat:
     mbeanregistry:
       enabled: true
@@ -66,7 +72,8 @@ camel:
     routes-collector-enabled: false
   servlet:
     mapping:
-      # CamelHttpTransportServlet mount point; APIs live under https://host:8096/camel/api/*
+      # CamelHttpTransportServlet mount point, relative to server.servlet.context-path above; APIs live
+      # under https://host:8096/simple/camel/api/*
       context-path: /camel/*
       # SAME switch as creed.camel.enabled below, and it must stay that way: this servlet is mapped at
       # /camel/* whenever camel-servlet is on the classpath, and a servlet mapping beats the "/"
@@ -185,8 +192,9 @@ creed:
   #
   # The httpd side must expose an MCMP-receiving VirtualHost (the node always posts MCMP to its "/",
   # NOT to the human-readable /mod_cluster_manager status page):
+  # (a ready-made one: .support/httpd — MCMP over mutual TLS on 6666, traffic on 9443)
   #   <VirtualHost *:6666>
-  #     EnableMCPMReceive
+  #     EnableMCMPReceive
   #     ManagerBalancerName mycluster
   #     <Location /mod_cluster_manager> SetHandler mod_cluster-manager  Require ip 127.0.0.1 </Location>
   #   </VirtualHost>
@@ -197,8 +205,9 @@ creed:
     # Comma-separated MCMP listeners (host:port; a scheme is accepted but ignored — see manager-scheme).
     # An entry whose host cannot be resolved is logged and skipped, not fatal.
     proxies: "${CREED_MODCLUSTER_PROXIES:127.0.0.1:6666}"
-    # https here turns on mod_cluster's "SSL to the proxy" mode (an MCMP VirtualHost is usually plain).
-    manager-scheme: ${CREED_MODCLUSTER_SCHEME:http}
+    # https = MCMP over TLS (mod_cluster's "SSL to the proxy" mode), with the client identity below. The
+    # bundled httpd (.support/httpd) only listens for MCMP over mutual TLS, hence the default.
+    manager-scheme: ${CREED_MODCLUSTER_SCHEME:https}
     socket-timeout: ${CREED_MODCLUSTER_SOCKET_TIMEOUT:10s}
     # STATUS heartbeat. Mapped onto the Tomcat Engine's backgroundProcessorDelay; the real period is that
     # delay × the org.jboss.modcluster.container.catalina.status-frequency system property (default 1).
@@ -214,7 +223,7 @@ creed:
     # INITIAL load; from the first STATUS on, the metric drives it.
     load-metric-class: ${CREED_MODCLUSTER_LOAD_METRIC:}
     # host:/path,... never registered with the proxy. Contexts are otherwise discovered from the
-    # container — with this integration that means Tomcat's ROOT context, not the /camel servlet mapping.
+    # container — with this integration that means server.servlet.context-path (/simple), never the /camel servlet mapping.
     excluded-contexts: ${CREED_MODCLUSTER_EXCLUDED_CONTEXTS:}
     session-draining-strategy: ${CREED_MODCLUSTER_SESSION_DRAINING:DEFAULT}
     # How long the startup banner waits for the proxies to confirm they hold this node (registration
@@ -224,6 +233,9 @@ creed:
       # Blank/0 = whatever the Tomcat connector reports. Set these only when the proxy must dial an
       # address the connector does not bind (containers, NAT, multi-NIC) — they override what
       # mod_cluster advertises, they do not select the connector.
+      # Resolved on THIS host by mod_cluster, so it must be an address (or a name resolvable here):
+      # for the dockerised httpd on Docker Desktop that is the host-gateway IP 192.168.65.254 —
+      # host.docker.internal only resolves inside containers.
       host: ${CREED_MODCLUSTER_NODE_HOST:}
       port: ${CREED_MODCLUSTER_NODE_PORT:0}
       # Set on the Tomcat Engine. Blank = "<spring.application.name>-<port>".
@@ -232,6 +244,16 @@ creed:
       aliases: ${CREED_MODCLUSTER_ALIASES:}
       # INITIAL load factor (1..100; 0 = standby). Dynamic from the first STATUS on.
       load: ${CREED_MODCLUSTER_LOAD:100}
+    # Only read when manager-scheme is https. mod_cluster ALWAYS loads a keystore once TLS is on
+    # (default ~/.keystore, which fails), so both stores are set. The client cert is this module's
+    # outbound identity (creed-gateway-partner-CLI, clientAuth), which httpd's `SSLVerifyClient require`
+    # checks against the Creed CA; the truststore validates httpd's creed-httpd certificate.
+    ssl:
+      key-store: ${CREED_MODCLUSTER_SSL_KEYSTORE:${creed.rootPath}/creed-gateway-partner-CLI-keystore.p12}
+      key-store-password: ${CREED_MODCLUSTER_SSL_KEYSTORE_PASSWORD:changeit}
+      key-store-type: PKCS12
+      trust-store: ${CREED_MODCLUSTER_SSL_TRUSTSTORE:${creed.rootPath}/creed-gateway-partner-CLI-truststore.p12}
+      trust-store-password: ${CREED_MODCLUSTER_SSL_TRUSTSTORE_PASSWORD:changeit}
   partner:
     # SSL bundle whose client cert + CA truststore back the @LoadBalanced RestClient's mTLS request
     # factory (see LoadBalancedRestClientConfiguration) used by RemoteClusterProcessor.

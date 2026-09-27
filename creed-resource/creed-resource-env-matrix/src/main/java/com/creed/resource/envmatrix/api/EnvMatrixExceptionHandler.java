@@ -2,6 +2,8 @@ package com.creed.resource.envmatrix.api;
 
 import com.creed.resource.envmatrix.service.EnvMatrixService;
 import com.creed.resource.envmatrix.service.ReleaseService;
+import com.creed.resource.envmatrix.service.splunk.SplunkLoginClient;
+import com.creed.resource.envmatrix.service.splunk.SplunkSessionService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
@@ -43,6 +45,35 @@ public class EnvMatrixExceptionHandler {
     @ExceptionHandler(ReleaseService.DuplicateReleaseException.class)
     ResponseEntity<Map<String, Object>> duplicateRelease(ReleaseService.DuplicateReleaseException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(body("duplicate_release", e.getMessage(), null));
+    }
+
+    @ExceptionHandler(SplunkSessionService.InvalidOtpException.class)
+    ResponseEntity<Map<String, Object>> invalidOtp(SplunkSessionService.InvalidOtpException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body(
+                "replayed".equals(e.reason()) ? "otp_replayed" : "otp_invalid", e.getMessage(), null));
+    }
+
+    @ExceptionHandler(SplunkSessionService.TooManyAttemptsException.class)
+    ResponseEntity<Map<String, Object>> tooManyAttempts(SplunkSessionService.TooManyAttemptsException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", Long.toString(e.retryAfterSeconds()))
+                .body(body("too_many_attempts", e.getMessage(), null));
+    }
+
+    @ExceptionHandler(SplunkSessionService.NotConfiguredException.class)
+    ResponseEntity<Map<String, Object>> notConfigured(SplunkSessionService.NotConfiguredException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body("not_configured", e.getMessage(), null));
+    }
+
+    @ExceptionHandler(SplunkSessionService.CodeHiddenException.class)
+    ResponseEntity<Map<String, Object>> codeHidden(SplunkSessionService.CodeHiddenException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body("code_hidden", e.getMessage(), null));
+    }
+
+    /** Splunk, not this service, is what failed — hence 502, with the audit reason as the error code. */
+    @ExceptionHandler(SplunkLoginClient.SplunkLoginException.class)
+    ResponseEntity<Map<String, Object>> splunkLogin(SplunkLoginClient.SplunkLoginException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body("splunk_" + e.reason(), e.getMessage(), null));
     }
 
     /** Someone else saved the same row first; the config page should reload and retry. */

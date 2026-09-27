@@ -1,18 +1,28 @@
-# creed-simple-metrics — Camel Spring Boot, HTTPS on 8096. APIs are declared with the XML REST DSL
-# (creed-simple-metrics/src/main/resources/camel/*.xml) and served via camel-servlet under /camel/*.
+# creed-simple-metrics — Camel Spring Boot, HTTPS on 8096, context path /simple
+# (server.servlet.context-path). APIs are declared with the XML REST DSL and served via camel-servlet
+# under /camel/*, so every API is <base>/simple/camel/api/*.
+#
+# Every request below goes THROUGH the Apache httpd balancer (.support/httpd, HTTPS 9443): the node
+# registers context /simple over MCMP/mTLS, and mod_proxy_cluster forwards /simple/* to it. Start the
+# node with CREED_MODCLUSTER_ENABLED=true CREED_MODCLUSTER_NODE_HOST=192.168.65.254 (see
+# .support/httpd/README.md). To bypass httpd, swap {{lb}} for {{node}}.
+#
 # Run with the `local` environment (http-client.private.env.json sets verifyHostCertificate=false)
-# to skip the self-signed cert check.
+# to skip the Creed-CA self-signed cert check — httpd and the node both present Creed certificates.
+
+@lb = https://localhost:9443/simple
+@node = https://localhost:8096/simple
 
 ### hello — self-contained demo route
-GET https://localhost:8096/camel/api/hello
+GET {{lb}}/camel/api/hello
 Accept: application/json
 
 ### time — self-contained demo route
-GET https://localhost:8096/camel/api/time
+GET {{lb}}/camel/api/time
 Accept: application/json
 
 ### echo — round-trips the posted JSON (REST DSL JSON binding)
-POST https://localhost:8096/camel/api/echo
+POST {{lb}}/camel/api/echo
 Content-Type: application/json
 Accept: application/json
 
@@ -22,49 +32,49 @@ Accept: application/json
 }
 
 ### catalog — mTLS passthrough, round-robin across the two catalog instances (18081/18082)
-GET https://localhost:8096/camel/api/catalog
+GET {{lb}}/camel/api/catalog
 Accept: application/json
 
 ### order — mTLS passthrough, round-robin across the two order instances (18091/18092)
-GET https://localhost:8096/camel/api/order
+GET {{lb}}/camel/api/order
 Accept: application/json
 
 ### payment — mTLS passthrough, round-robin across the two payment instances (18093/18094);
 # proxies creed-resource-payment's list endpoint (GET /api/payment) via the payment-resource service-id
-GET https://localhost:8096/camel/api/payment
+GET {{lb}}/camel/api/payment
 Accept: application/json
 
 ### payment sticky — stickyId cookie pins the call to the instance whose registry metadata.stickyId
 # matches (18093 here); PaymentStickyProcessor lifts the cookie, StickyMetadataServiceInstanceListSupplier
 # filters the health-checked alive list. Repeat the call: it never round-robins to 18094.
-GET https://localhost:8096/camel/api/payment
+GET {{lb}}/camel/api/payment
 Accept: application/json
 Cookie: stickyId=27AE496060A84649E527E8533A185D1461286662457143FE306F422EF1FA2696
 
 ### payment sticky — the other stickyId pins to 18094 (works with other cookies present too)
-GET https://localhost:8096/camel/api/payment
+GET {{lb}}/camel/api/payment
 Accept: application/json
 Cookie: JSESSIONID=abc123; stickyId=844D8CF83FBB091AB9E7F13E53E211668A36FE9761F3D22F593102CDE267A255
 
 ### payment sticky — unknown stickyId: no alive instance matches -> WARN + fallback to round-robin
-GET https://localhost:8096/camel/api/payment
+GET {{lb}}/camel/api/payment
 Accept: application/json
 Cookie: stickyId=DEADBEEF
 
 ### aggregate — multicast to catalog + order + payment, merged by AggregateStrategy
-GET https://localhost:8096/camel/api/aggregate
+GET {{lb}}/camel/api/aggregate
 Accept: application/json
 
 ### aggregate-notify — multicast aggregates on thread pool A; wireTap fires a notification on pool B
 # Check the logs for thread names: catalog/order/payment branches run on agg-poolA-*, notification on notify-poolB-*
-GET https://localhost:8096/camel/api/aggregate-notify
+GET {{lb}}/camel/api/aggregate-notify
 Accept: application/json
 
 
 ### fulfillment — complex pipeline: multicast aggregate (catalog+order bulk) -> filter fulfillable
 # orders (status NEW/PAID & catalog stock >= qty) -> multicast enrich (shipping + risk) -> wireTap
 # notification on success. POST; empty/no-fault body = happy path.
-POST https://localhost:8096/camel/api/fulfillment
+POST {{lb}}/camel/api/fulfillment
 Content-Type: application/json
 Accept: application/json
 Cookie: WSASID=50001LFRzoLS8-SJqPsL1oryMt9daIPDZgppc4Y7
@@ -75,7 +85,7 @@ Cookie: WSASID=50001LFRzoLS8-SJqPsL1oryMt9daIPDZgppc4Y7
 }
 
 ### fulfillment (fault-inject order) — order cluster returns 500 -> failure response body, HTTP 502
-POST https://localhost:8096/camel/api/fulfillment
+POST {{lb}}/camel/api/fulfillment
 Content-Type: application/json
 Accept: application/json
 
@@ -84,7 +94,7 @@ Accept: application/json
 }
 
 ### fulfillment (fault-inject catalog) — catalog cluster returns 500 -> failure response body, HTTP 502
-POST https://localhost:8096/camel/api/fulfillment
+POST {{lb}}/camel/api/fulfillment
 Content-Type: application/json
 Accept: application/json
 
@@ -97,18 +107,18 @@ Accept: application/json
 # 2) HttpCookie.parse() guesses WSASID version=1 -> HttpCookie.toString() emits name="value";$Path="/";$Domain="..."
 # 3) forwards the buggy header AND the fixed name=value join to <cluster>/echo.
 # Watch the org.apache.hc.client5.http.wire DEBUG lines for the two outgoing "Cookie:" headers.
-POST https://localhost:8096/camel/api/cookie-relay
+POST {{lb}}/camel/api/cookie-relay
 Accept: application/json
 
 ### cookie-relay against the catalog cluster (18081/18082)
-POST https://localhost:8096/camel/api/cookie-relay?cluster=catalog
+POST {{lb}}/camel/api/cookie-relay?cluster=catalog
 Accept: application/json
 
 ### checkout — sequential full-chain POST: catalog /reserve (stock decrement + quote) ->
 # order /checkout (create, NEW) -> payment /checkout (create+authorize in ONE call, since separate
 # create/authorize would round-robin to different in-memory instances). Response aggregates all
 # three hops; watch three "LB resolved ->" lines, one per POST.
-POST https://localhost:8096/camel/api/checkout
+POST {{lb}}/camel/api/checkout
 Content-Type: application/json
 Accept: application/json
 
@@ -122,7 +132,7 @@ Accept: application/json
 
 ### checkout — insufficient stock: catalog /reserve answers 409, gateway passes it through with
 # {"status":"FAILED","step":"catalog-reserve","downstreamBody":{...available...}}
-POST https://localhost:8096/camel/api/checkout
+POST {{lb}}/camel/api/checkout
 Content-Type: application/json
 Accept: application/json
 
@@ -133,7 +143,7 @@ Accept: application/json
 }
 
 ### checkout — gateway-side validation: missing sku -> 400 before any downstream call
-POST https://localhost:8096/camel/api/checkout
+POST {{lb}}/camel/api/checkout
 Content-Type: application/json
 Accept: application/json
 
@@ -143,22 +153,48 @@ Accept: application/json
 
 ### LB health-check toggle — current state + LB child contexts created so far (lazy: a service
 # never called yet won't be listed; it picks up the current flag when first used)
-GET https://localhost:8096/admin/lb/health-check
+GET {{lb}}/admin/lb/health-check
 Accept: application/json
 
 ### LB health-check OFF — probe loops stop immediately ([LB-HEALTH] "probe loop stopped" per service);
 # choose() switches to the raw discovery list at the next cache refresh (cache.ttl, default 35s)
-PUT https://localhost:8096/admin/lb/health-check?enabled=false
+PUT {{lb}}/admin/lb/health-check?enabled=false
 Accept: application/json
 
 ### LB health-check ON — resubscribes: initial-delay applies again before the first probe round
-PUT https://localhost:8096/admin/lb/health-check?enabled=true
+PUT {{lb}}/admin/lb/health-check?enabled=true
 Accept: application/json
 
 ### actuator: list metrics
-GET https://localhost:8096/actuator/metrics
+GET {{lb}}/actuator/metrics
 Accept: application/json
 
 ### actuator: health
-GET https://localhost:8096/actuator/health
+GET {{lb}}/actuator/health
+Accept: application/json
+
+### actuator: prometheus scrape endpoint (what monitoring/prometheus.yml pulls, now under /simple)
+GET {{lb}}/actuator/prometheus
+Accept: text/plain
+
+
+### ===================================================================================== direct
+### Same node WITHOUT httpd — compare with the {{lb}} calls above when a forwarded call misbehaves
+GET {{node}}/camel/api/hello
+Accept: application/json
+
+### direct: health
+GET {{node}}/actuator/health
+Accept: application/json
+
+
+### ===================================================================================== httpd
+### mod_cluster status page — which nodes/contexts the balancer holds (expect Contexts: /simple,
+# Status: ENABLED). Browser-friendly listener: no client certificate, loopback only. NOT 6666: browsers
+# refuse 6665–6669 as unsafe ports, and 6666 also demands a Creed client certificate.
+GET https://localhost:16666/mod_cluster_manager
+
+### httpd: a path outside every registered context is not forwarded — 404 from httpd itself
+# (503 instead while an old node registered with context "/" is still in the table)
+GET https://localhost:9443/camel/api/hello
 Accept: application/json

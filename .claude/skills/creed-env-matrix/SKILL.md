@@ -109,6 +109,34 @@ The config page's "save": the whole table in one transaction.
 - Tests use H2 + ddl-auto (Flyway off — V1/V2 are PostgreSQL-specific) and must set `spring.application.name` + `server.port`, because the `actuator` profile is `include`d from `application.yml` and cannot be un-included by a profile-specific file; OTel interpolates both and an unresolvable placeholder fails the context.
 - DB: `jdbc:postgresql://127.0.0.1:5432/env_matrix` on the `creed-artifactory-db` container. Create once: `docker exec creed-artifactory-db createdb -U artifactory env_matrix`.
 
+## Splunk session broker (`service/splunk/*`, `TotpService`, `/splunk/*`, page `/splunk`)
+
+TOTP-gated credential broker: the shared Splunk account lives in `env-matrix.splunk.*`, a valid code
+gets a Splunk Web session cookie back as a `document.cookie` script. Shares nothing with endpoints.
+
+- **The real call is off by default** — `env-matrix.splunk.enabled=false` makes
+  `RestClientSplunkLoginClient` return a `mock-…` value without sending anything.
+- **Do not follow redirects** in `RestClientSplunkLoginClient` (its request factory wraps a JDK client
+  with `Redirect.NEVER`) — the session cookie is on the login's 303; a following client returns the
+  next page's headers and the cookie is gone. Use `exchange`, not `retrieve`: a 401 must be read.
+- **Check Splunk configuration before verifying the OTP.** Verifying consumes the code; the first
+  version checked afterwards, so a 503 burned the code and the user's retry came back `replayed`.
+- **`cval` must be fetched and echoed** (cookie *and* form field) — Splunk Web 7+ rejects a POST
+  without it, answering 200 with no session cookie, which looks like a wrong password.
+- The cookie read (`session-cookie`, `splunkd_8000`) and written (`script-cookie-name`,
+  `splunkd_8089`) are separate settings on purpose — the requirement names both.
+- **Never persist or log the cookie value**; the audit keeps a 16-hex SHA-256 fingerprint. The
+  properties/DTO records override `toString` to mask secrets — keep that when adding fields.
+- Audit rows are saved one by one (service not `@Transactional`) so a failed Splunk call keeps the
+  OTP row. Replay memory and lockout are **in-process** — per instance, lost on restart.
+- `expose-current-code` defaults **on** (requested): the page shows the code, so the OTP is
+  decorative until it is turned off.
+- The countdown runs on the **server** clock (`serverTimeMillis` offset); the code is refetched on
+  step rollover — the secret never reaches the browser.
+- The node mock implements the same TOTP (same default
+  secret) and always mocks Splunk. Tests use RFC 6238's appendix-B key and a `@Primary` stepping
+  `Clock`, because replay memory lives as long as the shared test context.
+
 ## Frontend (`creed-env-matrix-design`)
 
 Vite 8 + React 19 + **antd 5.29.3** + `@ant-design/pro-components` 2.8.10 + **`@antv/g6` 5.1.1**.

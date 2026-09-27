@@ -51,6 +51,13 @@ Complete and verified in a browser against the real backend.
 - **Config (`/config`)** — two tabs. *Endpoints*: the full table, add/edit/delete via one
   page-level modal, save-back-to-database. *Release topology*: a release list, its participants and
   its connections, saved with one authoritative batch write per release.
+- **Splunk session (`/splunk`)** — rotating TOTP display with a server-clock countdown, a 6-digit
+  `Input.OTP`, the returned `document.cookie` script (copyable), and the audit table. Verified with
+  `npm run typecheck`/`build` and by curl against both `npm run mock` and the `dev` backend (Splunk
+  in mock mode). **Never run against a real Splunk** — by request, that test is the user's. The
+  input is cleared once a code is spent (success, `otp_replayed`, any `splunk_*` error) — the stale
+  code left in the box is what produced the first reported "replayed". The node mock implements the same TOTP (default secret
+  `JBSWY3DPEHPK3PXP`), always mocks Splunk, and keeps its audit in memory, not `mock.json`.
 - **i18n** en / zh-CN throughout, including the antd locale bundle; persisted in `localStorage`.
 - `antd lint src` → 0 issues. `tsc -b` and `vite build` clean.
 

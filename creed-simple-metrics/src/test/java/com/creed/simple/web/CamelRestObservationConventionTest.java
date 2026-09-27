@@ -51,6 +51,21 @@ class CamelRestObservationConventionTest {
     }
 
     @Test
+    void contextPathIsNotPartOfTheMatchOrTheTag() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/simple/camel/api/fulfillment");
+        request.setContextPath("/simple");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        response.setStatus(200);
+        String uri = new CamelRestObservationConvention()
+                .getLowCardinalityKeyValues(new ServerRequestObservationContext(request, response))
+                .stream()
+                .filter(kv -> "uri".equals(kv.getKey()))
+                .map(io.micrometer.common.KeyValue::getValue)
+                .findFirst().orElseThrow();
+        assertThat(uri).isEqualTo("/camel/api/fulfillment");
+    }
+
+    @Test
     void nullCarrierReturnsSuperKeyValuesUnchanged() {
         // A context with no carrier must not NPE — it just returns the default key values.
         ServerRequestObservationContext context =

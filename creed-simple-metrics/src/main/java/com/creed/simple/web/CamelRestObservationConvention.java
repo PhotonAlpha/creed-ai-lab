@@ -37,7 +37,10 @@ public class CamelRestObservationConvention extends DefaultServerRequestObservat
         if (request == null) {
             return keyValues;
         }
-        String path = request.getRequestURI();
+        // Match and tag on the path WITHIN the servlet context: getRequestURI() carries the context path
+        // (/simple/camel/...), and Spring MVC's own uri tags never include it — keeping it out leaves
+        // the tag, and every dashboard/alert keyed on it, unchanged by a context-path change.
+        String path = pathWithinContext(request);
         int status = (response != null) ? response.getStatus() : 0;
         if (path == null || !path.startsWith(CAMEL_PREFIX) || status >= 400) {
             return keyValues;
@@ -51,5 +54,14 @@ public class CamelRestObservationConvention extends DefaultServerRequestObservat
             }
         }
         return withoutUri.and(KeyValue.of("uri", path));
+    }
+
+    private static String pathWithinContext(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (uri == null || contextPath == null || contextPath.isEmpty() || !uri.startsWith(contextPath)) {
+            return uri;
+        }
+        return uri.substring(contextPath.length());
     }
 }

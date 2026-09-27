@@ -22,6 +22,9 @@ import static org.mockito.Mockito.when;
  */
 class ModClusterListenerStatusReporterTest {
 
+    private static final ModClusterProperties.Ssl NO_TLS =
+            new ModClusterProperties.Ssl("", "changeit", "PKCS12", "", "", "changeit", "TLS");
+
     private static final NodeIdentity NODE = new NodeIdentity(
             "creed-simple-metrics-8096", "10.1.2.3", 8096, "https", List.of("localhost"));
 
@@ -45,7 +48,8 @@ class ModClusterListenerStatusReporterTest {
                 false, "", "", "", "", "DEFAULT", Duration.ZERO,
                 new ModClusterProperties.Node("10.1.2.3", 8096, "", "", List.of("localhost"),
                         100, true, 10, 10, -1, 60, 0),
-                new ModClusterProperties.Balancer("mycluster", true, false, true, 0, 1));
+                new ModClusterProperties.Balancer("mycluster", true, false, true, 0, 1),
+                NO_TLS);
     }
 
     private ModClusterListenerStatusReporter reporter(ModClusterServiceMBean service, List<String> proxies) {
@@ -136,7 +140,7 @@ class ModClusterListenerStatusReporterTest {
         ModClusterProperties failFast = new ModClusterProperties(
                 true, true, base.proxies(), base.managerScheme(), base.socketTimeout(),
                 base.statusInterval(), false, "", "", "", "", "DEFAULT", Duration.ZERO,
-                base.node(), base.balancer());
+                base.node(), base.balancer(), base.ssl());
 
         ModClusterListenerStatusReporter reporter =
                 new ModClusterListenerStatusReporter(service, failFast, "creed-simple-metrics");

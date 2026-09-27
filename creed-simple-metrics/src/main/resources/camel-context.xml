@@ -11,7 +11,7 @@
 
   REST is served through the camel-servlet transport (restConfiguration component="servlet"); the
   servlet mount point stays in application.yml (camel.servlet.mapping.context-path=/camel/*), so the
-  APIs live under https://host:8096/camel/api/*.
+  APIs live under https://host:8096/simple/camel/api/* (context-path /simple + servlet /camel/*).
 -->
 <beans xmlns="http://www.springframework.org/schema/beans"
        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"

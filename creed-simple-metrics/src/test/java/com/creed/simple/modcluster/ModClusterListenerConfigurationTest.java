@@ -14,6 +14,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ModClusterListenerConfigurationTest {
 
+    private static final ModClusterProperties.Ssl NO_TLS =
+            new ModClusterProperties.Ssl("", "changeit", "PKCS12", "", "", "changeit", "TLS");
+
     private static ModClusterProperties properties(String managerScheme, ModClusterProperties.Node node) {
         return new ModClusterProperties(
                 true, false,
@@ -21,7 +24,8 @@ class ModClusterListenerConfigurationTest {
                 managerScheme, Duration.ofSeconds(10), Duration.ofSeconds(10),
                 false, "", "", "", "localhost:/private", "NEVER", Duration.ofSeconds(10),
                 node,
-                new ModClusterProperties.Balancer("mycluster", true, true, false, 7, 3));
+                new ModClusterProperties.Balancer("mycluster", true, true, false, 7, 3),
+                NO_TLS);
     }
 
     private static ModClusterProperties.Node node(String host, int port, int smax) {
@@ -86,6 +90,40 @@ class ModClusterListenerConfigurationTest {
     void httpsManagerSchemeTurnsIntoTheSslFlag() {
         assertThat(listener(properties("https", node("", 0, -1))).isSsl()).isTrue();
         assertThat(listener(properties("http", node("", 0, -1))).isSsl()).isFalse();
+    }
+
+    @Test
+    void httpsSetsBothStoresAsAbsolutePathsSoTheLibraryNeverFallsBackToHomeKeystore() {
+        ModClusterProperties base = properties("https", node("", 0, -1));
+        ModClusterProperties tls = new ModClusterProperties(
+                base.enabled(), base.failFast(), base.proxies(), "https", base.socketTimeout(),
+                base.statusInterval(), false, "", "", "", "", "DEFAULT", base.startupTimeout(),
+                base.node(), base.balancer(),
+                new ModClusterProperties.Ssl("pki/client-keystore.p12", "ks-pw", "PKCS12", "client",
+                        "pki/truststore.p12", "ts-pw", "TLSv1.3"));
+
+        ModClusterListener listener = listener(tls);
+
+        // Relative paths are resolved against the working directory here; left relative, the library
+        // would resolve them against catalina.base — a temp directory for embedded Tomcat.
+        String cwd = java.nio.file.Path.of("").toAbsolutePath().toString();
+        assertThat(listener.getSslKeyStore()).isEqualTo(cwd + "/pki/client-keystore.p12");
+        assertThat(listener.getSslTrustStore()).isEqualTo(cwd + "/pki/truststore.p12");
+        assertThat(listener.getSslKeyStorePassword()).isEqualTo("ks-pw");
+        assertThat(listener.getSslTrustStorePassword()).isEqualTo("ts-pw");
+        // The library's own default is JKS; the Creed PKI is PKCS12, for both stores.
+        assertThat(listener.getSslKeyStoreType()).isEqualTo("PKCS12");
+        assertThat(listener.getSslTrustStoreType()).isEqualTo("PKCS12");
+        assertThat(listener.getSslKeyAlias()).isEqualTo("client");
+        assertThat(listener.getSslProtocol()).isEqualTo("TLSv1.3");
+    }
+
+    @Test
+    void plainMcmpLeavesTheTlsMaterialAlone() {
+        ModClusterListener listener = listener(properties("http", node("", 0, -1)));
+
+        assertThat(listener.getSslKeyStoreType()).isEqualTo("JKS");
+        assertThat(listener.getSslKeyAlias()).isNull();
     }
 
     @Test

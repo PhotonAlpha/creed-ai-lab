@@ -305,6 +305,34 @@ release 具有权威性：在此删除的行会从数据库中删除，其他 re
 `ref` 提交，由保存时解析成新行的 id。同时声明 `A → B` 和 `B → A` 会被拒绝，双向连接请用
 `BIDIRECTIONAL`。
 
+### Splunk 会话（`/splunk`）
+
+一个凭据代理：Splunk 账号保存在后端 `application.yml`（`env-matrix.splunk.*`），用户拿到可用的
+Splunk Web 会话，却始终看不到密码。
+
+1. **一次性验证码。** 标准 TOTP（RFC 6238，HMAC-SHA1，6 位，30 秒一个窗口，前后各允许 1 个窗口的
+   误差）。左侧卡片按**服务端**时钟倒计时；由于开启了 `env-matrix.totp.expose-current-code`，页面会
+   轮流显示当前验证码 —— 因此任何能打开这个页面的人都能通过校验。关闭它，验证码就必须来自用
+   `env-matrix.totp.secret` 绑定的身份验证器 App。一个验证码**只能使用一次**；同一地址一分钟内输错
+   5 次，之后一分钟内返回 `429`。
+2. **登录 Splunk。** 在校验验证码**之前**先检查 Splunk 是否配置齐全：未配置时直接返回 `503`，验证码
+   不会被消耗。验证码通过后，后端（通过 Spring 的 `RestClient`）先 `GET` 登录页拿到 `cval` cookie，再以表单
+   `username=…&password=…&cval=…` `POST` 到 `env-matrix.splunk.login-url`，**不跟随重定向**
+   （cookie 在 303 响应上），从 `Set-Cookie` 中读取 `splunkd_8000`。
+3. **脚本。** 该值以脚本形式返回，粘贴到 Splunk 页面的开发者工具控制台执行：
+   `document.cookie = "splunkd_8089=<值>; path=/; Secure; SameSite=Lax";` 读取的 cookie 名与写入的
+   cookie 名是两个独立配置（`session-cookie` / `script-cookie-name`）。
+4. **审计。** 每一次验证码校验、每一次 Splunk 调用都在 `splunk_audit` 中记一行 —— 结果、原因、客户端
+   地址、`X-Forwarded-For`、User-Agent、时间窗口、Splunk 状态码、耗时。同一次请求的两行共享一个关联 ID。
+   cookie 本身**从不**保存 —— 只保存其 SHA-256 的前 16 个十六进制字符，足以与 Splunk 自身日志中的
+   会话对应。
+
+**真实调用由开关控制。** `env-matrix.splunk.enabled`（`SPLUNK_ENABLED`）默认 `false`：客户端直接返回
+伪造的 `mock-…` 值，不发送任何请求；设为 `true` 才会真正登录 `login-url`。node mock 始终返回伪造值。页面会把
+mock 值明确标出。
+
+验证码一经校验即被消耗，因此遇到「已使用」或 Splunk 调用失败时，页面会清空输入框并提示等待下一个验证码。
+
 ---
 
 ## 6. API
@@ -333,6 +361,10 @@ release 具有权威性：在此删除的行会从数据库中删除，其他 re
 | `GET` | `/conflicts` | 仅返回冲突分组 |
 | `GET` | `/health` | 各端点状态、汇总及探测模式 |
 | `POST` | `/health/recheck` | 重新执行探测（轮换模拟种子） |
+| `GET` | `/splunk/totp` | TOTP 周期 / 位数 / 误差 + 服务端时间、Splunk 模式 |
+| `GET` | `/splunk/totp/current` | 当前验证码（仅在开启 `expose-current-code` 时；否则 `404`） |
+| `POST` | `/splunk/session` | `{code}` → cookie 脚本；`401` 验证码错误/已使用，`429` 已锁定，`502` Splunk 失败，`503` 未配置 |
+| `GET` | `/splunk/audit` | 审计记录，按时间倒序（`?limit=`，默认 50） |
 
 错误统一使用同一个结构：`{error, message, fields?, time}`。
 

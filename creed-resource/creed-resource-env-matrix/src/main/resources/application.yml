@@ -67,3 +67,35 @@ env-matrix:
     mode: mock
     timeout-ms: 800
     mock-seed: 0
+
+  # Splunk session broker (/api/env-matrix/splunk/*): TOTP gate -> Splunk Web login -> cookie script.
+  # See TotpProperties / SplunkProperties for every key.
+  totp:
+    # Base32 shared secret — what an authenticator app is enrolled with. Blank => the broker answers
+    # 503. The fallback is a DEMO secret; set ENV_MATRIX_TOTP_SECRET for anything real.
+    secret: "${ENV_MATRIX_TOTP_SECRET:JBSWY3DPEHPK3PXP}"
+    period-seconds: 30
+    digits: 6
+    allowed-drift-steps: 1       # ±1 window = ±30 s of clock skew
+    reject-replay: true
+    # The Splunk page shows the current code on rotation. Anyone who can call
+    # GET /splunk/totp/current can therefore pass the check — set false to require an authenticator.
+    expose-current-code: "${ENV_MATRIX_TOTP_EXPOSE_CODE:true}"
+    max-failures: 5
+    failure-window: 60s
+  splunk:
+    # The switch for the real call. false (default): a fabricated cookie, no network. true: log in
+    # to login-url for real and read the session cookie off the response.
+    enabled: "${SPLUNK_ENABLED:false}"
+    login-url: "${SPLUNK_LOGIN_URL:https://splunk.example.invalid:8000/en-US/account/login}"
+    username: "${SPLUNK_USERNAME:admin}"
+    # Prefer SPLUNK_PASSWORD or a {cipher} value from the config server over committing a password.
+    password: "${SPLUNK_PASSWORD:admin}"
+    session-cookie: splunkd_8000        # read from the login response
+    script-cookie-name: splunkd_8089    # written by the copyable document.cookie script
+    script-cookie-path: /
+    prefetch-cval: true
+    connect-timeout: 5s
+    read-timeout: 15s
+    # Optional SSL bundle whose truststore validates Splunk's certificate; blank => JDK default trust.
+    ssl-bundle: ""

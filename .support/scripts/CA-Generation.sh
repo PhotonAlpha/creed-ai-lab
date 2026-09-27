@@ -12,7 +12,8 @@ set -euo pipefail
 #          ├─ creed-resource-catalog   / creed-resource-catalog-CLI
 #          ├─ creed-resource-order     / creed-resource-order-CLI
 #          ├─ creed-resource-payment   / creed-resource-payment-CLI
-#          └─ creed-resource-env-matrix / creed-resource-env-matrix-CLI
+#          ├─ creed-resource-env-matrix / creed-resource-env-matrix-CLI
+#          └─ creed-httpd              (server only — the mod_cluster balancer in .support/httpd)
 #
 # Trust model:  every *-truststore.p12 = { root , intermediate }.
 # All leaf certs are signed by creed-CA-Public-RSA, so any service trusts any
@@ -123,5 +124,11 @@ for svc in "${SERVICES[@]}"; do
   make_keystore   "${svc}-CLI"  clientAuth
   make_truststore "${svc}-CLI"
 done
+
+# ---- 6. Apache httpd (mod_cluster balancer, .support/httpd) ------------------
+# Server identity only: httpd presents it on the MCMP (6666) and traffic (9443) listeners. On an
+# existing PKI, issue it alone with .support/httpd/issue-cert.sh instead of rerunning this script —
+# rerunning mints a new CA and invalidates every other keystore.
+make_keystore creed-httpd serverAuth
 
 echo "== done =="; ls -1 *.p12

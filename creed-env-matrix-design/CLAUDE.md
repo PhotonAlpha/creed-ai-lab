@@ -66,7 +66,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 │   ├── pages/
 │   │   ├── Matrix       # 矩阵视图（首页 /）
 │   │   ├── Topology     # 矩阵拓扑图（/topology）
-│   │   └── Config       # CRUD 编辑页（/config）
+│   │   ├── Config       # CRUD 编辑页（/config）
+│   │   └── Splunk       # Splunk 会话代理（/splunk）
 │   └── api/             # 前端 API 封装
 ├── server/
 │   ├── index.(js|ts)    # mock API 服务
@@ -108,6 +109,15 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 表格化展示全部 endpoint，支持增、删、改。
 - 「保存到文件」按钮：校验后通过 写回 数据库。
 
+### 5.4 Splunk 会话（`/splunk`）
+- 凭据存储：Splunk 账号放在后端 `creed-resource-env-matrix` 的 yml（`env-matrix.splunk.*`）。
+- 身份验证：标准 TOTP（RFC 6238，30 秒一个窗口，允许 ±1 个窗口误差），密钥为 `env-matrix.totp.secret`。
+- 页面轮流显示当前 OTP（`expose-current-code`，按需求默认开启），用户手动输入后发起请求。
+- Splunk 调用使用 Spring Boot `RestClient`；**默认返回 mock 值**，开启 `env-matrix.splunk.enabled`
+  （`SPLUNK_ENABLED=true`）后才真正调用获取 cookie。
+- OTP 通过后由后端表单登录 Splunk，从响应 cookie 取 `splunkd_8000`，返回
+  `document.cookie = "splunkd_8089=…; path=/; Secure; SameSite=Lax";` 供复制。
+- 审计：每次 OTP 校验与 Splunk 调用写入 `splunk_audit`（不保存 cookie 值，只保存指纹）。
 
 ## 6. 命令
 

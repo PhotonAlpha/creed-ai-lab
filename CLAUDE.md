@@ -49,7 +49,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-config-server` | 8443 | `/config-server` | HTTPS, Basic auth, `{cipher}` |
 | `creed-gateway` | 8080 | — | HTTPS, **reactive** |
 | `creed-gateway-partner` | 8095 | — | HTTPS, **servlet** |
-| `creed-simple-metrics` | 8096 | `/camel/*` | HTTPS, Camel; **pull-mode** metrics |
+| `creed-simple-metrics` | 8096 | `/simple` (+ `/camel/*`) | HTTPS, Camel; **pull-mode** metrics; httpd forwards `/simple/*` |
 | `creed-report` | 9100 | `/report` | HTTP, standalone (outside the mesh) |
 | `creed-jasper-report` | 9110 | `/jasper-report` | HTTP, standalone; **JasperReports jrxml** twin of creed-report's approval-status PDF (+ xlsx/csv/html) |
 | `creed-resource-catalog` | 18081 / 18082 | `/api/catalog` | primary / secondary |
@@ -58,6 +58,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
 | `creed-env-matrix-design` | 5173 | — | Vite, proxies `/api` → `VITE_API_TARGET` (`.env`: 18095) |
 | `creed-mock-buddy` | 18100 | — | HTTP, **Node/Fastify**; YAML mock server, standalone |
+| `.support/httpd` (docker) | 6666 / 16666 / 9443 | `/mod_cluster_manager` | Apache + mod_proxy_cluster: MCMP over **mTLS** / browser status page (loopback, no client cert; 666x is browser-blocked) / HTTPS traffic; `creed-simple-metrics` registers here |
 | `creed-common-metrics` | — | — | library: `application-actuator.yml` + OTel helpers |
 
 Resource servers and gateways run `primary` / `secondary` (local two-instance) or `cloud`

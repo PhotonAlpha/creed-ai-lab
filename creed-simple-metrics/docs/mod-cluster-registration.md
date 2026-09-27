@@ -49,7 +49,7 @@ LoadModule advertise_module       modules/mod_advertise.so
 Listen 6666
 <VirtualHost *:6666>
     ServerName proxy.example:6666
-    EnableMCPMReceive                  # ← 没有这一行，CONFIG 会被拒
+    EnableMCMPReceive                  # ← 没有这一行，CONFIG 会被拒（旧文档误拼为 EnableMCPMReceive）
     ManagerBalancerName mycluster      # ← 必须与 creed.mod-cluster.balancer.name 一致
     ServerAdvertise Off                # 默认用静态 proxies 列表，不依赖组播广告
 
@@ -67,6 +67,30 @@ Listen 6666
 > **坑 2：节点是 HTTPS 时，httpd 要信任 Creed CA。**
 > mod_cluster 告诉代理「回连我用 https」（取自 Tomcat connector），代理侧还需要 `SSLProxyEngine On` +
 > `SSLProxyCACertificateFile <Creed CA>`，否则**注册是成功的、转发才失败**——现象是 banner 全绿但 502。
+
+### 2.1 HTTPS 注册（MCMP over mTLS）—— 现成的 httpd：`.support/httpd`
+
+`docker compose -f .support/httpd/docker-compose.yml up -d --build` 起一个 Apache 2.4.68 +
+mod_proxy_cluster（源码编译）：6666 = MCMP，**双向 TLS**（`SSLVerifyClient require`，只认 Creed CA）；
+9443 = 业务入口。节点侧：
+
+| 属性 | 值 |
+|---|---|
+| `manager-scheme` | `https`（现为默认值） |
+| `ssl.key-store` | `${creed.rootPath}/creed-gateway-partner-CLI-keystore.p12`（出站身份，clientAuth） |
+| `ssl.trust-store` | `${creed.rootPath}/creed-gateway-partner-CLI-truststore.p12`（校验 `creed-httpd`） |
+| `node.host` | **`192.168.65.254`**（Docker Desktop 宿主机网关的 IP，不能用 `host.docker.internal`） |
+
+三个只在 HTTPS 下出现的坑（完整说明见 `.support/httpd/README.md`）：
+
+- **`ssl=true` 时库一定加载 keystore**，默认 `~/.keystore`/JKS，缺文件就在 Tomcat 生命周期里抛
+  `IllegalStateException`，看上去像「mod_cluster 什么都没做」。所以两个库都显式设置，并先转成绝对路径
+  （库会相对 `catalina.base` 解析，内嵌 Tomcat 下那是临时目录）；文件不可读时启动即打 ERROR。
+- **`node.host` 在节点本机解析**（`TomcatConnector.getAddress`）。解析不了 → `null` →
+  `DefaultMCMPRequestFactory.createConfigRequest` NPE：代理照常回应 `INFO`/`STATUS`，却一直
+  `MEM: Can't read node with "..." JVMRoute`。现在启动时对无法解析的值打 ERROR。
+- **httpd 的 `SSLProxyEngine` 必须在 server 级**：mod_proxy_cluster 在主 server 上建 worker，写在
+  VirtualHost 里 → 节点 `Status: NOTOK`，请求全部 503（`AH01961: failed to enable ssl support`）。
 
 ---
 
@@ -107,7 +131,10 @@ Boot 在 `getWebServer(...)` 里的顺序是：建 Context → `host.addChild(co
 | 属性 | 落到哪里 | 备注 |
 |---|---|---|
 | `proxies` | `setProxies(...)` | 见 §3.4；scheme 会被剥掉 |
-| `manager-scheme: https` | `setSsl(true)` | MCMP 自身走 TLS，与节点的 `Type` 无关 |
+| `manager-scheme: https` | `setSsl(true)` | MCMP 自身走 TLS，与节点的 `Type` 无关；**默认 https** |
+| `ssl.key-store` / `-password` / `-type` / `key-alias` | `setSslKeyStore*` / `setSslKeyAlias` | 仅 https 时设置；路径转绝对路径 |
+| `ssl.trust-store` / `-password` | `setSslTrustStore*`（类型同 key-store） | 校验代理证书 |
+| `ssl.protocol` | `setSslProtocol` | 默认 `TLS` |
 | `socket-timeout` | `setSocketTimeout` | 单次 MCMP 往返 |
 | `status-interval` | Engine `backgroundProcessorDelay` | 见 §3.3 |
 | `advertise` / `advertise-interface` / `advertise-security-key` | 同名 setter | 组播发现，默认关 |
@@ -124,9 +151,10 @@ Boot 在 `getWebServer(...)` 里的顺序是：建 Context → `host.addChild(co
 
 **没有对应属性的两类**（容器说了算，别去找）：
 
-- **contexts**——注册的是 Tomcat **实际部署的 context**，也就是**ROOT `/`，不是 `/camel`**
-  （`/camel/*` 只是 `CamelHttpTransportServlet` 的 servlet mapping）。要排除某个用
-  `excluded-contexts`。httpd 侧的路由要按 ROOT 来配。
+- **contexts**——注册的是 Tomcat **实际部署的 context**，也就是 `server.servlet.context-path`：
+  现在是 **`/simple`**（2026-09-27 之前是 ROOT `/`）。`/camel/*` 只是 `CamelHttpTransportServlet` 的
+  servlet mapping，**永远不会**被注册。要排除某个用 `excluded-contexts`。httpd 按注册的 context 路由：
+  `/simple/*` 转发到节点，其余路径 httpd 自己回 404（表里还残留一个注册了 `/` 的旧节点时是 503）。
 - **sticky session 的 cookie 名 / path**——mod_cluster 直接读 Tomcat 自己的 session cookie 配置，
   `balancer.*` 里只有策略开关。
 
@@ -170,7 +198,7 @@ Boot 在 `getWebServer(...)` 里的顺序是：建 Context → `host.addChild(co
 ```
 [stub] CONFIG / JVMRoute=creed-simple-metrics-8096&Balancer=mycluster&Host=127.0.0.1&Maxattempts=1&
                 Port=8096&Timeout=0&Type=https&WaitWorker=0&flushpackets=On&flushwait=10&ping=10&ttl=60
-[stub] ENABLE-APP / JVMRoute=...&Alias=localhost&Context=%2F     ← ROOT context，不是 /camel
+[stub] ENABLE-APP / JVMRoute=...&Alias=localhost&Context=%2F     ← 当时是 ROOT；现在是 Context=%2Fsimple
 [stub] STATUS / JVMRoute=...&Load=100                             ← 每 status-interval 一次
 [stub] INFO /                                                     ← banner 的数据来源
 [stub] DISABLE-APP → STOP-APP → REMOVE-APP → REMOVE-APP /*        ← 停机（含 session draining）
@@ -184,14 +212,19 @@ Boot 在 `getWebServer(...)` 里的顺序是：建 Context → `host.addChild(co
 ## 7. 本地验证
 
 ```bash
-# 1. 起 httpd（含 §2 的 VirtualHost），然后：
-CREED_MODCLUSTER_ENABLED=true CREED_MODCLUSTER_PROXIES=127.0.0.1:6666 \
+# 1. 起 httpd（HTTPS，见 §2.1）：
+.support/httpd/issue-cert.sh && docker compose -f .support/httpd/docker-compose.yml up -d --build
+CREED_MODCLUSTER_ENABLED=true CREED_MODCLUSTER_PROXIES=127.0.0.1:6666 CREED_MODCLUSTER_NODE_HOST=192.168.65.254 \
   mvn -pl creed-simple-metrics spring-boot:run -Dspring-boot.run.workingDirectory="$PWD"
 
 # 2. 看启动 banner（§5）。
 
-# 3. 从代理侧确认（人读状态页）：
-curl -s http://127.0.0.1:6666/mod_cluster_manager | grep -A3 'Node creed-simple-metrics'
+# 3. 从代理侧确认。浏览器：https://localhost:16666/mod_cluster_manager（不要客户端证书，仅本机；6665–6669 被浏览器当作不安全端口直接拒绝）。
+#    命令行 INFO/DUMP 与输出示例：.support/httpd/README.md「查看已注册的实例」。
+#    6666 是 mTLS，需要客户端证书：
+P=.support/scripts/pki
+curl -s --cacert $P/ca-chain.crt --cert $P/creed-gateway-partner-CLI.crt --key $P/creed-gateway-partner-CLI.key \
+  https://127.0.0.1:6666/mod_cluster_manager | sed 's/<[^>]*>/ /g' | grep -E 'Node|Status'
 
 # 4. 没有 httpd 时：tmp/mcmp-stub.py 是一个最小的假 mod_cluster_manager（应答 CONFIG/ENABLE-APP/
 #    STATUS/INFO），足以把注册、心跳、停机摘除整条链路跑通并让 banner 变绿。
@@ -214,4 +247,4 @@ python3 tmp/mcmp-stub.py
 3. **JMX**：`ModClusterListener` MBean 上有 `getProxyInfo()` / `getProxyConfiguration()` / `ping()` /
    `refresh()` / `reset()`，运行期排障比重启快。
 4. **contexts enabled=0**：节点注册上了但 context 没 enable → 流量不会进来；检查 `excluded-contexts`
-   与 httpd 侧路由是不是按 ROOT `/` 配的。
+   与请求路径是不是以注册的 context（`/simple`）开头。

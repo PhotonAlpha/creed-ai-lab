@@ -1,0 +1,41 @@
+# Apache HTTP Server + mod_proxy_cluster — the balancer creed-simple-metrics registers with over HTTPS.
+#
+# 一次性:  .support/httpd/issue-cert.sh          # 用现有 Creed CA 签发 creed-httpd 证书
+# 启动:    docker compose -f .support/httpd/docker-compose.yml up -d --build
+# 日志:    docker compose -f .support/httpd/docker-compose.yml logs -f httpd
+# 停止:    docker compose -f .support/httpd/docker-compose.yml down
+#
+# 端口:  6666 = MCMP(节点注册,mTLS)   16666 = 状态页(浏览器用,仅本机)   9443 = 业务入口(HTTPS)
+# 详见 README.md。
+services:
+  httpd:
+    build: .
+    image: creed-httpd-modcluster:local
+    container_name: creed-httpd
+    ports:
+      - "6666:6666"
+      # Browser status page (no client cert) — loopback only: the page can Disable/Stop contexts.
+      # Not 666x: browsers refuse 6665–6669 (IRC) as unsafe ports without opening a connection.
+      # Both loopbacks, because macOS resolves "localhost" to ::1 first.
+      - "127.0.0.1:16666:16666"
+      - "[::1]:16666:16666"
+      - "9443:9443"
+    volumes:
+      # The DIRECTORY, not the single file: editors and `sed -i` replace httpd.conf with a new inode,
+      # and a single-file bind mount keeps serving the old one — `httpd -k graceful` then fails with
+      # "Could not open configuration file". A directory mount follows the edit.
+      - ./conf:/usr/local/apache2/conf-creed:ro
+      - ../scripts/pki:/pki:ro
+    # Docker Desktop provides host.docker.internal already; this makes it work on Linux engines too.
+    # The node must advertise the IP behind it, not the name (creed.mod-cluster.node.host): mod_cluster
+    # resolves that value on the node, where host.docker.internal does not exist.
+    #   docker exec creed-httpd getent hosts host.docker.internal   # Docker Desktop: 192.168.65.254
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["httpd-foreground", "-f", "/usr/local/apache2/conf-creed/httpd.conf"]
+    healthcheck:
+      test: ["CMD", "httpd", "-t", "-f", "/usr/local/apache2/conf-creed/httpd.conf"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped

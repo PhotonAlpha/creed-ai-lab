@@ -10,9 +10,13 @@
  * (`ConflictDetector`, `HealthProbeService`), including Java's exact string hash, so a given
  * host:port reports the same health state in both backends.
  *
+ * The Splunk session broker (`/splunk/*`) is here too: the same RFC 6238 TOTP and default secret as
+ * `TotpService`, Splunk always mocked, the audit trail kept in memory (not in mock.json).
+ *
  *   node server/index.js            # :3001
  *   PORT=4001 node server/index.js
  */
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -393,6 +397,131 @@ function toGroupDtos(conflicts) {
 
 const dimensionTuple = (e) => DIMENSIONS.map((d) => e[d]).join('/');
 
+// ------------------------------------------------------------ splunk session broker
+
+/** Same defaults as application.yml's env-matrix.totp.* — a code from one backend passes the other. */
+const TOTP = {
+  secret: process.env.ENV_MATRIX_TOTP_SECRET ?? 'JBSWY3DPEHPK3PXP',
+  periodSeconds: 30,
+  digits: 6,
+  allowedDriftSteps: 1,
+  maxFailures: 5,
+  failureWindowMs: 60_000,
+};
+const SPLUNK = { sessionCookie: 'splunkd_8000', scriptCookieName: 'splunkd_8089', scriptCookiePath: '/' };
+
+function base32Decode(input) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const clean = input.replace(/[\s=-]/g, '').toUpperCase();
+  const bytes = [];
+  let buffer = 0;
+  let bits = 0;
+  for (const c of clean) {
+    const value = alphabet.indexOf(c);
+    if (value < 0) throw new Error('TOTP secret is not valid Base32');
+    buffer = ((buffer << 5) | value) & 0xffff;
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((buffer >> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(bytes);
+}
+
+const TOTP_KEY = base32Decode(TOTP.secret);
+let lastAcceptedStep = -Infinity;
+const otpFailures = new Map();
+const splunkAudit = [];
+let auditSeq = 0;
+
+const currentStep = () => Math.floor(Date.now() / 1000 / TOTP.periodSeconds);
+
+function totpAt(step) {
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(step));
+  const hash = createHmac('sha1', TOTP_KEY).update(counter).digest();
+  const offset = hash[hash.length - 1] & 0x0f;
+  const binary = (hash.readUInt32BE(offset) & 0x7fffffff) % 10 ** TOTP.digits;
+  return String(binary).padStart(TOTP.digits, '0');
+}
+
+function audit(row) {
+  splunkAudit.unshift({
+    id: (auditSeq += 1),
+    reason: null,
+    detail: null,
+    forwardedFor: null,
+    serverStep: null,
+    matchedStep: null,
+    splunkMode: null,
+    httpStatus: null,
+    cookieFingerprint: null,
+    durationMs: null,
+    createdAt: new Date().toISOString(),
+    ...row,
+  });
+  splunkAudit.length = Math.min(splunkAudit.length, 500);
+}
+
+function issueSplunkSession(req, res, code) {
+  const correlationId = randomUUID();
+  const client = {
+    correlationId,
+    clientIp: req.socket.remoteAddress ?? null,
+    forwardedFor: req.headers['x-forwarded-for'] ?? null,
+    userAgent: req.headers['user-agent']?.slice(0, 256) ?? null,
+  };
+  const now = Date.now();
+  const recent = (otpFailures.get(client.clientIp) ?? []).filter((t) => now - t < TOTP.failureWindowMs);
+  otpFailures.set(client.clientIp, recent);
+  if (recent.length >= TOTP.maxFailures) {
+    audit({ ...client, eventType: 'OTP_VERIFY', outcome: 'FAILURE', reason: 'locked_out' });
+    res.setHeader('Retry-After', String(TOTP.failureWindowMs / 1000));
+    return fail(res, 429, 'too_many_attempts', `too many failed codes — try again in ${TOTP.failureWindowMs / 1000}s`);
+  }
+
+  const serverStep = currentStep();
+  let matchedStep = null;
+  if (/^\d+$/.test(code ?? '') && code.length === TOTP.digits) {
+    for (let drift = -TOTP.allowedDriftSteps; drift <= TOTP.allowedDriftSteps; drift++) {
+      if (matchedStep == null && totpAt(serverStep + drift) === code) matchedStep = serverStep + drift;
+    }
+  }
+  const reason = matchedStep == null ? 'invalid_code' : matchedStep <= lastAcceptedStep ? 'replayed' : null;
+  if (reason) {
+    recent.push(now);
+    audit({ ...client, eventType: 'OTP_VERIFY', outcome: 'FAILURE', reason, serverStep, matchedStep });
+    return reason === 'replayed'
+      ? fail(res, 401, 'otp_replayed', 'this code has already been used — wait for the next one')
+      : fail(res, 401, 'otp_invalid', 'the code is invalid or expired');
+  }
+  lastAcceptedStep = matchedStep;
+  otpFailures.delete(client.clientIp);
+  audit({
+    ...client, eventType: 'OTP_VERIFY', outcome: 'SUCCESS', serverStep, matchedStep,
+    detail: `drift=${matchedStep - serverStep}`,
+  });
+
+  const cookieValue = `mock-${randomBytes(32).toString('hex')}`;
+  const cookieFingerprint = createHash('sha256').update(cookieValue).digest('hex').slice(0, 16);
+  audit({
+    ...client, eventType: 'SPLUNK_LOGIN', outcome: 'SUCCESS', splunkMode: 'mock', cookieFingerprint,
+    durationMs: 0, detail: 'as mock',
+  });
+  res.setHeader('Cache-Control', 'no-store');
+  return json(res, 200, {
+    sourceCookie: SPLUNK.sessionCookie,
+    cookieName: SPLUNK.scriptCookieName,
+    cookieValue,
+    script: `document.cookie = "${SPLUNK.scriptCookieName}=${cookieValue}; path=${SPLUNK.scriptCookiePath}; Secure; SameSite=Lax";`,
+    mode: 'mock',
+    correlationId,
+    cookieFingerprint,
+    issuedAt: new Date().toISOString(),
+  });
+}
+
 // -------------------------------------------------------------------- routing
 
 const json = (res, status, body) => {
@@ -469,6 +598,51 @@ const server = createServer(async (req, res) => {
   }
 
   try {
+    if (req.method === 'GET' && path === '/splunk/totp') {
+      return json(res, 200, {
+        configured: true,
+        periodSeconds: TOTP.periodSeconds,
+        digits: TOTP.digits,
+        allowedDriftSteps: TOTP.allowedDriftSteps,
+        serverTimeMillis: Date.now(),
+        codeVisible: true,
+        splunkMode: 'mock',
+        splunkConfigured: true,
+        loginUrl: null,
+        scriptCookieName: SPLUNK.scriptCookieName,
+      });
+    }
+
+    if (req.method === 'GET' && path === '/splunk/totp/current') {
+      const epochSeconds = Math.floor(Date.now() / 1000);
+      res.setHeader('Cache-Control', 'no-store');
+      return json(res, 200, {
+        code: totpAt(currentStep()),
+        step: currentStep(),
+        secondsRemaining: TOTP.periodSeconds - (epochSeconds % TOTP.periodSeconds),
+        periodSeconds: TOTP.periodSeconds,
+        serverTimeMillis: Date.now(),
+      });
+    }
+
+    if (req.method === 'POST' && path === '/splunk/session') {
+      const body = await readBody(req);
+      if (!/^\d{6,8}$/.test(body.code ?? '')) {
+        return json(res, 400, {
+          error: 'validation_failed',
+          message: 'request payload is invalid',
+          fields: [{ field: 'code', message: 'must be 6-8 digits' }],
+          time: new Date().toISOString(),
+        });
+      }
+      return issueSplunkSession(req, res, body.code);
+    }
+
+    if (req.method === 'GET' && path === '/splunk/audit') {
+      const limit = Math.min(Math.max(Number(params.get('limit') ?? 50) || 50, 1), 500);
+      return json(res, 200, splunkAudit.slice(0, limit));
+    }
+
     if (req.method === 'GET' && path === '/ping') {
       return json(res, 200, {
         service: 'creed-resource-env-matrix (mock)',

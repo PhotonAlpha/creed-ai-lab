@@ -24,7 +24,7 @@ include 误杀出站、jackson 漏洞误报）、hc5 entity 一次性流的 `wri
 `camel-observation-starter` 依赖被整体移除的根因与代价，见
 **[docs/camel-observation-baggage-loss.md](docs/camel-observation-baggage-loss.md)**。
 
-REST 走 camel-servlet，API 在 `https://localhost:8096/camel/api/*`（hello / time / echo / catalog /
+REST 走 camel-servlet，Tomcat context path 为 `/simple`，API 在 `https://localhost:8096/simple/camel/api/*`（经 httpd：`https://localhost:9443/simple/camel/api/*`）（hello / time / echo / catalog /
 order / payment / aggregate / aggregate-notify / **fulfillment**）。`/aggregate` 与 `/aggregate-notify`
 的 multicast 现聚合三个下游集群：catalog（18081/18082）、order（18091/18092）、payment（18093/18094，
 `creed-resource-payment` 的列表端点 `GET /api/payment`），均经 `payment-resource` 等逻辑服务名由
@@ -66,7 +66,7 @@ context 发现、session draining、停机摘除全由库负责；本模块补�
 全失败 ERROR，未启用也打印一行；`fail-fast=true` 可让注册失败直接终止启动）。
 httpd 侧最小配置、四个坑（MCMP 端点是 VirtualHost 的 `/` 而不是 `/mod_cluster_manager`、listener 必须挂
 `Server` 且赶在 init 前、`setProxyList` 会在建 bean 时做 DNS 解析并抛异常、注册的 context 是 Tomcat 的
-**ROOT `/`** 而不是 `/camel`）与本地验证步骤见
+context path **`/simple`**，不是 `/camel` servlet 映射）与本地验证步骤见
 **[docs/mod-cluster-registration.md](docs/mod-cluster-registration.md)**。
 
 ---

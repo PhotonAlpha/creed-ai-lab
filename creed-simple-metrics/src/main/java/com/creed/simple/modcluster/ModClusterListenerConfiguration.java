@@ -11,7 +11,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -69,7 +73,11 @@ public class ModClusterListenerConfiguration {
 
         ModClusterListener modCluster = new ModClusterListener();
         modCluster.setProxies(parseProxies(properties));
-        modCluster.setSsl("https".equalsIgnoreCase(properties.managerScheme()));
+        boolean tls = "https".equalsIgnoreCase(properties.managerScheme());
+        modCluster.setSsl(tls);
+        if (tls) {
+            configureTls(modCluster, properties.ssl());
+        }
         modCluster.setSocketTimeout((int) properties.socketTimeout().toMillis());
 
         modCluster.setAdvertise(properties.advertise());
@@ -112,7 +120,20 @@ public class ModClusterListenerConfiguration {
         // (containers, NAT, multi-NIC) — the "external" pair, not connectorAddress/Port, which select
         // WHICH local connector to advertise.
         if (StringUtils.hasText(node.host())) {
-            modCluster.setExternalConnectorAddress(node.host().trim());
+            String host = node.host().trim();
+            // mod_cluster resolves this ON THIS HOST (TomcatConnector.getAddress), not on the proxy. A
+            // name only the proxy can resolve — host.docker.internal from a Mac — comes back null, and
+            // the library then fails every CONFIG with an NPE in DefaultMCMPRequestFactory: the proxy
+            // answers INFO/STATUS but never learns the node. Use an address (e.g. Docker Desktop's
+            // host-gateway 192.168.65.254) or a name that resolves on both sides.
+            try {
+                InetAddress.getByName(host);
+            } catch (UnknownHostException ex) {
+                log.error("mod_cluster: creed.mod-cluster.node.host '{}' cannot be resolved on THIS host. "
+                        + "mod_cluster resolves it locally, so CONFIG will fail and the node will not be "
+                        + "registered — use an IP address the proxy can reach.", host);
+            }
+            modCluster.setExternalConnectorAddress(host);
         }
         if (node.port() > 0) {
             modCluster.setExternalConnectorPort(node.port());
@@ -173,6 +194,47 @@ public class ModClusterListenerConfiguration {
             ModClusterProperties properties,
             @Value("${spring.application.name:creed-simple-metrics}") String applicationName) {
         return new ModClusterListenerStatusReporter(modClusterListener, properties, applicationName);
+    }
+
+    /**
+     * MCMP over TLS. Once {@code ssl} is on, the library's {@code JSSESocketFactory} loads the keystore
+     * unconditionally (default {@code ~/.keystore}, JKS) and throws {@code IllegalStateException} when it
+     * is missing — from inside the Tomcat lifecycle, where it reads as "mod_cluster did nothing". So the
+     * stores are always set, resolved to absolute paths (a relative one would be resolved against
+     * {@code catalina.base}, a temp directory for embedded Tomcat), and a missing file is reported here,
+     * by name, at startup.
+     */
+    private static void configureTls(ModClusterListener modCluster, ModClusterProperties.Ssl ssl) {
+        String keyStore = absolute(ssl.keyStore());
+        String trustStore = absolute(ssl.trustStore());
+        for (String[] store : new String[][] {{"key-store", keyStore}, {"trust-store", trustStore}}) {
+            if (store[1] == null) {
+                log.error("mod_cluster: manager-scheme is https but creed.mod-cluster.ssl.{} is not set — "
+                        + "MCMP over TLS cannot start and this node will not be registered.", store[0]);
+            } else if (!Files.isReadable(Path.of(store[1]))) {
+                log.error("mod_cluster: creed.mod-cluster.ssl.{} '{}' is not a readable file — MCMP over "
+                        + "TLS cannot start and this node will not be registered.", store[0], store[1]);
+            }
+        }
+        if (keyStore != null) {
+            modCluster.setSslKeyStore(keyStore);
+        }
+        modCluster.setSslKeyStorePassword(ssl.keyStorePassword());
+        modCluster.setSslKeyStoreType(ssl.keyStoreType());
+        if (StringUtils.hasText(ssl.keyAlias())) {
+            modCluster.setSslKeyAlias(ssl.keyAlias());
+        }
+        if (trustStore != null) {
+            modCluster.setSslTrustStore(trustStore);
+        }
+        modCluster.setSslTrustStorePassword(ssl.trustStorePassword());
+        modCluster.setSslTrustStoreType(ssl.keyStoreType());
+        modCluster.setSslProtocol(ssl.protocol());
+        log.info("mod_cluster: MCMP over TLS — client identity {}, trusting {}", keyStore, trustStore);
+    }
+
+    private static String absolute(String path) {
+        return StringUtils.hasText(path) ? Path.of(path.trim()).toAbsolutePath().normalize().toString() : null;
     }
 
     /**

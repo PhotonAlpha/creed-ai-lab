@@ -1,12 +1,12 @@
 ---
 name: creed-simple-metrics
-description: The creed-simple-metrics module — a Camel-on-Spring-Boot servlet gateway on HTTPS 8096 (context-path /camel/*), routes defined in the classic <camelContext> Spring XML DSL, aggregating creed-resource-catalog/order/payment via camel-http + a custom Spring Cloud LoadBalancer route planner (plus a @LoadBalanced RestClient path for bulk/legacy calls), cookie-based sticky routing for payment, a three-layer audit/timing/observability design, local-baggage (non-header) trace correlation, and mod_cluster node registration with an Apache HTTP Server balancer via the upstream JBoss listener. Use when working on camel-context.xml routes, the LB route planner / sticky LB, the audit-and-timing layers, MDC/baggage tracing, or the mod_cluster registration in this module.
+description: The creed-simple-metrics module — a Camel-on-Spring-Boot servlet gateway on HTTPS 8096 (Tomcat context path /simple, Camel servlet /camel/*), routes defined in the classic <camelContext> Spring XML DSL, aggregating creed-resource-catalog/order/payment via camel-http + a custom Spring Cloud LoadBalancer route planner (plus a @LoadBalanced RestClient path for bulk/legacy calls), cookie-based sticky routing for payment, a three-layer audit/timing/observability design, local-baggage (non-header) trace correlation, and mod_cluster node registration with an Apache HTTP Server balancer via the upstream JBoss listener. Use when working on camel-context.xml routes, the LB route planner / sticky LB, the audit-and-timing layers, MDC/baggage tracing, or the mod_cluster registration in this module.
 ---
 
 # creed-simple-metrics
 
-Camel-on-Spring-Boot servlet gateway. HTTPS `8096`, Camel REST under `https://host:8096/camel/api/*`
-(`camel.servlet.mapping.context-path=/camel/*`). See [[creed-platform]] for ports/mTLS/SSL-bundle
+Camel-on-Spring-Boot servlet gateway. HTTPS `8096`, Tomcat context path **`/simple`**, Camel REST under
+`https://host:8096/simple/camel/api/*` (`camel.servlet.mapping.context-path=/camel/*` is relative to it). See [[creed-platform]] for ports/mTLS/SSL-bundle
 conventions shared across the mesh, and [[creed-resource-catalog]]/[[creed-resource-order]]/
 [[creed-resource-payment]] for the three downstream resource servers it aggregates.
 
@@ -182,8 +182,11 @@ verdict. Full design, httpd config and verification recipe: `docs/mod-cluster-re
 - **`setProxyList(String)` resolves DNS at bean-creation time and throws** — from a `@Bean` method that
   is a failed context, contradicting `fail-fast: false`. `parseProxies` builds `InetSocketAddress`es by
   hand and skips (loudly) the ones that cannot resolve.
-- **The registered context is Tomcat's ROOT `/`, not `/camel`** — contexts come from what the container
-  has deployed; `/camel/*` is only the `CamelHttpTransportServlet` mapping. `excluded-contexts` is the
+- **The registered context is the Tomcat context path — `/simple`** (`server.servlet.context-path`;
+  it was ROOT `/` before) — contexts come from what the container has deployed; `/camel/*` is only the
+  `CamelHttpTransportServlet` mapping and never registers. httpd forwards `/simple/*`, needs no
+  `ProxyPass`. Anything matching on `getRequestURI()` must strip `getContextPath()` first
+  (`CamelRestObservationConvention` does, so metric `uri` tags stay `/camel/api/...`). `excluded-contexts` is the
   only lever. Likewise the sticky-session cookie/path come from Tomcat's session config, not from
   `creed.mod-cluster.balancer.*`.
 - **Registration success is not in the library's logs** (MCMP traffic is DEBUG; refused and unreachable
@@ -196,6 +199,31 @@ verdict. Full design, httpd config and verification recipe: `docs/mod-cluster-re
   the advertised address from the Tomcat connector, and the two really do differ on a multi-homed host
   (measured: local `192.168.5.9` vs advertised `127.0.0.1`). `node.host`/`node.port` only override what
   is published (`externalConnector*`), they do not select the connector.
+
+### HTTPS registration (`.support/httpd`, `creed.mod-cluster.ssl.*`)
+
+A real balancer: `docker compose -f .support/httpd/docker-compose.yml up -d --build` (Apache 2.4.68 +
+mod_proxy_cluster compiled from a pinned upstream commit — no release tags exist). MCMP on 6666 is
+**mutual TLS**; traffic on 9443; the browser status page is **16666** (`/mod_cluster_manager`, no
+client cert, loopback-only). Browsers **refuse 6665–6669 outright** (IRC "unsafe ports",
+`ERR_UNSAFE_PORT`, no TCP connection — httpd logs nothing), which is why neither 6666 nor a first
+attempt at 6667 opened in Chrome. The conf is mounted as a directory: a single-file bind mount breaks
+on `sed -i`/editor saves (new inode → "Could not open configuration file" on reload).
+Inspection recipes (`-X INFO` / `-X DUMP`): `.support/httpd/README.md`. `manager-scheme` defaults to `https`. Verified end to end; the
+three traps, all found by running it:
+
+- **`ssl=true` always loads a keystore** (library default `~/.keystore`, JKS) and resolves relative
+  paths against `catalina.base` (a temp dir in embedded Tomcat) — so `ModClusterListenerConfiguration`
+  always sets both stores as absolute paths and logs a missing file by name.
+- **`node.host` is resolved on the NODE** (`TomcatConnector.getAddress`). `host.docker.internal` does
+  not resolve on a Mac → `null` → NPE in `DefaultMCMPRequestFactory.createConfigRequest` on every
+  `CONFIG`; the proxy still answers INFO/STATUS (`MEM: Can't read node ... JVMRoute`). Use the
+  host-gateway IP `192.168.65.254`. A startup ERROR now flags an unresolvable value.
+- **httpd's `SSLProxyEngine` must be server-level**: mod_proxy_cluster builds node workers on the main
+  server; inside a VirtualHost the node registers but shows `Status: NOTOK` and every request is a 503.
+
+New httpd server cert: `.support/httpd/issue-cert.sh` signs `creed-httpd` with the EXISTING CA —
+never rerun `CA-Generation.sh` just for it (that mints a new CA and breaks every other keystore).
 
 ## SSL / mTLS
 
