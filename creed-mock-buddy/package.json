@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "nodemon",
+    "dev": "nodemon -- --env sg",
     "dev:ms": "nodemon -- --env ms",
     "dev:sg": "nodemon -- --env sg",
     "build": "tsup",

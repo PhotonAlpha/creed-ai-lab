@@ -15,3 +15,5 @@ creed-report/local-example.md
 .support/jenkins/.password.txt
 .support/sonarqube/.password.txt
 */.idea
+.agents
+AGENTS.md
