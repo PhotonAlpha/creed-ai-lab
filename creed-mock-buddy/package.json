@@ -9,6 +9,8 @@
   },
   "scripts": {
     "dev": "nodemon",
+    "dev:ms": "nodemon -- --env ms",
+    "dev:sg": "nodemon -- --env sg",
     "build": "tsup",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",

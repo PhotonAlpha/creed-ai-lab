@@ -222,6 +222,17 @@ three traps, all found by running it:
 - **httpd's `SSLProxyEngine` must be server-level**: mod_proxy_cluster builds node workers on the main
   server; inside a VirtualHost the node registers but shows `Status: NOTOK` and every request is a 503.
 
+Run against it with the **`modcluster` profile** (`-Dspring-boot.run.profiles=local,modcluster`,
+`application-modcluster.yml`): enabled + proxy + https + `node.host=192.168.65.254`. Without it the
+node registers as `127.0.0.1` → banner green, context ENABLED, every request 503 with `All workers are
+in error state` — which reads like a missing balancer, but `mycluster` is created by registration.
+
+Every `ModClusterListener` attribute (meaning, our value, library default, httpd default) is in
+`docs/mod-cluster-registration.md` §4.1. Two things there that surprise people: `CONFIG` only carries
+parameters that differ from httpd's defaults (so a short packet is not a missing config), and
+`stickySessionForce=true` (our default) means a request whose `JSESSIONID` names a dead node gets a
+**503 even while other nodes are healthy** — measured, not assumed.
+
 New httpd server cert: `.support/httpd/issue-cert.sh` signs `creed-httpd` with the EXISTING CA —
 never rerun `CA-Generation.sh` just for it (that mints a new CA and breaks every other keystore).
 

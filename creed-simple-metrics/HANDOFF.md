@@ -11,6 +11,8 @@ servers.
 mvn -pl creed-simple-metrics spring-boot:run -Dspring-boot.run.workingDirectory="$PWD"
 curl -k https://localhost:8096/simple/camel/api/...          # direct
 curl -k https://localhost:9443/simple/camel/api/...          # via the httpd balancer (.support/httpd)
+# register with that httpd: add the modcluster profile (application-modcluster.yml)
+mvn -pl creed-simple-metrics spring-boot:run -Dspring-boot.run.profiles=local,modcluster -Dspring-boot.run.workingDirectory="$PWD"
 ```
 
 HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Requests: `.support/http-client/creed-simple-metrics.http` (through httpd by default). Needs the downstream resource servers up to aggregate.
@@ -51,6 +53,10 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Landmines
 
+- **Registered but every call 503 = the node registered as `127.0.0.1`** (started without `node.host`).
+  httpd logs `All workers are in error state` — it looks like a missing balancer, but `mycluster` is
+  created by registration itself; the only worker is just unreachable from the container. Start with
+  the `modcluster` profile, which sets `node.host=192.168.65.254` along with enabled/proxy/https.
 - **mod_cluster over HTTPS** (details: `.support/httpd/README.md`):
   `node.host` is resolved **on the node** — `host.docker.internal` fails on a Mac and the library then
   NPEs on every `CONFIG` (proxy answers INFO/STATUS, never holds the node); use `192.168.65.254`.

@@ -20,6 +20,14 @@ export async function registerSwagger(app: FastifyInstance): Promise<void> {
       })),
   ];
 
+  const origins = [`http://localhost:${config.port}`];
+  if (config.httpsPort !== 0) origins.push(`https://localhost:${config.httpsPort}`);
+  // Relative first: whichever port served /docs is the default target, so the common case never
+  // crosses origins. The absolute entries let you point the UI at the other listener.
+  const servers = [
+    ...origins.map((url) => ({ url, description: url.startsWith('https') ? 'HTTPS' : 'HTTP' })),
+  ];
+
   await app.register(swagger, {
     openapi: {
       openapi: '3.1.0',
@@ -31,7 +39,7 @@ export async function registerSwagger(app: FastifyInstance): Promise<void> {
           `Mock definitions are loaded from \`${config.mocksDir}\`. ` +
           `Switch behaviour at runtime with \`PUT ${config.adminPrefix}/scenario\`.`,
       },
-      servers: [{ url: `http://localhost:${config.port}`, description: 'local' }],
+      servers,
       tags,
     },
   });
@@ -40,5 +48,13 @@ export async function registerSwagger(app: FastifyInstance): Promise<void> {
     routePrefix: config.docsPath,
     uiConfig: { docExpansion: 'list', deepLinking: true, displayRequestDuration: true },
     staticCSP: true,
+    // The stock CSP has no connect-src, so it falls back to default-src 'self' and blocks "Try it
+    // out" against the other listener (a different port is a different origin). Its
+    // upgrade-insecure-requests would also rewrite http://localhost:<port> to https on the HTTPS
+    // page, which the HTTP listener can't answer. CORS is already open (origin: true in app.ts).
+    transformStaticCSP: (header) =>
+      header
+        .replace(/\s*upgrade-insecure-requests;?/, '')
+        .concat(` connect-src 'self' ${origins.join(' ')};`),
   });
 }

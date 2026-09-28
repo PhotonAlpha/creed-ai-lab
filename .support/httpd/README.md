@@ -26,16 +26,18 @@ creed-simple-metrics ──MCMP over mTLS──▶ :6666  creed-httpd  :9443 ◀
 # 2. 构建并启动
 docker compose -f .support/httpd/docker-compose.yml up -d --build
 
-# 3. 节点以 HTTPS 注册
-CREED_MODCLUSTER_ENABLED=true \
-CREED_MODCLUSTER_PROXIES=127.0.0.1:6666 \
-CREED_MODCLUSTER_SCHEME=https \
-CREED_MODCLUSTER_NODE_HOST=192.168.65.254 \
-  mvn -pl creed-simple-metrics spring-boot:run -Dspring-boot.run.workingDirectory="$PWD"
+# 3. 节点以 HTTPS 注册：modcluster profile（application-modcluster.yml）一次打开全部设置
+mvn -pl creed-simple-metrics spring-boot:run -Dspring-boot.run.profiles=local,modcluster \
+  -Dspring-boot.run.workingDirectory="$PWD"
 ```
 
-`CREED_MODCLUSTER_SCHEME=https` 已是默认值，写出来是为了说明。客户端证书默认取
-`creed-gateway-partner-CLI-keystore.p12`（本模块的出站身份），见 `creed.mod-cluster.ssl.*`。
+`modcluster` profile = `enabled: true` + `proxies: 127.0.0.1:6666` + `manager-scheme: https` +
+**`node.host: 192.168.65.254`**。要保留 `local`：命令行指定 profile 会替换 `spring.profiles.active`。
+客户端证书默认取 `creed-gateway-partner-CLI-keystore.p12`（本模块的出站身份），见 `creed.mod-cluster.ssl.*`。
+
+> **不用 profile、只开 `CREED_MODCLUSTER_ENABLED=true` 时，节点会以 `127.0.0.1` 注册**：注册 banner 全绿、
+> context 显示 ENABLED，但所有请求都是 **503**（httpd 日志 `All workers are in error state` /
+> `AH00957 ... 127.0.0.1:8096 failed`）—— 容器里的 127.0.0.1 是容器自己。这就是改用 profile 的原因。
 
 ## 查看已注册的实例
 
@@ -117,6 +119,29 @@ context: 0 [/simple] vhost: 1 node: 0 status: 1
 
 不需要证书的等价写法（本机）：`curl -s --cacert $P/ca-chain.crt https://localhost:16666/mod_cluster_manager`。
 
+**每个 balancer 下有多少个实例**（`INFO` 每个节点一行 `Node:`，按 `Balancer:` 分组计数）：
+
+```bash
+mc -X INFO https://127.0.0.1:6666/ | grep '^Node:' \
+  | sed -E 's/.*Name: ([^,]+),Balancer: ([^,]+),.*Host: ([^,]+),Port: ([^,]+),.*/\2 \1 \3:\4/' | sort \
+  | awk '{n[$1]++; print} END {for (b in n) print "=> balancer " b ": " n[b] " instance(s)"}'
+```
+```
+mycluster creed-simple-metrics-8096 192.168.65.254:8096
+mycluster creed-simple-metrics-8097 192.168.65.254:8097
+=> balancer mycluster: 2 instance(s)
+```
+
+不带证书的快速版（16666，只数节点、不分 balancer）：
+
+```bash
+curl -s --cacert $P/ca-chain.crt https://localhost:16666/mod_cluster_manager | grep -c '<h1> Node '
+```
+
+注意「已注册」≠「能接流量」：`Host` 是 `127.0.0.1` 的节点、或状态页里 `Status: NOTOK` 的节点虽然被计数，
+httpd 并不会把请求发给它（见「踩过的坑」第 9 条）。刚停掉的节点也会在表里留到停机时的 `REMOVE-APP` 送达
+或 `ttl` 过期为止。
+
 ### 3. 访问日志
 
 ```bash
@@ -178,6 +203,10 @@ curl --cacert $P/ca-chain.crt https://localhost:9443/simple/camel/api/hello
    mount 仍指向旧文件，`httpd -k graceful` 直接报 `Could not open configuration file`。现在挂的是
    `./conf` → `/usr/local/apache2/conf-creed`，改完配置执行：
    `docker exec creed-httpd httpd -k graceful -f /usr/local/apache2/conf-creed/httpd.conf`
-9. **节点注册成 `127.0.0.1:8096` 时 httpd 连不上它**：日志 `AH00957: attempt to connect to 127.0.0.1:8096
-   failed` / `disabling worker`。容器里的 127.0.0.1 是容器自己 —— 启动节点时要带
-   `CREED_MODCLUSTER_NODE_HOST=192.168.65.254`。
+9. **节点注册成 `127.0.0.1:8096` 时 httpd 连不上它**，看起来像「balancer 没配」：注册成功、context
+   ENABLED，但请求 503，日志 `proxy_cluster_pre_request: CLUSTER: (balancer://mycluster). All workers are in
+   error state` / `AH00957: attempt to connect to 127.0.0.1:8096 failed`。balancer 是有的（`mycluster` 由
+   节点注册时自动创建，httpd 侧不需要 `ProxyPass`）—— 是唯一的 worker 不可达。用 `modcluster` profile 启动
+   （它设置 `node.host=192.168.65.254`）。同一 context 下有别的可达节点时，httpd 会跳过 `NOTOK` 的那个。
+10. **mod_proxy_cluster 在每个 VirtualHost 上都按已注册 context 转发**，所以
+   `https://localhost:16666/simple/...` 也会被转发。业务入口仍按约定用 9443，16666 只用来看状态页。

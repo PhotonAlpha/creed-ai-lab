@@ -1,0 +1,15 @@
+{
+  "id": "1",
+  "description": "Full description for product 1 (Singapore)",
+  "updatedAt": "2026-09-28T08:33:21.290Z",
+  "warehouses": [
+    {
+      "code": "SG-WH-1",
+      "quantity": 158
+    },
+    {
+      "code": "SG-WH-2",
+      "quantity": 94
+    }
+  ]
+}

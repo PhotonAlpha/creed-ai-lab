@@ -1,12 +1,12 @@
 ---
 name: creed-mock-buddy
-description: The creed-mock-buddy module — a config-driven mock API server (Fastify 5 + TypeScript, Node ≥22) on HTTP 18100, serving YAML-defined routes with scenario variants, latency/fault injection, auto-generated CRUD collections, a /__admin control plane and OpenAPI docs. Standalone — outside the OAuth2 mesh and outside the Maven reactor. Use when working on mock definitions, the template engine, the registry/reload model, collections, the admin API, or this module's Fastify wiring.
+description: The creed-mock-buddy module — a config-driven mock API server (Fastify 5 + TypeScript, Node ≥22) on HTTP 5173 + HTTPS 4000 (one shared app), serving YAML-defined routes with scenario variants, latency/fault injection, auto-generated CRUD collections, a /__admin control plane and OpenAPI docs. Standalone — outside the OAuth2 mesh and outside the Maven reactor. Use when working on mock definitions, the template engine, the registry/reload model, collections, the admin API, or this module's Fastify wiring.
 ---
 
 # creed-mock-buddy
 
-Config-driven **mock API server**. Fastify 5 + TypeScript, Node ≥ 22, plain HTTP `18100`, no context
-path. **Not part of the OAuth2 mesh** (no HTTPS listener, no mTLS, no config server, no JWT) and
+Config-driven **mock API server**. Fastify 5 + TypeScript, Node ≥ 22, HTTP `5173` + HTTPS `4000`, no
+context path. **Not part of the OAuth2 mesh** (no mTLS, no config server, no JWT) and
 **not in the root `pom.xml`** — it is a Node module, the second in this repo alongside
 `creed-env-matrix-design`. Run it with `npm run dev`; nothing else needs to be up.
 
@@ -22,7 +22,7 @@ either. User-facing docs: `README.md`. Current state and open items: `HANDOFF.md
 - **`app.ts`** — `buildApp(options)` builds a Fastify instance over a `MockRegistry`. Tests call it
   with `{ mocksDir, scenario, logger: false, docs: false }` and drive it with `app.inject()`, so the
   suite binds no port. **The `await app.register(...)` ordering is load-bearing** — see Landmines.
-- **`main.ts`** — listen + signal handling. Shutdown has a 10s force-exit timer, because a handler
+- **`main.ts`** — listen (HTTP, then `listenHttps`) + signal handling. Shutdown has a 10s force-exit timer, because a handler
   wedged on an injected 30s delay would otherwise hold the process until an orchestrator SIGKILLs it
   and cuts in-flight writes anyway.
 - **`mock/definition.ts`** — the zod schema for a definition file. `strictObject` throughout, so an
@@ -99,6 +99,13 @@ calls `registry.resolve(key)` per request. That indirection is what makes scenar
 - under-pressure's thresholds are deliberately generous — a mock returning 503 under a load test is a
   worse failure mode than a slow response. `/ready` surfaces the same signals so a test can watch it
   degrade.
+
+- **HTTPS is a second Node server over the *same* Fastify instance** (`listenHttps` in `app.ts`
+  hands requests to `app.routing`), not a second `buildApp()` — a second app would get its own
+  `MockRegistry`, so a scenario switch on one port would be invisible on the other. It must run
+  after `app.listen()` (routing needs a ready app), and `addHook('onClose')` is unavailable by then,
+  so `main.ts` closes the HTTPS server itself. It borrows `creed-gateway`'s cert (SAN covers
+  localhost); missing key/cert skips HTTPS with a warning so the module still runs without the PKI.
 
 ## Conventions
 

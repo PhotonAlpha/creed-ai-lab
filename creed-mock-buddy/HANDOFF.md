@@ -9,11 +9,11 @@ mesh and outside the Maven reactor** — plain HTTP, no mTLS, no config server, 
 
 ```bash
 npm install
-npm run dev          # http://localhost:18100 — nodemon restarts on any change under src/ or mocks/
-open http://localhost:18100/docs
+npm run dev          # http://localhost:5173 — nodemon restarts on any change under src/ or mocks/
+open http://localhost:5173/docs
 ```
 
-HTTP `18100`, no context path. Runs fully standalone — nothing else in the repo needs to be up. The
+HTTP `5173`, no context path. Runs fully standalone — nothing else in the repo needs to be up. The
 second Node module in this repo alongside `creed-env-matrix-design`; it is not in the root `pom.xml`.
 
 ```bash

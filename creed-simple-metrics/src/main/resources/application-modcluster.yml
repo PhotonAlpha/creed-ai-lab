@@ -1,0 +1,22 @@
+# Registers this node with the dockerised Apache httpd balancer in .support/httpd, over HTTPS.
+#
+#   mvn -pl creed-simple-metrics spring-boot:run -Dspring-boot.run.profiles=local,modcluster \
+#     -Dspring-boot.run.workingDirectory="$PWD"
+#
+# (keep `local`: naming profiles on the command line replaces spring.profiles.active, and `local` is what
+# pulls in the prometheus profile.)
+#
+# One profile instead of three environment variables, because forgetting one of them fails silently:
+# without node.host the node registers as 127.0.0.1 — inside the httpd container that is the container
+# itself, so registration shows green, the context shows ENABLED, and every request is a 503
+# ("proxy_cluster_pre_request: ... All workers are in error state", "AH00957 ... 127.0.0.1:8096 failed").
+creed:
+  mod-cluster:
+    enabled: true
+    proxies: "${CREED_MODCLUSTER_PROXIES:127.0.0.1:6666}"
+    manager-scheme: https
+    node:
+      # The address httpd dials back. Docker Desktop's host gateway (what host.docker.internal resolves to
+      # INSIDE the container: docker exec creed-httpd getent hosts host.docker.internal). It must be an IP:
+      # mod_cluster resolves this value on the node, where host.docker.internal does not exist.
+      host: "${CREED_MODCLUSTER_NODE_HOST:192.168.65.254}"

@@ -57,7 +57,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
 | `creed-env-matrix-design` | 5173 | — | Vite, proxies `/api` → `VITE_API_TARGET` (`.env`: 18095) |
-| `creed-mock-buddy` | 18100 | — | HTTP, **Node/Fastify**; YAML mock server, standalone |
+| `creed-mock-buddy` | 5173 / 4000 | — | HTTP / HTTPS (borrows `creed-gateway` cert), **Node/Fastify**; YAML mock server, standalone |
 | `.support/httpd` (docker) | 6666 / 16666 / 9443 | `/mod_cluster_manager` | Apache + mod_proxy_cluster: MCMP over **mTLS** / browser status page (loopback, no client cert; 666x is browser-blocked) / HTTPS traffic; `creed-simple-metrics` registers here |
 | `creed-common-metrics` | — | — | library: `application-actuator.yml` + OTel helpers |
 

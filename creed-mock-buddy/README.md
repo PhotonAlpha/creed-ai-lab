@@ -14,11 +14,11 @@ different `mocks/` directory and it mocks something else.
 
 ```bash
 npm install
-npm run dev                                  # http://localhost:18100, restarts on any change
+npm run dev                                  # http://localhost:5173, restarts on any change
 
-curl http://localhost:18100/api/catalog/products
-curl http://localhost:18100/api/catalog/search?q=widget
-open  http://localhost:18100/docs            # OpenAPI UI for every loaded mock
+curl http://localhost:5173/api/catalog/products
+curl http://localhost:5173/api/catalog/search?q=widget
+open  http://localhost:5173/docs            # OpenAPI UI for every loaded mock
 ```
 
 | Script | What it does |
@@ -106,9 +106,9 @@ A route carrying `scenario: outage` is served only while that scenario is active
 is the fallback. Switching is instant and needs no restart or reconnect:
 
 ```bash
-curl -X PUT localhost:18100/__admin/scenario -H 'content-type: application/json' -d '{"name":"outage"}'
-curl localhost:18100/api/catalog/search?q=widget        # 503 catalog unavailable
-curl -X PUT localhost:18100/__admin/scenario -H 'content-type: application/json' -d '{"name":"default"}'
+curl -X PUT localhost:5173/__admin/scenario -H 'content-type: application/json' -d '{"name":"outage"}'
+curl localhost:5173/api/catalog/search?q=widget        # 503 catalog unavailable
+curl -X PUT localhost:5173/__admin/scenario -H 'content-type: application/json' -d '{"name":"default"}'
 ```
 
 The shipped mocks define `outage`, `slow` and `declined`. A path that *only* exists in a scenario
@@ -165,7 +165,12 @@ convention used on the Java side of this repo.
 
 | Variable | Default | |
 |---|---|---|
-| `CREED_MOCK_HOST` / `CREED_MOCK_PORT` | `0.0.0.0` / `18100` | listen address |
+| `CREED_MOCK_HOST` / `CREED_MOCK_PORT` | `0.0.0.0` / `5173` | listen address |
+| `CREED_MOCK_ENV` / `--env <name>` | *(empty)* | loads `.env.<name>` then `.env` from the cwd; the shell wins over both, `.env.<name>` over `.env`. Unknown name fails startup. `npm run dev:ms` = `--env ms` |
+| `CREED_MOCK_COUNTRY` | *(empty)* | country for canned JSON (`POST /product/details`): reads `<dir>/<country>/<file>`, falls back to `<dir>/default/<file>` |
+| `CREED_MOCK_JSON_DIR` | `src/mock` | base dir of those per-country JSON folders |
+| `CREED_MOCK_HTTPS_PORT` | `4000` | HTTPS listener over the same app and state; `0` disables it |
+| `CREED_MOCK_TLS_KEY` / `CREED_MOCK_TLS_CERT` | `../.support/scripts/pki/creed-gateway.{key,crt}` | PEM server identity; missing files skip HTTPS with a warning |
 | `CREED_MOCK_DIR` | `mocks` | definition directory, resolved against the cwd |
 | `CREED_MOCK_SCENARIO` | `default` | scenario active at boot |
 | `CREED_MOCK_CHAOS` | `true` | master switch for delay + fault injection |

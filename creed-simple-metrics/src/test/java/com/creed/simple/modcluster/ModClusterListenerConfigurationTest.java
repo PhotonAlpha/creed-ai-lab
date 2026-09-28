@@ -45,10 +45,14 @@ class ModClusterListenerConfigurationTest {
         // string passed to setProxyList(String), and returns null for proxies set as addresses.
         // Scheme is stripped (TLS to the proxy is a separate flag), and entries that cannot become an
         // address — unresolvable host, malformed entry — are skipped instead of failing the context.
-        assertThat(listener.getProxies())
-                .extracting(address -> address.getAddress().getHostAddress() + ":" + address.getPort())
-                // order is not preserved — mod_cluster keeps the proxies in a set
-                .containsExactlyInAnyOrder("127.0.0.1:6666", "127.0.0.1:6667");
+        // Through getProxyConfigurations(), not the deprecated getProxies(): the listener is configured
+        // with setProxyConfigurations(), and each entry carries no local bind address.
+        assertThat(listener.getProxyConfigurations())
+                .allSatisfy(proxy -> assertThat(proxy.getLocalAddress()).isNull())
+                .extracting(proxy -> proxy.getRemoteAddress().getAddress().getHostAddress()
+                        + ":" + proxy.getRemoteAddress().getPort())
+                // configuration order, now that they are a list rather than setProxies()' HashSet
+                .containsExactly("127.0.0.1:6666", "127.0.0.1:6667");
         assertThat(listener.getBalancer()).isEqualTo("mycluster");
         assertThat(listener.getStickySession()).isTrue();
         assertThat(listener.getStickySessionRemove()).isTrue();

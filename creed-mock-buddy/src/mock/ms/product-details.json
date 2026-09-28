@@ -1,0 +1,19 @@
+{
+  "id": "1",
+  "description": "Full description for product 1",
+  "updatedAt": "2026-09-28T08:33:21.290Z",
+  "warehouses": [
+    {
+      "code": "WH-1",
+      "quantity": 463
+    },
+    {
+      "code": "WH-2",
+      "quantity": 273
+    },
+    {
+      "code": "WH-3",
+      "quantity": 322
+    }
+  ]
+}

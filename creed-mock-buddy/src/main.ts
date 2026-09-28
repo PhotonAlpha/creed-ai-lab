@@ -1,4 +1,5 @@
-import { buildApp } from './app.js';
+import type { Server } from 'node:https';
+import { buildApp, closeServer, listenHttps } from './app.js';
 import { config } from './config.js';
 import { pkg } from './version.js';
 
@@ -6,7 +7,7 @@ const SHUTDOWN_GRACE_MS = 10_000;
 
 async function main(): Promise<void> {
   const app = await buildApp();
-
+  let httpsServer: Server | undefined;
   let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) return;
@@ -22,6 +23,7 @@ async function main(): Promise<void> {
     forceExit.unref();
 
     try {
+      if (httpsServer) await closeServer(httpsServer);
       await app.close();
       app.log.info('shutdown complete');
       process.exit(0);
@@ -40,6 +42,7 @@ async function main(): Promise<void> {
   });
 
   await app.listen({ host: config.host, port: config.port });
+  httpsServer = await listenHttps(app);
 
   const base = `http://localhost:${config.port}`;
   app.log.info(
@@ -48,10 +51,13 @@ async function main(): Promise<void> {
       routes: app.registry.routeKeys().length,
       collections: app.registry.collectionBindings().length,
       scenario: app.registry.scenario,
+      env: config.envFile || '(none)',
+      country: config.country || '(default)',
       mocksDir: config.mocksDir,
     },
     `${pkg.name} ${pkg.version} ready`,
   );
+  if (httpsServer) app.log.info(`https     https://localhost:${config.httpsPort}`);
   if (config.docsEnabled) app.log.info(`docs      ${base}${config.docsPath}`);
   app.log.info(`admin     ${base}${config.adminPrefix}/routes`);
 }

@@ -4,8 +4,9 @@
 #
 # Every request below goes THROUGH the Apache httpd balancer (.support/httpd, HTTPS 9443): the node
 # registers context /simple over MCMP/mTLS, and mod_proxy_cluster forwards /simple/* to it. Start the
-# node with CREED_MODCLUSTER_ENABLED=true CREED_MODCLUSTER_NODE_HOST=192.168.65.254 (see
-# .support/httpd/README.md). To bypass httpd, swap {{lb}} for {{node}}.
+# node with -Dspring-boot.run.profiles=local,modcluster (see .support/httpd/README.md) — without the
+# profile it registers as 127.0.0.1, which httpd cannot reach, and every {{lb}} call is a 503.
+# To bypass httpd, swap {{lb}} for {{node}}.
 #
 # Run with the `local` environment (http-client.private.env.json sets verifyHostCertificate=false)
 # to skip the Creed-CA self-signed cert check — httpd and the node both present Creed certificates.

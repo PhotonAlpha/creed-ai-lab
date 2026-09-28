@@ -3,6 +3,8 @@ package com.creed.simple.modcluster;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.catalina.Engine;
 import org.apache.catalina.Server;
+import org.jboss.modcluster.config.ProxyConfiguration;
+import org.jboss.modcluster.config.impl.ProxyConfigurationImpl;
 import org.jboss.modcluster.container.tomcat.ModClusterListener;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
@@ -72,7 +74,9 @@ public class ModClusterListenerConfiguration {
         ModClusterProperties.Balancer balancer = properties.balancer();
 
         ModClusterListener modCluster = new ModClusterListener();
-        modCluster.setProxies(parseProxies(properties));
+        // setProxies(Collection<InetSocketAddress>) is deprecated since 1.3.1.Final; it only wrapped each
+        // address in an anonymous ProxyConfiguration with no local bind address, which is what this does.
+        modCluster.setProxyConfigurations(parseProxies(properties));
         boolean tls = "https".equalsIgnoreCase(properties.managerScheme());
         modCluster.setSsl(tls);
         if (tls) {
@@ -238,7 +242,8 @@ public class ModClusterListenerConfiguration {
     }
 
     /**
-     * Turns the {@code proxies} entries into the resolved addresses the listener wants.
+     * Turns the {@code proxies} entries into the {@link ProxyConfiguration}s the listener wants — one
+     * {@link ProxyConfigurationImpl} per resolved address, with no local bind address (the OS picks it).
      *
      * <p><strong>Why not {@code setProxyList(String)}.</strong> That setter resolves every host through
      * DNS <em>at configuration time</em> and throws {@code IllegalArgumentException} on the first name
@@ -251,8 +256,8 @@ public class ModClusterListenerConfiguration {
      * them as "unresolved" with a {@code null} address, which mod_cluster's MCMP handler is not written
      * to receive.
      */
-    private static Collection<InetSocketAddress> parseProxies(ModClusterProperties properties) {
-        List<InetSocketAddress> addresses = new ArrayList<>();
+    private static Collection<ProxyConfiguration> parseProxies(ModClusterProperties properties) {
+        List<ProxyConfiguration> proxies = new ArrayList<>();
         for (String entry : properties.proxies()) {
             String hostPort = stripScheme(entry);
             int colon = hostPort.lastIndexOf(':');
@@ -273,13 +278,13 @@ public class ModClusterListenerConfiguration {
                         + "The node will NOT be registered with it.", entry);
                 continue;
             }
-            addresses.add(address);
+            proxies.add(new ProxyConfigurationImpl(address));
         }
-        if (addresses.isEmpty() && !properties.advertise()) {
+        if (proxies.isEmpty() && !properties.advertise()) {
             log.error("mod_cluster: no usable proxy address and advertise is off — this node will not "
                     + "be registered anywhere.");
         }
-        return addresses;
+        return proxies;
     }
 
     private static String stripScheme(String proxy) {
