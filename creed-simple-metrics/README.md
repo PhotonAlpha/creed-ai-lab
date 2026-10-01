@@ -22,7 +22,9 @@ include 误杀出站、jackson 漏洞误报）、hc5 entity 一次性流的 `wri
 **[docs/logbook-production-tuning.md](docs/logbook-production-tuning.md)**。local baggage 字段
 `correlationTraceId`（`MyMDCScopeDecorator`）在单跳同步 `<to>` 调用里丢失的排查过程，以及
 `camel-observation-starter` 依赖被整体移除的根因与代价，见
-**[docs/camel-observation-baggage-loss.md](docs/camel-observation-baggage-loss.md)**。
+**[docs/camel-observation-baggage-loss.md](docs/camel-observation-baggage-loss.md)**。`ProducerTemplate.send` 返回后读大响应 body 报
+`NoSuchFileException`（UoW 在返回前已结束并删除 stream cache 临时文件）的根因与修复，见
+**[docs/producertemplate-stream-cache-cleanup.md](docs/producertemplate-stream-cache-cleanup.md)**。
 
 REST 走 camel-servlet，Tomcat context path 为 `/simple`，API 在 `https://localhost:8096/simple/camel/api/*`（经 httpd：`https://localhost:9443/simple/camel/api/*`）（hello / time / echo / catalog /
 order / payment / aggregate / aggregate-notify / **fulfillment**）。`/aggregate` 与 `/aggregate-notify`

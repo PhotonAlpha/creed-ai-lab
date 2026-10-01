@@ -3,7 +3,8 @@
 **Purpose** Camel-on-Spring-Boot servlet gateway aggregating the catalog / order / payment resource
 servers.
 **Skill** `creed-simple-metrics` · shared: `creed-platform` · deep notes: `README.md`,
-`docs/camel-http-loadbalancer.md`, `docs/camel-observation-baggage-loss.md`
+`docs/camel-http-loadbalancer.md`, `docs/camel-observation-baggage-loss.md`,
+`docs/producertemplate-stream-cache-cleanup.md`
 
 ## Run
 
@@ -85,6 +86,12 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
   propagation because it looks up the parent span through its own mechanism rather than Brave's
   ambient context. The documented cost is losing route-level Prometheus timers. Do not add it back
   without reading `docs/camel-observation-baggage-loss.md`.
+- **Never read the body of an `Exchange` returned by `producerTemplate.send(...)` afterwards.** `send()`
+  creates its own exchange and finishes that exchange's UnitOfWork before returning, which deletes any
+  spooled `FileInputStreamCache` temp file → `NoSuchFileException`. Convert inside the call: a `Class<T>`
+  `request*` overload, or `send(endpoint, pattern, processor, resultProcessor)` when response headers are
+  needed too (what `PaymentStickyProcessor` does). Masked locally: Camel 4 `spoolEnabled` defaults to
+  false, and Logbook de-streams JSON responses. `docs/producertemplate-stream-cache-cleanup.md`.
 - **mod_cluster: the listener must go on the `Server`, before it initialises.**
   `TomcatEventHandlerAdapter` only reacts to `Server`-sourced lifecycle events — on a Context or Host it
   silently registers nothing. A `TomcatContextCustomizer` is the right window in Boot (parent chain

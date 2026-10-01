@@ -21,7 +21,7 @@
                            http://camel.apache.org/schema/spring/camel-spring.xsd">
 
     <camelContext xmlns="http://camel.apache.org/schema/spring">
-
+        <streamCaching id="cacheConfig" bufferSize="1024" spoolEnabled="true" spoolThreshold="131072" />
         <!-- ===== thread pools =====
              Defined as Micrometer-monitored Spring ExecutorService beans in
              CamelThreadPoolConfiguration (aggregatePoolA / notificationPoolB) instead of inline

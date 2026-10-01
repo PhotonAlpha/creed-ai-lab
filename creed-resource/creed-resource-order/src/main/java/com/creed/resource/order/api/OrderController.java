@@ -93,6 +93,37 @@ public class OrderController {
         return ResponseEntity.ok(list);
     }
 
+    /**
+     * Returns a JSON body of roughly {@code kb} KiB — sized to cross a caller's Camel stream-caching
+     * {@code spoolThreshold} (creed-simple-metrics: 128 KiB) so the response is spooled to a temp file
+     * ({@code FileInputStreamCache}) instead of being held in memory. Used to reproduce the
+     * "temp file already deleted" failure of reading a {@code ProducerTemplate.send(...)} result after
+     * the call returns.
+     *
+     * <p>{@code contentType} exists because the caller's Logbook hc5 handler buffers any body whose type
+     * is in {@code creed.logbook.allowed-content-types} and swaps in a non-streaming
+     * {@code ByteArrayEntity} — camel-http then never stream-caches it and the failure is masked. A type
+     * outside that list (e.g. {@code text/plain}) keeps the entity streaming.
+     *
+     * @param kb          approximate response size in KiB (default 256)
+     * @param contentType response {@code Content-Type} (default {@code application/json})
+     */
+    @GetMapping("/large")
+    public ResponseEntity<String> large(@RequestParam(defaultValue = "256") int kb,
+                                        @RequestParam(defaultValue = "application/json") String contentType)
+            throws JsonProcessingException {
+        log.info("large kb={} contentType={}", kb, contentType);
+        int count = Math.max(1, kb * 1024 / 100); // each line serializes to ~100 bytes
+        List<Map<String, Object>> lines = new ArrayList<>(count);
+        for (int i = 1; i <= count; i++) {
+            lines.add(Map.of("id", "ORD-L" + i, "note", "x".repeat(64)));
+        }
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE, contentType)
+                .body(MAPPER.writeValueAsString(
+                        Map.of("service", "creed-resource-order", "count", count, "lines", lines)));
+    }
+
     /** Lightweight liveness/echo endpoint — handy for verifying the HTTPS listener is up. */
     @GetMapping("/ping")
     public Map<String, Object> ping(@AuthenticationPrincipal Jwt jwt) {

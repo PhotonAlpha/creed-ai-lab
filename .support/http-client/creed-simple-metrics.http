@@ -11,7 +11,8 @@
 # Run with the `local` environment (http-client.private.env.json sets verifyHostCertificate=false)
 # to skip the Creed-CA self-signed cert check — httpd and the node both present Creed certificates.
 
-@lb = https://localhost:9443/simple
+#@lb = https://localhost:9443/simple
+@lb = https://localhost:8097/simple
 @node = https://localhost:8096/simple
 
 ### hello — self-contained demo route

@@ -73,6 +73,20 @@ instance in `application.yml`). Contract: no cookie → full alive list; match �
 match (unknown id, or the pinned instance just failed health check) → WARN + fall back to the full alive
 list (availability beats stickiness).
 
+## ProducerTemplate results: the body dies with `send()`'s UnitOfWork
+
+`producerTemplate.send(...)` builds a new exchange, and `ProducerCache`'s `UnitOfWorkProcessorAdvice`
+creates **and completes** its UoW before `send()` returns. Completion fires the stream cache's `onDone`,
+which deletes a spooled `FileInputStreamCache` temp file, so `result.getMessage().getBody(String.class)`
+afterwards throws `NoSuchFileException`. The `resultProcessor` runs *before* that `doneUow`
+(`SharedCamelInternalProcessor.InternalCallback.done`), so materialise the body there:
+`send(endpoint, InOut, reqProcessor, e -> e.getMessage().setBody(e.getMessage().getBody(String.class)))`
+keeps the response headers too; `request*(…, Class<T>)` does the same internally. `send()` also doesn't
+throw: check `result.getException()`. Two things hide this locally: Camel 4 `spoolEnabled` defaults to
+**false** (a `spoolThreshold` alone never writes a file), and the Logbook hc5 handler replaces any body it
+buffers (`allowed-content-types`, i.e. JSON) with a non-streaming `ByteArrayEntity`, which camel-http
+never stream-caches. Repro + full source chain: `docs/producertemplate-stream-cache-cleanup.md`.
+
 ## Three-layer audit/timing design
 
 See `docs/camel-audit-observability.md` for the full writeup (Zalando Logbook config, three real
