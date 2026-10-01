@@ -27,6 +27,9 @@ curl -k https://localhost:18091/api/order/ping
     orders the aggregator's fulfillment filter must reject; `fail=true` fault-injects a 500.
   - `POST /checkout` — the strict variant of create (400 with an error body instead of defaulting),
     used by the `creed-simple-metrics` checkout chain.
+  - `GET /large?kb=&contentType=` — a ~`kb` KiB JSON text body with a chosen `Content-Type`, sized to
+    cross a caller's Camel `spoolThreshold`; a non-JSON type keeps the caller's Logbook from buffering
+    it. Repro for `creed-simple-metrics/docs/producertemplate-stream-cache-cleanup.md`.
   - `POST /session` + `POST /echo` — hand-built `Set-Cookie` headers reproducing the
     "`Max-Age` without `Expires` ⇒ `HttpCookie.parse()` guesses version 1" corruption that
     `creed-simple-metrics`' cookie-relay demonstrates.

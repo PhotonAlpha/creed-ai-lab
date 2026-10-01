@@ -49,6 +49,12 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
   ENABLED, `https://localhost:9443/...` → 200 via `https://192.168.65.254:8096`, automatic
   re-registration after an httpd restart. Re-verified with `spring-boot:run` once the module compiled
   again (2026-09-27, context path `/simple`).
+- **`PaymentStickyProcessor` reads the order response via `send(endpoint, InOut, req, resultProcessor)`**
+  (2026-10-02): it needs both response headers and body, and a body read *after* `send()` returns fails
+  with `NoSuchFileException` once spooled (send's own UnitOfWork deletes the temp file before returning).
+  The resultProcessor converts the body to `String` before that. It also rethrows
+  `result.getException()` (send never throws). Verified end to end with a 242 KB response, spool on:
+  500 → 200. Write-up: `docs/producertemplate-stream-cache-cleanup.md`.
 - Metrics are **pull-mode**: this module exposes `/actuator/prometheus` itself and Prometheus scrapes
   it directly, unlike every other module (which pushes via OTLP).
 
@@ -113,6 +119,12 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Open items
 
+- **Repro leftovers from 2026-10-02, still in the tree — decide what to keep:**
+  `camel-context.xml` has `spoolEnabled="true"` (originally absent; this module does not need spooling —
+  JSON is unmarshalled into memory anyway and Logbook already buffers it), and `PaymentStickyProcessor`
+  calls `order-resource /api/order/large?kb=256&contentType=text/plain` (originally `/items`) and logs the
+  ~240 KB body at INFO on every `/camel/api/payment` call. The doc's repro section describes these as
+  temporary repro settings.
 - **`rest/RestConfig.java` is staged for deletion** (it imported the never-committed
   `com.creed.simple.pipeline.*`). With it gone the module compiles again (2026-09-27); `creed.camel.enabled=false`
   (the Spring MVC variant of `/camel/api/*`) presumably has nothing behind it now — not checked.
