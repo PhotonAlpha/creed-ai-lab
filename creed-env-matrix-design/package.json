@@ -5,11 +5,18 @@
   "type": "module",
   "description": "Env host/ip/port mapping matrix viewer — React + Ant Design Pro frontend for creed-resource-env-matrix",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
+    "dev:mock": "VITE_API_TARGET=http://localhost:3001 VITE_SPLUNK_TARGET=http://localhost:3001 vite",
     "mock": "node server/index.js",
+    "bff": "node --env-file-if-exists=.env.server.local server/bff.js",
+    "package:bff": "node scripts/package-bff.mjs",
+    "test:server": "node --test 'server/**/*.test.js'",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --force"
+  },
+  "engines": {
+    "node": ">=22.9"
   },
   "dependencies": {
     "@ant-design/icons": "5.6.1",
@@ -17,6 +24,7 @@
     "@ant-design/v5-patch-for-react-19": "1.0.3",
     "@antv/g6": "5.1.1",
     "antd": "5.29.3",
+    "pg": "8.23.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router-dom": "7.18.1"

@@ -65,36 +65,20 @@ every row back to `null` / `0`.
   with endpoints (no conflicts, no health, no seven-dimension identity), which is why it is a
   separate service rather than more methods on `EnvMatrixService`.
 
-### Splunk session broker (`/splunk/*`)
+### Splunk session broker — moved out (2026-10-02)
 
-`TOTP → Splunk Web login → document.cookie script`, every step audited. **61 tests pass.**
-V6 has been applied to the live `env_matrix` database and the flow exercised by curl on the `dev`
-profile with the switch off. **The real login has never been run against a real Splunk** — only
-against a loopback stub in `RestClientSplunkLoginClientTest`; the user is testing that part.
+The broker (`SplunkSessionController`, `SplunkSessionService`, `TotpService`, the login client, the
+`env-matrix.totp.*` / `env-matrix.splunk.*` properties, `SplunkAuditEvent` and its tests) was
+**removed from this module** and now lives in the frontend's Node BFF
+(`creed-env-matrix-design/server/splunk/`, run by `npm run bff`). This service no longer answers
+`/api/env-matrix/splunk/*`; `SPLUNK_*` / `ENV_MATRIX_TOTP_*` variables do nothing here.
 
-```bash
-SPLUNK_ENABLED=true SPLUNK_LOGIN_URL=https://<host>:8000/en-US/account/login SPLUNK_USERNAME=… SPLUNK_PASSWORD=… \
-  mvn -pl creed-resource/creed-resource-env-matrix spring-boot:run \
-  -Dspring-boot.run.profiles=dev -Dspring-boot.run.workingDirectory="$PWD"
-```
-
-- `TotpService` — RFC 6238 by hand (no dependency), checked against the RFC's appendix-B vectors.
-  ±`allowed-drift-steps`, constant-time compare, replay rejection (**in memory, per instance**),
-  per-address lockout (`max-failures` in `failure-window` → 429).
-- `expose-current-code` is **on by default, by request**: `/splunk/totp/current` serves the code, so
-  the OTP proves only that the caller could load the page. `ENV_MATRIX_TOTP_EXPOSE_CODE=false` to
-  require an authenticator. The default secret `JBSWY3DPEHPK3PXP` is a demo value.
-- **`env-matrix.splunk.enabled` (`SPLUNK_ENABLED`) is the switch, default `false`**: the client
-  returns a fabricated `mock-…` value and sends nothing. On, `RestClientSplunkLoginClient` (Boot's
-  `RestClient.Builder` over a JDK `HttpClient` with `Redirect.NEVER`) does the real login.
-- Splunk configuration is checked **before** the OTP is verified: verifying consumes the code, so a
-  503 after the check left the user's retry coming back `replayed` (the first bug report).
-- `RestClientSplunkLoginClient` — `GET` login page for `cval`, form `POST` echoing it (cookie +
-  field), `exchange` not `retrieve` (a 401 must be read, not thrown), reads `session-cookie` (`splunkd_8000`) from `Set-Cookie`. Script writes
-  `script-cookie-name` (`splunkd_8089`) — kept separate because the requirement names both.
-- `splunk_audit` (V6) — one row per OTP check and per Splunk call, linked by `correlation_id`,
-  saved individually (the service is not `@Transactional`) so a Splunk failure keeps its OTP row.
-  Stores a 16-hex SHA-256 **fingerprint** of the cookie, never the value.
+- **`V6__create_splunk_audit.sql` stays, unedited.** Flyway refuses to start when an applied migration
+  has gone missing or its checksum changed, so the file must outlive the code that used it. The
+  `public.splunk_audit` table it creates is now legacy: the BFF (with `SPLUNK_AUDIT_STORE=pg`) writes to
+  `splunk_broker.splunk_audit` and copied the existing rows across on its first start (25 rows on the
+  local database). Dropping the legacy table would take a **V7** here — never an edit to V6.
+- Nothing else depended on the removed `Clock` bean.
 
 ## Landmines
 

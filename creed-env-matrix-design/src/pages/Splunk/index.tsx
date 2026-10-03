@@ -168,6 +168,7 @@ export function SplunkPage() {
           value,
           row.httpStatus != null ? `HTTP ${row.httpStatus}` : null,
           row.splunkMode ? `mode=${row.splunkMode}` : null,
+          row.forwardedFor ? `forwardedFor=${row.forwardedFor}` : null,
         ].filter(Boolean);
         return parts.length ? parts.join(' · ') : '—';
       },

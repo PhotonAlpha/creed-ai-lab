@@ -13,6 +13,7 @@ distinct resolve to the same address.
 | Frontend | React 19 + TypeScript + Vite 8 + Ant Design 5 / Ant Design Pro components |
 | Backend | [`creed-resource-env-matrix`](../creed-resource/creed-resource-env-matrix) (Spring Boot 3.5, PostgreSQL) |
 | Mock backend | `server/index.js` — same contract, no database required |
+| BFF | `server/bff.js` — serves `dist/`, **owns the Splunk broker** (`server/splunk/`), proxies the rest of `/api` |
 
 ---
 
@@ -22,11 +23,11 @@ distinct resolve to the same address.
 
 ```bash
 npm install
-npm run mock                                        # terminal 1 — mock API on :3001
-VITE_API_TARGET=http://localhost:3001 npm run dev   # terminal 2 — UI on :5173
+npm run mock       # terminal 1 — mock API on :3001 (Splunk broker included, always mocked)
+npm run dev:mock   # terminal 2 — UI on :5173, both proxy targets pointed at :3001
 ```
 
-(The env var is not optional — see *Which backend `npm run dev` actually talks to* below.)
+(Plain `npm run dev` would not reach the mock — see *Which backend `npm run dev` actually talks to* below.)
 
 ### Option B — real backend (PostgreSQL)
 
@@ -38,11 +39,30 @@ docker exec creed-artifactory-db createdb -U artifactory env_matrix
 cd .. && mvn -pl creed-resource/creed-resource-env-matrix spring-boot:run \
   -Dspring-boot.run.profiles=dev -Dspring-boot.run.workingDirectory="$PWD"
 
-# 3. start the UI, pointed at :3001
+# 3. start the BFF on :3002 — the Splunk page talks to it (audit in memory; SPLUNK_AUDIT_STORE=pg to persist)
+npm run bff
+
+# 4. start the UI, pointed at :3001
 VITE_API_TARGET=http://localhost:3001 npm run dev
 ```
 
 Open <http://localhost:5173/>.
+
+### Option C — what is deployed: the BFF
+
+```bash
+npm run build
+cp .env.server.example .env.server.local   # fill in secrets; git-ignored
+npm run bff                                # :3002 — dist/ + Splunk broker + /api proxy
+```
+
+One process on <http://localhost:3002/>: `/api/env-matrix/splunk/*` is answered by the BFF itself,
+every other `/api/*` is proxied to `ENV_MATRIX_API_TARGET` (default `https://localhost:18095`,
+certificate not verified unless `ENV_MATRIX_API_INSECURE=false`), anything else is `dist/` with
+`index.html` for client routes. The audit is in memory unless `SPLUNK_AUDIT_STORE=pg`; with pg it
+refuses to start if it cannot reach the database.
+
+**Full build → package → run guide (systemd, Docker, reverse proxy, checklist, troubleshooting): [DEPLOY.md](./DEPLOY.md).**
 
 ### Which backend `npm run dev` actually talks to
 
@@ -50,6 +70,7 @@ Open <http://localhost:5173/>.
 
 ```
 VITE_API_TARGET=https://localhost:18095
+VITE_SPLUNK_TARGET=http://localhost:3002
 ```
 
 So a plain `npm run dev` proxies `/api` to `creed-resource-env-matrix` on **:18095** (`primary` /
@@ -65,12 +86,20 @@ comes up fully populated whether or not `npm run mock` is running, so a stale ba
 exactly like a broken frontend. A shell-exported `VITE_API_TARGET` wins over `.env`; both are read by
 `loadEnv` in `vite.config.ts`.
 
+`/api/env-matrix/splunk` is proxied separately, to `VITE_SPLUNK_TARGET`: the Java service no longer
+has those routes. The BFF (`npm run bff`, :3002) or the mock (:3001) answers them — `npm run dev:mock`
+sets both targets to the mock.
+
 ### Scripts
 
 | Script | What it does |
 |---|---|
 | `npm run dev` | Vite dev server on `:5173`, proxying `/api` → `VITE_API_TARGET` (`.env`: `https://localhost:18095`) |
+| `npm run dev:mock` | `npm run dev` with both `VITE_API_TARGET` and `VITE_SPLUNK_TARGET` at the mock (`:3001`) |
 | `npm run mock` | Node mock API on `:3001` (`PORT=… ` to change) |
+| `npm run bff` | BFF on `:3002` (`BFF_PORT`); loads `.env.server.local` — every variable is in `.env.server.example` |
+| `npm run package:bff` | Copy `dist/` + the BFF into `release/env-matrix-bff/` with only `pg` installed — see [DEPLOY.md](./DEPLOY.md) |
+| `npm run test:server` | `node --test` for the Splunk broker (`server/**/*.test.js`) |
 | `npm run build` | Type-check and produce `dist/` |
 | `npm run typecheck` | Types only |
 
@@ -335,32 +364,47 @@ and `B → A` is rejected; that is what `BIDIRECTIONAL` is for.
 
 ### Splunk session (`/splunk`)
 
-A credential broker: the Splunk account lives in the backend's `application.yml`
-(`env-matrix.splunk.*`), and a user gets a working Splunk Web session without ever seeing the
-password.
+A credential broker: the shared Splunk account lives with the **Node BFF** (`server/bff.js`, code in
+`server/splunk/`), and a user gets a working Splunk Web session without ever seeing the password.
+It used to live in `creed-resource-env-matrix`; the Java service no longer has these routes.
 
 1. **One-time code.** Standard TOTP (RFC 6238, HMAC-SHA1, 6 digits, 30-second step, one step of
    drift accepted either side). The left card counts down on the **server's** clock and, because
-   `env-matrix.totp.expose-current-code` is on, shows the current code on rotation — anyone who can
-   open this page can therefore pass the check. Turn it off to make the code come from an
-   authenticator app enrolled with `env-matrix.totp.secret` instead. A code is accepted **once**;
-   five wrong codes from one address within a minute answer `429` for a minute.
+   `ENV_MATRIX_TOTP_EXPOSE_CODE` is on, shows the current code on rotation — anyone who can open
+   this page can therefore pass the check. Turn it off to make the code come from an authenticator
+   app enrolled with `ENV_MATRIX_TOTP_SECRET` instead. A code is accepted **once**; five wrong codes
+   from one address within a minute answer `429` for a minute.
 2. **Splunk login.** Checked **before** the code: if Splunk is not configured the answer is `503`
-   and the code is not used up. Once the code is accepted the backend — through Spring's
-   `RestClient` — `GET`s the login page for its `cval` cookie, then `POST`s `username=…&password=…&cval=…` as a form to `env-matrix.splunk.login-url`
+   and the code is not used up. Once the code is accepted the BFF `GET`s the login page for its
+   `cval` cookie, then `POST`s `username=…&password=…&cval=…` as a form to `SPLUNK_LOGIN_URL`
    **without following redirects** (the cookie is on the 303), and reads `splunkd_8000` from
-   `Set-Cookie`.
+   `Set-Cookie`. **Splunk's TLS certificate is not verified by default** (`SPLUNK_TLS_INSECURE=true`:
+   neither the chain nor the hostname); set it to `false`, plus `SPLUNK_CA_FILE` for a private CA,
+   to verify.
 3. **Script.** The value comes back as a script to paste into the Splunk tab's devtools console:
    `document.cookie = "splunkd_8089=<value>; path=/; Secure; SameSite=Lax";` The name read and the
-   name written are separate settings (`session-cookie` / `script-cookie-name`).
-4. **Audit.** Every code check and every Splunk call is a row in `splunk_audit` — outcome, reason,
-   client address, `X-Forwarded-For`, user agent, time steps, Splunk status, duration. The two rows
-   of one request share a correlation id. The cookie is **never** stored — only the first 16 hex
-   characters of its SHA-256, enough to match a session in Splunk's own logs.
+   name written are separate settings (`SPLUNK_SESSION_COOKIE` / `SPLUNK_SCRIPT_COOKIE_NAME`).
+4. **Audit.** Every code check and every Splunk call is an audit row —
+   outcome, reason, client address, `X-Forwarded-For`, user agent, time steps, Splunk status,
+   duration. The two rows of one request share a correlation id. The cookie is **never** stored —
+   only the first 16 hex characters of its SHA-256, enough to match a session in Splunk's own logs.
+   The audit is mandatory: if a row cannot be written the request fails rather than issue an
+   unrecorded session. **Where it goes is `SPLUNK_AUDIT_STORE`:** `memory` (default — newest 500
+   rows, gone on restart) or `pg` (`splunk_broker.splunk_audit` in PostgreSQL, `SPLUNK_DB_*`).
 
-**The real call is behind a switch.** `env-matrix.splunk.enabled` (`SPLUNK_ENABLED`) defaults to
-`false`: the client returns a fabricated `mock-…` value and sends nothing. Set it to `true` to log in
-to `login-url` for real. The node mock always fabricates. The page labels a mock value as such.
+**Secrets** come from environment variables, or from `NAME_FILE` (a file holding the value — Docker /
+Kubernetes secrets, a Vault agent sink) for `ENV_MATRIX_TOTP_SECRET`, `SPLUNK_PASSWORD` and
+`SPLUNK_DB_PASSWORD`. `npm run bff` also loads `.env.server.local`; `.env.server.example` lists every
+variable.
+
+**The real call is behind a switch.** `SPLUNK_ENABLED` defaults to `false`: the client returns a
+fabricated `mock-…` value and sends nothing. The node mock always fabricates and keeps its audit in
+memory. The page labels a mock value as such.
+
+**Why its own schema** (pg only). The audit table is `splunk_broker.splunk_audit`, not `public.splunk_audit`:
+the latter is Flyway V6 of the Java module, which cannot be deleted from it, and creating it from
+Node first would make V6 fail on a fresh database. On its first start the BFF copies any rows already
+in `public.splunk_audit` across once and leaves that table alone — drop it by hand when done with it.
 
 A code is spent the moment it is verified, so after a replay or a Splunk failure the page clears the
 input and says to wait for the next code.
@@ -393,7 +437,7 @@ Base path `/api/env-matrix`. Filters are repeated query parameters —
 | `GET` | `/conflicts` | Conflict groups only |
 | `GET` | `/health` | Per-endpoint states + summary + probe mode |
 | `POST` | `/health/recheck` | Re-run the probe (rotates the mock seed) |
-| `GET` | `/splunk/totp` | TOTP period/digits/drift + server time, Splunk mode |
+| `GET` | `/splunk/totp` | TOTP period/digits/drift + server time, Splunk mode — **`/splunk/*` is served by the BFF / mock, not the Java service** |
 | `GET` | `/splunk/totp/current` | Current code (only with `expose-current-code`; else `404`) |
 | `POST` | `/splunk/session` | `{code}` → cookie script; `401` bad/replayed code, `429` locked out, `502` Splunk failed, `503` not configured |
 | `GET` | `/splunk/audit` | Audit rows, newest first (`?limit=`, default 50) |
@@ -421,8 +465,10 @@ so conflicts are reported, never rejected. Only duplicate *identities* are rejec
 │       └── Config/     # CRUD editor (/config)
 ├── server/
 │   ├── index.js        # mock API — same contract, no dependencies
-│   └── mock.json       # mock data source, rewritten on save
-└── vite.config.ts      # /api → :3001 proxy
+│   ├── mock.json       # mock data source, rewritten on save
+│   ├── bff.js          # deployable server: dist/ + Splunk broker + /api proxy
+│   └── splunk/         # the Splunk broker (TOTP, login client, pg/memory audit), shared by both
+└── vite.config.ts      # /api/env-matrix/splunk → VITE_SPLUNK_TARGET, /api → VITE_API_TARGET
 ```
 
 `server/mock.json` is committed on purpose: it is the mock API's source of truth. The mock server

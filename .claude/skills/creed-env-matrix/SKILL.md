@@ -109,38 +109,55 @@ The config page's "save": the whole table in one transaction.
 - Tests use H2 + ddl-auto (Flyway off — V1/V2 are PostgreSQL-specific) and must set `spring.application.name` + `server.port`, because the `actuator` profile is `include`d from `application.yml` and cannot be un-included by a profile-specific file; OTel interpolates both and an unresolvable placeholder fails the context.
 - DB: `jdbc:postgresql://127.0.0.1:5432/env_matrix` on the `creed-artifactory-db` container. Create once: `docker exec creed-artifactory-db createdb -U artifactory env_matrix`.
 
-## Splunk session broker (`service/splunk/*`, `TotpService`, `/splunk/*`, page `/splunk`)
+## Splunk session broker (Node BFF: `creed-env-matrix-design/server/splunk/*`, page `/splunk`)
 
-TOTP-gated credential broker: the shared Splunk account lives in `env-matrix.splunk.*`, a valid code
-gets a Splunk Web session cookie back as a `document.cookie` script. Shares nothing with endpoints.
+TOTP-gated credential broker: the shared Splunk account lives with the BFF, a valid code gets a
+Splunk Web session cookie back as a `document.cookie` script. Shares nothing with endpoints.
 
-- **The real call is off by default** — `env-matrix.splunk.enabled=false` makes
-  `RestClientSplunkLoginClient` return a `mock-…` value without sending anything.
-- **Do not follow redirects** in `RestClientSplunkLoginClient` (its request factory wraps a JDK client
-  with `Redirect.NEVER`) — the session cookie is on the login's 303; a following client returns the
-  next page's headers and the cookie is gone. Use `exchange`, not `retrieve`: a 401 must be read.
+**It is NOT in the Java service any more** (moved 2026-10-02). `server/bff.js` (`npm run bff`, :3002)
+serves `dist/`, answers `/api/env-matrix/splunk/*` itself and proxies the rest of `/api` to
+`ENV_MATRIX_API_TARGET`. `server/index.js` (the mock) imports the same `server/splunk/` code with
+Splunk forced to mock and a `MemoryAuditStore`. During `npm run dev`, Vite sends the Splunk prefix to
+`VITE_SPLUNK_TARGET` (`.env`: :3002) — `npm run dev:mock` points both targets at :3001.
+
+- **Flyway V6 (`public.splunk_audit`) stays in the Java module, unedited** — Flyway fails on a missing
+  or changed applied migration. With `SPLUNK_AUDIT_STORE=pg` the BFF writes `splunk_broker.splunk_audit` (own schema, so Node
+  creating its table first can never break V6 on a fresh DB) and copies the legacy rows once under an
+  advisory lock. Drop the legacy table only via a new V7.
+- **The real call is off by default** — `SPLUNK_ENABLED=false` returns a `mock-…` value, no network.
+- **Splunk TLS is not verified by default (`SPLUNK_TLS_INSECURE=true`), by request** — chain and
+  hostname both. Scoped to the login client's own `https.Agent`; **never** `NODE_TLS_REJECT_UNAUTHORIZED`,
+  which would also disable verification for the backend proxy and Postgres.
+- **Do not follow redirects** — the session cookie is on the login's 303. The client is `node:https`,
+  which never follows; switching to `fetch` would need `redirect: 'manual'`.
 - **Check Splunk configuration before verifying the OTP.** Verifying consumes the code; the first
   version checked afterwards, so a 503 burned the code and the user's retry came back `replayed`.
 - **`cval` must be fetched and echoed** (cookie *and* form field) — Splunk Web 7+ rejects a POST
   without it, answering 200 with no session cookie, which looks like a wrong password.
-- The cookie read (`session-cookie`, `splunkd_8000`) and written (`script-cookie-name`,
-  `splunkd_8089`) are separate settings on purpose — the requirement names both.
-- **Never persist or log the cookie value**; the audit keeps a 16-hex SHA-256 fingerprint. The
-  properties/DTO records override `toString` to mask secrets — keep that when adding fields.
-- Audit rows are saved one by one (service not `@Transactional`) so a failed Splunk call keeps the
-  OTP row. Replay memory and lockout are **in-process** — per instance, lost on restart.
-- `expose-current-code` defaults **on** (requested): the page shows the code, so the OTP is
+- **`pg` + `connectionString`: parsed URL fields override the separate `user`/`password` options** —
+  a URL without a password erased `SPLUNK_DB_PASSWORD` ("client password must be a string"). The
+  store puts the credentials into the URL.
+- **`node --test <dir>` runs every `.js` in it** — it started the mock and BFF as "tests" and hung.
+  `test:server` globs `server/**/*.test.js`.
+- `TOTP.verify` is synchronous on purpose: nothing may `await` between accepting a step and recording it.
+- Secrets: env vars or `NAME_FILE` (`ENV_MATRIX_TOTP_SECRET`, `SPLUNK_PASSWORD`, `SPLUNK_DB_PASSWORD`);
+  `npm run bff` loads `.env.server.local`. **Never log the cookie or a secret**; the audit keeps a
+  16-hex SHA-256 fingerprint and `describe(config)` masks every credential.
+- **Audit store = `SPLUNK_AUDIT_STORE`: `memory` by default** (newest 500, lost on restart, startup
+  warning), `pg` to persist. **Audit is fail-closed** either way: a row that cannot be written fails
+  the request (500); with pg the BFF refuses to start without the DB. Rows are saved one by one so a failed Splunk call keeps its OTP row. Replay
+  memory and lockout are **in-process** — per instance, lost on restart.
+- `ENV_MATRIX_TOTP_EXPOSE_CODE` defaults **on** (requested): the page shows the code, so the OTP is
   decorative until it is turned off.
-- The countdown runs on the **server** clock (`serverTimeMillis` offset); the code is refetched on
-  step rollover — the secret never reaches the browser.
-- The node mock implements the same TOTP (same default
-  secret) and always mocks Splunk. Tests use RFC 6238's appendix-B key and a `@Primary` stepping
-  `Clock`, because replay memory lives as long as the shared test context.
+- The countdown runs on the **server** clock (`serverTimeMillis` offset); the secret never reaches the browser.
+- Tests (`npm run test:server`): RFC 6238 appendix-B vectors, loopback Splunk stubs over HTTP and a
+  self-signed HTTPS cert (verification off passes, on fails).
 
 ## Frontend (`creed-env-matrix-design`)
 
 Vite 8 + React 19 + **antd 5.29.3** + `@ant-design/pro-components` 2.8.10 + **`@antv/g6` 5.1.1**.
 `npm run mock` serves the contract from `server/index.js` on `:3001` with no database.
+`npm run bff` (:3002) is the deployable shape and the Splunk broker's home — see that section.
 
 **`npm run dev` does not talk to it by default.** The committed `.env` holds
 `VITE_API_TARGET=https://localhost:18095`, so a plain `npm run dev` proxies `/api` at whatever
@@ -287,4 +304,4 @@ in the other direction.
 
 ## Mock API (`server/index.js`)
 
-Dependency-free node, same contract on the same port, `mock.json` as the committed source of truth — `{ endpoints, releases, releaseNodes, releaseLinks }`, all rewritten in place on save (expect a diff after using the UI in mock mode). It ports **Java's exact `String.hashCode`**, so mocked health matches the Spring backend endpoint-for-endpoint at the same seed. Verified identical for dimensions/conflicts/matrix/health. Keep the two in step when changing the contract.
+Dependency-free node (`pg` is imported lazily, by the BFF's pg audit store only), same contract on the same port, `mock.json` as the committed source of truth — `{ endpoints, releases, releaseNodes, releaseLinks }`, all rewritten in place on save (expect a diff after using the UI in mock mode). It ports **Java's exact `String.hashCode`**, so mocked health matches the Spring backend endpoint-for-endpoint at the same seed. Verified identical for dimensions/conflicts/matrix/health. Keep the two in step when changing the contract.

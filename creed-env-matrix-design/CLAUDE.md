@@ -57,6 +57,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 后端：[creed-resource](../creed-resource)下创建新的resource
 - 联调：Vite 把 `/api` 代理到 `VITE_API_TARGET`（`.env` 里是 `https://localhost:18095`）；
   连 mock 或 `dev` profile 需要 `VITE_API_TARGET=http://localhost:3001`。
+  `/api/env-matrix/splunk` 单独代理到 `VITE_SPLUNK_TARGET`（`.env`：BFF `http://localhost:3002`）。
+- Splunk 会话代理：Node BFF（`server/bff.js`），审计默认存内存，开关 `SPLUNK_AUDIT_STORE=pg` 时用 `pg` 写 PostgreSQL。
 
 ## 4. 目录结构（目标）
 
@@ -71,7 +73,9 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 │   └── api/             # 前端 API 封装
 ├── server/
 │   ├── index.(js|ts)    # mock API 服务
-│   └── mock.json        # 数据源（唯一真相）
+│   ├── mock.json        # 数据源（唯一真相）
+│   ├── bff.js           # 部署用 BFF：dist/ + Splunk 会话代理 + /api 反向代理（:3002）
+│   └── splunk/          # Splunk 会话代理实现，mock 与 BFF 共用
 ├── grafana/             # Grafana 演示与说明
 └── vite.config.ts       # 含 /api → :3001 代理
 ```
@@ -110,14 +114,18 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 「保存到文件」按钮：校验后通过 写回 数据库。
 
 ### 5.4 Splunk 会话（`/splunk`）
-- 凭据存储：Splunk 账号放在后端 `creed-resource-env-matrix` 的 yml（`env-matrix.splunk.*`）。
-- 身份验证：标准 TOTP（RFC 6238，30 秒一个窗口，允许 ±1 个窗口误差），密钥为 `env-matrix.totp.secret`。
-- 页面轮流显示当前 OTP（`expose-current-code`，按需求默认开启），用户手动输入后发起请求。
-- Splunk 调用使用 Spring Boot `RestClient`；**默认返回 mock 值**，开启 `env-matrix.splunk.enabled`
-  （`SPLUNK_ENABLED=true`）后才真正调用获取 cookie。
-- OTP 通过后由后端表单登录 Splunk，从响应 cookie 取 `splunkd_8000`，返回
+- **由 Node BFF（`server/bff.js`，实现在 `server/splunk/`）提供，已从 `creed-resource-env-matrix` 剥离。**
+- 凭据存储：环境变量，或 `NAME_FILE` 指向的文件（`ENV_MATRIX_TOTP_SECRET` / `SPLUNK_PASSWORD` /
+  `SPLUNK_DB_PASSWORD`）；`npm run bff` 会加载 `.env.server.local`，变量清单见 `.env.server.example`。
+- 身份验证：标准 TOTP（RFC 6238，30 秒一个窗口，允许 ±1 个窗口误差），密钥为 `ENV_MATRIX_TOTP_SECRET`。
+- 页面轮流显示当前 OTP（`ENV_MATRIX_TOTP_EXPOSE_CODE`，按需求默认开启），用户手动输入后发起请求。
+- Splunk 调用使用 `node:https`；**默认返回 mock 值**，`SPLUNK_ENABLED=true` 后才真正调用获取 cookie。
+  **按需求默认跳过 Splunk 证书校验**（`SPLUNK_TLS_INSECURE=true`，证书链与主机名都不校验）。
+- OTP 通过后由 BFF 表单登录 Splunk，从响应 cookie 取 `splunkd_8000`，返回
   `document.cookie = "splunkd_8089=…; path=/; Secure; SameSite=Lax";` 供复制。
-- 审计：每次 OTP 校验与 Splunk 调用写入 `splunk_audit`（不保存 cookie 值，只保存指纹）。
+- 审计：每次 OTP 校验与 Splunk 调用都记一行（不保存 cookie 值，只保存指纹）；写不进审计则请求失败。
+  **默认存内存**（最新 500 条，重启即丢失）；`SPLUNK_AUDIT_STORE=pg` 时写入 Postgres
+  `splunk_broker.splunk_audit`。mock 始终存内存。
 
 ## 6. 命令
 
@@ -125,7 +133,11 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 npm install
 npm run dev                                        # 启动 UI（:5173），后端取自 .env
 npm run mock                                       # 无需数据库的 mock API（:3001）
-VITE_API_TARGET=http://localhost:3001 npm run dev  # 让 UI 连 mock 或 dev profile
+npm run dev:mock                                   # 让 UI（含 Splunk）全部连 mock
+VITE_API_TARGET=http://localhost:3001 npm run dev  # 让 UI 连 dev profile（Splunk 仍走 :3002 的 BFF）
+npm run bff                                        # BFF（:3002）：dist/ + Splunk + /api 代理
+npm run test:server                                # Splunk 会话代理的 node:test 测试
+npm run build && npm run package:bff              # 部署包 release/env-matrix-bff/（详见 DEPLOY.zh-CN.md）
 ```
 
 - 矩阵视图：`http://localhost:5173/`

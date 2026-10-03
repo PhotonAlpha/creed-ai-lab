@@ -12,6 +12,7 @@
 | 前端 | React 19 + TypeScript + Vite 8 + Ant Design 5 / Ant Design Pro 组件 |
 | 后端 | [`creed-resource-env-matrix`](../creed-resource/creed-resource-env-matrix)（Spring Boot 3.5、PostgreSQL） |
 | Mock 后端 | `server/index.js` —— 契约完全一致，无需数据库 |
+| BFF | `server/bff.js` —— 托管 `dist/`，**负责 Splunk 会话代理**（`server/splunk/`），其余 `/api` 反向代理到后端 |
 
 ---
 
@@ -21,11 +22,11 @@
 
 ```bash
 npm install
-npm run mock                                        # 终端 1 —— Mock API 运行在 :3001
-VITE_API_TARGET=http://localhost:3001 npm run dev   # 终端 2 —— UI 运行在 :5173
+npm run mock       # 终端 1 —— Mock API 运行在 :3001（含 Splunk 会话代理，始终为 mock）
+npm run dev:mock   # 终端 2 —— UI 运行在 :5173，两个代理目标都指向 :3001
 ```
 
-（这个环境变量不是可选的 —— 见下面的《`npm run dev` 实际连的是哪个后端》。）
+（直接 `npm run dev` 连不到 mock —— 见下面的《`npm run dev` 实际连的是哪个后端》。）
 
 ### 方式 B —— 真实后端（PostgreSQL）
 
@@ -37,11 +38,29 @@ docker exec creed-artifactory-db createdb -U artifactory env_matrix
 cd .. && mvn -pl creed-resource/creed-resource-env-matrix spring-boot:run \
   -Dspring-boot.run.profiles=dev -Dspring-boot.run.workingDirectory="$PWD"
 
-# 3. 启动 UI，并把代理指向 :3001
+# 3. 在 :3002 启动 BFF —— Splunk 页面调用它（审计默认存内存；SPLUNK_AUDIT_STORE=pg 时写入 Postgres）
+npm run bff
+
+# 4. 启动 UI，并把代理指向 :3001
 VITE_API_TARGET=http://localhost:3001 npm run dev
 ```
 
 浏览器打开 <http://localhost:5173/>。
+
+### 方式 C —— 部署形态：BFF
+
+```bash
+npm run build
+cp .env.server.example .env.server.local   # 填入密钥；已被 git 忽略
+npm run bff                                # :3002 —— dist/ + Splunk 会话代理 + /api 反向代理
+```
+
+<http://localhost:3002/> 一个进程搞定：`/api/env-matrix/splunk/*` 由 BFF 自己处理，其余 `/api/*`
+反向代理到 `ENV_MATRIX_API_TARGET`（默认 `https://localhost:18095`，除非设置
+`ENV_MATRIX_API_INSECURE=false`，否则不校验证书），其他路径返回 `dist/`，前端路由回落到
+`index.html`。审计默认存在内存中；`SPLUNK_AUDIT_STORE=pg` 时写入数据库，连不上数据库则拒绝启动。
+
+**完整的 编译 → 打包 → 运行 指南（systemd、Docker、反向代理、检查清单、故障排查）：[DEPLOY.zh-CN.md](./DEPLOY.zh-CN.md)。**
 
 ### `npm run dev` 实际连的是哪个后端
 
@@ -49,6 +68,7 @@ VITE_API_TARGET=http://localhost:3001 npm run dev
 
 ```
 VITE_API_TARGET=https://localhost:18095
+VITE_SPLUNK_TARGET=http://localhost:3002
 ```
 
 因此直接 `npm run dev` 会把 `/api` 代理到 **:18095** 上的 `creed-resource-env-matrix`
@@ -63,12 +83,19 @@ VITE_API_TARGET=http://localhost:3001 npm run dev
 会正常显示数据 —— 于是一个没重启的旧后端，看起来和前端坏掉一模一样。shell 里导出的
 `VITE_API_TARGET` 优先于 `.env`，两者都由 `vite.config.ts` 中的 `loadEnv` 读取。
 
+`/api/env-matrix/splunk` 单独代理到 `VITE_SPLUNK_TARGET`：Java 服务已不再提供这些接口，由 BFF
+（`npm run bff`，:3002）或 mock（:3001）应答 —— `npm run dev:mock` 会把两个目标都指向 mock。
+
 ### 脚本
 
 | 脚本 | 作用 |
 |---|---|
 | `npm run dev` | Vite 开发服务器（`:5173`），将 `/api` 代理到 `VITE_API_TARGET`（`.env`：`https://localhost:18095`） |
+| `npm run dev:mock` | 等同 `npm run dev`，但 `VITE_API_TARGET` 与 `VITE_SPLUNK_TARGET` 都指向 mock（`:3001`） |
 | `npm run mock` | Node Mock API（`:3001`，可用 `PORT=…` 修改） |
+| `npm run bff` | BFF（`:3002`，可用 `BFF_PORT` 修改）；会加载 `.env.server.local`，全部变量见 `.env.server.example` |
+| `npm run package:bff` | 把 `dist/` 和 BFF 复制到 `release/env-matrix-bff/`，只安装 `pg` —— 见 [DEPLOY.zh-CN.md](./DEPLOY.zh-CN.md) |
+| `npm run test:server` | 用 `node --test` 跑 Splunk 会话代理的测试（`server/**/*.test.js`） |
 | `npm run build` | 类型检查并产出 `dist/` |
 | `npm run typecheck` | 仅做类型检查 |
 
@@ -307,29 +334,41 @@ release 具有权威性：在此删除的行会从数据库中删除，其他 re
 
 ### Splunk 会话（`/splunk`）
 
-一个凭据代理：Splunk 账号保存在后端 `application.yml`（`env-matrix.splunk.*`），用户拿到可用的
-Splunk Web 会话，却始终看不到密码。
+一个凭据代理：共享的 Splunk 账号保存在 **Node BFF**（`server/bff.js`，代码在 `server/splunk/`），
+用户拿到可用的 Splunk Web 会话，却始终看不到密码。它原先位于 `creed-resource-env-matrix`，
+Java 服务现已不再提供这些接口。
 
 1. **一次性验证码。** 标准 TOTP（RFC 6238，HMAC-SHA1，6 位，30 秒一个窗口，前后各允许 1 个窗口的
-   误差）。左侧卡片按**服务端**时钟倒计时；由于开启了 `env-matrix.totp.expose-current-code`，页面会
-   轮流显示当前验证码 —— 因此任何能打开这个页面的人都能通过校验。关闭它，验证码就必须来自用
-   `env-matrix.totp.secret` 绑定的身份验证器 App。一个验证码**只能使用一次**；同一地址一分钟内输错
+   误差）。左侧卡片按**服务端**时钟倒计时；由于开启了 `ENV_MATRIX_TOTP_EXPOSE_CODE`，页面会轮流
+   显示当前验证码 —— 因此任何能打开本页的人都能通过校验。关闭它，验证码就必须来自用
+   `ENV_MATRIX_TOTP_SECRET` 绑定的身份验证器 App。一个验证码**只能使用一次**；同一地址一分钟内输错
    5 次，之后一分钟内返回 `429`。
 2. **登录 Splunk。** 在校验验证码**之前**先检查 Splunk 是否配置齐全：未配置时直接返回 `503`，验证码
-   不会被消耗。验证码通过后，后端（通过 Spring 的 `RestClient`）先 `GET` 登录页拿到 `cval` cookie，再以表单
-   `username=…&password=…&cval=…` `POST` 到 `env-matrix.splunk.login-url`，**不跟随重定向**
-   （cookie 在 303 响应上），从 `Set-Cookie` 中读取 `splunkd_8000`。
+   不会被消耗。验证码通过后，BFF 先 `GET` 登录页拿到 `cval` cookie，再把
+   `username=…&password=…&cval=…` 以表单 `POST` 到 `SPLUNK_LOGIN_URL`，**不跟随重定向**
+   （cookie 在 303 响应上），从 `Set-Cookie` 中读取 `splunkd_8000`。**默认不校验 Splunk 的 TLS
+   证书**（`SPLUNK_TLS_INSECURE=true`：既不校验证书链，也不校验主机名）；设为 `false`（私有 CA 再配
+   `SPLUNK_CA_FILE`）即开启校验。
 3. **脚本。** 该值以脚本形式返回，粘贴到 Splunk 页面的开发者工具控制台执行：
    `document.cookie = "splunkd_8089=<值>; path=/; Secure; SameSite=Lax";` 读取的 cookie 名与写入的
-   cookie 名是两个独立配置（`session-cookie` / `script-cookie-name`）。
-4. **审计。** 每一次验证码校验、每一次 Splunk 调用都在 `splunk_audit` 中记一行 —— 结果、原因、客户端
-   地址、`X-Forwarded-For`、User-Agent、时间窗口、Splunk 状态码、耗时。同一次请求的两行共享一个关联 ID。
-   cookie 本身**从不**保存 —— 只保存其 SHA-256 的前 16 个十六进制字符，足以与 Splunk 自身日志中的
-   会话对应。
+   cookie 名是两个独立配置（`SPLUNK_SESSION_COOKIE` / `SPLUNK_SCRIPT_COOKIE_NAME`）。
+4. **审计。** 每一次验证码校验、每一次 Splunk 调用都记一行审计 ——
+   结果、原因、客户端地址、`X-Forwarded-For`、User-Agent、时间窗口、Splunk 状态码、耗时。同一次请求的
+   两行共享一个关联 ID。cookie 本身**从不**保存 —— 只保存其 SHA-256 的前 16 个十六进制字符，足以与
+   Splunk 自身日志中的会话对应。审计是强制的：写不进审计行时请求直接失败，绝不签发未记录的会话。
+   **存到哪里由 `SPLUNK_AUDIT_STORE` 决定：** `memory`（默认 —— 保留最新 500 条，重启即丢失）或
+   `pg`（PostgreSQL 的 `splunk_broker.splunk_audit`，连接参数为 `SPLUNK_DB_*`）。
 
-**真实调用由开关控制。** `env-matrix.splunk.enabled`（`SPLUNK_ENABLED`）默认 `false`：客户端直接返回
-伪造的 `mock-…` 值，不发送任何请求；设为 `true` 才会真正登录 `login-url`。node mock 始终返回伪造值。页面会把
-mock 值明确标出。
+**密钥**来自环境变量；`ENV_MATRIX_TOTP_SECRET`、`SPLUNK_PASSWORD`、`SPLUNK_DB_PASSWORD` 也可以用
+`NAME_FILE`（存放该值的文件 —— Docker / Kubernetes secret、Vault agent 输出文件）。`npm run bff`
+还会加载 `.env.server.local`；全部变量见 `.env.server.example`。
+
+**真实调用由开关控制。** `SPLUNK_ENABLED` 默认 `false`：客户端直接返回伪造的 `mock-…` 值，不发出
+任何请求。Node mock 始终伪造，且审计只保存在内存中。页面会把 mock 值明确标注出来。
+
+**为什么用独立 schema**（仅 pg）。 审计表是 `splunk_broker.splunk_audit`，而不是 `public.splunk_audit`：
+后者是 Java 模块的 Flyway V6，无法从该模块删除；如果 Node 先建出同名表，全新数据库上 V6 就会失败。
+BFF 首次启动时会把 `public.splunk_audit` 中已有的记录复制一次过来，原表保持不动 —— 确认无用后可手动删除。
 
 验证码一经校验即被消耗，因此遇到「已使用」或 Splunk 调用失败时，页面会清空输入框并提示等待下一个验证码。
 
@@ -361,7 +400,7 @@ mock 值明确标出。
 | `GET` | `/conflicts` | 仅返回冲突分组 |
 | `GET` | `/health` | 各端点状态、汇总及探测模式 |
 | `POST` | `/health/recheck` | 重新执行探测（轮换模拟种子） |
-| `GET` | `/splunk/totp` | TOTP 周期 / 位数 / 误差 + 服务端时间、Splunk 模式 |
+| `GET` | `/splunk/totp` | TOTP 周期 / 位数 / 误差 + 服务端时间、Splunk 模式 —— **`/splunk/*` 由 BFF / mock 提供，不在 Java 服务中** |
 | `GET` | `/splunk/totp/current` | 当前验证码（仅在开启 `expose-current-code` 时；否则 `404`） |
 | `POST` | `/splunk/session` | `{code}` → cookie 脚本；`401` 验证码错误/已使用，`429` 已锁定，`502` Splunk 失败，`503` 未配置 |
 | `GET` | `/splunk/audit` | 审计记录，按时间倒序（`?limit=`，默认 50） |
@@ -389,8 +428,10 @@ mock 值明确标出。
 │       └── Config/     # 增删改查编辑页（/config）
 ├── server/
 │   ├── index.js        # Mock API —— 契约一致，零依赖
-│   └── mock.json       # Mock 数据源，保存时会被回写
-└── vite.config.ts      # /api → :3001 代理
+│   ├── mock.json       # Mock 数据源，保存时会被回写
+│   ├── bff.js          # 可部署的服务：dist/ + Splunk 会话代理 + /api 反向代理
+│   └── splunk/         # Splunk 会话代理（TOTP、登录客户端、pg/内存审计），两者共用
+└── vite.config.ts      # /api/env-matrix/splunk → VITE_SPLUNK_TARGET，/api → VITE_API_TARGET
 ```
 
 `server/mock.json` 刻意纳入版本管理：它是 Mock API 的唯一真相来源。配置页保存时 Mock 服务器会就地重写

@@ -52,12 +52,31 @@ Complete and verified in a browser against the real backend.
   page-level modal, save-back-to-database. *Release topology*: a release list, its participants and
   its connections, saved with one authoritative batch write per release.
 - **Splunk session (`/splunk`)** — rotating TOTP display with a server-clock countdown, a 6-digit
-  `Input.OTP`, the returned `document.cookie` script (copyable), and the audit table. Verified with
-  `npm run typecheck`/`build` and by curl against both `npm run mock` and the `dev` backend (Splunk
-  in mock mode). **Never run against a real Splunk** — by request, that test is the user's. The
-  input is cleared once a code is spent (success, `otp_replayed`, any `splunk_*` error) — the stale
-  code left in the box is what produced the first reported "replayed". The node mock implements the same TOTP (default secret
-  `JBSWY3DPEHPK3PXP`), always mocks Splunk, and keeps its audit in memory, not `mock.json`.
+  `Input.OTP`, the returned `document.cookie` script (copyable), and the audit table. The input is
+  cleared once a code is spent (success, `otp_replayed`, any `splunk_*` error) — the stale code left
+  in the box is what produced the first reported "replayed".
+- **Splunk broker = Node BFF (`server/bff.js` + `server/splunk/`), moved out of the Java service on
+  2026-10-02.** Same contract, same env-var names. The BFF serves `dist/`, answers
+  `/api/env-matrix/splunk/*` itself and proxies the rest of `/api` to `ENV_MATRIX_API_TARGET`. The
+  mock imports the very same broker, with Splunk forced to mock and a memory audit store.
+  - Secrets: env vars, or `NAME_FILE` for `ENV_MATRIX_TOTP_SECRET` / `SPLUNK_PASSWORD` /
+    `SPLUNK_DB_PASSWORD`; `npm run bff` loads `.env.server.local` (`.env.server.example` lists all).
+  - **Splunk TLS is not verified by default (`SPLUNK_TLS_INSECURE=true`), by request** — the
+    equivalent of a trust-all context plus `NoopHostnameVerifier`. Scoped to the login agent only;
+    never `NODE_TLS_REJECT_UNAUTHORIZED`, which would also switch it off for the backend proxy and pg.
+  - Audit: **`SPLUNK_AUDIT_STORE=memory` by default** (newest 500 rows, lost on restart — the BFF
+    warns at startup); `pg` writes `splunk_broker.splunk_audit` (own schema — see the README for why),
+    one-time copy of `public.splunk_audit` under an advisory lock, and refuses to start without the
+    database. Either way fail-closed: no audit row, no session.
+  - Verified: `npm run test:server` (24 tests incl. RFC 6238 vectors and a self-signed HTTPS stub,
+    both with verification off and on); curl through the BFF against a local self-signed HTTPS Splunk
+    stub (cval echoed, 303 not followed, replay 401, path traversal → `index.html`); pg store on the
+    live `env_matrix` DB (25 legacy rows copied, ids continue at 26, no re-copy on restart).
+    **Never run against a real Splunk** — by request, that test is the user's.
+  - Deployment: `npm run build && npm run package:bff` → `release/env-matrix-bff/` (runtime
+    `package.json` with `"type": "module"` + `pg` only). Verified by `npm start` from the packaged
+    copy (UI, SPA fallback, `/api` proxy, Splunk routes, pg audit). Step-by-step in `DEPLOY.md` /
+    `DEPLOY.zh-CN.md`; the systemd/Docker/nginx templates there were not run.
 - **i18n** en / zh-CN throughout, including the antd locale bundle; persisted in `localStorage`.
 - `antd lint src` → 0 issues. `tsc -b` and `vite build` clean.
 

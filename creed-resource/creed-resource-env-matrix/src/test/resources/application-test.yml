@@ -56,10 +56,3 @@ env-matrix:
   health:
     mode: mock
     mock-seed: 0
-  totp:
-    # RFC 6238 appendix B's SHA-1 key ("12345678901234567890"), Base32.
-    secret: GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ
-    expose-current-code: true
-    max-failures: 3
-  splunk:
-    enabled: false
