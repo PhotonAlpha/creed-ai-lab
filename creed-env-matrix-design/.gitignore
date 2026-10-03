@@ -1,6 +1,5 @@
 node_modules/
 dist/
-*.local
 .DS_Store
 
 # Vite / TS build caches
