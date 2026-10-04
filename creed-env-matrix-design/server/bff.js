@@ -2,7 +2,7 @@
  * Env Matrix BFF — the process the frontend runs as outside `npm run dev`, and the only owner of the
  * Splunk session broker since it left creed-resource-env-matrix.
  *
- *   /api/env-matrix/splunk/*  answered here (server/splunk/), audit in memory or Postgres (SPLUNK_AUDIT_STORE)
+ *   /api/env-matrix/splunk/*  answered here (server/splunk/), audit in memory, Postgres or MySQL (SPLUNK_AUDIT_STORE)
  *   /api/*                    reverse-proxied to creed-resource-env-matrix (ENV_MATRIX_API_TARGET)
  *   everything else           dist/ — the built SPA, index.html for unknown paths (client routing)
  *
@@ -141,9 +141,9 @@ if (config.splunk.enabled && config.splunk.tlsInsecure) {
   console.warn(`[bff] SPLUNK_TLS_INSECURE: Splunk's certificate is not verified (${config.splunk.loginUrl})`);
 }
 if (config.audit.store === 'memory') {
-  console.warn('[bff] SPLUNK_AUDIT_STORE=memory: the audit keeps the newest 500 rows and is lost on restart — set pg to persist it');
+  console.warn('[bff] SPLUNK_AUDIT_STORE=memory: the audit keeps the newest 500 rows and is lost on restart — set pg or mysql to persist it');
 }
-// pg: fail at startup, not on the first code — the broker refuses to issue a session it cannot audit.
+// pg / mysql: fail at startup, not on the first code — the broker refuses to issue a session it cannot audit.
 // memory: a no-op.
 await store.init();
 server.listen(PORT, HOST, () => {

@@ -9,7 +9,7 @@ and proxies everything else to `creed-resource-env-matrix`. For local developmen
 ```
 browser ──► BFF (node server/bff.js, :3002)
               ├─ /api/env-matrix/splunk/*  answered here ── Splunk Web (HTTPS, form login)
-              │                                         └── audit: memory (default) | PostgreSQL (SPLUNK_AUDIT_STORE=pg)
+              │                                         └── audit: memory (default) | PostgreSQL | MySQL (SPLUNK_AUDIT_STORE)
               ├─ /api/*                    proxied ─────── creed-resource-env-matrix (:18095)
               └─ everything else           dist/ (index.html for client routes)
 ```
@@ -28,7 +28,7 @@ dependency is `pg`. React, antd and G6 are bundled into `dist/` and are not need
 | Network | npm registry | PostgreSQL, `creed-resource-env-matrix`, Splunk Web |
 | openssl | optional — only for one `test:server` case | — |
 
-PostgreSQL is needed **only with `SPLUNK_AUDIT_STORE=pg`**. The default audit store is memory (newest
+A database is needed **only with `SPLUNK_AUDIT_STORE=pg` or `mysql`**. The default audit store is memory (newest
 500 rows, lost on restart), and then no database is involved at all. With pg, the database must
 exist (`env_matrix`) and the DB user needs `CREATE` on it, or a DBA creates the schema first (§5).
 
@@ -63,7 +63,7 @@ release/env-matrix-bff/
 ├── server/splunk/         broker code, without *.test.js
 ├── package.json           "type": "module", dependencies: { pg }, scripts.start
 ├── package-lock.json
-├── node_modules/          pg only (~1 MB)
+├── node_modules/          pg + mysql2 only
 └── .env.server.example    every setting, commented
 ```
 
@@ -117,9 +117,9 @@ cp .env.server.example .env.server.local && chmod 600 .env.server.local
 | `SPLUNK_LOGIN_URL` | `splunk.example.invalid` | `https://<splunk>:8000/en-US/account/login` |
 | `SPLUNK_USERNAME` / `SPLUNK_PASSWORD` (`_FILE`) | `admin` / `admin` | the shared account |
 | `SPLUNK_TLS_INSECURE` | `true` — certificate **not verified** | as required; `false` + `SPLUNK_CA_FILE` to verify |
-| `SPLUNK_AUDIT_STORE` | `memory` — newest 500 rows, **lost on restart** | `pg` to keep an audit trail |
-| `SPLUNK_DB_URL` (pg only) | `postgres://127.0.0.1:5432/env_matrix` | the real host |
-| `SPLUNK_DB_USER` / `SPLUNK_DB_PASSWORD` (`_FILE`, pg only) | `artifactory` / `artifactory_pw` | real credentials |
+| `SPLUNK_AUDIT_STORE` | `memory` — newest 500 rows, **lost on restart** | `pg` or `mysql` to keep an audit trail |
+| `SPLUNK_DB_URL` (pg / mysql) | `postgres://127.0.0.1:5432/env_matrix`, or `mysql://127.0.0.1:3306/env_matrix` with mysql | the real host; a URL for the other database is rejected at startup |
+| `SPLUNK_DB_USER` / `SPLUNK_DB_PASSWORD` (`_FILE`, pg / mysql) | `artifactory` / `artifactory_pw` | real credentials |
 | `BFF_PORT` / `BFF_HOST` | `3002` / all interfaces | `BFF_HOST=127.0.0.1` behind a reverse proxy |
 
 Generate a TOTP secret: `node -e "const a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';console.log([...require('crypto').randomBytes(20)].map(b=>a[b&31]).join(''))"`.
@@ -127,9 +127,21 @@ Generate a TOTP secret: `node -e "const a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';con
 Invalid values (a non-Base32 secret, a bad schema name, out-of-range numbers) fail at startup with
 the variable's name, not on the first request.
 
-## 5. Prepare the database (`SPLUNK_AUDIT_STORE=pg` only)
+## 5. Prepare the database (`SPLUNK_AUDIT_STORE=pg` or `mysql`)
 
-Skip this section with the default memory store. With pg, there is nothing to do if the DB user may
+Skip this section with the default memory store.
+
+**MySQL** (8.0+, or MariaDB 10.5+): create the database and an account that may create a table in it;
+the BFF creates `splunk_audit` (InnoDB, utf8mb4) on first start. Times are stored as UTC `datetime(3)`
+whatever the server's time zone.
+
+```sql
+create database env_matrix character set utf8mb4;
+create user 'artifactory'@'%' identified by '…';
+grant create, select, insert on env_matrix.* to 'artifactory'@'%';
+```
+
+**PostgreSQL**: there is nothing to do if the DB user may
 create schemas: on first start the BFF runs
 `create schema if not exists splunk_broker` + the table + two indexes, and copies any rows from the
 legacy `public.splunk_audit` (Flyway V6 of the Java module) once. Otherwise, as a privileged user:
@@ -271,7 +283,9 @@ versions can be swapped freely. Restarting clears the replay memory and lockout 
 | `Cannot find package 'pg'` | `npm install --omit=dev` not run in the release directory |
 | `SASL: … client password must be a string` | no DB password reached `pg` — set `SPLUNK_DB_PASSWORD` (or `_FILE`) |
 | startup fails with `ECONNREFUSED …:5432` / `permission denied for database` | `SPLUNK_AUDIT_STORE=pg` and the DB is unreachable / no `CREATE` — see §5 |
-| audit empty after a restart | the default `SPLUNK_AUDIT_STORE=memory` — set `pg` to persist |
+| startup fails with `ECONNREFUSED …:3306` / `Access denied for user` / `Unknown database` | `SPLUNK_AUDIT_STORE=mysql` and the DB is unreachable / wrong credentials / database not created — see §5 |
+| `SPLUNK_DB_URL '…' does not fit SPLUNK_AUDIT_STORE=…` | a `postgres://` URL with `mysql`, or the reverse |
+| audit empty after a restart | the default `SPLUNK_AUDIT_STORE=memory` — set `pg` or `mysql` to persist |
 | `EADDRINUSE :::3002` | another BFF is running; `lsof -nP -iTCP:3002 -sTCP:LISTEN` |
 | `/` answers ``no build at … — run `npm run build` first`` | `dist/` missing or `BFF_STATIC_DIR` wrong |
 | `/api/...` → `502 bad_gateway` | `ENV_MATRIX_API_TARGET` unreachable, or its certificate rejected with `ENV_MATRIX_API_INSECURE=false` |

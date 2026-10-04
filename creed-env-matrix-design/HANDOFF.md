@@ -67,7 +67,10 @@ Complete and verified in a browser against the real backend.
   - Audit: **`SPLUNK_AUDIT_STORE=memory` by default** (newest 500 rows, lost on restart — the BFF
     warns at startup); `pg` writes `splunk_broker.splunk_audit` (own schema — see the README for why),
     one-time copy of `public.splunk_audit` under an advisory lock, and refuses to start without the
-    database. Either way fail-closed: no audit row, no session.
+    database. `mysql` (`mysql2`, lazily imported) writes `splunk_audit` in the URL's database —
+    `datetime(3)` written as UTC by the store with pool `timezone: 'Z'`, verified against a MySQL 8.4
+    container running `--default-time-zone=+08:00` (times stayed UTC, rows survived a restart, a
+    wrong password stopped startup). Either way fail-closed: no audit row, no session.
   - Verified: `npm run test:server` (24 tests incl. RFC 6238 vectors and a self-signed HTTPS stub,
     both with verification off and on); curl through the BFF against a local self-signed HTTPS Splunk
     stub (cval echoed, 303 not followed, replay 401, path traversal → `index.html`); pg store on the

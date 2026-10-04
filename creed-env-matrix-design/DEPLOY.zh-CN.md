@@ -8,7 +8,7 @@
 ```
 浏览器 ──► BFF（node server/bff.js，:3002）
              ├─ /api/env-matrix/splunk/*  在此处理 ── Splunk Web（HTTPS 表单登录）
-             │                                    └── 审计：内存（默认）| PostgreSQL（SPLUNK_AUDIT_STORE=pg）
+             │                                    └── 审计：内存（默认）| PostgreSQL | MySQL（SPLUNK_AUDIT_STORE）
              ├─ /api/*                    反向代理 ── creed-resource-env-matrix（:18095）
              └─ 其余路径                  dist/（前端路由回落到 index.html）
 ```
@@ -27,7 +27,7 @@ G6 都已打包进 `dist/`，服务器上不需要。
 | 网络 | npm 仓库 | PostgreSQL、`creed-resource-env-matrix`、Splunk Web |
 | openssl | 可选 —— 仅 `test:server` 中的一个用例需要 | —— |
 
-**只有 `SPLUNK_AUDIT_STORE=pg` 时才需要 PostgreSQL。** 默认审计存在内存中（保留最新 500 条，重启即丢失），
+**只有 `SPLUNK_AUDIT_STORE=pg` 或 `mysql` 时才需要数据库。** 默认审计存在内存中（保留最新 500 条，重启即丢失），
 此时完全不涉及数据库。使用 pg 时，数据库 `env_matrix` 必须已存在，且数据库用户需要该库的 `CREATE`
 权限；没有的话请 DBA 先建好 schema（见第 5 节）。
 
@@ -114,9 +114,9 @@ cp .env.server.example .env.server.local && chmod 600 .env.server.local
 | `SPLUNK_LOGIN_URL` | `splunk.example.invalid` | `https://<splunk>:8000/en-US/account/login` |
 | `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`（`_FILE`） | `admin` / `admin` | 共享账号 |
 | `SPLUNK_TLS_INSECURE` | `true` —— **不校验**证书 | 按需求；校验时设为 `false` + `SPLUNK_CA_FILE` |
-| `SPLUNK_AUDIT_STORE` | `memory` —— 保留最新 500 条，**重启即丢失** | 需要保留审计时设为 `pg` |
-| `SPLUNK_DB_URL`（仅 pg） | `postgres://127.0.0.1:5432/env_matrix` | 真实主机 |
-| `SPLUNK_DB_USER` / `SPLUNK_DB_PASSWORD`（`_FILE`，仅 pg） | `artifactory` / `artifactory_pw` | 真实凭据 |
+| `SPLUNK_AUDIT_STORE` | `memory` —— 保留最新 500 条，**重启即丢失** | 需要保留审计时设为 `pg` 或 `mysql` |
+| `SPLUNK_DB_URL`（pg / mysql） | `postgres://127.0.0.1:5432/env_matrix`；mysql 时为 `mysql://127.0.0.1:3306/env_matrix` | 真实主机；与所选数据库不符的 URL 启动时即报错 |
+| `SPLUNK_DB_USER` / `SPLUNK_DB_PASSWORD`（`_FILE`，pg / mysql） | `artifactory` / `artifactory_pw` | 真实凭据 |
 | `BFF_PORT` / `BFF_HOST` | `3002` / 所有网卡 | 在反向代理之后时设 `BFF_HOST=127.0.0.1` |
 
 生成 TOTP 密钥：`node -e "const a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';console.log([...require('crypto').randomBytes(20)].map(b=>a[b&31]).join(''))"`。
@@ -124,9 +124,20 @@ cp .env.server.example .env.server.local && chmod 600 .env.server.local
 非法取值（非 Base32 的密钥、非法 schema 名、越界数字）会在**启动时**报错并指出变量名，而不是等到
 第一个请求。
 
-## 5. 准备数据库（仅 `SPLUNK_AUDIT_STORE=pg`）
+## 5. 准备数据库（`SPLUNK_AUDIT_STORE=pg` 或 `mysql`）
 
-使用默认的内存审计时跳过本节。使用 pg 时，如果数据库用户有建 schema 的权限，则无需任何操作：BFF 首次启动时会执行
+使用默认的内存审计时跳过本节。
+
+**MySQL**（8.0+，或 MariaDB 10.5+）：建好数据库和一个能在其中建表的账号；BFF 首次启动时会创建
+`splunk_audit`（InnoDB，utf8mb4）。时间一律以 UTC 存入 `datetime(3)`，与服务器时区无关。
+
+```sql
+create database env_matrix character set utf8mb4;
+create user 'artifactory'@'%' identified by '…';
+grant create, select, insert on env_matrix.* to 'artifactory'@'%';
+```
+
+**PostgreSQL**：如果数据库用户有建 schema 的权限，则无需任何操作：BFF 首次启动时会执行
 `create schema if not exists splunk_broker`，建表和两个索引，并把旧表 `public.splunk_audit`
 （Java 模块的 Flyway V6）中已有的记录复制一次。否则请用有权限的用户执行：
 
@@ -264,7 +275,9 @@ location / {
 | `Cannot find package 'pg'` | 没有在发布目录执行 `npm install --omit=dev` |
 | `SASL: … client password must be a string` | 数据库密码没有传到 `pg` —— 设置 `SPLUNK_DB_PASSWORD`（或 `_FILE`） |
 | 启动失败：`ECONNREFUSED …:5432` / `permission denied for database` | `SPLUNK_AUDIT_STORE=pg` 且数据库不可达 / 没有 `CREATE` 权限 —— 见第 5 节 |
-| 重启后审计为空 | 默认 `SPLUNK_AUDIT_STORE=memory` —— 设为 `pg` 才会持久化 |
+| 启动失败：`ECONNREFUSED …:3306` / `Access denied for user` / `Unknown database` | `SPLUNK_AUDIT_STORE=mysql` 且数据库不可达 / 凭据错误 / 数据库未创建 —— 见第 5 节 |
+| `SPLUNK_DB_URL '…' does not fit SPLUNK_AUDIT_STORE=…` | `mysql` 配了 `postgres://` 的 URL，或反过来 |
+| 重启后审计为空 | 默认 `SPLUNK_AUDIT_STORE=memory` —— 设为 `pg` 或 `mysql` 才会持久化 |
 | `EADDRINUSE :::3002` | 已有一个 BFF 在运行；`lsof -nP -iTCP:3002 -sTCP:LISTEN` |
 | 访问 `/` 返回 ``no build at … — run `npm run build` first`` | 缺少 `dist/`，或 `BFF_STATIC_DIR` 设错 |
 | `/api/...` → `502 bad_gateway` | `ENV_MATRIX_API_TARGET` 不可达，或在 `ENV_MATRIX_API_INSECURE=false` 时证书被拒 |

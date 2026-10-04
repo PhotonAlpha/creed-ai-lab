@@ -144,8 +144,11 @@ Splunk forced to mock and a `MemoryAuditStore`. During `npm run dev`, Vite sends
   `npm run bff` loads `.env.server.local`. **Never log the cookie or a secret**; the audit keeps a
   16-hex SHA-256 fingerprint and `describe(config)` masks every credential.
 - **Audit store = `SPLUNK_AUDIT_STORE`: `memory` by default** (newest 500, lost on restart, startup
-  warning), `pg` to persist. **Audit is fail-closed** either way: a row that cannot be written fails
-  the request (500); with pg the BFF refuses to start without the DB. Rows are saved one by one so a failed Splunk call keeps its OTP row. Replay
+  warning), `pg` or `mysql` to persist. **Audit is fail-closed** either way: a row that cannot be
+  written fails the request (500); with pg/mysql the BFF refuses to start without the DB. MySQL:
+  `splunk_audit` in the URL's database (no schema — the Flyway clash is PG-only), `created_at`
+  `datetime(3)` written in UTC by the store (`timezone: 'Z'`) — a `timestamp` would shift with the
+  session time zone. `SPLUNK_DB_URL` defaults per store and a mismatched scheme fails at startup. Rows are saved one by one so a failed Splunk call keeps its OTP row. Replay
   memory and lockout are **in-process** — per instance, lost on restart.
 - `ENV_MATRIX_TOTP_EXPOSE_CODE` defaults **on** (requested): the page shows the code, so the OTP is
   decorative until it is turned off.

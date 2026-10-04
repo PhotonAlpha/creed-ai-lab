@@ -5,13 +5,13 @@
  *   ├── dist/               the built SPA
  *   ├── server/bff.js
  *   ├── server/splunk/      without *.test.js
- *   ├── package.json        runtime-only: `pg`, nothing else
+ *   ├── package.json        runtime-only: `pg` and `mysql2`, nothing else
  *   ├── package-lock.json
  *   └── .env.server.example
  *
  * Why a separate package.json: the project's own one lists react/antd/G6 under `dependencies` (Vite
  * bundles them into dist/), so `npm ci --omit=dev` on it would install ~all of them for a process
- * whose only runtime dependency is `pg`.
+ * whose only runtime dependencies are the two database drivers.
  *
  *   RELEASE_DIR=/opt/env-matrix-bff npm run package:bff
  */
@@ -47,7 +47,7 @@ writeFileSync(join(OUT, 'package.json'), `${JSON.stringify({
   type: 'module',
   engines: project.engines,
   scripts: { start: 'node --env-file-if-exists=.env.server.local server/bff.js' },
-  dependencies: { pg: project.dependencies.pg },
+  dependencies: { mysql2: project.dependencies.mysql2, pg: project.dependencies.pg },
 }, null, 2)}\n`);
 
 // Resolves the lockfile for the trimmed dependency set; --omit=dev is a no-op here but states intent.

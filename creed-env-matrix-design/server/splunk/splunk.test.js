@@ -78,10 +78,19 @@ describe('config', () => {
     }
   });
 
-  test('the audit goes to memory unless SPLUNK_AUDIT_STORE=pg', () => {
+  test('the audit goes to memory unless SPLUNK_AUDIT_STORE is pg or mysql', () => {
     assert.equal(loadConfig({}).audit.store, 'memory');
     assert.equal(loadConfig({ SPLUNK_AUDIT_STORE: 'pg' }).audit.store, 'pg');
+    assert.equal(loadConfig({ SPLUNK_AUDIT_STORE: 'mysql' }).audit.store, 'mysql');
     assert.throws(() => loadConfig({ SPLUNK_AUDIT_STORE: 'postgres' }), /SPLUNK_AUDIT_STORE/);
+  });
+
+  test('the default SPLUNK_DB_URL follows the store; a URL for the other database is rejected', () => {
+    assert.equal(loadConfig({ SPLUNK_AUDIT_STORE: 'mysql' }).audit.dbUrl, 'mysql://127.0.0.1:3306/env_matrix');
+    assert.equal(loadConfig({ SPLUNK_AUDIT_STORE: 'pg' }).audit.dbUrl, 'postgres://127.0.0.1:5432/env_matrix');
+    assert.throws(() => loadConfig({ SPLUNK_AUDIT_STORE: 'mysql', SPLUNK_DB_URL: 'postgres://u:secret@h/db' }),
+      (e) => /does not fit SPLUNK_AUDIT_STORE=mysql/.test(e.message) && !e.message.includes('secret'));
+    assert.throws(() => loadConfig({ SPLUNK_AUDIT_STORE: 'pg', SPLUNK_DB_URL: 'mysql://h/db' }), /SPLUNK_AUDIT_STORE=pg/);
   });
 
   test('rejects a schema name that is not a plain identifier', () => {

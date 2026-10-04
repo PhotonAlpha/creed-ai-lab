@@ -58,7 +58,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 联调：Vite 把 `/api` 代理到 `VITE_API_TARGET`（`.env` 里是 `https://localhost:18095`）；
   连 mock 或 `dev` profile 需要 `VITE_API_TARGET=http://localhost:3001`。
   `/api/env-matrix/splunk` 单独代理到 `VITE_SPLUNK_TARGET`（`.env`：BFF `http://localhost:3002`）。
-- Splunk 会话代理：Node BFF（`server/bff.js`），审计默认存内存，开关 `SPLUNK_AUDIT_STORE=pg` 时用 `pg` 写 PostgreSQL。
+- Splunk 会话代理：Node BFF（`server/bff.js`），审计默认存内存，开关 `SPLUNK_AUDIT_STORE=pg` / `mysql` 时写入 PostgreSQL / MySQL。
 
 ## 4. 目录结构（目标）
 
@@ -126,7 +126,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   `document.cookie = "splunkd_8089=…; path=/; Secure; SameSite=Lax";` 供复制。
 - 审计：每次 OTP 校验与 Splunk 调用都记一行（不保存 cookie 值，只保存指纹）；写不进审计则请求失败。
   **默认存内存**（最新 500 条，重启即丢失）；`SPLUNK_AUDIT_STORE=pg` 时写入 Postgres
-  `splunk_broker.splunk_audit`。mock 始终存内存。
+  `splunk_broker.splunk_audit`，`mysql` 时写入 `SPLUNK_DB_URL` 所指 MySQL 数据库的 `splunk_audit`。mock 始终存内存。
 
 ### 5.5 AES 加解密（`/aes`）
 - 设计图：`creed-resource/creed-resource-env-matrix/docs/design.png`。

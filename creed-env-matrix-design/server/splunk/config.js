@@ -63,18 +63,26 @@ export function loadConfig(env = process.env) {
   };
 
   const audit = {
-    // memory (default) | pg. memory keeps the newest 500 rows and forgets them on restart; pg writes
-    // splunk_broker.splunk_audit and is the only choice that leaves a trail worth the name. The
-    // SPLUNK_DB_* settings below are read either way but used only by pg.
+    // memory (default) | pg | mysql. memory keeps the newest 500 rows and forgets them on restart;
+    // pg writes splunk_broker.splunk_audit, mysql writes splunk_audit in SPLUNK_DB_URL's database.
+    // The SPLUNK_DB_* settings below are read either way but used only by pg and mysql.
     store: env.SPLUNK_AUDIT_STORE ?? 'memory',
-    dbUrl: env.SPLUNK_DB_URL ?? 'postgres://127.0.0.1:5432/env_matrix',
+    dbUrl: env.SPLUNK_DB_URL ?? (env.SPLUNK_AUDIT_STORE === 'mysql'
+      ? 'mysql://127.0.0.1:3306/env_matrix'
+      : 'postgres://127.0.0.1:5432/env_matrix'),
     dbUser: env.SPLUNK_DB_USER ?? 'artifactory',
     dbPassword: readSecret(env, 'SPLUNK_DB_PASSWORD', 'artifactory_pw'),
-    // Interpolated into DDL, so it must be a plain identifier.
+    // pg only (MySQL uses the URL's database). Interpolated into DDL, so a plain identifier.
     schema: env.SPLUNK_AUDIT_SCHEMA ?? 'splunk_broker',
   };
-  if (!['pg', 'memory'].includes(audit.store)) {
-    throw new Error(`SPLUNK_AUDIT_STORE must be 'pg' or 'memory', got '${audit.store}'`);
+  if (!['memory', 'pg', 'mysql'].includes(audit.store)) {
+    throw new Error(`SPLUNK_AUDIT_STORE must be 'memory', 'pg' or 'mysql', got '${audit.store}'`);
+  }
+  // A postgres:// URL handed to the mysql store (or the reverse) fails later with a protocol error
+  // that does not mention the setting; say which one is wrong instead.
+  const expected = { pg: /^postgres(ql)?:/, mysql: /^mysql:/ }[audit.store];
+  if (expected && !expected.test(audit.dbUrl)) {
+    throw new Error(`SPLUNK_DB_URL '${audit.dbUrl.replace(/\/\/[^@/]*@/, '//***@')}' does not fit SPLUNK_AUDIT_STORE=${audit.store}`);
   }
   if (!IDENTIFIER.test(audit.schema)) {
     throw new Error(`SPLUNK_AUDIT_SCHEMA must match ${IDENTIFIER}, got '${audit.schema}'`);

@@ -39,7 +39,7 @@ docker exec creed-artifactory-db createdb -U artifactory env_matrix
 cd .. && mvn -pl creed-resource/creed-resource-env-matrix spring-boot:run \
   -Dspring-boot.run.profiles=dev -Dspring-boot.run.workingDirectory="$PWD"
 
-# 3. start the BFF on :3002 — the Splunk page talks to it (audit in memory; SPLUNK_AUDIT_STORE=pg to persist)
+# 3. start the BFF on :3002 — the Splunk page talks to it (audit in memory; SPLUNK_AUDIT_STORE=pg or mysql to persist)
 npm run bff
 
 # 4. start the UI, pointed at :3001
@@ -59,8 +59,8 @@ npm run bff                                # :3002 — dist/ + Splunk broker + /
 One process on <http://localhost:3002/>: `/api/env-matrix/splunk/*` is answered by the BFF itself,
 every other `/api/*` is proxied to `ENV_MATRIX_API_TARGET` (default `https://localhost:18095`,
 certificate not verified unless `ENV_MATRIX_API_INSECURE=false`), anything else is `dist/` with
-`index.html` for client routes. The audit is in memory unless `SPLUNK_AUDIT_STORE=pg`; with pg it
-refuses to start if it cannot reach the database.
+`index.html` for client routes. The audit is in memory unless `SPLUNK_AUDIT_STORE=pg` or `mysql`;
+with either it refuses to start if it cannot reach the database.
 
 **Full build → package → run guide (systemd, Docker, reverse proxy, checklist, troubleshooting): [DEPLOY.md](./DEPLOY.md).**
 
@@ -390,7 +390,8 @@ It used to live in `creed-resource-env-matrix`; the Java service no longer has t
    only the first 16 hex characters of its SHA-256, enough to match a session in Splunk's own logs.
    The audit is mandatory: if a row cannot be written the request fails rather than issue an
    unrecorded session. **Where it goes is `SPLUNK_AUDIT_STORE`:** `memory` (default — newest 500
-   rows, gone on restart) or `pg` (`splunk_broker.splunk_audit` in PostgreSQL, `SPLUNK_DB_*`).
+   rows, gone on restart), `pg` (`splunk_broker.splunk_audit` in PostgreSQL) or `mysql` (`splunk_audit`
+   in the database named by `SPLUNK_DB_URL`, MySQL 8 / MariaDB 10.5+); both read `SPLUNK_DB_*`.
 
 **Secrets** come from environment variables, or from `NAME_FILE` (a file holding the value — Docker /
 Kubernetes secrets, a Vault agent sink) for `ENV_MATRIX_TOTP_SECRET`, `SPLUNK_PASSWORD` and

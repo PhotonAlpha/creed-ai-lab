@@ -38,7 +38,7 @@ docker exec creed-artifactory-db createdb -U artifactory env_matrix
 cd .. && mvn -pl creed-resource/creed-resource-env-matrix spring-boot:run \
   -Dspring-boot.run.profiles=dev -Dspring-boot.run.workingDirectory="$PWD"
 
-# 3. 在 :3002 启动 BFF —— Splunk 页面调用它（审计默认存内存；SPLUNK_AUDIT_STORE=pg 时写入 Postgres）
+# 3. 在 :3002 启动 BFF —— Splunk 页面调用它（审计默认存内存；SPLUNK_AUDIT_STORE=pg 或 mysql 时写入数据库）
 npm run bff
 
 # 4. 启动 UI，并把代理指向 :3001
@@ -58,7 +58,7 @@ npm run bff                                # :3002 —— dist/ + Splunk 会话�
 <http://localhost:3002/> 一个进程搞定：`/api/env-matrix/splunk/*` 由 BFF 自己处理，其余 `/api/*`
 反向代理到 `ENV_MATRIX_API_TARGET`（默认 `https://localhost:18095`，除非设置
 `ENV_MATRIX_API_INSECURE=false`，否则不校验证书），其他路径返回 `dist/`，前端路由回落到
-`index.html`。审计默认存在内存中；`SPLUNK_AUDIT_STORE=pg` 时写入数据库，连不上数据库则拒绝启动。
+`index.html`。审计默认存在内存中；`SPLUNK_AUDIT_STORE=pg` 或 `mysql` 时写入数据库，连不上数据库则拒绝启动。
 
 **完整的 编译 → 打包 → 运行 指南（systemd、Docker、反向代理、检查清单、故障排查）：[DEPLOY.zh-CN.md](./DEPLOY.zh-CN.md)。**
 
@@ -356,8 +356,9 @@ Java 服务现已不再提供这些接口。
    结果、原因、客户端地址、`X-Forwarded-For`、User-Agent、时间窗口、Splunk 状态码、耗时。同一次请求的
    两行共享一个关联 ID。cookie 本身**从不**保存 —— 只保存其 SHA-256 的前 16 个十六进制字符，足以与
    Splunk 自身日志中的会话对应。审计是强制的：写不进审计行时请求直接失败，绝不签发未记录的会话。
-   **存到哪里由 `SPLUNK_AUDIT_STORE` 决定：** `memory`（默认 —— 保留最新 500 条，重启即丢失）或
-   `pg`（PostgreSQL 的 `splunk_broker.splunk_audit`，连接参数为 `SPLUNK_DB_*`）。
+   **存到哪里由 `SPLUNK_AUDIT_STORE` 决定：** `memory`（默认 —— 保留最新 500 条，重启即丢失）、
+   `pg`（PostgreSQL 的 `splunk_broker.splunk_audit`）或 `mysql`（`SPLUNK_DB_URL` 所指数据库中的
+   `splunk_audit`，MySQL 8 / MariaDB 10.5+）；后两者的连接参数都是 `SPLUNK_DB_*`。
 
 **密钥**来自环境变量；`ENV_MATRIX_TOTP_SECRET`、`SPLUNK_PASSWORD`、`SPLUNK_DB_PASSWORD` 也可以用
 `NAME_FILE`（存放该值的文件 —— Docker / Kubernetes secret、Vault agent 输出文件）。`npm run bff`
