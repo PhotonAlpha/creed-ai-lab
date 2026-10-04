@@ -315,13 +315,17 @@ export interface SplunkAuditRow {
 
 /* ---- AES encryption (/aes/*) ------------------------------------------------------------------ */
 
-/** Sent with each encrypt/decrypt request. Only the randomkey is ever stored — per saved row. */
+/**
+ * What one server's key is made from. There is no Secret Key input: it is `randomKey + host + ip`.
+ * The IV is never stored; the randomkey is stored per saved row.
+ */
 export interface AesKeys {
-  secretKey: string;
   /** Exactly 16 bytes in UTF-8. */
   iv: string;
-  /** Appended to the Secret Key before hashing; may be empty. */
+  /** First part of the Secret Key; may be empty. */
   randomKey: string;
+  host: string;
+  ip: string;
 }
 
 export interface AesCryptoResult {
@@ -343,16 +347,19 @@ export interface AesRecord extends AesServer {
   encryptedValue: string;
   /** The randomkey the row was saved with; `null` when none was (or before it was recorded). */
   randomKey: string | null;
+  /** `randomKey + host + ip` — derived by the server, shown to compare against the real config. */
+  secretKey: string;
   note: string | null;
   createdAt: string;
   updatedAt: string;
   version: number;
 }
 
+/** Single save: one plain value, encrypted per server by the backend. */
 export interface AesRecordSaveRequest {
   propertyKey: string;
-  encryptedValue: string;
-  /** Stored with each row for the result list. The Secret Key and IV are never sent with a save. */
+  plainValue: string;
+  iv: string;
   randomKey?: string;
   note?: string;
   servers: AesServer[];
@@ -371,9 +378,11 @@ export interface AesRecordDecryptResult {
   message: string | null;
 }
 
-/** One row of "Keys and values": a complete, independent set — the JSON dialog's array element too. */
+/**
+ * One row of "Keys and values" — the JSON dialog's array element too. No Secret Key: it is
+ * `randomKey + host + ip`, so it depends on the server the row is encrypted for.
+ */
 export interface AesKeyValueRow {
-  secretKey: string;
   iv: string;
   randomKey: string;
   propertyKey: string;
@@ -396,12 +405,14 @@ export interface AesBatchCryptoResult {
   message: string | null;
 }
 
+/** Plain values, not ciphertexts: the backend encrypts each item once per server. */
 export interface AesRecordBatchSaveRequest {
-  items: { propertyKey: string; encryptedValue: string; randomKey?: string; note?: string }[];
+  items: { propertyKey: string; plainValue: string; iv: string; randomKey?: string; note?: string }[];
   servers: AesServer[];
 }
 
-/** One stored record to decrypt, with the keys chosen for it. */
-export interface AesRecordDecryptItem extends AesKeys {
+/** One stored record to decrypt. Its Secret Key comes from the record; only the IV is supplied. */
+export interface AesRecordDecryptItem {
   id: number;
+  iv: string;
 }

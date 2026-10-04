@@ -47,24 +47,28 @@ interface FormValues {
 }
 
 /** Field order of a row — also the JSON shape the "Edit as JSON" dialog reads and writes. */
-const ROW_FIELDS = ['secretKey', 'iv', 'randomKey', 'propertyKey', 'plainValue', 'encryptedValue'] as const;
+const ROW_FIELDS = ['iv', 'randomKey', 'propertyKey', 'plainValue', 'encryptedValue'] as const;
 type RowField = (typeof ROW_FIELDS)[number];
-const KEY_FIELDS: readonly RowField[] = ['secretKey', 'iv', 'randomKey'];
-const EMPTY_ROW: AesKeyValueRow = { secretKey: '', iv: '', randomKey: '', propertyKey: '', plainValue: '', encryptedValue: '' };
+const KEY_FIELDS: readonly RowField[] = ['iv', 'randomKey'];
+const EMPTY_ROW: AesKeyValueRow = { iv: '', randomKey: '', propertyKey: '', plainValue: '', encryptedValue: '' };
 /** The batch endpoints' limit. */
 const MAX_ROWS = 200;
 
 const utf8Length = (text: string) => new TextEncoder().encode(text).length;
 const serverKey = (s: AesServer) => `${s.appSystem}\u0000${s.host}\u0000${s.ip}`;
+/** The real config files' rule — randomkey + host + ip, no separator. The server derives the same. */
+const secretKeyOf = (randomKey: string | null | undefined, s: Pick<AesServer, 'host' | 'ip'>) => `${randomKey ?? ''}${s.host}${s.ip}`;
 const normalize = (row: Partial<AesKeyValueRow> | undefined): AesKeyValueRow => ({ ...EMPTY_ROW, ...row });
 
 /**
  * Column spans of a "Keys and values" row; the header uses the same ones. Below `lg` every field
  * takes the full width and the header is hidden — each input then carries its name as placeholder.
  */
-const SPANS: Record<RowField | 'actions', number> = {
-  secretKey: 3, iv: 3, randomKey: 3, propertyKey: 4, plainValue: 4, encryptedValue: 5, actions: 2,
+const SPANS: Record<RowField | 'secretKey' | 'actions', number> = {
+  iv: 3, randomKey: 3, secretKey: 4, propertyKey: 4, plainValue: 4, encryptedValue: 4, actions: 2,
 };
+/** Header order: the derived Secret Key sits right after the randomkey it starts with. */
+const COLUMNS = ['iv', 'randomKey', 'secretKey', 'propertyKey', 'plainValue', 'encryptedValue'] as const;
 
 /** Parses the JSON dialog's text into rows, or throws an Error whose message is shown under it. */
 function parseRows(text: string, t: ReturnType<typeof useI18n>['t']): AesKeyValueRow[] {
@@ -84,6 +88,9 @@ function parseRows(text: string, t: ReturnType<typeof useI18n>['t']): AesKeyValu
     for (const [field, value] of Object.entries(item as Record<string, unknown>)) {
       // Unknown names are rejected rather than ignored: `secret_key` silently dropped would encrypt
       // with an empty key and look like it worked.
+      if (field === 'secretKey') {
+        throw new Error(t('aes.json.badItem', { index, reason: t('aes.json.secretKeyRemoved') }));
+      }
       if (!(ROW_FIELDS as readonly string[]).includes(field)) {
         throw new Error(t('aes.json.badItem', {
           index, reason: t('aes.json.unknownField', { field, allowed: ROW_FIELDS.join(', ') }),
@@ -102,10 +109,13 @@ function parseRows(text: string, t: ReturnType<typeof useI18n>['t']): AesKeyValu
 /**
  * AES encryption page.
  *
- * "Keys and values" is an array of complete, independent rows — each its own Secret Key, IV,
- * randomkey, property key, plain and encrypted value — edited as rows or as a JSON array. The
- * Secret Key and IV are form state only: sent with each request and never stored. A save keeps each
- * row's ciphertext and randomkey, once per ticked server; the randomkey alone decrypts nothing.
+ * The Secret Key is not an input: it is `randomkey + host + ip`, so every server has its own and the
+ * same value has a different ciphertext on each. "Keys and values" rows carry IV, randomkey,
+ * property key and plain value; *Save* sends the plain values and the backend encrypts each once per
+ * ticked server. The form's own encrypt/decrypt work against one **preview server** (a ticked one,
+ * picked in the card header), and the derived Secret Key column shows that server's key. The IV is
+ * never stored; the randomkey is, per record, and the result list shows each record's Secret Key so
+ * it can be compared with the real config file.
  *
  * Decrypted values in the result list are cleared whenever a key field changes, since they no longer
  * describe what the form would produce.
@@ -127,6 +137,8 @@ export function AesPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [decrypted, setDecrypted] = useState<Record<number, AesRecordDecryptResult>>({});
 
+  /** serverKey of the ticked server the form's encrypt/decrypt and Secret Key column use. */
+  const [previewKey, setPreviewKey] = useState<string | undefined>();
   const [busy, setBusy] = useState<'encrypt' | 'decrypt' | 'save' | 'decryptRows' | 'delete' | null>(null);
   const [jsonOpen, setJsonOpen] = useState(false);
   const [jsonText, setJsonText] = useState('');
@@ -180,6 +192,10 @@ export function AesPage() {
     const listed = new Set(servers.map(serverKey));
     setChecked((keys) => keys.filter((k) => listed.has(k)));
   }, [servers]);
+
+  // The preview server is always a ticked one: the first, unless one was picked (or loaded).
+  const checkedServers = useMemo(() => servers.filter((s) => checked.includes(serverKey(s))), [servers, checked]);
+  const previewServer = checkedServers.find((s) => serverKey(s) === previewKey) ?? checkedServers[0];
 
   type Cell = { name: (string | number)[]; errors: string[] };
   /** setFields with list paths — antd's FieldData type cannot express `['items', i, field]`. */
@@ -240,13 +256,19 @@ export function AesPage() {
       message.warning(t(direction === 'encrypt' ? 'aes.rows.nothingToEncrypt' : 'aes.rows.nothingToDecrypt'));
       return;
     }
-    const invalid = await invalidRows(candidates.map((c) => c.index), ['secretKey', 'iv']);
+    if (!previewServer) {
+      message.warning(t('aes.rows.needServer'));
+      return;
+    }
+    const invalid = await invalidRows(candidates.map((c) => c.index), ['iv']);
     const picked = candidates.filter((c) => !invalid.has(c.index));
     if (picked.length === 0) return; // every row is marked on the form
 
     setBusy(direction);
     try {
-      const items = picked.map(({ row }) => ({ secretKey: row.secretKey, iv: row.iv, randomKey: row.randomKey, value: row[source] }));
+      const items = picked.map(({ row }) => ({
+        iv: row.iv, randomKey: row.randomKey, host: previewServer.host, ip: previewServer.ip, value: row[source],
+      }));
       const results: AesBatchCryptoResult[] = direction === 'encrypt'
         ? await aesApi.encryptBatch(items)
         : await aesApi.decryptBatch(items);
@@ -273,15 +295,22 @@ export function AesPage() {
     }
   };
 
-  /** Every row with a property key or an encrypted value, to every ticked server, in one call. */
+  /**
+   * Every row with a property key or a plain value, encrypted by the backend for every ticked server
+   * (each its own Secret Key), in one call.
+   */
   const save = async () => {
     const all = rows();
-    const picked = all.flatMap((row, index) => (row.propertyKey.trim() || row.encryptedValue.trim() ? [{ row, index }] : []));
+    const picked = all.flatMap((row, index) => (row.propertyKey.trim() || row.plainValue !== '' ? [{ row, index }] : []));
     if (picked.length === 0) {
       message.warning(t('aes.rows.nothingToSave'));
       return;
     }
-    if (!(await validCells(picked.flatMap(({ index }) => [['items', index, 'propertyKey'], ['items', index, 'encryptedValue']])))) return;
+    // The plain value has no form rule — it is only required here, not while decrypting into it.
+    const noPlain = picked.filter(({ row }) => row.plainValue === '');
+    const fieldsValid = await validCells(picked.flatMap(({ index }) => (['propertyKey', 'iv'] as const).map((f) => ['items', index, f])));
+    if (noPlain.length) setCells(noPlain.map(({ index }) => ({ name: ['items', index, 'plainValue'], errors: [t('aes.form.required')] })));
+    if (!fieldsValid || noPlain.length) return;
 
     // The server rejects a repeated property key too; catching it here marks the row before a round trip.
     const firstRow = new Map<string, number>();
@@ -307,7 +336,7 @@ export function AesPage() {
     setBusy('save');
     try {
       const result = await aesApi.saveBatch({
-        items: picked.map(({ row }) => ({ propertyKey: row.propertyKey, encryptedValue: row.encryptedValue, randomKey: row.randomKey })),
+        items: picked.map(({ row }) => ({ propertyKey: row.propertyKey, plainValue: row.plainValue, iv: row.iv, randomKey: row.randomKey })),
         servers: targets,
       });
       message.success(t('aes.save.done', {
@@ -322,32 +351,32 @@ export function AesPage() {
   };
 
   /**
-   * Decrypts the ticked records, each with the keys of the form row that has the same property key.
-   * With a single form row, that row's keys are used for every record — the one-set-of-keys case.
+   * Decrypts the ticked records. Each record's Secret Key comes from the record itself; the IV comes
+   * from the form row with the same property key — or from the only row, the one-IV case.
    */
   const decryptSelected = async () => {
     const all = rows();
-    const withSecret = all.filter((r) => r.secretKey !== '');
-    const items: { id: number; secretKey: string; iv: string; randomKey: string }[] = [];
+    const withIv = all.filter((r) => r.iv !== '');
+    const items: { id: number; iv: string }[] = [];
     const missing: AesRecordDecryptResult[] = [];
     for (const id of selectedIds) {
       const record = records.find((r) => r.id === id);
       if (!record) continue;
-      const keys = all.find((r) => r.propertyKey.trim() === record.propertyKey && r.secretKey !== '')
-        ?? (all.length === 1 && withSecret.length === 1 ? withSecret[0] : undefined);
-      if (keys) {
-        items.push({ id, secretKey: keys.secretKey, iv: keys.iv, randomKey: keys.randomKey });
+      const source = all.find((r) => r.propertyKey.trim() === record.propertyKey && r.iv !== '')
+        ?? (all.length === 1 && withIv.length === 1 ? withIv[0] : undefined);
+      if (source) {
+        items.push({ id, iv: source.iv });
       } else {
-        missing.push({ id, plainValue: null, error: 'not_found', message: t('aes.records.noKeys', { key: record.propertyKey }) });
+        missing.push({ id, plainValue: null, error: 'not_found', message: t('aes.records.noIv', { key: record.propertyKey }) });
       }
     }
     setBusy('decryptRows');
     try {
       const results = items.length ? await aesApi.decryptRecords(items) : [];
-      const all2 = [...results, ...missing];
-      setDecrypted((prev) => ({ ...prev, ...Object.fromEntries(all2.map((r) => [r.id, r])) }));
-      const failed = all2.filter((r) => r.error).length;
-      if (failed) message.warning(t('aes.records.decryptPartial', { failed, total: all2.length }));
+      const merged = [...results, ...missing];
+      setDecrypted((prev) => ({ ...prev, ...Object.fromEntries(merged.map((r) => [r.id, r])) }));
+      const failed = merged.filter((r) => r.error).length;
+      if (failed) message.warning(t('aes.records.decryptPartial', { failed, total: merged.length }));
     } catch (e) {
       message.error((e as Error).message);
     } finally {
@@ -370,14 +399,15 @@ export function AesPage() {
   };
 
   /**
-   * Puts a saved record into the form — into the row with the same property key, else into a single
-   * blank row, else as a new row — and ticks its server.
+   * Puts a saved record into the form — into the row with the same property key, else into the first
+   * row with no property key and no values (keeping its IV: a row holding only an IV is how a check
+   * usually starts), else as a new row — and makes its server the preview server.
    */
   const load = (record: AesRecord) => {
     const all = rows();
     const loaded = { propertyKey: record.propertyKey, encryptedValue: record.encryptedValue, randomKey: record.randomKey ?? '', plainValue: '' };
     let index = all.findIndex((r) => r.propertyKey.trim() === record.propertyKey);
-    if (index < 0 && all.length === 1 && ROW_FIELDS.every((f) => all[0][f] === '')) index = 0;
+    if (index < 0) index = all.findIndex((r) => !r.propertyKey.trim() && r.plainValue === '' && r.encryptedValue === '');
     if (index < 0) {
       if (all.length >= MAX_ROWS) {
         message.warning(t('aes.json.tooMany', { max: MAX_ROWS }));
@@ -392,9 +422,12 @@ export function AesPage() {
     setCells([{ name: ['items', index, 'encryptedValue'], errors: [] }]);
     // setFieldsValue does not fire onValuesChange, and the randomkey may just have changed.
     setDecrypted({});
+    // The loaded ciphertext belongs to this server: make it the preview server, so Decrypt all in the
+    // form uses this server's Secret Key.
     const key = serverKey(record);
     if (servers.some((s) => serverKey(s) === key)) {
       setChecked((keys) => (keys.includes(key) ? keys : [...keys, key]));
+      setPreviewKey(key);
     }
   };
 
@@ -465,18 +498,25 @@ export function AesPage() {
       },
     },
     {
+      // Secret Key = randomkey + host + ip — one cell for both, since the randomkey is its first part.
+      // Right after the plaintext: these are what a check against the real config file compares.
+      title: t('aes.records.secretKey'),
+      dataIndex: 'secretKey',
+      width: 300,
+      render: (value: string, r) => (
+        <Space direction="vertical" size={0}>
+          <Text code copyable={{ text: value }} ellipsis={{ tooltip: value }} style={{ maxWidth: 280 }}>{value}</Text>
+          <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+            {t('aes.records.randomKey')}: {r.randomKey ?? '—'}
+          </Text>
+        </Space>
+      ),
+    },
+    {
       title: t('aes.records.encrypted'),
       dataIndex: 'encryptedValue',
       width: 240,
       render: (value: string) => <Text code copyable={{ text: value }} ellipsis={{ tooltip: value }} style={{ maxWidth: 220 }}>{value}</Text>,
-    },
-    {
-      title: t('aes.records.randomKey'),
-      dataIndex: 'randomKey',
-      width: 150,
-      render: (value: string | null) => (value
-        ? <Text code copyable={{ text: value }} ellipsis={{ tooltip: value }} style={{ maxWidth: 130 }}>{value}</Text>
-        : <Text type="secondary">—</Text>),
     },
     {
       title: t('aes.records.updated'),
@@ -507,7 +547,20 @@ export function AesPage() {
           title={t('aes.form.title')}
           subTitle={t('aes.rows.count', { count: rowCount })}
           bordered
-          extra={<Button icon={<CodeOutlined />} onClick={openJson}>{t('aes.action.json')}</Button>}
+          extra={(
+            <Space wrap>
+              <Text type="secondary">{t('aes.preview.label')}</Text>
+              <Select
+                style={{ width: 300 }}
+                placeholder={t('aes.preview.none')}
+                value={previewServer ? serverKey(previewServer) : undefined}
+                onChange={setPreviewKey}
+                options={checkedServers.map((s) => ({ value: serverKey(s), label: `${s.host}:${s.ip}` }))}
+                notFoundContent={t('aes.preview.none')}
+              />
+              <Button icon={<CodeOutlined />} onClick={openJson}>{t('aes.action.json')}</Button>
+            </Space>
+          )}
         >
           <Form<FormValues>
             form={form}
@@ -518,9 +571,12 @@ export function AesPage() {
             }}
           >
             <Row gutter={8} style={{ marginBottom: token.marginXS }}>
-              {ROW_FIELDS.map((f) => (
+              {COLUMNS.map((f) => (
                 <Col key={f} xs={0} lg={SPANS[f]}>
                   <Text strong>{t(`aes.form.${f}`)}</Text>
+                  {f === 'secretKey' && (
+                    <Tooltip title={t('aes.form.secretKeyHint')}><Text type="secondary"> ⓘ</Text></Tooltip>
+                  )}
                   {f === 'iv' && (
                     <Tooltip title={t('aes.form.ivHint')}><Text type="secondary"> ⓘ</Text></Tooltip>
                   )}
@@ -535,11 +591,6 @@ export function AesPage() {
                 <>
                   {fields.map(({ key, name }) => (
                     <Row key={key} gutter={8} align="top">
-                      <Col xs={24} lg={SPANS.secretKey}>
-                        <Form.Item name={[name, 'secretKey']} rules={[{ required: true, message: t('aes.form.required') }]}>
-                          <Input.Password autoComplete="off" placeholder={t('aes.form.secretKey')} />
-                        </Form.Item>
-                      </Col>
                       <Col xs={24} lg={SPANS.iv}>
                         <Form.Item
                           name={[name, 'iv']}
@@ -565,6 +616,23 @@ export function AesPage() {
                           <Input autoComplete="off" spellCheck={false} placeholder={t('aes.form.randomKey')} />
                         </Form.Item>
                       </Col>
+                      <Col xs={24} lg={SPANS.secretKey}>
+                        <Form.Item shouldUpdate>
+                          {() => {
+                            const randomKey = form.getFieldValue(['items', name, 'randomKey']) as string | undefined;
+                            const value = previewServer ? secretKeyOf(randomKey, previewServer) : '';
+                            return (
+                              <Input
+                                readOnly
+                                variant="filled"
+                                value={value}
+                                placeholder={t('aes.preview.none')}
+                                title={value}
+                              />
+                            );
+                          }}
+                        </Form.Item>
+                      </Col>
                       <Col xs={24} lg={SPANS.propertyKey}>
                         <Form.Item name={[name, 'propertyKey']} rules={[{ required: true, message: t('aes.form.required') }]}>
                           <Input placeholder={t('aes.form.propertyKey')} spellCheck={false} />
@@ -576,7 +644,7 @@ export function AesPage() {
                         </Form.Item>
                       </Col>
                       <Col xs={24} lg={SPANS.encryptedValue}>
-                        <Form.Item name={[name, 'encryptedValue']} rules={[{ required: true, message: t('aes.form.required') }]}>
+                        <Form.Item name={[name, 'encryptedValue']}>
                           <Input.TextArea autoSize={{ minRows: 1, maxRows: 4 }} spellCheck={false} placeholder={t('aes.form.encryptedValue')} />
                         </Form.Item>
                       </Col>
@@ -750,7 +818,7 @@ export function AesPage() {
                 columns={columns}
                 dataSource={records}
                 loading={recordsLoading}
-                scroll={{ x: 1390, y: 420 }}
+                scroll={{ x: 1540, y: 420 }}
                 pagination={false}
                 rowSelection={{ selectedRowKeys: selectedIds, onChange: (keys) => setSelectedIds(keys as number[]) }}
                 locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('aes.records.empty')} /> }}

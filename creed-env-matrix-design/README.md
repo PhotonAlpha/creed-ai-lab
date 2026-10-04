@@ -412,59 +412,68 @@ input and says to wait for the next code.
 
 ### AES encryption (`/aes`)
 
-Encrypts or decrypts a configuration value and keeps the ciphertext **per server**. Layout follows
+Encrypts or decrypts configuration values and keeps the ciphertext **per server**, so a real config
+file can be checked against what it should contain. Layout follows
 `creed-resource-env-matrix/docs/design.png`: keys and values on top, the server list bottom-left,
 the saved results bottom-right.
 
-**The cipher** — the same in the Java service (`AesCryptoService`) and the node mock (`server/aes.js`),
-pinned by one shared test vector:
+**The cipher** — the real config files' rule, the same in the Java service (`AesCryptoService`) and
+the node mock (`server/aes.js`), pinned by one shared test vector that `openssl enc` reproduces:
 
 ```
-key        = SHA-256( UTF-8(Secret Key + randomkey) )      32 bytes -> AES-256
-iv         = UTF-8(Initialization Vector)                  exactly 16 bytes
+Secret Key = randomkey + host + ip                          plain concatenation, no separator
+key        = SHA-256( UTF-8(Secret Key) )                   32 bytes -> AES-256
+iv         = UTF-8(Initialization Vector)                   exactly 16 bytes
 ciphertext = Base64( AES/CBC/PKCS5Padding(key, iv, UTF-8(plain value)) )
 ```
 
-- **randomkey** is appended to the Secret Key before hashing, so it varies the key; it may be empty.
-  ("ab" + "c" and "a" + "bc" derive the same key — it is not a second, independent secret.)
+- **The Secret Key is not an input.** It is derived per server, so **the same value has a different
+  ciphertext on every server**. Plain concatenation means `("ab", "c…")` and `("a", "bc…")` as
+  (randomkey, host) give the same key.
 - **The IV is counted in UTF-8 bytes**, not characters: the field shows `n / 16`, and a Chinese
   character counts as 3.
-- **The Secret Key and IV are never stored.** They are POSTed with each encrypt/decrypt request (never
-  in a URL) and dropped. A save keeps the ciphertext **and the randomkey in the form** (shown in the
-  result list); the randomkey alone decrypts nothing, so a copy of the database still cannot be
-  decrypted. Rows saved before V8 have no recorded randomkey and show "—".
+- **What is stored:** the ciphertext and the randomkey, per record. The IV is never stored, logged or
+  put in a URL. Note what that means: the Secret Key is built entirely from stored or public data
+  (randomkey, host, ip), so **the IV is the only thing between a copy of the database and the
+  plaintexts**. That is the real system's rule, reproduced here so its files can be checked.
 - CBC has no integrity check: a wrong key is almost always reported (bad padding, or output that is
   not UTF-8), but rarely decrypts to short garbage instead.
 
-**Keys and values is an array.** Each row is a complete, independent set — its own Secret Key, IV,
-randomkey, property key, plain value and encrypted value. Add, duplicate and remove rows, or use
-*Edit as JSON* to import/export the whole array:
+**Keys and values is an array** of rows — IV, randomkey, property key, plain value, and an encrypted
+value **preview** — plus a read-only **Secret Key (preview)** column. Add, duplicate and remove rows,
+or use *Edit as JSON*:
 
 ```json
 [
-  { "secretKey": "…", "iv": "0123456789abcdef", "randomKey": "r4nd0m",
+  { "iv": "0123456789abcdef", "randomKey": "r4nd0m",
     "propertyKey": "db.password", "plainValue": "db-p@ss", "encryptedValue": "" }
 ]
 ```
 
-The dialog replaces or appends rows; an unknown field name (`secret_key`) is rejected rather than
-silently dropped, since a dropped key would encrypt with an empty one. The JSON carries the Secret
-Keys in clear text. At most 200 rows.
+The dialog replaces or appends rows; an unknown field name is rejected rather than silently dropped,
+and an old `secretKey` field is rejected with a note that it is now derived. At most 200 rows.
 
-**Flow.** *Encrypt all* encrypts every row that has a plain value, each with its own keys; *Decrypt
-all* does the reverse for every row with an encrypted value. A row whose keys are unusable is marked
-and skipped — the other rows still go through. Tick servers in the **server list** — every distinct
-`host:ip` in the configuration, narrowed by the app-system filter — and *Save to selected servers*
-stores every row against every ticked server, in one transaction. Saving the same property for a
-server again replaces its value; the same property key on two rows is rejected. A server that already
-holds any property key in the form is tagged *saved*.
+**Flow.**
+1. Tick servers in the **server list** — every distinct `host:ip` in the configuration, narrowed by
+   the app-system filter.
+2. The **preview server** (card header; the first ticked one unless you pick another) is what the
+   form previews against: the Secret Key column shows its `randomkey + host + ip`, and *Encrypt all*
+   / *Decrypt all* use it. Rows with an unusable IV are marked and skipped; the rest go through.
+3. *Save to selected servers* sends the **plain values**; the backend encrypts every row once per
+   ticked server — each with that server's Secret Key — and stores the results in one transaction.
+   Saving the same property for a server again replaces its value; the same property key on two rows
+   is rejected. A server that already holds any property key in the form is tagged *saved*.
 
-The **result list** shows the saved rows for the current app system. Tick rows and *Decrypt
-selected*: each record is decrypted with the keys of the form row that has **the same property key**
-(with a single form row, that row's keys are used for every record). Results are per row, so a
-record without matching keys shows its own error without hiding the rest. Changing any key clears the
-decrypted column. *Load* puts a record into the form row with its property key (or a new row),
-randomkey included; *Delete* removes rows.
+The **result list** shows each record's **Secret Key** (with its randomkey underneath) next to the
+decrypted value — the two things a check against the real config file compares. *Decrypt selected*
+uses each record's own Secret Key and the IV of the form row with **the same property key** (with a
+single form row, that row's IV for every record); results are per row. Changing an IV or randomkey
+clears the decrypted column. *Load* puts a record into the row with its property key (else into a row
+with no values yet, keeping its IV; else a new row) and makes its server the preview server;
+*Delete* removes rows.
+
+Records saved under the earlier rule (`SHA-256(Secret Key + randomkey)` with a typed Secret Key) do
+not decrypt under this one.
 
 ---
 
@@ -499,16 +508,16 @@ Base path `/api/env-matrix`. Filters are repeated query parameters —
 | `POST` | `/splunk/session` | `{code}` → cookie script; `401` bad/replayed code, `429` locked out, `502` Splunk failed, `503` not configured |
 | `GET` | `/splunk/audit` | Audit rows, newest first (`?limit=`, default 50) |
 | `GET` | `/aes/servers` | Distinct `(appSystem, host, ip)` from the endpoints; `?appSystem=` narrows |
-| `POST` | `/aes/encrypt` | `{secretKey, iv, randomKey, plainValue}` → `{encryptedValue}`; `400` naming `iv` if not 16 bytes |
-| `POST` | `/aes/decrypt` | `{secretKey, iv, randomKey, encryptedValue}` → `{plainValue}`; `422 decrypt_failed` |
-| `POST` | `/aes/encrypt/batch` | `{items: [{secretKey, iv, randomKey, value}]}` → per-row `{index, value \| error, field, message}` |
+| `POST` | `/aes/encrypt` | `{iv, randomKey, host, ip, plainValue}` → `{encryptedValue}`; Secret Key = randomKey + host + ip; `400` naming `iv` if not 16 bytes |
+| `POST` | `/aes/decrypt` | `{iv, randomKey, host, ip, encryptedValue}` → `{plainValue}`; `422 decrypt_failed` |
+| `POST` | `/aes/encrypt/batch` | `{items: [{iv, randomKey, host, ip, value}]}` → per-row `{index, value \| error, field, message}` |
 | `POST` | `/aes/decrypt/batch` | Same shape, `value` = ciphertext; per-row results, `no-store` |
-| `GET` | `/aes/records` | Saved ciphertexts; `?appSystem=`, `?propertyKey=` |
-| `POST` | `/aes/records` | `{propertyKey, encryptedValue, randomKey?, note?, servers[]}` → one row per server, upserted |
-| `POST` | `/aes/records/batch` | `{items: [{propertyKey, encryptedValue, randomKey?, note?}], servers[]}` → every item to every server, one transaction; repeated property key → `400` |
+| `GET` | `/aes/records` | Saved ciphertexts with derived `secretKey`; `?appSystem=`, `?propertyKey=` |
+| `POST` | `/aes/records` | `{propertyKey, plainValue, iv, randomKey?, note?, servers[]}` → encrypted per server, upserted |
+| `POST` | `/aes/records/batch` | `{items: [{propertyKey, plainValue, iv, randomKey?, note?}], servers[]}` → every item encrypted for every server, one transaction; repeated property key or bad IV → `400` |
 | `PUT` | `/aes/records/{id}` | Update → `409 duplicate_aes_record` if the identity collides |
 | `DELETE` | `/aes/records?ids=…` | Delete several → `204`; unknown ids ignored |
-| `POST` | `/aes/records/decrypt` | `{items: [{id, secretKey, iv, randomKey}]}` → per-row `{id, plainValue \| error, message}` |
+| `POST` | `/aes/records/decrypt` | `{items: [{id, iv}]}` (Secret Key from the record) → per-row `{id, plainValue \| error, message}` |
 
 Errors use one envelope: `{error, message, fields?, time}`.
 

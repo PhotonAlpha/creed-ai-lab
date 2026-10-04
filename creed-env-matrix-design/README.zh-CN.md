@@ -375,48 +375,56 @@ BFF 首次启动时会把 `public.splunk_audit` 中已有的记录复制一次�
 
 ### AES 加解密（`/aes`）
 
-对配置值加密或解密，并**按服务器**保存密文。布局遵循 `creed-resource-env-matrix/docs/design.png`：
-上方是密钥与取值，左下是服务器列表，右下是已保存的结果。
+对配置值加密或解密，并**按服务器**保存密文，用来核对真实配置文件中应有的内容。布局遵循
+`creed-resource-env-matrix/docs/design.png`：上方是密钥与取值，左下是服务器列表，右下是已保存的结果。
 
-**算法** —— Java 服务（`AesCryptoService`）与 node mock（`server/aes.js`）完全一致，由同一个测试向量锁定：
+**算法** —— 与真实配置文件使用的规则一致；Java 服务（`AesCryptoService`）与 node mock（`server/aes.js`）
+完全相同，由同一个测试向量锁定，`openssl enc` 可复现：
 
 ```
-key        = SHA-256( UTF-8(Secret Key + randomkey) )      32 字节 -> AES-256
-iv         = UTF-8(Initialization Vector)                  正好 16 字节
+Secret Key = randomkey + host + ip                          直接拼接，无分隔符
+key        = SHA-256( UTF-8(Secret Key) )                   32 字节 -> AES-256
+iv         = UTF-8(Initialization Vector)                   正好 16 字节
 ciphertext = Base64( AES/CBC/PKCS5Padding(key, iv, UTF-8(明文)) )
 ```
 
-- **randomkey** 在哈希前拼接在 Secret Key 之后，用来改变密钥；可以为空。（"ab" + "c" 与 "a" + "bc"
-  得到同一个密钥 —— 它不是第二个独立的密钥。）
+- **Secret Key 不是输入项**，而是按服务器推导出来的，所以**同一个值在每台服务器上的密文都不同**。
+  由于是直接拼接，(randomkey, host) 为 `("ab", "c…")` 与 `("a", "bc…")` 时得到同一个密钥。
 - **IV 按 UTF-8 字节计数**，不是按字符：输入框显示 `n / 16`，一个汉字算 3 个字节。
-- **Secret Key 和 IV 从不保存。** 每次加解密请求都在请求体中 POST（绝不放进 URL），用完即弃。保存时
-  记录密文以及**表单中的 randomkey**（显示在结果列表中）；单凭 randomkey 无法解密，所以拿到数据库副本
-  也无法解密。V8 之前保存的记录没有 randomkey，显示为「—」。
+- **保存的内容：** 每条记录的密文和 randomkey。IV 从不保存、不写日志、不放进 URL。需要注意：Secret Key
+  完全由已保存或公开的数据（randomkey、host、ip）构成，所以**拿到数据库副本后，只差 IV 就能解密全部明文**。
+  这是真实系统的规则，此处照搬是为了核对其配置文件。
 - CBC 没有完整性校验：密钥错误几乎总会被识别（填充错误或结果不是 UTF-8），但极少数情况下会解出一小段乱码。
 
-**「密钥与取值」是一个数组。** 每一行都是一组完整、独立的数据 —— 各自的 Secret Key、IV、randomkey、
-属性键、明文和密文。可以添加、复制、删除行，也可以用「以 JSON 编辑」导入 / 导出整个数组：
+**「密钥与取值」是一个数组**，每行包含 IV、randomkey、属性键、明文和**预览**密文，另有一列只读的
+**Secret Key（预览）**。可以添加、复制、删除行，也可以「以 JSON 编辑」：
 
 ```json
 [
-  { "secretKey": "…", "iv": "0123456789abcdef", "randomKey": "r4nd0m",
+  { "iv": "0123456789abcdef", "randomKey": "r4nd0m",
     "propertyKey": "db.password", "plainValue": "db-p@ss", "encryptedValue": "" }
 ]
 ```
 
-对话框可以替换或追加行；未知字段名（如 `secret_key`）会被拒绝而不是静默忽略 —— 被忽略的密钥会让加密
-用空密钥进行。JSON 中包含明文的 Secret Key。最多 200 行。
+对话框可以替换或追加行；未知字段名会被拒绝而不是静默忽略，旧的 `secretKey` 字段会被拒绝并提示它现在由
+系统推导。最多 200 行。
 
-**操作流程。** 「全部加密」用每行各自的密钥加密所有填了明文的行；「全部解密」对所有填了密文的行做相反操作。
-密钥不可用的行会被标红并跳过 —— 其他行照常处理。在**服务器列表**中勾选服务器 —— 列出配置中所有不重复的
-`host:ip`，可按应用系统过滤 —— 再点「保存到所选服务器」，把每一行保存到每一台勾选的服务器，在一个事务中
-完成。对同一台服务器再次保存同一个属性键会替换原值；两行属性键相同会被拒绝。已保存了表单中任一属性键的
-服务器会标记「已保存」。
+**操作流程。**
+1. 在**服务器列表**中勾选服务器 —— 列出配置中所有不重复的 `host:ip`，可按应用系统过滤。
+2. **预览服务器**（卡片右上角；默认是第一台勾选的服务器，也可以另选）是表单预览所用的服务器：Secret Key
+   列显示它的 `randomkey + host + ip`，「全部加密」/「全部解密」也用它。IV 不可用的行会被标红并跳过，
+   其他行照常处理。
+3. 「保存到所选服务器」发送的是**明文**；后端用每台勾选服务器各自的 Secret Key 把每一行加密一次，在一个
+   事务中保存。对同一台服务器再次保存同一个属性键会替换原值；两行属性键相同会被拒绝。已保存了表单中任一
+   属性键的服务器会标记「已保存」。
 
-**结果列表**显示当前应用系统下已保存的记录。勾选记录后点「解密所选」：每条记录使用表单中**属性键相同**
-那一行的密钥解密（表单只有一行时，所有记录都用这一行的密钥）。逐行返回结果，找不到对应密钥的记录只显示
-自己的错误，不影响其余记录。修改任何密钥都会清空解密结果列。「载入」把一条记录（含 randomkey）放进属性键
-相同的那一行（没有则新增一行）；「删除」删除记录。
+**结果列表**在解密结果旁显示每条记录的 **Secret Key**（下方是它的 randomkey）—— 核对真实配置文件时
+比对的正是这两项。「解密所选」使用每条记录自己的 Secret Key，以及表单中**属性键相同**那一行的 IV
+（表单只有一行时，所有记录都用这一行的 IV）；逐行返回结果。修改 IV 或 randomkey 会清空解密结果列。
+「载入」把一条记录放进属性键相同的那一行（否则放进一个尚未填写取值的行并保留它的 IV，再否则新增一行），
+并把该记录的服务器设为预览服务器；「删除」删除记录。
+
+按旧规则（`SHA-256(Secret Key + randomkey)`，Secret Key 由用户输入）保存的记录，在新规则下无法解密。
 
 ---
 
@@ -451,16 +459,16 @@ ciphertext = Base64( AES/CBC/PKCS5Padding(key, iv, UTF-8(明文)) )
 | `POST` | `/splunk/session` | `{code}` → cookie 脚本；`401` 验证码错误/已使用，`429` 已锁定，`502` Splunk 失败，`503` 未配置 |
 | `GET` | `/splunk/audit` | 审计记录，按时间倒序（`?limit=`，默认 50） |
 | `GET` | `/aes/servers` | 从 endpoint 中取不重复的 `(appSystem, host, ip)`；`?appSystem=` 过滤 |
-| `POST` | `/aes/encrypt` | `{secretKey, iv, randomKey, plainValue}` → `{encryptedValue}`；IV 不是 16 字节时返回 `400` 并指出 `iv` |
-| `POST` | `/aes/decrypt` | `{secretKey, iv, randomKey, encryptedValue}` → `{plainValue}`；`422 decrypt_failed` |
-| `POST` | `/aes/encrypt/batch` | `{items: [{secretKey, iv, randomKey, value}]}` → 逐行返回 `{index, value \| error, field, message}` |
+| `POST` | `/aes/encrypt` | `{iv, randomKey, host, ip, plainValue}` → `{encryptedValue}`；Secret Key = randomKey + host + ip；IV 不是 16 字节时返回 `400` 并指出 `iv` |
+| `POST` | `/aes/decrypt` | `{iv, randomKey, host, ip, encryptedValue}` → `{plainValue}`；`422 decrypt_failed` |
+| `POST` | `/aes/encrypt/batch` | `{items: [{iv, randomKey, host, ip, value}]}` → 逐行返回 `{index, value \| error, field, message}` |
 | `POST` | `/aes/decrypt/batch` | 同上，`value` 为密文；逐行返回，`no-store` |
-| `GET` | `/aes/records` | 已保存的密文；`?appSystem=`、`?propertyKey=` |
-| `POST` | `/aes/records` | `{propertyKey, encryptedValue, randomKey?, note?, servers[]}` → 每台服务器一行，存在则更新 |
-| `POST` | `/aes/records/batch` | `{items: [{propertyKey, encryptedValue, randomKey?, note?}], servers[]}` → 每项保存到每台服务器，一个事务；属性键重复返回 `400` |
+| `GET` | `/aes/records` | 已保存的密文及推导出的 `secretKey`；`?appSystem=`、`?propertyKey=` |
+| `POST` | `/aes/records` | `{propertyKey, plainValue, iv, randomKey?, note?, servers[]}` → 按服务器加密，存在则更新 |
+| `POST` | `/aes/records/batch` | `{items: [{propertyKey, plainValue, iv, randomKey?, note?}], servers[]}` → 每项按每台服务器加密保存，一个事务；属性键重复或 IV 无效返回 `400` |
 | `PUT` | `/aes/records/{id}` | 更新；与其他记录身份冲突时返回 `409 duplicate_aes_record` |
 | `DELETE` | `/aes/records?ids=…` | 批量删除 → `204`；不存在的 id 忽略 |
-| `POST` | `/aes/records/decrypt` | `{items: [{id, secretKey, iv, randomKey}]}` → 逐行返回 `{id, plainValue \| error, message}` |
+| `POST` | `/aes/records/decrypt` | `{items: [{id, iv}]}`（Secret Key 取自记录）→ 逐行返回 `{id, plainValue \| error, message}` |
 
 错误统一使用同一个结构：`{error, message, fields?, time}`。
 

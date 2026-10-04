@@ -32,9 +32,9 @@ import java.util.stream.Collectors;
  * Stored AES ciphertexts, one per {@code (appSystem, host, ip, propertyKey)}, plus the server list
  * they are saved against.
  *
- * <p>Stores no Secret Key or IV: decrypting a stored row takes keys supplied with that request, which
- * are used and dropped. The randomkey is stored per row for display only. Log lines carry ids and
- * counts, never values.
+ * <p>Stores no IV: decrypting a stored row takes the IV supplied with that request. The Secret Key is
+ * never stored either, but it needs no storing — it is {@code randomKey + host + ip}, all of which a
+ * record holds. Log lines carry ids and counts, never values.
  */
 @Service
 @RequiredArgsConstructor
@@ -64,31 +64,38 @@ public class AesRecordService {
                 .toList();
     }
 
-    /** One ciphertext against every listed server — a batch of one; see {@link #saveBatch}. */
+    /** One plain value, encrypted for and saved against every listed server — a batch of one. */
     @Transactional
     public AesRecordSaveResponse save(AesRecordSaveRequest request) {
         return saveBatch(new AesRecordBatchSaveRequest(
                 List.of(new AesRecordBatchSaveRequest.Item(
-                        request.propertyKey(), request.encryptedValue(), request.randomKey(), request.note())),
+                        request.propertyKey(), request.plainValue(), request.iv(), request.randomKey(), request.note())),
                 request.servers()));
     }
 
     /**
-     * Saves every item against every listed server, in one transaction: an insert where the server
-     * has no row for that property yet, a replacement where it has, and nothing where the stored row
-     * is already identical — so "saved to 10 servers" reports what actually changed. A server listed
-     * twice is saved once.
+     * Encrypts every item for every listed server and saves the result, in one transaction: an insert
+     * where the server has no row for that property yet, a replacement where it has, and nothing
+     * where the stored ciphertext is already identical — CBC with a fixed IV is deterministic, so an
+     * unchanged value re-encrypts to the same bytes, and "saved to 10 servers" reports what changed.
      *
-     * <p>The ciphertext is stored as given — it is not decrypted here, since no Secret Key is sent
-     * with a save. The page encrypts first and saves what came back.
+     * <p>Each server gets its own ciphertext: the Secret Key is {@code randomKey + host + ip}. The
+     * plain value and the IV are used and dropped; the ciphertext and the randomkey are stored.
      */
     @Transactional
     public AesRecordSaveResponse saveBatch(AesRecordBatchSaveRequest request) {
         Map<String, Integer> seen = new HashMap<>();
         for (int i = 0; i < request.items().size(); i++) {
-            Integer first = seen.putIfAbsent(request.items().get(i).propertyKey().strip(), i);
+            AesRecordBatchSaveRequest.Item item = request.items().get(i);
+            Integer first = seen.putIfAbsent(item.propertyKey().strip(), i);
             if (first != null) {
                 throw new DuplicatePropertyKeyException(i, first);
+            }
+            try {
+                crypto.requireUsableIv(item.iv());
+            } catch (AesCryptoService.InvalidKeyMaterialException e) {
+                // Checked for every item before anything is written, and named by position.
+                throw new AesCryptoService.InvalidKeyMaterialException("items[" + i + "]." + e.field(), e.getMessage());
             }
         }
 
@@ -101,12 +108,13 @@ public class AesRecordService {
         List<AesRecordDto> saved = new ArrayList<>();
         for (AesRecordBatchSaveRequest.Item item : request.items()) {
             String propertyKey = item.propertyKey().strip();
-            String value = item.encryptedValue().strip();
             String note = blankToNull(item.note());
-            // Not stripped: unlike a property key, a randomkey's spaces are part of the hashed material.
+            // Not stripped: unlike a property key, a randomkey's spaces are part of the Secret Key.
             String randomKey = emptyToNull(item.randomKey());
 
             for (AesRecordSaveRequest.Server server : servers) {
+                String value = crypto.encrypt(
+                        AesCryptoService.secretKey(randomKey, server.host(), server.ip()), item.iv(), item.plainValue());
                 EnvAesRecord row = repository
                         .findByAppSystemAndHostAndIpAndPropertyKey(server.appSystem(), server.host(), server.ip(), propertyKey)
                         .orElse(null);
@@ -167,10 +175,11 @@ public class AesRecordService {
     }
 
     /**
-     * Decrypts stored rows, each with the keys supplied for it, one result per requested id in
-     * request order (a repeated id is answered once). Every failure is that row's own result:
-     * unusable keys ({@code invalid_key_material}), a value they do not decrypt
-     * ({@code decrypt_failed}), or an unknown id ({@code not_found}).
+     * Decrypts stored rows, one result per requested id in request order (a repeated id is answered
+     * once). The Secret Key comes from the record — {@code randomKey + host + ip} — and only the IV
+     * from the request. Every failure is that row's own result: an unusable IV
+     * ({@code invalid_key_material}), a value that does not decrypt ({@code decrypt_failed}), or an
+     * unknown id ({@code not_found}).
      */
     @Transactional(readOnly = true)
     public List<AesRecordDecryptResult> decrypt(AesRecordDecryptRequest request) {
@@ -190,8 +199,8 @@ public class AesRecordService {
                 continue;
             }
             try {
-                String plain = crypto.decrypt(item.secretKey(), item.iv(), item.randomKey(), row.getEncryptedValue());
-                results.add(new AesRecordDecryptResult(id, plain, null, null));
+                String secretKey = AesCryptoService.secretKey(row.getRandomKey(), row.getHost(), row.getIp());
+                results.add(new AesRecordDecryptResult(id, crypto.decrypt(secretKey, item.iv(), row.getEncryptedValue()), null, null));
             } catch (AesCryptoService.InvalidKeyMaterialException e) {
                 results.add(new AesRecordDecryptResult(id, null, "invalid_key_material", e.field() + ": " + e.getMessage()));
             } catch (AesCryptoService.DecryptException e) {

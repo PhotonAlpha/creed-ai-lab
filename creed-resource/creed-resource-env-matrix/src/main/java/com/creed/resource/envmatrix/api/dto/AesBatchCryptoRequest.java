@@ -8,19 +8,20 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 
 /**
- * {@code POST /aes/encrypt/batch} and {@code /aes/decrypt/batch}: the page's "Keys and values" rows,
- * each a complete, independent set — its own Secret Key, IV and randomkey.
+ * {@code POST /aes/encrypt/batch} and {@code /aes/decrypt/batch}: the page's "Keys and values" rows
+ * previewed against one server each. The Secret Key is {@code randomKey + host + ip}.
  *
  * <p>{@code value} is the plaintext for encrypt and the Base64 ciphertext for decrypt. Bean
- * validation only checks shape and size (a violation anywhere is one 400); whether a row's keys are
+ * validation only checks shape and size (a violation anywhere is one 400); whether a row's IV is
  * usable and whether its value decrypts is answered per row, in {@link AesBatchCryptoResult}.
  */
 public record AesBatchCryptoRequest(@NotEmpty @Size(max = 200) List<@Valid Item> items) {
 
     public record Item(
-            @Size(max = 256) String secretKey,
             @Size(max = 64) String iv,
             @Size(max = 256) String randomKey,
+            @NotNull @Size(max = 255) String host,
+            @NotNull @Size(max = 45) String ip,
             @NotNull @Size(max = 16384) String value) {
 
         @Override

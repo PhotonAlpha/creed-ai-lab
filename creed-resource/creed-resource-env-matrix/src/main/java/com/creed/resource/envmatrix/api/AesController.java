@@ -36,19 +36,20 @@ import java.util.List;
  *
  * <pre>
  * GET    /aes/servers?appSystem=        distinct (appSystem, host, ip) from the endpoint table
- * POST   /aes/encrypt                   {secretKey, iv, randomKey, plainValue}     -> {encryptedValue}
- * POST   /aes/decrypt                   {secretKey, iv, randomKey, encryptedValue} -> {plainValue} | 422
- * POST   /aes/encrypt/batch             {items: [{secretKey, iv, randomKey, value}]} -> per-row results
+ * POST   /aes/encrypt                   {iv, randomKey, host, ip, plainValue}     -> {encryptedValue}
+ * POST   /aes/decrypt                   {iv, randomKey, host, ip, encryptedValue} -> {plainValue} | 422
+ * POST   /aes/encrypt/batch             {items: [{iv, randomKey, host, ip, value}]} -> per-row results
  * POST   /aes/decrypt/batch             same shape, value = ciphertext                -> per-row results
  * GET    /aes/records?appSystem=&amp;propertyKey=
- * POST   /aes/records                   {propertyKey, encryptedValue, randomKey, note, servers[]} -> upsert per server
- * POST   /aes/records/batch             {items: [{propertyKey, encryptedValue, randomKey, note}], servers[]}
+ * POST   /aes/records                   {propertyKey, plainValue, iv, randomKey, note, servers[]} -> encrypt + upsert per server
+ * POST   /aes/records/batch             {items: [{propertyKey, plainValue, iv, randomKey, note}], servers[]}
  * PUT    /aes/records/{id}
  * DELETE /aes/records?ids=1&amp;ids=2      -> 204
- * POST   /aes/records/decrypt           {items: [{id, secretKey, iv, randomKey}]} -> per-row results
+ * POST   /aes/records/decrypt           {items: [{id, iv}]} -> per-row results
  * </pre>
  *
- * Keys are POSTed, never put in a URL: a query string ends up in access logs and browser history.
+ * The Secret Key is never an input: it is randomKey + host + ip (see AesCryptoService). Keys are
+ * POSTed, never put in a URL: a query string ends up in access logs and browser history.
  * Responses carrying a plaintext are {@code no-store}.
  */
 @RestController
@@ -66,13 +67,13 @@ public class AesController {
 
     @PostMapping("/encrypt")
     public AesCryptoResponse encrypt(@Valid @RequestBody AesEncryptRequest body) {
-        String encrypted = crypto.encrypt(body.secretKey(), body.iv(), body.randomKey(), body.plainValue());
+        String encrypted = crypto.encrypt(AesCryptoService.secretKey(body.randomKey(), body.host(), body.ip()), body.iv(), body.plainValue());
         return new AesCryptoResponse(encrypted, null, AesCryptoService.ALGORITHM);
     }
 
     @PostMapping("/decrypt")
     public ResponseEntity<AesCryptoResponse> decrypt(@Valid @RequestBody AesDecryptRequest body) {
-        String plain = crypto.decrypt(body.secretKey(), body.iv(), body.randomKey(), body.encryptedValue());
+        String plain = crypto.decrypt(AesCryptoService.secretKey(body.randomKey(), body.host(), body.ip()), body.iv(), body.encryptedValue());
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(new AesCryptoResponse(null, plain, AesCryptoService.ALGORITHM));
     }

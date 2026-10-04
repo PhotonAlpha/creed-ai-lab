@@ -8,20 +8,17 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 
 /**
- * {@code POST /aes/records/decrypt}: decrypt stored rows, each with its own keys — the page picks,
- * per record, the "Keys and values" row with the same property key.
+ * {@code POST /aes/records/decrypt}: decrypt stored rows. Only the IV is supplied — the Secret Key
+ * comes from the record itself ({@code randomKey + host + ip}). The page picks, per record, the IV of
+ * the "Keys and values" row with the same property key.
  */
 public record AesRecordDecryptRequest(@NotEmpty @Size(max = 500) List<@Valid Item> items) {
 
-    public record Item(
-            @NotNull Long id,
-            @Size(max = 256) String secretKey,
-            @Size(max = 64) String iv,
-            @Size(max = 256) String randomKey) {
+    public record Item(@NotNull Long id, @Size(max = 64) String iv) {
 
         @Override
         public String toString() {
-            return "Item[id=" + id + ", keys=***]";
+            return "Item[id=" + id + ", iv=***]";
         }
     }
 

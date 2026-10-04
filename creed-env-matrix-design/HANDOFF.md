@@ -92,16 +92,26 @@ Complete and verified in a browser against the real backend.
   - Verified: typecheck, `antd lint`, `test:server` (30), headless-Chrome CDP drive against the mock
     (IV byte check, encrypt/decrypt, save to 2 servers, decrypt rows, key change clears + per-row
     failure, delete), and the same flow by curl against the Java `dev` profile on real Postgres.
-  - **Keys and values is an array** (`Form.List` of complete rows + "Edit as JSON" dialog —
+  - **Keys and values is an array** (`Form.List` rows + "Edit as JSON" dialog —
     not a clipboard button, since `navigator.clipboard` needs a secure context and the BFF is HTTP).
     Encrypt/decrypt all use `/aes/{encrypt,decrypt}/batch`; a row failing client validation is
     marked and skipped, the rest go through. Save uses `/aes/records/batch` (all rows × servers, one
-    transaction, repeated property key marked client-side first). Decrypt selected sends per-record
-    keys: the form row with the same property key, or the only row. "Decrypted" sits right after
+    transaction, repeated property key marked client-side first). Decrypt selected sends a per-record
+    IV: from the form row with the same property key, or the only row. "Decrypted" sits right after
     "Property key" so the result is never behind the table's horizontal scroll.
   - Verified (multi-row): `tmp/aes-rows-e2e.mjs` (CDP) — JSON typo rejected, mixed per-row keys,
     bad row skipped, 2 values × 2 servers = 4 rows, per-record decrypt, duplicate key marked; and
     `tmp/aes-parity.mjs` gives byte-identical output from the mock and the Java `dev` profile.
+  - **Rule change (2026-10-04): Secret Key = randomkey + host + ip, key = SHA-256(Secret Key)** — the
+    real config files' rule; there is no Secret Key input any more. The form previews against one
+    ticked **preview server** (card header; Load switches it to the record's server); *Save* sends plain
+    values and the backend encrypts once per server. Result list shows each record's Secret Key (with
+    its randomkey) beside the plaintext for checking against config files. Plain value is required only
+    at save (no form rule — it would flag "Required" while decrypting into it). Load reuses a row with
+    no values (keeps its IV). Vector `jD7BgEr6wW5uZCYJi4j5Rw==` (r4nd0m / ms1.cn.uat1 / 10.1.1.11 /
+    0123456789abcdef / db-p@ss 密码) matches openssl; `tmp/aes-rows-e2e.mjs` checks every derived value
+    against node crypto; `tmp/aes-parity.mjs` mock vs Java on Postgres: identical. Records saved under
+    the old rule no longer decrypt.
   - `ServerList` is `memo`'d: unfiltered it is ~717 checkboxes, and re-rendering them per keystroke
     cost 114 ms/char in dev (now 16 ms). Ticking one box still re-renders the group (~200 ms dev,
     all apps listed) — virtualise it if that ever matters.
