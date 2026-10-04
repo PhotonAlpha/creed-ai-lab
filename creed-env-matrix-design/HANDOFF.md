@@ -77,6 +77,33 @@ Complete and verified in a browser against the real backend.
     `package.json` with `"type": "module"` + `pg` only). Verified by `npm start` from the packaged
     copy (UI, SPA fallback, `/api` proxy, Splunk routes, pg audit). Step-by-step in `DEPLOY.md` /
     `DEPLOY.zh-CN.md`; the systemd/Docker/nginx templates there were not run.
+- **AES encryption (`/aes`)** — design `creed-resource-env-matrix/docs/design.png`. Keys + values form,
+  server list (distinct `host:ip` from the endpoints, app-system filter, "saved" tag for the property
+  key in the form), result list (`Table` with row selection: decrypt selected per row, delete, load
+  into form). Cipher `SHA-256(secret + randomkey)` → AES-256-CBC/PKCS5, 16-byte UTF-8 IV, Base64 —
+  identical in `server/aes.js` and the Java `AesCryptoService`, both pinned to
+  `EFZDc/Ok6Ib89heJb1OkHw==` (also produced by `openssl enc`). The Secret Key and IV are never stored
+  or put in a URL; the randomkey is saved per row (V8) and shown in the result list, and *Load*
+  restores it into the form (which also clears the decrypted column — `setFieldsValue` does not fire
+  `onValuesChange`). The randomkey form field is a plain `Input` now, since the table shows it anyway.
+  - Verified: typecheck, `antd lint`, `test:server` (30), headless-Chrome CDP drive against the mock
+    (IV byte check, encrypt/decrypt, save to 2 servers, decrypt rows, key change clears + per-row
+    failure, delete), and the same flow by curl against the Java `dev` profile on real Postgres.
+  - **Keys and values is an array** (`Form.List` of complete rows + "Edit as JSON" dialog —
+    not a clipboard button, since `navigator.clipboard` needs a secure context and the BFF is HTTP).
+    Encrypt/decrypt all use `/aes/{encrypt,decrypt}/batch`; a row failing client validation is
+    marked and skipped, the rest go through. Save uses `/aes/records/batch` (all rows × servers, one
+    transaction, repeated property key marked client-side first). Decrypt selected sends per-record
+    keys: the form row with the same property key, or the only row. "Decrypted" sits right after
+    "Property key" so the result is never behind the table's horizontal scroll.
+  - Verified (multi-row): `tmp/aes-rows-e2e.mjs` (CDP) — JSON typo rejected, mixed per-row keys,
+    bad row skipped, 2 values × 2 servers = 4 rows, per-record decrypt, duplicate key marked; and
+    `tmp/aes-parity.mjs` gives byte-identical output from the mock and the Java `dev` profile.
+  - `ServerList` is `memo`'d: unfiltered it is ~717 checkboxes, and re-rendering them per keystroke
+    cost 114 ms/char in dev (now 16 ms). Ticking one box still re-renders the group (~200 ms dev,
+    all apps listed) — virtualise it if that ever matters.
+  - Claude-in-Chrome could not screenshot any page in this session (even a JSON URL); headless
+    Chrome over CDP (`--remote-debugging-port`) was used instead.
 - **i18n** en / zh-CN throughout, including the antd locale bundle; persisted in `localStorage`.
 - `antd lint src` → 0 issues. `tsc -b` and `vite build` clean.
 

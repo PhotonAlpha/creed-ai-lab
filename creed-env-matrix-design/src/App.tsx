@@ -2,12 +2,13 @@ import type { CSSProperties } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { ProLayout } from '@ant-design/pro-components';
 import { Button, theme } from 'antd';
-import { ApartmentOutlined, GlobalOutlined, KeyOutlined, SettingOutlined, TableOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, GlobalOutlined, KeyOutlined, LockOutlined, SettingOutlined, TableOutlined } from '@ant-design/icons';
 import { useI18n } from './locales';
 import { MatrixPage } from './pages/Matrix';
 import { ConfigPage } from './pages/Config';
 import { TopologyPage } from './pages/Topology';
 import { SplunkPage } from './pages/Splunk';
+import { AesPage } from './pages/Aes';
 
 export function App() {
   const { t, toggleLang } = useI18n();
@@ -42,6 +43,7 @@ export function App() {
             { path: '/topology', name: t('nav.topology'), icon: <ApartmentOutlined /> },
             { path: '/config', name: t('nav.config'), icon: <SettingOutlined /> },
             { path: '/splunk', name: t('nav.splunk'), icon: <KeyOutlined /> },
+            { path: '/aes', name: t('nav.aes'), icon: <LockOutlined /> },
           ],
         }}
         menuItemRender={(item, dom) => <Link to={item.path ?? '/'}>{dom}</Link>}
@@ -58,6 +60,7 @@ export function App() {
           <Route path="/topology" element={<TopologyPage />} />
           <Route path="/config" element={<ConfigPage />} />
           <Route path="/splunk" element={<SplunkPage />} />
+          <Route path="/aes" element={<AesPage />} />
         </Routes>
       </ProLayout>
     </div>

@@ -409,6 +409,62 @@ in `public.splunk_audit` across once and leaves that table alone — drop it by 
 A code is spent the moment it is verified, so after a replay or a Splunk failure the page clears the
 input and says to wait for the next code.
 
+### AES encryption (`/aes`)
+
+Encrypts or decrypts a configuration value and keeps the ciphertext **per server**. Layout follows
+`creed-resource-env-matrix/docs/design.png`: keys and values on top, the server list bottom-left,
+the saved results bottom-right.
+
+**The cipher** — the same in the Java service (`AesCryptoService`) and the node mock (`server/aes.js`),
+pinned by one shared test vector:
+
+```
+key        = SHA-256( UTF-8(Secret Key + randomkey) )      32 bytes -> AES-256
+iv         = UTF-8(Initialization Vector)                  exactly 16 bytes
+ciphertext = Base64( AES/CBC/PKCS5Padding(key, iv, UTF-8(plain value)) )
+```
+
+- **randomkey** is appended to the Secret Key before hashing, so it varies the key; it may be empty.
+  ("ab" + "c" and "a" + "bc" derive the same key — it is not a second, independent secret.)
+- **The IV is counted in UTF-8 bytes**, not characters: the field shows `n / 16`, and a Chinese
+  character counts as 3.
+- **The Secret Key and IV are never stored.** They are POSTed with each encrypt/decrypt request (never
+  in a URL) and dropped. A save keeps the ciphertext **and the randomkey in the form** (shown in the
+  result list); the randomkey alone decrypts nothing, so a copy of the database still cannot be
+  decrypted. Rows saved before V8 have no recorded randomkey and show "—".
+- CBC has no integrity check: a wrong key is almost always reported (bad padding, or output that is
+  not UTF-8), but rarely decrypts to short garbage instead.
+
+**Keys and values is an array.** Each row is a complete, independent set — its own Secret Key, IV,
+randomkey, property key, plain value and encrypted value. Add, duplicate and remove rows, or use
+*Edit as JSON* to import/export the whole array:
+
+```json
+[
+  { "secretKey": "…", "iv": "0123456789abcdef", "randomKey": "r4nd0m",
+    "propertyKey": "db.password", "plainValue": "db-p@ss", "encryptedValue": "" }
+]
+```
+
+The dialog replaces or appends rows; an unknown field name (`secret_key`) is rejected rather than
+silently dropped, since a dropped key would encrypt with an empty one. The JSON carries the Secret
+Keys in clear text. At most 200 rows.
+
+**Flow.** *Encrypt all* encrypts every row that has a plain value, each with its own keys; *Decrypt
+all* does the reverse for every row with an encrypted value. A row whose keys are unusable is marked
+and skipped — the other rows still go through. Tick servers in the **server list** — every distinct
+`host:ip` in the configuration, narrowed by the app-system filter — and *Save to selected servers*
+stores every row against every ticked server, in one transaction. Saving the same property for a
+server again replaces its value; the same property key on two rows is rejected. A server that already
+holds any property key in the form is tagged *saved*.
+
+The **result list** shows the saved rows for the current app system. Tick rows and *Decrypt
+selected*: each record is decrypted with the keys of the form row that has **the same property key**
+(with a single form row, that row's keys are used for every record). Results are per row, so a
+record without matching keys shows its own error without hiding the rest. Changing any key clears the
+decrypted column. *Load* puts a record into the form row with its property key (or a new row),
+randomkey included; *Delete* removes rows.
+
 ---
 
 ## 6. API
@@ -441,6 +497,17 @@ Base path `/api/env-matrix`. Filters are repeated query parameters —
 | `GET` | `/splunk/totp/current` | Current code (only with `expose-current-code`; else `404`) |
 | `POST` | `/splunk/session` | `{code}` → cookie script; `401` bad/replayed code, `429` locked out, `502` Splunk failed, `503` not configured |
 | `GET` | `/splunk/audit` | Audit rows, newest first (`?limit=`, default 50) |
+| `GET` | `/aes/servers` | Distinct `(appSystem, host, ip)` from the endpoints; `?appSystem=` narrows |
+| `POST` | `/aes/encrypt` | `{secretKey, iv, randomKey, plainValue}` → `{encryptedValue}`; `400` naming `iv` if not 16 bytes |
+| `POST` | `/aes/decrypt` | `{secretKey, iv, randomKey, encryptedValue}` → `{plainValue}`; `422 decrypt_failed` |
+| `POST` | `/aes/encrypt/batch` | `{items: [{secretKey, iv, randomKey, value}]}` → per-row `{index, value \| error, field, message}` |
+| `POST` | `/aes/decrypt/batch` | Same shape, `value` = ciphertext; per-row results, `no-store` |
+| `GET` | `/aes/records` | Saved ciphertexts; `?appSystem=`, `?propertyKey=` |
+| `POST` | `/aes/records` | `{propertyKey, encryptedValue, randomKey?, note?, servers[]}` → one row per server, upserted |
+| `POST` | `/aes/records/batch` | `{items: [{propertyKey, encryptedValue, randomKey?, note?}], servers[]}` → every item to every server, one transaction; repeated property key → `400` |
+| `PUT` | `/aes/records/{id}` | Update → `409 duplicate_aes_record` if the identity collides |
+| `DELETE` | `/aes/records?ids=…` | Delete several → `204`; unknown ids ignored |
+| `POST` | `/aes/records/decrypt` | `{items: [{id, secretKey, iv, randomKey}]}` → per-row `{id, plainValue \| error, message}` |
 
 Errors use one envelope: `{error, message, fields?, time}`.
 
@@ -462,9 +529,11 @@ so conflicts are reported, never rejected. Only duplicate *identities* are rejec
 │       ├── Matrix/     # matrix view (/)
 │       ├── Topology/   # topology graph (/topology)
 │       │                # buildGraph.ts is pure: endpoints + conflicts + links -> nodes/edges
-│       └── Config/     # CRUD editor (/config)
+│       ├── Config/     # CRUD editor (/config)
+│       └── Aes/        # AES encryption (/aes)
 ├── server/
 │   ├── index.js        # mock API — same contract, no dependencies
+│   ├── aes.js          # mock's /aes/* routes + the shared cipher (pinned vector in aes.test.js)
 │   ├── mock.json       # mock data source, rewritten on save
 │   ├── bff.js          # deployable server: dist/ + Splunk broker + /api proxy
 │   └── splunk/         # the Splunk broker (TOTP, login client, pg/memory audit), shared by both

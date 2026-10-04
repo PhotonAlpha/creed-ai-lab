@@ -69,7 +69,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 │   │   ├── Matrix       # 矩阵视图（首页 /）
 │   │   ├── Topology     # 矩阵拓扑图（/topology）
 │   │   ├── Config       # CRUD 编辑页（/config）
-│   │   └── Splunk       # Splunk 会话代理（/splunk）
+│   │   ├── Splunk       # Splunk 会话代理（/splunk）
+│   │   └── Aes          # AES 加解密（/aes）
 │   └── api/             # 前端 API 封装
 ├── server/
 │   ├── index.(js|ts)    # mock API 服务
@@ -126,6 +127,19 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 审计：每次 OTP 校验与 Splunk 调用都记一行（不保存 cookie 值，只保存指纹）；写不进审计则请求失败。
   **默认存内存**（最新 500 条，重启即丢失）；`SPLUNK_AUDIT_STORE=pg` 时写入 Postgres
   `splunk_broker.splunk_audit`。mock 始终存内存。
+
+### 5.5 AES 加解密（`/aes`）
+- 设计图：`creed-resource/creed-resource-env-matrix/docs/design.png`。
+- 「密钥与取值」是一个数组：每行一组完整独立的 Secret Key / Initialization Vector / randomkey / 属性键 / 明文 / 密文，
+  可增删行，也可「以 JSON 编辑」导入导出（未知字段拒绝）。全部加密 / 全部解密逐行处理，坏行标红跳过。
+- 算法：`key = SHA-256(Secret Key + randomkey)`，AES-256/CBC/PKCS5Padding，IV 为 UTF-8 正好 16 字节，密文 Base64。
+  Java（`AesCryptoService`）与 mock（`server/aes.js`）必须保持一致 —— 两边测试锁定同一个向量。
+- 服务器列表从配置（`env_endpoint`）读取不重复的 host / ip，按 App system 过滤。
+- 后端 CRUD 在 `creed-resource-env-matrix`（`env_aes_record`，Flyway V7）：按属性键每台服务器一行，
+  同一服务器同一属性键再次保存即替换。保存密文与 randomkey（Flyway V8，结果列表中显示）；
+  **Secret Key 与 IV 从不保存**，也不放进 URL。
+- 保存：所有行 × 所有勾选服务器，一个事务；同一批次属性键重复则拒绝。
+- 结果列表可勾选后批量解密（每条记录用属性键相同那一行的密钥；表单只有一行时用这一行）或删除。
 
 ## 6. 命令
 

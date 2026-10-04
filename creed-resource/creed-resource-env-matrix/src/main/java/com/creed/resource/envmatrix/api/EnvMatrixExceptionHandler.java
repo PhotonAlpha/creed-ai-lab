@@ -1,5 +1,7 @@
 package com.creed.resource.envmatrix.api;
 
+import com.creed.resource.envmatrix.service.AesCryptoService;
+import com.creed.resource.envmatrix.service.AesRecordService;
 import com.creed.resource.envmatrix.service.EnvMatrixService;
 import com.creed.resource.envmatrix.service.ReleaseService;
 import com.creed.resource.envmatrix.service.splunk.SplunkLoginClient;
@@ -74,6 +76,39 @@ public class EnvMatrixExceptionHandler {
     @ExceptionHandler(SplunkLoginClient.SplunkLoginException.class)
     ResponseEntity<Map<String, Object>> splunkLogin(SplunkLoginClient.SplunkLoginException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body("splunk_" + e.reason(), e.getMessage(), null));
+    }
+
+    @ExceptionHandler(AesRecordService.AesRecordNotFoundException.class)
+    ResponseEntity<Map<String, Object>> aesNotFound(AesRecordService.AesRecordNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body("not_found", e.getMessage(), null));
+    }
+
+    @ExceptionHandler(AesRecordService.DuplicateAesRecordException.class)
+    ResponseEntity<Map<String, Object>> aesDuplicate(AesRecordService.DuplicateAesRecordException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body("duplicate_aes_record", e.getMessage(), null));
+    }
+
+    /** A key or IV that cannot be used at all: a 400 shaped like a bean-validation failure, naming the field. */
+    @ExceptionHandler(AesCryptoService.InvalidKeyMaterialException.class)
+    ResponseEntity<Map<String, Object>> aesKeys(AesCryptoService.InvalidKeyMaterialException e) {
+        Map<String, String> field = new LinkedHashMap<>();
+        field.put("field", e.field());
+        field.put("message", e.getMessage());
+        return ResponseEntity.badRequest().body(body("validation_failed", "request payload is invalid", List.of(field)));
+    }
+
+    @ExceptionHandler(AesRecordService.DuplicatePropertyKeyException.class)
+    ResponseEntity<Map<String, Object>> aesDuplicateKey(AesRecordService.DuplicatePropertyKeyException e) {
+        Map<String, String> field = new LinkedHashMap<>();
+        field.put("field", e.field());
+        field.put("message", e.getMessage());
+        return ResponseEntity.badRequest().body(body("validation_failed", "request payload is invalid", List.of(field)));
+    }
+
+    /** The request was well-formed; the value just does not decrypt with these keys. */
+    @ExceptionHandler(AesCryptoService.DecryptException.class)
+    ResponseEntity<Map<String, Object>> aesDecrypt(AesCryptoService.DecryptException e) {
+        return ResponseEntity.unprocessableEntity().body(body("decrypt_failed", e.getMessage(), null));
     }
 
     /** Someone else saved the same row first; the config page should reload and retry. */

@@ -372,6 +372,51 @@ BFF 首次启动时会把 `public.splunk_audit` 中已有的记录复制一次�
 
 验证码一经校验即被消耗，因此遇到「已使用」或 Splunk 调用失败时，页面会清空输入框并提示等待下一个验证码。
 
+### AES 加解密（`/aes`）
+
+对配置值加密或解密，并**按服务器**保存密文。布局遵循 `creed-resource-env-matrix/docs/design.png`：
+上方是密钥与取值，左下是服务器列表，右下是已保存的结果。
+
+**算法** —— Java 服务（`AesCryptoService`）与 node mock（`server/aes.js`）完全一致，由同一个测试向量锁定：
+
+```
+key        = SHA-256( UTF-8(Secret Key + randomkey) )      32 字节 -> AES-256
+iv         = UTF-8(Initialization Vector)                  正好 16 字节
+ciphertext = Base64( AES/CBC/PKCS5Padding(key, iv, UTF-8(明文)) )
+```
+
+- **randomkey** 在哈希前拼接在 Secret Key 之后，用来改变密钥；可以为空。（"ab" + "c" 与 "a" + "bc"
+  得到同一个密钥 —— 它不是第二个独立的密钥。）
+- **IV 按 UTF-8 字节计数**，不是按字符：输入框显示 `n / 16`，一个汉字算 3 个字节。
+- **Secret Key 和 IV 从不保存。** 每次加解密请求都在请求体中 POST（绝不放进 URL），用完即弃。保存时
+  记录密文以及**表单中的 randomkey**（显示在结果列表中）；单凭 randomkey 无法解密，所以拿到数据库副本
+  也无法解密。V8 之前保存的记录没有 randomkey，显示为「—」。
+- CBC 没有完整性校验：密钥错误几乎总会被识别（填充错误或结果不是 UTF-8），但极少数情况下会解出一小段乱码。
+
+**「密钥与取值」是一个数组。** 每一行都是一组完整、独立的数据 —— 各自的 Secret Key、IV、randomkey、
+属性键、明文和密文。可以添加、复制、删除行，也可以用「以 JSON 编辑」导入 / 导出整个数组：
+
+```json
+[
+  { "secretKey": "…", "iv": "0123456789abcdef", "randomKey": "r4nd0m",
+    "propertyKey": "db.password", "plainValue": "db-p@ss", "encryptedValue": "" }
+]
+```
+
+对话框可以替换或追加行；未知字段名（如 `secret_key`）会被拒绝而不是静默忽略 —— 被忽略的密钥会让加密
+用空密钥进行。JSON 中包含明文的 Secret Key。最多 200 行。
+
+**操作流程。** 「全部加密」用每行各自的密钥加密所有填了明文的行；「全部解密」对所有填了密文的行做相反操作。
+密钥不可用的行会被标红并跳过 —— 其他行照常处理。在**服务器列表**中勾选服务器 —— 列出配置中所有不重复的
+`host:ip`，可按应用系统过滤 —— 再点「保存到所选服务器」，把每一行保存到每一台勾选的服务器，在一个事务中
+完成。对同一台服务器再次保存同一个属性键会替换原值；两行属性键相同会被拒绝。已保存了表单中任一属性键的
+服务器会标记「已保存」。
+
+**结果列表**显示当前应用系统下已保存的记录。勾选记录后点「解密所选」：每条记录使用表单中**属性键相同**
+那一行的密钥解密（表单只有一行时，所有记录都用这一行的密钥）。逐行返回结果，找不到对应密钥的记录只显示
+自己的错误，不影响其余记录。修改任何密钥都会清空解密结果列。「载入」把一条记录（含 randomkey）放进属性键
+相同的那一行（没有则新增一行）；「删除」删除记录。
+
 ---
 
 ## 6. API
@@ -404,6 +449,17 @@ BFF 首次启动时会把 `public.splunk_audit` 中已有的记录复制一次�
 | `GET` | `/splunk/totp/current` | 当前验证码（仅在开启 `expose-current-code` 时；否则 `404`） |
 | `POST` | `/splunk/session` | `{code}` → cookie 脚本；`401` 验证码错误/已使用，`429` 已锁定，`502` Splunk 失败，`503` 未配置 |
 | `GET` | `/splunk/audit` | 审计记录，按时间倒序（`?limit=`，默认 50） |
+| `GET` | `/aes/servers` | 从 endpoint 中取不重复的 `(appSystem, host, ip)`；`?appSystem=` 过滤 |
+| `POST` | `/aes/encrypt` | `{secretKey, iv, randomKey, plainValue}` → `{encryptedValue}`；IV 不是 16 字节时返回 `400` 并指出 `iv` |
+| `POST` | `/aes/decrypt` | `{secretKey, iv, randomKey, encryptedValue}` → `{plainValue}`；`422 decrypt_failed` |
+| `POST` | `/aes/encrypt/batch` | `{items: [{secretKey, iv, randomKey, value}]}` → 逐行返回 `{index, value \| error, field, message}` |
+| `POST` | `/aes/decrypt/batch` | 同上，`value` 为密文；逐行返回，`no-store` |
+| `GET` | `/aes/records` | 已保存的密文；`?appSystem=`、`?propertyKey=` |
+| `POST` | `/aes/records` | `{propertyKey, encryptedValue, randomKey?, note?, servers[]}` → 每台服务器一行，存在则更新 |
+| `POST` | `/aes/records/batch` | `{items: [{propertyKey, encryptedValue, randomKey?, note?}], servers[]}` → 每项保存到每台服务器，一个事务；属性键重复返回 `400` |
+| `PUT` | `/aes/records/{id}` | 更新；与其他记录身份冲突时返回 `409 duplicate_aes_record` |
+| `DELETE` | `/aes/records?ids=…` | 批量删除 → `204`；不存在的 id 忽略 |
+| `POST` | `/aes/records/decrypt` | `{items: [{id, secretKey, iv, randomKey}]}` → 逐行返回 `{id, plainValue \| error, message}` |
 
 错误统一使用同一个结构：`{error, message, fields?, time}`。
 
@@ -425,9 +481,11 @@ BFF 首次启动时会把 `public.splunk_audit` 中已有的记录复制一次�
 │       ├── Matrix/     # 矩阵视图（/）
 │       ├── Topology/   # 拓扑图（/topology）
 │       │                # buildGraph.ts 为纯函数：endpoints + conflicts + links -> 节点/边
-│       └── Config/     # 增删改查编辑页（/config）
+│       ├── Config/     # 增删改查编辑页（/config）
+│       └── Aes/        # AES 加解密（/aes）
 ├── server/
 │   ├── index.js        # Mock API —— 契约一致，零依赖
+│   ├── aes.js          # mock 的 /aes/* 接口与加解密实现（测试向量见 aes.test.js）
 │   ├── mock.json       # Mock 数据源，保存时会被回写
 │   ├── bff.js          # 可部署的服务：dist/ + Splunk 会话代理 + /api 反向代理
 │   └── splunk/         # Splunk 会话代理（TOTP、登录客户端、pg/内存审计），两者共用

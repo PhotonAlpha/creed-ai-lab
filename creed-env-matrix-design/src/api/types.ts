@@ -312,3 +312,96 @@ export interface SplunkAuditRow {
   durationMs: number | null;
   createdAt: string;
 }
+
+/* ---- AES encryption (/aes/*) ------------------------------------------------------------------ */
+
+/** Sent with each encrypt/decrypt request. Only the randomkey is ever stored — per saved row. */
+export interface AesKeys {
+  secretKey: string;
+  /** Exactly 16 bytes in UTF-8. */
+  iv: string;
+  /** Appended to the Secret Key before hashing; may be empty. */
+  randomKey: string;
+}
+
+export interface AesCryptoResult {
+  encryptedValue: string | null;
+  plainValue: string | null;
+  algorithm: string;
+}
+
+/** One distinct (appSystem, host, ip) from the endpoint table. */
+export interface AesServer {
+  appSystem: string;
+  host: string;
+  ip: string;
+}
+
+export interface AesRecord extends AesServer {
+  id: number;
+  propertyKey: string;
+  encryptedValue: string;
+  /** The randomkey the row was saved with; `null` when none was (or before it was recorded). */
+  randomKey: string | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface AesRecordSaveRequest {
+  propertyKey: string;
+  encryptedValue: string;
+  /** Stored with each row for the result list. The Secret Key and IV are never sent with a save. */
+  randomKey?: string;
+  note?: string;
+  servers: AesServer[];
+}
+
+export interface AesRecordSaveResponse {
+  inserted: number;
+  updated: number;
+  records: AesRecord[];
+}
+
+export interface AesRecordDecryptResult {
+  id: number;
+  plainValue: string | null;
+  error: 'not_found' | 'invalid_key_material' | 'decrypt_failed' | null;
+  message: string | null;
+}
+
+/** One row of "Keys and values": a complete, independent set — the JSON dialog's array element too. */
+export interface AesKeyValueRow {
+  secretKey: string;
+  iv: string;
+  randomKey: string;
+  propertyKey: string;
+  plainValue: string;
+  encryptedValue: string;
+}
+
+/** A row of `/aes/encrypt/batch` or `/aes/decrypt/batch` (`value` = plaintext or ciphertext). */
+export interface AesBatchCryptoItem extends AesKeys {
+  value: string;
+}
+
+export interface AesBatchCryptoResult {
+  /** Position in the request. */
+  index: number;
+  value: string | null;
+  error: 'invalid_key_material' | 'decrypt_failed' | null;
+  /** For `invalid_key_material`: `secretKey` or `iv`. */
+  field: string | null;
+  message: string | null;
+}
+
+export interface AesRecordBatchSaveRequest {
+  items: { propertyKey: string; encryptedValue: string; randomKey?: string; note?: string }[];
+  servers: AesServer[];
+}
+
+/** One stored record to decrypt, with the keys chosen for it. */
+export interface AesRecordDecryptItem extends AesKeys {
+  id: number;
+}

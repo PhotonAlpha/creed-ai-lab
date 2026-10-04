@@ -96,6 +96,39 @@ SPLUNK_ENABLED=true SPLUNK_LOGIN_URL=https://<host>:8000/en-US/account/login SPL
   saved individually (the service is not `@Transactional`) so a Splunk failure keeps its OTP row.
   Stores a 16-hex SHA-256 **fingerprint** of the cookie, never the value.
 
+### AES records (`/aes/*`, V7 `env_aes_record` + V8 `random_key`)
+
+Backend of the frontend's `/aes` page (design: `docs/design.png`). **83 tests pass** (22 new:
+`AesCryptoServiceTest`, `AesControllerTest`). V7 and V8 applied to the live `env_matrix` DB and exercised by
+curl on the `dev` profile.
+
+- `AesCryptoService` — `key = SHA-256(UTF-8(secretKey + randomKey))`, `AES/CBC/PKCS5Padding`, IV =
+  exactly 16 UTF-8 bytes, Base64. Vector `EFZDc/Ok6Ib89heJb1OkHw==` is pinned here and in the node
+  mock (`server/aes.test.js`) and matches `openssl enc` — change the cipher in both or neither.
+- **The Secret Key and IV are never stored, logged or put in a URL.** Request records override
+  `toString`; no exception message carries a key, IV or value (a test checks the error body).
+- **V8 adds `random_key`** (nullable — pre-V8 rows are "unknown", not ""): the randomkey in the form
+  at save time, shown in the result list. Recorded, not verified (a pasted ciphertext cannot be
+  checked without the Secret Key); not trimmed, since spaces are hashed. A changed randomkey alone
+  counts as an update. Alone it decrypts nothing — it is only hashed with the Secret Key.
+- Unusable keys (empty secret, IV ≠ 16 bytes) → `400 validation_failed` naming the field; a value that
+  will not decrypt → `422 decrypt_failed`. Strict UTF-8 decoding, so a wrong key is not reported as
+  U+FFFD soup.
+- `env_aes_record` identity `(app_system, host, ip, property_key)` — in V7 *and* on `@Table`, for the
+  H2 test schema. A save upserts per server and skips unchanged rows. **No FK to `env_endpoint`**, for
+  the same reason as `env_release_node`: the config page rewrites endpoints wholesale.
+- `GET /aes/servers` uses two queries, not `(:appSystem is null or …)` — PostgreSQL cannot type a
+  parameter only ever compared with null.
+- **Batches** (the page's "Keys and values" is an array of complete rows):
+  `POST /aes/{encrypt,decrypt}/batch` — each item its own keys, per-row `{index, value | error, field}`
+  (`invalid_key_material` / `decrypt_failed`); bean-validation shape errors stay one 400.
+  `POST /aes/records/batch` — every item × every server in one transaction; a repeated property key
+  is a 400 naming `items[i].propertyKey` (`DuplicatePropertyKeyException`). Single `POST /aes/records`
+  is a batch of one. `POST /aes/records/decrypt` takes `{items: [{id, secretKey, iv, randomKey}]}`;
+  unusable keys are that row's `invalid_key_material`, no longer a request-wide 400.
+- Type-use `@Valid` on a nested type must be written `Outer.@Valid Inner` —
+  `@Valid Outer.Inner` is a compile error that surfaces as a wall of Lombok `cannot find symbol: log`.
+
 ## Landmines
 
 - **A topology node is a slice, not an app system.** `env_app_link` keyed a connection on

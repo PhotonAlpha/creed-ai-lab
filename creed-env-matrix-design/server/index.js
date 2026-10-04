@@ -10,6 +10,7 @@
  * (`ConflictDetector`, `HealthProbeService`), including Java's exact string hash, so a given
  * host:port reports the same health state in both backends.
  *
+ * The AES page's routes (`/aes/*`, server/aes.js) are here too, records in mock.json `aesRecords`.
  * The Splunk session broker (`/splunk/*`) is here too — the very code the BFF (server/bff.js) runs,
  * imported from server/splunk/, with Splunk always mocked and the audit trail kept in memory.
  *
@@ -20,6 +21,7 @@ import { createServer } from 'node:http';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createAesRoutes } from './aes.js';
 import { MemoryAuditStore } from './splunk/audit-store.js';
 import { loadConfig } from './splunk/config.js';
 import { createSplunkBroker, handleSplunk } from './splunk/routes.js';
@@ -45,10 +47,12 @@ let endpoints = [];
 let releases = [];
 let releaseNodes = [];
 let releaseLinks = [];
+let aesRecords = [];
 let nextId = 1;
 let nextReleaseId = 1;
 let nextNodeId = 1;
 let nextLinkId = 1;
+let nextAesId = 1;
 let mockSeed = 0;
 
 const maxId = (rows) => rows.reduce((max, r) => Math.max(max, r.id), 0) + 1;
@@ -60,20 +64,23 @@ function loadData() {
   releases = parsed.releases ?? [];
   releaseNodes = parsed.releaseNodes ?? [];
   releaseLinks = parsed.releaseLinks ?? [];
+  // AES page: ciphertext per server. Absent from an older mock.json means none saved yet.
+  aesRecords = parsed.aesRecords ?? [];
   nextId = maxId(endpoints);
   nextReleaseId = maxId(releases);
   nextNodeId = maxId(releaseNodes);
   nextLinkId = maxId(releaseLinks);
+  nextAesId = maxId(aesRecords);
   console.log(
     `[mock] loaded ${endpoints.length} endpoints, ${releases.length} releases ` +
-      `(${releaseNodes.length} participants / ${releaseLinks.length} links) from ${DATA_FILE}`,
+      `(${releaseNodes.length} participants / ${releaseLinks.length} links), ${aesRecords.length} AES records from ${DATA_FILE}`,
   );
 }
 
 function persist() {
   writeFileSync(
     DATA_FILE,
-    `${JSON.stringify({ endpoints, releases, releaseNodes, releaseLinks }, null, 2)}\n`,
+    `${JSON.stringify({ endpoints, releases, releaseNodes, releaseLinks, aesRecords }, null, 2)}\n`,
   );
 }
 
@@ -463,6 +470,13 @@ function applyPayload(target, payload) {
   return target;
 }
 
+const handleAes = createAesRoutes({
+  endpoints: () => endpoints,
+  records: () => aesRecords,
+  nextId: () => nextAesId++,
+  persist,
+}, (req) => readBody(req));
+
 async function readBody(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
@@ -486,6 +500,7 @@ const server = createServer(async (req, res) => {
 
   try {
     if (await handleSplunk(splunkBroker, req, res, path, params)) return;
+    if (await handleAes(req, res, path, params)) return;
 
     if (req.method === 'GET' && path === '/ping') {
       return json(res, 200, {

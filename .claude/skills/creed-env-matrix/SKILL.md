@@ -153,6 +153,34 @@ Splunk forced to mock and a `MemoryAuditStore`. During `npm run dev`, Vite sends
 - Tests (`npm run test:server`): RFC 6238 appendix-B vectors, loopback Splunk stubs over HTTP and a
   self-signed HTTPS cert (verification off passes, on fails).
 
+## AES records (`/aes/*`, `AesCryptoService`, `AesRecordService`, page `/aes`)
+
+Encrypt/decrypt a property value; save the ciphertext **and its randomkey** per server. Design: `docs/design.png`.
+
+- **Cipher, identical in Java and `server/aes.js`:** `key = SHA-256(UTF-8(secretKey + randomKey))`,
+  AES-256/CBC/PKCS5Padding, IV = exactly 16 UTF-8 bytes, Base64. Both test suites pin
+  `EFZDc/Ok6Ib89heJb1OkHw==` (keys `creed-secret` / `0123456789abcdef` / `r4nd0m`, plain
+  `db-p@ss 密码`) — it also matches `openssl enc`. Change one, change both.
+- **The Secret Key and IV are never stored, logged, or put in a URL** — POST bodies only; `toString`
+  masked; errors never echo them. The randomkey *is* stored (V8 `random_key`, nullable, untrimmed) and
+  shown in the result list — it is only hashed with the Secret Key, so a DB copy still decrypts nothing.
+  **V7 is applied: never edit it — add a migration.**
+- IV is counted in **bytes**: the field's `count.strategy` is `TextEncoder` length, and the server
+  rejects ≠ 16 with a 400 naming `iv`. Wrong keys → 422 `decrypt_failed` (strict UTF-8 decode).
+- `env_aes_record` (V7): identity `(app_system, host, ip, property_key)`, upsert per server, no FK to
+  `env_endpoint`. Server list = distinct `(appSystem, host, ip)` from endpoints (two queries — PG
+  cannot type a null-only parameter).
+- **"Keys and values" is an array of complete rows** (own Secret Key/IV/randomkey each), edited as
+  `Form.List` rows or via the "Edit as JSON" dialog (unknown fields rejected; no clipboard API — HTTP).
+  Batch endpoints answer **per row**: `/aes/{encrypt,decrypt}/batch`, `/aes/records/batch` (items ×
+  servers, one transaction, repeated property key → 400 `items[i].propertyKey`), and
+  `/aes/records/decrypt` with per-record keys — the page picks the form row with the same property
+  key, or the only row. Mock and Java must stay byte-identical: `tmp/aes-parity.mjs` diffs them.
+- `List<Outer.@Valid Inner>`, not `List<@Valid Outer.Inner>` — the latter is a javac error that shows
+  up as Lombok's `cannot find symbol: log` everywhere.
+- Page: decrypted column clears whenever a key field changes. `ServerList` is `memo`'d with a
+  content-keyed `saved` set — ~717 checkboxes unfiltered re-rendered per keystroke otherwise.
+
 ## Frontend (`creed-env-matrix-design`)
 
 Vite 8 + React 19 + **antd 5.29.3** + `@ant-design/pro-components` 2.8.10 + **`@antv/g6` 5.1.1**.

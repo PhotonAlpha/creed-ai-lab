@@ -3,6 +3,7 @@ package com.creed.resource.envmatrix.domain;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -38,4 +39,14 @@ public interface EnvEndpointRepository
 
     @Query("select distinct e.scheme from EnvEndpoint e order by e.scheme")
     List<String> findDistinctSchemes();
+
+    // Two queries rather than one `(:appSystem is null or …)`: PostgreSQL cannot infer the type of a
+    // parameter that is only ever compared with null, and fails the statement.
+    @Query("select distinct new com.creed.resource.envmatrix.domain.EnvServer(e.appSystem, e.host, e.ip) "
+            + "from EnvEndpoint e order by e.appSystem, e.host, e.ip")
+    List<EnvServer> findDistinctServers();
+
+    @Query("select distinct new com.creed.resource.envmatrix.domain.EnvServer(e.appSystem, e.host, e.ip) "
+            + "from EnvEndpoint e where e.appSystem = :appSystem order by e.appSystem, e.host, e.ip")
+    List<EnvServer> findDistinctServersByAppSystem(@Param("appSystem") String appSystem);
 }
