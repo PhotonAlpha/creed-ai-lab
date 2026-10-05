@@ -222,6 +222,7 @@ code. The value is read with `loadEnv` because a Vite config file runs *before* 
 - **Per-row modals**: one `ModalForm` per table row lost its trigger state on cell re-render, so the first Edit click did nothing. Use **one page-level controlled modal**, never a per-row `trigger`.
 - **`scroll={{x:'max-content'}}` + a `fixed:'right'` column** collapses the last scrolling column — use an explicit numeric width.
 - `sticky` together with `scroll.y` renders a second, offset header. `scroll.y` alone already pins the header.
+- **Clipboard: use `utils/clipboard.ts` `copyText`, not `navigator.clipboard`** — the latter is `undefined` on plain HTTP (the BFF, `vite --host` from another box). The helper's `execCommand('copy')` fallback needs the click's user activation, so call it synchronously from the handler, never after an `await`.
 
 **Conventions**: one root `ConfigProvider` in `main.tsx` (+ `AntdApp` so `App.useApp()` gives themed `message`/`modal`); cell highlighting via `onCell`→`className` and antd tokens bridged to CSS variables — **no `.ant-*` overrides**; `zh-CN.ts` typed as `Record<keyof typeof enUS, string>` so a missing translation is a compile error. Per the repo's antd skill, query `antd info <Component> --format json --version 5.29.3` before writing component code.
 
