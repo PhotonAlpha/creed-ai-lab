@@ -4,7 +4,6 @@ import { PageContainer, ProCard, ProTable } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
 import { Alert, App, Button, Popconfirm, Space, Tag, Tooltip, Typography } from 'antd';
 import {
-  BlockOutlined,
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
@@ -21,7 +20,6 @@ import { envMatrixApi } from '../../api/envMatrix';
 import { useI18n } from '../../locales';
 import { copyText, toTsv } from '../../utils/clipboard';
 import type { BatchSaveIssue, EndpointFilter } from '../../api/types';
-import { CloneRowsModal } from './CloneRowsModal';
 import { EndpointFormModal } from './EndpointFormModal';
 import { ReleasePanel } from './ReleasePanel';
 import type { EndpointFormValues } from './EndpointFormModal';
@@ -29,39 +27,6 @@ import type { ConfigRow } from './types';
 import { toConfigRow, toRequest } from './types';
 
 let newRowSequence = 0;
-
-/** A browser-only row: no id yet, which is what makes the batch save insert it. */
-function newRow(values: EndpointFormValues): ConfigRow {
-  newRowSequence += 1;
-  return {
-    _key: `new-${newRowSequence}`,
-    _new: true,
-    _deleted: false,
-    _dirty: false,
-    id: null,
-    ...values,
-    note: values.note ?? null,
-    url: `${values.scheme}://${values.host}:${values.port}`,
-    conflict: false,
-    conflictKeys: [],
-    health: 'UNKNOWN',
-  };
-}
-
-function matchesFilter(row: ConfigRow, filter: EndpointFilter) {
-  const dimensionMatch = (
-    ['appSystem', 'tier', 'envInstance', 'country', 'service', 'instance', 'scheme'] as const
-  ).every((key) => {
-    const selected = filter[key];
-    return !selected?.length || selected.includes(row[key]);
-  });
-  if (!dimensionMatch) return false;
-  if (!filter.keyword) return true;
-  const needle = filter.keyword.toLowerCase();
-  return [row.host, row.ip, row.service, row.note ?? ''].some((field) =>
-    field.toLowerCase().includes(needle),
-  );
-}
 
 export function ConfigPage() {
   const { t } = useI18n();
@@ -85,7 +50,6 @@ export function ConfigPage() {
    * pages (`preserveSelectedRowKeys`), so the copy is whatever is ticked, not just what is on screen.
    */
   const [selectedKeys, setSelectedKeys] = useState<Key[]>([]);
-  const [cloning, setCloning] = useState(false);
 
   /**
    * Always loads the complete, unfiltered table.
@@ -113,7 +77,23 @@ export function ConfigPage() {
 
   const dirtyCount = rows.filter((row) => row._dirty || row._new || row._deleted).length;
 
-  const visibleRows = useMemo(() => rows.filter((row) => matchesFilter(row, filter)), [rows, filter]);
+  const visibleRows = useMemo(() => {
+    const matches = (row: ConfigRow) => {
+      const dimensionMatch = (
+        ['appSystem', 'tier', 'envInstance', 'country', 'service', 'instance', 'scheme'] as const
+      ).every((key) => {
+        const selected = filter[key];
+        return !selected?.length || selected.includes(row[key]);
+      });
+      if (!dimensionMatch) return false;
+      if (!filter.keyword) return true;
+      const needle = filter.keyword.toLowerCase();
+      return [row.host, row.ip, row.service, row.note ?? ''].some((field) =>
+        field.toLowerCase().includes(needle),
+      );
+    };
+    return rows.filter(matches);
+  }, [rows, filter]);
 
   // Resolved against `rows` rather than kept as objects: a reload or an edit replaces the row
   // objects, and a key whose row is gone (reload after a delete) simply drops out.
@@ -144,23 +124,24 @@ export function ConfigPage() {
         ),
       );
     } else {
-      setRows((current) => [newRow(values), ...current]);
+      newRowSequence += 1;
+      setRows((current) => [
+        {
+          _key: `new-${newRowSequence}`,
+          _new: true,
+          _deleted: false,
+          _dirty: false,
+          id: null,
+          ...values,
+          note: values.note ?? null,
+          url: `${values.scheme}://${values.host}:${values.port}`,
+          conflict: false,
+          conflictKeys: [],
+          health: 'UNKNOWN',
+        },
+        ...current,
+      ]);
     }
-  };
-
-  /**
-   * Prepends the clones and makes them the selection, so the next step — editing them, or copying
-   * them — starts from exactly the rows just made. A clone the current filter hides is still added;
-   * the message says so rather than leaving the user wondering where it went.
-   */
-  const addClones = (clones: EndpointFormValues[]) => {
-    setIssues([]);
-    const created = clones.map(newRow);
-    setRows((current) => [...created, ...current]);
-    setSelectedKeys(created.map((row) => row._key));
-    const hidden = created.filter((row) => !matchesFilter(row, filter)).length;
-    message.success(t('config.clone.done', { count: created.length }));
-    if (hidden > 0) message.warning(t('config.clone.hidden', { count: hidden }));
   };
 
   const toggleDelete = (key: string) => {
@@ -424,15 +405,6 @@ export function ConfigPage() {
             </Space>
           }
           toolBarRender={() => [
-            <Tooltip key="clone" title={t('config.clone.tooltip')}>
-              <Button
-                icon={<BlockOutlined />}
-                disabled={selectedRows.length === 0}
-                onClick={() => setCloning(true)}
-              >
-                {t('config.clone.button', { count: selectedRows.length })}
-              </Button>
-            </Tooltip>,
             <Tooltip key="copy" title={t('config.copyHint')}>
               <Button
                 icon={<CopyOutlined />}
@@ -464,18 +436,6 @@ export function ConfigPage() {
               {saving ? t('config.saving') : t('config.save')}
             </Button>,
           ]}
-        />
-
-        <CloneRowsModal
-          open={cloning}
-          sources={selectedRows}
-          rows={rows}
-          dimensions={dimensions}
-          onCancel={() => setCloning(false)}
-          onSubmit={(clones) => {
-            addClones(clones);
-            setCloning(false);
-          }}
         />
 
         <EndpointFormModal
