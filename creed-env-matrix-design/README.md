@@ -349,11 +349,6 @@ nor written, so a one-field edit reports "1 updated", not "1235 updated".
 Validation failures come back as `422` with per-row issues and **nothing is written** — the whole
 save is one transaction.
 
-Tick rows and **Copy selected** puts them on the clipboard as tab-separated text with a header line
-(the stored fields only — health and conflict are per-load), so they paste into Excel or Confluence as
-cells. The selection survives paging and filtering, and the copy works on plain HTTP too, where the
-browser's Clipboard API is unavailable.
-
 **Release topology** — a release list on the left, the selected release's participants and
 connections on the right, one save. Saving is authoritative for that release only: rows removed here
 are deleted, and other releases are never touched.

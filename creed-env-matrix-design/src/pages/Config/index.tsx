@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Key } from 'react';
 import { PageContainer, ProCard, ProTable } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
 import { Alert, App, Button, Popconfirm, Space, Tag, Tooltip, Typography } from 'antd';
 import {
-  CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   PlusOutlined,
@@ -18,7 +16,6 @@ import { HealthTag } from '../../components/HealthTag';
 import { useDimensions } from '../../hooks/useDimensions';
 import { envMatrixApi } from '../../api/envMatrix';
 import { useI18n } from '../../locales';
-import { copyText, toTsv } from '../../utils/clipboard';
 import type { BatchSaveIssue, EndpointFilter } from '../../api/types';
 import { EndpointFormModal } from './EndpointFormModal';
 import { ReleasePanel } from './ReleasePanel';
@@ -45,11 +42,6 @@ export function ConfigPage() {
    * One dialog for the whole page rather than one per table row.
    */
   const [editing, setEditing] = useState<{ row?: ConfigRow } | null>(null);
-  /**
-   * Ticked rows, by `_key` — the only key a browser-added row has. Kept across filter changes and
-   * pages (`preserveSelectedRowKeys`), so the copy is whatever is ticked, not just what is on screen.
-   */
-  const [selectedKeys, setSelectedKeys] = useState<Key[]>([]);
 
   /**
    * Always loads the complete, unfiltered table.
@@ -94,13 +86,6 @@ export function ConfigPage() {
     };
     return rows.filter(matches);
   }, [rows, filter]);
-
-  // Resolved against `rows` rather than kept as objects: a reload or an edit replaces the row
-  // objects, and a key whose row is gone (reload after a delete) simply drops out.
-  const selectedRows = useMemo(() => {
-    const keys = new Set(selectedKeys);
-    return rows.filter((row) => keys.has(row._key));
-  }, [rows, selectedKeys]);
 
   const issuesByKey = useMemo(() => {
     // Issues are reported by index into the payload we sent, which is the non-deleted rows in order.
@@ -178,44 +163,6 @@ export function ConfigPage() {
     } finally {
       setSaving(false);
     }
-  };
-
-  /**
-   * The stored fields only, in table order — health and conflict are derived per load and would be
-   * stale the moment the text is pasted anywhere. Must stay synchronous up to `copyText`: the
-   * plain-HTTP fallback needs the click's user activation.
-   */
-  const copySelected = () => {
-    const header = [
-      t('column.appSystem'),
-      t('column.tier'),
-      t('column.envInstance'),
-      t('column.country'),
-      t('column.service'),
-      t('column.instance'),
-      t('column.scheme'),
-      t('column.host'),
-      t('column.ip'),
-      t('column.port'),
-      t('column.note'),
-    ];
-    const body = selectedRows.map((row) => [
-      row.appSystem,
-      row.tier,
-      row.envInstance,
-      row.country,
-      row.service,
-      row.instance,
-      row.scheme,
-      row.host,
-      row.ip,
-      row.port,
-      row.note,
-    ]);
-    copyText(toTsv(header, body)).then(
-      () => message.success(t('config.copied', { count: body.length })),
-      (e: unknown) => message.error(t('config.copyFailed', { error: (e as Error).message })),
-    );
   };
 
   const reload = () => {
@@ -377,15 +324,7 @@ export function ConfigPage() {
           // Explicit total width (the sum of the column widths below), not 'max-content': with a
           // fixed-right column, 'max-content' lets the last scrolling column — note — collapse to a
           // few pixels and clip its header.
-          // + 40 for the selection column.
-          scroll={{ x: 1780, y: 560 }}
-          rowSelection={{
-            columnWidth: 40,
-            fixed: 'left',
-            selectedRowKeys: selectedKeys,
-            onChange: setSelectedKeys,
-            preserveSelectedRowKeys: true,
-          }}
+          scroll={{ x: 1740, y: 560 }}
           pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `${total}` }}
           rowClassName={(row) =>
             [
@@ -405,15 +344,6 @@ export function ConfigPage() {
             </Space>
           }
           toolBarRender={() => [
-            <Tooltip key="copy" title={t('config.copyHint')}>
-              <Button
-                icon={<CopyOutlined />}
-                disabled={selectedRows.length === 0}
-                onClick={copySelected}
-              >
-                {t('config.copySelected', { count: selectedRows.length })}
-              </Button>
-            </Tooltip>,
             <Button
               key="add"
               type="default"
