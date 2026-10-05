@@ -184,6 +184,8 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'config.dirty': '有 {count} 处未保存的修改',
   'config.clean': '没有未保存的修改',
   'config.delete': '删除',
+  'config.copy': '复制',
+  'config.copyTitle': '复制端点',
   'config.deleteConfirm': '移除此行？保存时将从数据库中删除。',
   'config.discardConfirm': '放弃未保存的修改并重新加载？',
   'config.saved': '保存成功',

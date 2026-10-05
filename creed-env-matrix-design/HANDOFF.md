@@ -48,8 +48,8 @@ Complete and verified in a browser against the real backend.
   **The derivation from endpoints to graph is documented in `README.md` → "How the graph is derived
   from the endpoints"** (and the same section in `README.zh-CN.md`) — keep it in step with
   `pages/Topology/buildGraph.ts`, which is the only place that join lives.
-- **Config (`/config`)** — two tabs. *Endpoints*: the full table, add/edit/delete via one
-  page-level modal, save-back-to-database. *Release topology*: a release list, its participants and
+- **Config (`/config`)** — two tabs. *Endpoints*: the full table, add/edit/copy/delete via one
+  page-level modal (*Copy* = that modal in add mode pre-filled from the row, `copyFrom`), save-back-to-database. *Release topology*: a release list, its participants and
   its connections, saved with one authoritative batch write per release.
 - **Splunk session (`/splunk`)** — rotating TOTP display with a server-clock countdown, a 6-digit
   `Input.OTP`, the returned `document.cookie` script (copyable), and the audit table. The input is

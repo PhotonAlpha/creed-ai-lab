@@ -339,7 +339,10 @@ boxes, not one box stretched across everything between them.
 
 Two tabs.
 
-**Endpoints** — the full endpoint table with add / edit / delete, then **Save to database**.
+**Endpoints** — the full endpoint table with add / edit / copy / delete, then **Save to database**.
+A row's **Copy** opens the add dialog pre-filled with that row, so a new environment's endpoint is
+one field change away; nothing is added until you confirm, and a copy whose seven-dimension identity
+is left unchanged is rejected by the save like any other duplicate.
 
 Saving writes the **whole table**: rows removed in the UI are deleted in the database. The page
 therefore always loads the complete, unfiltered set and narrows client-side — sending a filtered

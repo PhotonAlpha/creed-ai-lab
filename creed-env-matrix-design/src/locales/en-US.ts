@@ -193,6 +193,8 @@ const enUS = {
   'config.dirty': '{count} unsaved change(s)',
   'config.clean': 'No unsaved changes',
   'config.delete': 'Delete',
+  'config.copy': 'Copy',
+  'config.copyTitle': 'Copy endpoint',
   'config.deleteConfirm': 'Remove this row? It is deleted from the database when you save.',
   'config.discardConfirm': 'Discard unsaved changes and reload?',
   'config.saved': 'Saved',

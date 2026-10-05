@@ -33,6 +33,11 @@ interface EndpointFormModalProps {
   open: boolean;
   /** Row being edited, or `undefined` when adding. */
   initial?: ConfigRow;
+  /**
+   * Adding, pre-filled from this row — the "Copy" action. Kept apart from `initial` because the
+   * result is a new row: the source is a template, never the row the dialog writes back to.
+   */
+  copyFrom?: ConfigRow;
   dimensions: Dimensions;
   onCancel: () => void;
   onSubmit: (values: EndpointFormValues) => void;
@@ -53,6 +58,7 @@ interface EndpointFormModalProps {
 export function EndpointFormModal({
   open,
   initial,
+  copyFrom,
   dimensions,
   onCancel,
   onSubmit,
@@ -63,11 +69,11 @@ export function EndpointFormModal({
 
   return (
     <ModalForm<EndpointFormValues>
-      title={initial ? t('common.edit') : t('config.add')}
+      title={initial ? t('common.edit') : copyFrom ? t('config.copyTitle') : t('config.add')}
       open={open}
       // Remount per open so `initialValues` is re-read; otherwise the form would still hold the
       // previous row's values.
-      key={initial?._key ?? 'new'}
+      key={initial?._key ?? (copyFrom ? `copy-${copyFrom._key}` : 'new')}
       modalProps={{
         destroyOnHidden: true,
         okText: t('common.ok'),
@@ -78,7 +84,8 @@ export function EndpointFormModal({
         if (!next) onCancel();
       }}
       initialValues={
-        initial ?? {
+        initial ??
+        copyFrom ?? {
           scheme: dimensions.scheme.includes('https') ? 'https' : (dimensions.scheme[0] ?? 'https'),
           port: 8443,
         }

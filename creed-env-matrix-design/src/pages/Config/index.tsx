@@ -3,6 +3,7 @@ import { PageContainer, ProCard, ProTable } from '@ant-design/pro-components';
 import type { ProColumns } from '@ant-design/pro-components';
 import { Alert, App, Button, Popconfirm, Space, Tag, Tooltip, Typography } from 'antd';
 import {
+  CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   PlusOutlined,
@@ -38,10 +39,11 @@ export function ConfigPage() {
   /** Which editor is on screen. The two tables share nothing but this page's chrome. */
   const [tab, setTab] = useState<'endpoints' | 'links'>('endpoints');
   /**
-   * Which row the single page-level dialog is editing: `null` = closed, `{row: undefined}` = add.
-   * One dialog for the whole page rather than one per table row.
+   * Which row the single page-level dialog is editing: `null` = closed, `{row: undefined}` = add,
+   * `{copyFrom}` = add pre-filled from that row. One dialog for the whole page rather than one per
+   * table row.
    */
-  const [editing, setEditing] = useState<{ row?: ConfigRow } | null>(null);
+  const [editing, setEditing] = useState<{ row?: ConfigRow; copyFrom?: ConfigRow } | null>(null);
 
   /**
    * Always loads the complete, unfiltered table.
@@ -223,7 +225,7 @@ export function ConfigPage() {
     {
       title: t('column.actions'),
       key: 'actions',
-      width: 150,
+      width: 240,
       fixed: 'right',
       render: (_, row) => (
         <Space size="small">
@@ -235,6 +237,19 @@ export function ConfigPage() {
             onClick={() => setEditing({ row })}
           >
             {t('common.edit')}
+          </Button>
+          {/*
+            * Opens the add dialog pre-filled rather than inserting a duplicate straight away: an
+            * unchanged copy has the source's seven-dimension identity, which the save would reject.
+            */}
+          <Button
+            size="small"
+            type="link"
+            icon={<CopyOutlined />}
+            disabled={row._deleted}
+            onClick={() => setEditing({ copyFrom: row })}
+          >
+            {t('config.copy')}
           </Button>
           {row._deleted ? (
             <Button
@@ -324,7 +339,7 @@ export function ConfigPage() {
           // Explicit total width (the sum of the column widths below), not 'max-content': with a
           // fixed-right column, 'max-content' lets the last scrolling column — note — collapse to a
           // few pixels and clip its header.
-          scroll={{ x: 1740, y: 560 }}
+          scroll={{ x: 1830, y: 560 }}
           pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `${total}` }}
           rowClassName={(row) =>
             [
@@ -371,6 +386,7 @@ export function ConfigPage() {
         <EndpointFormModal
           open={editing !== null}
           initial={editing?.row}
+          copyFrom={editing?.copyFrom}
           dimensions={dimensions}
           onCancel={() => setEditing(null)}
           onSubmit={(values) => {
