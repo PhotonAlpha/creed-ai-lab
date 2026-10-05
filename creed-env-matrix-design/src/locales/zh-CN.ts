@@ -186,6 +186,8 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'config.delete': '删除',
   'config.copy': '复制',
   'config.copyTitle': '复制端点',
+  'config.copyHint': '请修改主机名或 IP —— 复制出的行不能使用表格中已有的 主机名 + IP 组合。',
+  'config.copyHostIpTaken': '该 主机名 + IP 已被 {row} 使用',
   'config.deleteConfirm': '移除此行？保存时将从数据库中删除。',
   'config.discardConfirm': '放弃未保存的修改并重新加载？',
   'config.saved': '保存成功',

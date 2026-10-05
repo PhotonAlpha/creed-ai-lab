@@ -195,6 +195,8 @@ const enUS = {
   'config.delete': 'Delete',
   'config.copy': 'Copy',
   'config.copyTitle': 'Copy endpoint',
+  'config.copyHint': 'Change the host or the IP — a copy cannot reuse a host + IP already in the table.',
+  'config.copyHostIpTaken': 'This host + IP is already used by {row}',
   'config.deleteConfirm': 'Remove this row? It is deleted from the database when you save.',
   'config.discardConfirm': 'Discard unsaved changes and reload?',
   'config.saved': 'Saved',

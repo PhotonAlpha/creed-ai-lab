@@ -387,6 +387,7 @@ export function ConfigPage() {
           open={editing !== null}
           initial={editing?.row}
           copyFrom={editing?.copyFrom}
+          rows={rows}
           dimensions={dimensions}
           onCancel={() => setEditing(null)}
           onSubmit={(values) => {

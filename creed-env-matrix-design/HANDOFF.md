@@ -49,7 +49,9 @@ Complete and verified in a browser against the real backend.
   from the endpoints"** (and the same section in `README.zh-CN.md`) — keep it in step with
   `pages/Topology/buildGraph.ts`, which is the only place that join lives.
 - **Config (`/config`)** — two tabs. *Endpoints*: the full table, add/edit/copy/delete via one
-  page-level modal (*Copy* = that modal in add mode pre-filled from the row, `copyFrom`), save-back-to-database. *Release topology*: a release list, its participants and
+  page-level modal (*Copy* = that modal in add mode pre-filled from the row, `copyFrom`; it alone blocks a
+  host + IP already in the table — save/add/edit keep the seven-dimension rule, since http+https rows
+  share a host + IP), save-back-to-database. *Release topology*: a release list, its participants and
   its connections, saved with one authoritative batch write per release.
 - **Splunk session (`/splunk`)** — rotating TOTP display with a server-clock countdown, a 6-digit
   `Input.OTP`, the returned `document.cookie` script (copyable), and the audit table. The input is

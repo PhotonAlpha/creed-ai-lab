@@ -340,9 +340,11 @@ boxes, not one box stretched across everything between them.
 Two tabs.
 
 **Endpoints** — the full endpoint table with add / edit / copy / delete, then **Save to database**.
-A row's **Copy** opens the add dialog pre-filled with that row, so a new environment's endpoint is
-one field change away; nothing is added until you confirm, and a copy whose seven-dimension identity
-is left unchanged is rejected by the save like any other duplicate.
+A row's **Copy** opens the add dialog pre-filled with that row; nothing is added until you confirm.
+The copy cannot be confirmed while its **host + IP** matches a row already in the table — change one
+of the two. That check belongs to the copy dialog only: the save still enforces the seven-dimension
+identity, and add/edit are unaffected, because one service's http and https listeners legitimately
+share a host + IP.
 
 Saving writes the **whole table**: rows removed in the UI are deleted in the database. The page
 therefore always loads the complete, unfiltered set and narrows client-side — sending a filtered
