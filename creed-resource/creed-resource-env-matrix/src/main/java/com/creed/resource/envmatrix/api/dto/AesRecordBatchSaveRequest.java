@@ -14,7 +14,8 @@ import java.util.List;
  *
  * <p>Plain values are sent, not ciphertexts: the Secret Key is {@code randomKey + host + ip}, so each
  * server needs its own ciphertext and only the backend, which encrypts per server, can make them.
- * The plain value and the IV are used and dropped — only the ciphertext and the randomkey are stored.
+ * The plain value, the IV and the salt are used and dropped — only the ciphertext and the randomkey
+ * are stored.
  *
  * <p>A property key may appear only once per batch — two values for the same server and property
  * would leave the last one silently winning.
@@ -27,6 +28,7 @@ public record AesRecordBatchSaveRequest(
             @NotBlank @Size(max = 255) String propertyKey,
             @NotNull @Size(max = 4000) String plainValue,
             @NotNull @Size(max = 64) String iv,
+            @Size(max = 256) String salt,
             @Size(max = 256) String randomKey,
             @Size(max = 512) String note) {
 

@@ -339,7 +339,12 @@ boxes, not one box stretched across everything between them.
 
 Two tabs.
 
-**Endpoints** — the full endpoint table with add / edit / delete, then **Save to database**.
+**Endpoints** — the full endpoint table with add / edit / copy / delete, then **Save to database**.
+A row's **Copy** opens the add dialog pre-filled with that row; nothing is added until you confirm.
+The copy cannot be confirmed while its **host + IP** matches a row already in the table — change one
+of the two. That check belongs to the copy dialog only: the save still enforces the seven-dimension
+identity, and add/edit are unaffected, because one service's http and https listeners legitimately
+share a host + IP.
 
 Saving writes the **whole table**: rows removed in the UI are deleted in the database. The page
 therefore always loads the complete, unfiltered set and narrows client-side — sending a filtered
@@ -418,11 +423,13 @@ file can be checked against what it should contain. Layout follows
 the saved results bottom-right.
 
 **The cipher** — the real config files' rule, the same in the Java service (`AesCryptoService`) and
-the node mock (`server/aes.js`), pinned by one shared test vector that `openssl enc` reproduces:
+the node mock (`server/aes.js`), pinned by one shared test vector that `openssl kdf PBKDF2` +
+`openssl enc` reproduce:
 
 ```
 Secret Key = randomkey + host + ip                          plain concatenation, no separator
-key        = SHA-256( UTF-8(Secret Key) )                   32 bytes -> AES-256
+key        = PBKDF2WithHmacSHA256( UTF-8(Secret Key),
+                                   UTF-8(salt), 65536, 256 ) 32 bytes -> AES-256
 iv         = UTF-8(Initialization Vector)                   exactly 16 bytes
 ciphertext = Base64( AES/CBC/PKCS5Padding(key, iv, UTF-8(plain value)) )
 ```
@@ -432,20 +439,22 @@ ciphertext = Base64( AES/CBC/PKCS5Padding(key, iv, UTF-8(plain value)) )
   (randomkey, host) give the same key.
 - **The IV is counted in UTF-8 bytes**, not characters: the field shows `n / 16`, and a Chinese
   character counts as 3.
-- **What is stored:** the ciphertext and the randomkey, per record. The IV is never stored, logged or
-  put in a URL. Note what that means: the Secret Key is built entirely from stored or public data
-  (randomkey, host, ip), so **the IV is the only thing between a copy of the database and the
-  plaintexts**. That is the real system's rule, reproduced here so its files can be checked.
+- **The salt is required** (any non-empty text, used as UTF-8 bytes); a missing one is a 400 naming
+  `salt`, like a bad IV.
+- **What is stored:** the ciphertext and the randomkey, per record. The IV and the salt are never
+  stored, logged or put in a URL — both have to be entered again to decrypt. Note what that means:
+  the Secret Key is built entirely from stored or public data (randomkey, host, ip), so **the IV and
+  the salt are the only things between a copy of the database and the plaintexts**. That is the real system's rule, reproduced here so its files can be checked.
 - CBC has no integrity check: a wrong key is almost always reported (bad padding, or output that is
   not UTF-8), but rarely decrypts to short garbage instead.
 
-**Keys and values is an array** of rows — IV, randomkey, property key, plain value, and an encrypted
-value **preview** — plus a read-only **Secret Key (preview)** column. Add, duplicate and remove rows,
-or use *Edit as JSON*:
+**Keys and values is an array** of rows. Each row takes two lines: **IV and salt** on the first;
+randomkey, a read-only **Secret Key (preview)**, property key, plain value and an encrypted value
+**preview** on the second. Add, duplicate and remove rows, or use *Edit as JSON*:
 
 ```json
 [
-  { "iv": "0123456789abcdef", "randomKey": "r4nd0m",
+  { "iv": "0123456789abcdef", "salt": "s4lt", "randomKey": "r4nd0m",
     "propertyKey": "db.password", "plainValue": "db-p@ss", "encryptedValue": "" }
 ]
 ```
@@ -458,7 +467,8 @@ and an old `secretKey` field is rejected with a note that it is now derived. At 
    the app-system filter.
 2. The **preview server** (card header; the first ticked one unless you pick another) is what the
    form previews against: the Secret Key column shows its `randomkey + host + ip`, and *Encrypt all*
-   / *Decrypt all* use it. Rows with an unusable IV are marked and skipped; the rest go through.
+   / *Decrypt all* use it. Rows with an unusable IV or no salt are marked and skipped; the rest go
+   through.
 3. *Save to selected servers* sends the **plain values**; the backend encrypts every row once per
    ticked server — each with that server's Secret Key — and stores the results in one transaction.
    Saving the same property for a server again replaces its value; the same property key on two rows
@@ -466,14 +476,14 @@ and an old `secretKey` field is rejected with a note that it is now derived. At 
 
 The **result list** shows each record's **Secret Key** (with its randomkey underneath) next to the
 decrypted value — the two things a check against the real config file compares. *Decrypt selected*
-uses each record's own Secret Key and the IV of the form row with **the same property key** (with a
-single form row, that row's IV for every record); results are per row. Changing an IV or randomkey
-clears the decrypted column. *Load* puts a record into the row with its property key (else into a row
-with no values yet, keeping its IV; else a new row) and makes its server the preview server;
+uses each record's own Secret Key and the IV and salt of the form row with **the same property key**
+(with a single form row, that row's for every record); results are per row. Changing an IV, salt or
+randomkey clears the decrypted column. *Load* puts a record into the row with its property key (else
+into a row with no values yet, keeping its IV and salt; else a new row) and makes its server the preview server;
 *Delete* removes rows.
 
-Records saved under the earlier rule (`SHA-256(Secret Key + randomkey)` with a typed Secret Key) do
-not decrypt under this one.
+Records saved under the earlier rules (`SHA-256(Secret Key + randomkey)` with a typed Secret Key, and
+`SHA-256(randomkey + host + ip)` without a salt) do not decrypt under this one.
 
 ---
 

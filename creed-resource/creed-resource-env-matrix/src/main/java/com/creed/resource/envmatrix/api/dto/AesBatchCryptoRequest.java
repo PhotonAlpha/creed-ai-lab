@@ -19,6 +19,7 @@ public record AesBatchCryptoRequest(@NotEmpty @Size(max = 200) List<@Valid Item>
 
     public record Item(
             @Size(max = 64) String iv,
+            @Size(max = 256) String salt,
             @Size(max = 256) String randomKey,
             @NotNull @Size(max = 255) String host,
             @NotNull @Size(max = 45) String ip,

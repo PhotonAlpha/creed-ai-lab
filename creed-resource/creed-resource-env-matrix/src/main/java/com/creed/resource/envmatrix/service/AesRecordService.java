@@ -32,9 +32,10 @@ import java.util.stream.Collectors;
  * Stored AES ciphertexts, one per {@code (appSystem, host, ip, propertyKey)}, plus the server list
  * they are saved against.
  *
- * <p>Stores no IV: decrypting a stored row takes the IV supplied with that request. The Secret Key is
- * never stored either, but it needs no storing — it is {@code randomKey + host + ip}, all of which a
- * record holds. Log lines carry ids and counts, never values.
+ * <p>Stores no IV and no salt: decrypting a stored row takes the ones supplied with that request.
+ * The Secret Key is never stored either, but it needs no storing — it is
+ * {@code randomKey + host + ip}, all of which a record holds. Log lines carry ids and counts, never
+ * values.
  */
 @Service
 @RequiredArgsConstructor
@@ -69,7 +70,8 @@ public class AesRecordService {
     public AesRecordSaveResponse save(AesRecordSaveRequest request) {
         return saveBatch(new AesRecordBatchSaveRequest(
                 List.of(new AesRecordBatchSaveRequest.Item(
-                        request.propertyKey(), request.plainValue(), request.iv(), request.randomKey(), request.note())),
+                        request.propertyKey(), request.plainValue(), request.iv(), request.salt(),
+                        request.randomKey(), request.note())),
                 request.servers()));
     }
 
@@ -80,7 +82,8 @@ public class AesRecordService {
      * unchanged value re-encrypts to the same bytes, and "saved to 10 servers" reports what changed.
      *
      * <p>Each server gets its own ciphertext: the Secret Key is {@code randomKey + host + ip}. The
-     * plain value and the IV are used and dropped; the ciphertext and the randomkey are stored.
+     * plain value, the IV and the salt are used and dropped; the ciphertext and the randomkey are
+     * stored. Keys are derived once per (server, randomkey, salt), not once per item.
      */
     @Transactional
     public AesRecordSaveResponse saveBatch(AesRecordBatchSaveRequest request) {
@@ -92,7 +95,7 @@ public class AesRecordService {
                 throw new DuplicatePropertyKeyException(i, first);
             }
             try {
-                crypto.requireUsableIv(item.iv());
+                crypto.requireUsableKeyMaterial(item.iv(), item.salt());
             } catch (AesCryptoService.InvalidKeyMaterialException e) {
                 // Checked for every item before anything is written, and named by position.
                 throw new AesCryptoService.InvalidKeyMaterialException("items[" + i + "]." + e.field(), e.getMessage());
@@ -106,6 +109,7 @@ public class AesRecordService {
         int inserted = 0;
         int updated = 0;
         List<AesRecordDto> saved = new ArrayList<>();
+        AesCryptoService.KeyCache keys = new AesCryptoService.KeyCache();
         for (AesRecordBatchSaveRequest.Item item : request.items()) {
             String propertyKey = item.propertyKey().strip();
             String note = blankToNull(item.note());
@@ -114,7 +118,8 @@ public class AesRecordService {
 
             for (AesRecordSaveRequest.Server server : servers) {
                 String value = crypto.encrypt(
-                        AesCryptoService.secretKey(randomKey, server.host(), server.ip()), item.iv(), item.plainValue());
+                        keys.key(AesCryptoService.secretKey(randomKey, server.host(), server.ip()), item.salt()),
+                        item.iv(), item.plainValue());
                 EnvAesRecord row = repository
                         .findByAppSystemAndHostAndIpAndPropertyKey(server.appSystem(), server.host(), server.ip(), propertyKey)
                         .orElse(null);
@@ -177,7 +182,7 @@ public class AesRecordService {
     /**
      * Decrypts stored rows, one result per requested id in request order (a repeated id is answered
      * once). The Secret Key comes from the record — {@code randomKey + host + ip} — and only the IV
-     * from the request. Every failure is that row's own result: an unusable IV
+     * and the salt from the request. Every failure is that row's own result: an unusable IV or salt
      * ({@code invalid_key_material}), a value that does not decrypt ({@code decrypt_failed}), or an
      * unknown id ({@code not_found}).
      */
@@ -188,6 +193,7 @@ public class AesRecordService {
                 .collect(Collectors.toMap(EnvAesRecord::getId, Function.identity()));
         List<AesRecordDecryptResult> results = new ArrayList<>();
         Set<Long> answered = new HashSet<>();
+        AesCryptoService.KeyCache keys = new AesCryptoService.KeyCache();
         for (AesRecordDecryptRequest.Item item : request.items()) {
             Long id = item.id();
             if (!answered.add(id)) {
@@ -199,8 +205,10 @@ public class AesRecordService {
                 continue;
             }
             try {
+                crypto.requireUsableKeyMaterial(item.iv(), item.salt());
                 String secretKey = AesCryptoService.secretKey(row.getRandomKey(), row.getHost(), row.getIp());
-                results.add(new AesRecordDecryptResult(id, crypto.decrypt(secretKey, item.iv(), row.getEncryptedValue()), null, null));
+                results.add(new AesRecordDecryptResult(id,
+                        crypto.decrypt(keys.key(secretKey, item.salt()), item.iv(), row.getEncryptedValue()), null, null));
             } catch (AesCryptoService.InvalidKeyMaterialException e) {
                 results.add(new AesRecordDecryptResult(id, null, "invalid_key_material", e.field() + ": " + e.getMessage()));
             } catch (AesCryptoService.DecryptException e) {
