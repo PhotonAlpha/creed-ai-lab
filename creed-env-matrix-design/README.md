@@ -354,6 +354,14 @@ Tick rows and **Copy selected** puts them on the clipboard as tab-separated text
 cells. The selection survives paging and filtering, and the copy works on plain HTTP too, where the
 browser's Clipboard API is unavailable.
 
+**Clone selected** adds the ticked rows again as new, unsaved rows — the quick way to build a new
+environment from an existing one. Its dialog applies the same edits to every clone: tier, env
+instance, country and instance (blank keeps the source value), plus a find → replace on host and on
+IP (plain text, every occurrence, case-insensitive — `nft1 → uat4`, `10.6. → 10.4.`). A live preview
+marks any clone whose seven-dimension identity is still taken; that is a warning, not a block, since
+each new row can still be edited before saving, and the save rejects whatever collision is left. The
+clones land at the top, highlighted and selected.
+
 **Release topology** — a release list on the left, the selected release's participants and
 connections on the right, one save. Saving is authoritative for that release only: rows removed here
 are deleted, and other releases are never touched.

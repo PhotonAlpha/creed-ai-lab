@@ -51,7 +51,10 @@ Complete and verified in a browser against the real backend.
 - **Config (`/config`)** — two tabs. *Endpoints*: the full table, add/edit/delete via one
   page-level modal, save-back-to-database, and row selection + **Copy selected** (TSV with header,
   `utils/clipboard.ts` — falls back to `execCommand('copy')` because `navigator.clipboard` is
-  `undefined` on plain HTTP, so it must run inside the click, never after an `await`). *Release topology*: a release list, its participants and
+  `undefined` on plain HTTP, so it must run inside the click, never after an `await`), and
+  **Clone selected** (`CloneRowsModal` + pure `clone.ts`: bulk tier/env/country/instance overrides
+  and host/IP find→replace, live identity-collision preview; clones are prepended, selected, and left
+  to the normal save — collisions warn, they don't block). *Release topology*: a release list, its participants and
   its connections, saved with one authoritative batch write per release.
 - **Splunk session (`/splunk`)** — rotating TOTP display with a server-clock countdown, a 6-digit
   `Input.OTP`, the returned `document.cookie` script (copyable), and the audit table. The input is
