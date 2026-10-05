@@ -98,19 +98,22 @@ SPLUNK_ENABLED=true SPLUNK_LOGIN_URL=https://<host>:8000/en-US/account/login SPL
 
 ### AES records (`/aes/*`, V7 `env_aes_record` + V8 `random_key`)
 
-Backend of the frontend's `/aes` page (design: `docs/design.png`). **81 tests pass** (20 AES:
+Backend of the frontend's `/aes` page (design: `docs/design.png`). **86 tests pass** (25 AES:
 `AesCryptoServiceTest`, `AesControllerTest`). V7 and V8 applied to the live `env_matrix` DB and exercised by
 curl on the `dev` profile.
 
 - `AesCryptoService` — **`secretKey = randomKey + host + ip`** (plain concatenation, the real config
-  files' rule; not an input), `key = SHA-256(UTF-8(secretKey))`, `AES/CBC/PKCS5Padding`, IV = exactly
-  16 UTF-8 bytes, Base64. Vector `jD7BgEr6wW5uZCYJi4j5Rw==` (r4nd0m / ms1.cn.uat1 / 10.1.1.11) is pinned
-  here and in the node mock (`server/aes.test.js`) and matches `openssl enc` — change both or neither.
-  Saves take **plain values + IV** and encrypt once per server; `/records/decrypt` takes `{id, iv}` and
-  derives the Secret Key from the record; `AesRecordDto.secretKey` is derived on read (no column).
-  **The Secret Key is made only of stored/public data, so the never-stored IV is the only secret.**
-  Records saved under the earlier `SHA-256(secretKey + randomKey)` rule no longer decrypt.
-- **The IV is never stored, logged or put in a URL** (nor is the Secret Key — it is derived). Request records override
+  files' rule; not an input), `key = PBKDF2WithHmacSHA256(secretKey, UTF-8(salt), 65536, 256)`,
+  `AES/CBC/PKCS5Padding`, IV = exactly 16 UTF-8 bytes, Base64. **Salt is required** (400 naming
+  `salt`) and never stored. Vector `H24JNkxfMPSBHI3vtO41cQ==` (r4nd0m / ms1.cn.uat1 / 10.1.1.11, salt
+  `s4lt 盐`) is pinned here and in the node mock (`server/aes.test.js`) and matches `openssl kdf` +
+  `openssl enc` — change both or neither. Batch paths derive once per (secretKey, salt) via
+  `AesCryptoService.KeyCache` (request-scoped). Saves take **plain values + IV + salt** and encrypt
+  once per server; `/records/decrypt` takes `{id, iv, salt}` and derives the Secret Key from the
+  record; `AesRecordDto.secretKey` is derived on read (no column). **The Secret Key is made only of
+  stored/public data, so the never-stored IV and salt are the only secrets.** Records saved under the
+  earlier `SHA-256(secretKey + randomKey)` and unsalted `SHA-256(secretKey)` rules no longer decrypt.
+- **The IV and the salt are never stored, logged or put in a URL** (nor is the Secret Key — it is derived). Request records override
   `toString`; no exception message carries a key, IV or value (a test checks the error body).
 - **V8 adds `random_key`** (nullable — pre-V8 rows are "unknown", not ""): the randomkey in the form
   at save time, shown in the result list. Recorded, not verified (a pasted ciphertext cannot be

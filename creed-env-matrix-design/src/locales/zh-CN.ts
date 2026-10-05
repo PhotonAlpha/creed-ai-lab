@@ -274,6 +274,8 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'aes.form.secretKey': 'Secret Key（预览）',
   'aes.form.iv': 'Initialization Vector',
   'aes.form.ivHint': 'UTF-8 编码下必须正好 16 个字节 —— 一个汉字算 3 个字节。',
+  'aes.form.salt': 'Salt（盐）',
+  'aes.form.saltHint': 'PBKDF2 的盐，按 UTF-8 字节使用。必填。从不保存 —— 和 IV 一样，解密时需要重新输入。',
   'aes.form.ivLength': 'UTF-8 编码下必须正好 16 个字节（当前 {bytes}）',
   'aes.form.randomKey': 'randomkey',
   'aes.form.randomKeyHint': 'Secret Key（randomkey + host + ip）的第一部分。可以为空。随每条记录保存。',
@@ -281,7 +283,7 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'aes.form.encryptedValue': '密文（预览）',
   'aes.form.plainValue': '明文',
   'aes.form.required': '必填',
-  'aes.form.algorithm': 'AES-256/CBC/PKCS5Padding · Secret Key = randomkey + host + ip · key = SHA-256(Secret Key) · Base64。IV 从不保存；randomkey 随每条记录保存。',
+  'aes.form.algorithm': 'AES-256/CBC/PKCS5Padding · Secret Key = randomkey + host + ip · key = PBKDF2WithHmacSHA256(Secret Key, salt, 65536, 256) · Base64。IV 和 salt 从不保存；randomkey 随每条记录保存。',
   'aes.action.encrypt': '全部加密',
   'aes.action.decrypt': '全部解密',
   'aes.action.save': '保存到所选服务器（{count}）',
@@ -325,7 +327,7 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'aes.rows.duplicateKey': '与第 {row} 行的属性键相同',
   'aes.action.json': '以 JSON 编辑',
   'aes.json.title': '以 JSON 编辑密钥与取值',
-  'aes.json.hint': '对象数组，字段为 iv、randomKey、propertyKey、plainValue、encryptedValue。没有 secretKey：它是 randomkey + host + ip。',
+  'aes.json.hint': '对象数组，字段为 iv、salt、randomKey、propertyKey、plainValue、encryptedValue。没有 secretKey：它是 randomkey + host + ip。',
   'aes.json.replace': '替换所有行',
   'aes.json.append': '追加到末尾',
   'aes.json.cancel': '取消',
@@ -342,7 +344,7 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'aes.rows.needServer': '请先勾选服务器 —— Secret Key 是 randomkey + host + ip',
   'aes.json.secretKeyRemoved': '"secretKey" 已不再是输入项 —— 它是 randomkey + host + ip，请删除该字段',
   'aes.records.secretKey': 'Secret Key',
-  'aes.records.noIv': '「密钥与取值」中没有属性键为 {key} 且填写了 IV 的行 —— 请添加一行，或只保留一行以便所有记录都使用它的 IV',
+  'aes.records.noIv': '「密钥与取值」中没有属性键为 {key} 且填写了 IV 的行 —— 请添加一行，或只保留一行以便所有记录都使用它的 IV 和 salt',
 };
 
 export default zhCN;

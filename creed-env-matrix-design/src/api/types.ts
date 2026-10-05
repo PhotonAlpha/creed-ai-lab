@@ -322,6 +322,8 @@ export interface SplunkAuditRow {
 export interface AesKeys {
   /** Exactly 16 bytes in UTF-8. */
   iv: string;
+  /** PBKDF2 salt, used as UTF-8 bytes; required. Never stored, like the IV. */
+  salt: string;
   /** First part of the Secret Key; may be empty. */
   randomKey: string;
   host: string;
@@ -360,6 +362,7 @@ export interface AesRecordSaveRequest {
   propertyKey: string;
   plainValue: string;
   iv: string;
+  salt: string;
   randomKey?: string;
   note?: string;
   servers: AesServer[];
@@ -384,6 +387,7 @@ export interface AesRecordDecryptResult {
  */
 export interface AesKeyValueRow {
   iv: string;
+  salt: string;
   randomKey: string;
   propertyKey: string;
   plainValue: string;
@@ -400,14 +404,14 @@ export interface AesBatchCryptoResult {
   index: number;
   value: string | null;
   error: 'invalid_key_material' | 'decrypt_failed' | null;
-  /** For `invalid_key_material`: `secretKey` or `iv`. */
+  /** For `invalid_key_material`: `iv` or `salt`. */
   field: string | null;
   message: string | null;
 }
 
 /** Plain values, not ciphertexts: the backend encrypts each item once per server. */
 export interface AesRecordBatchSaveRequest {
-  items: { propertyKey: string; plainValue: string; iv: string; randomKey?: string; note?: string }[];
+  items: { propertyKey: string; plainValue: string; iv: string; salt: string; randomKey?: string; note?: string }[];
   servers: AesServer[];
 }
 
@@ -415,4 +419,5 @@ export interface AesRecordBatchSaveRequest {
 export interface AesRecordDecryptItem {
   id: number;
   iv: string;
+  salt: string;
 }

@@ -20,7 +20,10 @@ import type {
 export const aesApi = {
   servers: (appSystem?: string) => request<AesServer[]>(`/aes/servers${toQuery({ appSystem })}`),
 
-  /** One server; Secret Key = randomKey + host + ip. 400 naming `iv` when it is not 16 UTF-8 bytes. */
+  /**
+   * One server; Secret Key = randomKey + host + ip, key = PBKDF2(Secret Key, salt). 400 naming `iv`
+   * when it is not 16 UTF-8 bytes, or `salt` when it is empty.
+   */
   encrypt: (keys: AesKeys, plainValue: string) =>
     request<AesCryptoResult>('/aes/encrypt', { method: 'POST', body: JSON.stringify({ ...keys, plainValue }) }),
 
@@ -48,7 +51,7 @@ export const aesApi = {
   remove: (ids: number[]) =>
     request<void>(`/aes/records${toQuery({ ids: ids.map(String) })}`, { method: 'DELETE' }),
 
-  /** Each record with its own Secret Key and the IV given for it; per-row results. */
+  /** Each record with its own Secret Key and the IV and salt given for it; per-row results. */
   decryptRecords: (items: AesRecordDecryptItem[]) =>
     request<AesRecordDecryptResult[]>('/aes/records/decrypt', { method: 'POST', body: JSON.stringify({ items }) }),
 };

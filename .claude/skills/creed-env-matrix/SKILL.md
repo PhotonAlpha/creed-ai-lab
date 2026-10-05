@@ -162,26 +162,35 @@ Encrypt/decrypt a property value; save the ciphertext **and its randomkey** per 
 
 - **Cipher, identical in Java and `server/aes.js` (the real config files' rule):**
   `secretKey = randomKey + host + ip` (plain concatenation — **not an input**, derived per server),
-  `key = SHA-256(UTF-8(secretKey))`, AES-256/CBC/PKCS5Padding, IV = exactly 16 UTF-8 bytes, Base64.
-  Both suites pin `jD7BgEr6wW5uZCYJi4j5Rw==` (r4nd0m / ms1.cn.uat1 / 10.1.1.11 / 0123456789abcdef /
-  `db-p@ss 密码`), which `openssl enc` matches. Change one, change both.
+  `key = PBKDF2WithHmacSHA256(UTF-8(secretKey), UTF-8(salt), 65536, 256)`, AES-256/CBC/PKCS5Padding,
+  IV = exactly 16 UTF-8 bytes, Base64. Both suites pin `H24JNkxfMPSBHI3vtO41cQ==` (r4nd0m /
+  ms1.cn.uat1 / 10.1.1.11 / salt `s4lt 盐` / 0123456789abcdef / `db-p@ss 密码`), which
+  `openssl kdf PBKDF2` + `openssl enc` match. Change one, change both.
+- **Salt is required — no fallback.** `PBEKeySpec` throws on an empty salt, and a quiet fallback to
+  another derivation would write ciphertexts the real system cannot read. It is validated like the IV
+  (IV first, so two bad fields always name the same one) and answered as 400 / per-row
+  `invalid_key_material` naming `salt`. Never stored, logged or put in a URL.
+- **65 536 PBKDF2 iterations ≈ tens of ms per derivation** — a save is items × servers, so the batch
+  paths derive once per (Secret Key, salt) through a request-scoped `AesCryptoService.KeyCache` /
+  `keyCache()` in the mock. Keyed by a record, not a joined string (a separator could collide).
 - **Per server:** saves send plain values + IV and the backend encrypts once per server; the form
   previews against one ticked "preview server"; records expose a derived `secretKey` (no column);
-  `/records/decrypt` takes `{id, iv}`. **The Secret Key is built from stored/public data, so the IV —
-  never stored, logged, or put in a URL — is the only secret.** Old-rule records no longer decrypt.
+  `/records/decrypt` takes `{id, iv, salt}`. **The Secret Key is built from stored/public data, so the
+  IV and salt — never stored, logged, or put in a URL — are the only secrets.** Old-rule records no
+  longer decrypt.
 - IV is counted in **bytes**: the field's `count.strategy` is `TextEncoder` length, and the server
   rejects ≠ 16 with a 400 naming `iv`. Wrong keys → 422 `decrypt_failed` (strict UTF-8 decode).
 - `env_aes_record` (V7): identity `(app_system, host, ip, property_key)`, upsert per server, no FK to
   `env_endpoint`. Server list = distinct `(appSystem, host, ip)` from endpoints (two queries — PG
   cannot type a null-only parameter).
-- **"Keys and values" is an array of rows** (IV / randomkey / property key / plain / preview ciphertext; the
-  Secret Key column is derived for the preview server), edited as
+- **"Keys and values" is an array of rows**, each two lines — IV + salt, then randomkey / Secret Key
+  (derived for the preview server) / property key / plain / preview ciphertext — edited as
   `Form.List` rows or via the "Edit as JSON" dialog (unknown fields rejected — `secretKey` with an
   explanation; no clipboard API — HTTP).
   Batch endpoints answer **per row**: `/aes/{encrypt,decrypt}/batch`, `/aes/records/batch` (items ×
   servers, one transaction, repeated property key → 400 `items[i].propertyKey`), and
-  `/aes/records/decrypt` with a per-record IV (Secret Key from the record) — the page takes the IV of
-  the form row with the same property key, or of the only row. Mock and Java must stay byte-identical: `tmp/aes-parity.mjs` diffs them.
+  `/aes/records/decrypt` with a per-record IV and salt (Secret Key from the record) — the page takes
+  them from the form row with the same property key, or from the only row. Mock and Java must stay byte-identical: `tmp/aes-parity.mjs` diffs them.
 - `List<Outer.@Valid Inner>`, not `List<@Valid Outer.Inner>` — the latter is a javac error that shows
   up as Lombok's `cannot find symbol: log` everywhere.
 - Page: decrypted column clears whenever a key field changes. `ServerList` is `memo`'d with a

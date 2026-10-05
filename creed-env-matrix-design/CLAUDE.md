@@ -130,16 +130,17 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 
 ### 5.5 AES 加解密（`/aes`）
 - 设计图：`creed-resource/creed-resource-env-matrix/docs/design.png`。
-- 算法（与真实配置文件一致）：`Secret Key = randomkey + host + ip`（直接拼接），`key = SHA-256(Secret Key)`，
-  AES-256/CBC/PKCS5Padding，IV 为 UTF-8 正好 16 字节，密文 Base64。**页面不输入 Secret Key**，每台服务器各不相同。
+- 算法（与真实配置文件一致）：`Secret Key = randomkey + host + ip`（直接拼接），
+  `key = PBKDF2WithHmacSHA256(Secret Key, UTF-8(salt), 65536, 256)`，AES-256/CBC/PKCS5Padding，
+  IV 为 UTF-8 正好 16 字节，salt 必填，密文 Base64。**页面不输入 Secret Key**，每台服务器各不相同。
   Java（`AesCryptoService`）与 mock（`server/aes.js`）必须保持一致 —— 两边测试锁定同一个向量。
-- 「密钥与取值」是一个数组：每行 IV / randomkey / 属性键 / 明文 / 预览密文，外加只读的 Secret Key（预览）列；
+- 「密钥与取值」是一个数组：每行分两排 —— 第一排 IV / salt，第二排 randomkey / Secret Key（预览，只读）/ 属性键 / 明文 / 预览密文；
   可增删行，也可「以 JSON 编辑」导入导出（未知字段拒绝）。表单的全部加密 / 全部解密针对「预览服务器」（勾选的服务器之一）。
 - 服务器列表从配置（`env_endpoint`）读取不重复的 host / ip，按 App system 过滤。
 - 保存：发送明文，后端按每台勾选服务器各自的 Secret Key 加密，所有行 × 所有服务器一个事务；属性键重复则拒绝。
-  后端 CRUD 在 `creed-resource-env-matrix`（`env_aes_record`，Flyway V7/V8）：保存密文与 randomkey；**IV 从不保存**。
+  后端 CRUD 在 `creed-resource-env-matrix`（`env_aes_record`，Flyway V7/V8）：保存密文与 randomkey；**IV 和 salt 从不保存**。
 - 结果列表显示每条记录的 Secret Key（及 randomkey），用于核对真实配置文件；可勾选后批量解密
-  （记录自身的 Secret Key + 表单中属性键相同那一行的 IV）或删除。
+  （记录自身的 Secret Key + 表单中属性键相同那一行的 IV 和 salt）或删除。
 
 ## 6. 命令
 

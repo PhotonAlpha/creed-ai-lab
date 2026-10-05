@@ -283,6 +283,8 @@ const enUS = {
   'aes.form.secretKey': 'Secret Key (preview)',
   'aes.form.iv': 'Initialization Vector',
   'aes.form.ivHint': 'Exactly 16 bytes in UTF-8 — a Chinese character counts as 3.',
+  'aes.form.salt': 'Salt',
+  'aes.form.saltHint': 'PBKDF2 salt, used as UTF-8 bytes. Required. Never stored — like the IV, it has to be entered again to decrypt.',
   'aes.form.ivLength': 'Must be exactly 16 bytes in UTF-8 (currently {bytes})',
   'aes.form.randomKey': 'randomkey',
   'aes.form.randomKeyHint': 'First part of the Secret Key (randomkey + host + ip). May be empty. Saved with each record.',
@@ -290,7 +292,7 @@ const enUS = {
   'aes.form.encryptedValue': 'Encrypted value (preview)',
   'aes.form.plainValue': 'Plain value',
   'aes.form.required': 'Required',
-  'aes.form.algorithm': 'AES-256/CBC/PKCS5Padding · Secret Key = randomkey + host + ip · key = SHA-256(Secret Key) · Base64. The IV is never stored; the randomkey is saved with each record.',
+  'aes.form.algorithm': 'AES-256/CBC/PKCS5Padding · Secret Key = randomkey + host + ip · key = PBKDF2WithHmacSHA256(Secret Key, salt, 65536, 256) · Base64. The IV and the salt are never stored; the randomkey is saved with each record.',
   'aes.action.encrypt': 'Encrypt all',
   'aes.action.decrypt': 'Decrypt all',
   'aes.action.save': 'Save to selected servers ({count})',
@@ -334,7 +336,7 @@ const enUS = {
   'aes.rows.duplicateKey': 'Same property key as row {row}',
   'aes.action.json': 'Edit as JSON',
   'aes.json.title': 'Keys and values as JSON',
-  'aes.json.hint': 'An array of objects with iv, randomKey, propertyKey, plainValue, encryptedValue. There is no secretKey: it is randomkey + host + ip.',
+  'aes.json.hint': 'An array of objects with iv, salt, randomKey, propertyKey, plainValue, encryptedValue. There is no secretKey: it is randomkey + host + ip.',
   'aes.json.replace': 'Replace rows',
   'aes.json.append': 'Append rows',
   'aes.json.cancel': 'Cancel',
@@ -351,7 +353,7 @@ const enUS = {
   'aes.rows.needServer': 'Tick a server first — the Secret Key is randomkey + host + ip',
   'aes.json.secretKeyRemoved': '"secretKey" is not an input any more — it is randomkey + host + ip; remove it',
   'aes.records.secretKey': 'Secret Key',
-  'aes.records.noIv': 'No row in Keys and values has property key {key} and an IV — add one, or keep a single row to use its IV for every record',
+  'aes.records.noIv': 'No row in Keys and values has property key {key} and an IV — add one, or keep a single row to use its IV and salt for every record',
 } as const;
 
 export default enUS;

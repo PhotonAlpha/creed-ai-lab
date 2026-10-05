@@ -3,19 +3,21 @@
  * AesController, and the same cipher as its AesCryptoService (the real config files' rule):
  *
  *   secretKey  = randomKey + host + ip                 plain concatenation, no separator
- *   key        = SHA-256( UTF-8(secretKey) )           -> AES-256
+ *   key        = PBKDF2-HMAC-SHA256( UTF-8(secretKey),
+ *                                    UTF-8(salt), 65536 iterations, 32 bytes )  -> AES-256
  *   iv         = UTF-8(iv), exactly 16 bytes
  *   ciphertext = Base64( AES-256-CBC with PKCS#7 = Java's PKCS5Padding )
  *
  * Every server gets its own ciphertext. A value encrypted by either backend decrypts in the other;
  * server/aes.test.js and AesCryptoServiceTest pin the same vector. Records live in mock.json
- * (`aesRecords`): the ciphertext and its randomkey; the Secret Key is derived on read, the IV never
- * stored.
+ * (`aesRecords`): the ciphertext and its randomkey; the Secret Key is derived on read, the IV and the
+ * salt never stored. The salt is required (Java's PBEKeySpec rejects an empty one).
  */
-import { createCipheriv, createDecipheriv, createHash } from 'node:crypto';
+import { createCipheriv, createDecipheriv, pbkdf2Sync } from 'node:crypto';
 
-export const ALGORITHM = 'AES-256/CBC/PKCS5Padding, Secret Key = randomKey + host + ip, key = SHA-256(Secret Key), Base64';
-const WRONG_KEYS = 'could not decrypt — the IV or the Secret Key (randomkey + host + ip) differ from the ones it was encrypted with';
+export const ALGORITHM = 'AES-256/CBC/PKCS5Padding, Secret Key = randomKey + host + ip, '
+  + 'key = PBKDF2WithHmacSHA256(Secret Key, salt, 65536, 256), Base64';
+const WRONG_KEYS = 'could not decrypt — the IV, the salt or the Secret Key (randomkey + host + ip) differ from the ones it was encrypted with';
 
 export class AesError extends Error {
   /** @param field set for a 400 that names one request field */
@@ -38,14 +40,44 @@ function ivBytes(iv) {
   return bytes;
 }
 
-const deriveKey = (secretKey) => createHash('sha256').update(secretKey ?? '', 'utf8').digest();
+function saltBytes(salt) {
+  const bytes = Buffer.from(salt ?? '', 'utf8');
+  if (bytes.length === 0) throw new AesError(400, 'validation_failed', 'is required', 'salt');
+  return bytes;
+}
 
-export function aesEncrypt(secretKey, iv, plainValue) {
-  const cipher = createCipheriv('aes-256-cbc', deriveKey(secretKey), ivBytes(iv));
+/** IV before salt, as in Java, so a request with both wrong always names the same field. */
+export function requireUsableKeyMaterial(iv, salt) {
+  ivBytes(iv);
+  saltBytes(salt);
+}
+
+export const aesDeriveKey = (secretKey, salt) =>
+  pbkdf2Sync(Buffer.from(secretKey ?? '', 'utf8'), saltBytes(salt), 65536, 32, 'sha256');
+
+/**
+ * Derived keys for one request, by (Secret Key, salt) — 65 536 iterations is tens of milliseconds,
+ * and a save repeats the same pair for every item. Java's AesCryptoService.KeyCache.
+ */
+export function keyCache() {
+  const keys = new Map();
+  return (secretKey, salt) => {
+    const id = JSON.stringify([secretKey ?? '', salt ?? '']);
+    if (!keys.has(id)) keys.set(id, aesDeriveKey(secretKey, salt));
+    return keys.get(id);
+  };
+}
+
+/** @param keys a {@link keyCache} to reuse derived keys; one derivation per call otherwise */
+export function aesEncrypt(secretKey, salt, iv, plainValue, keys = aesDeriveKey) {
+  requireUsableKeyMaterial(iv, salt);
+  const cipher = createCipheriv('aes-256-cbc', keys(secretKey, salt), ivBytes(iv));
   return Buffer.concat([cipher.update(plainValue, 'utf8'), cipher.final()]).toString('base64');
 }
 
-export function aesDecrypt(secretKey, iv, encryptedValue) {
+export function aesDecrypt(secretKey, salt, iv, encryptedValue, keys = aesDeriveKey) {
+  requireUsableKeyMaterial(iv, salt);
+  const key = keys(secretKey, salt);
   const text = String(encryptedValue).trim();
   // Buffer.from(…, 'base64') never throws — it skips what it cannot read — so check the alphabet first.
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4 !== 0) {
@@ -55,10 +87,9 @@ export function aesDecrypt(secretKey, iv, encryptedValue) {
   if (bytes.length === 0 || bytes.length % 16 !== 0) {
     throw new AesError(422, 'decrypt_failed', `the encrypted value is ${bytes.length} bytes; AES/CBC output is a non-empty multiple of 16`);
   }
-  const ivb = ivBytes(iv);
   let plain;
   try {
-    const decipher = createDecipheriv('aes-256-cbc', deriveKey(secretKey), ivb);
+    const decipher = createDecipheriv('aes-256-cbc', key, ivBytes(iv));
     plain = Buffer.concat([decipher.update(bytes), decipher.final()]);
   } catch {
     throw new AesError(422, 'decrypt_failed', WRONG_KEYS);
@@ -100,14 +131,15 @@ function check(body, rules) {
 }
 
 /** One server's key inputs, as the single encrypt/decrypt requests carry them. */
-const KEY_RULES = { iv: { required: 'null', max: 64 }, randomKey: { max: 256 }, host: { required: 'blank', max: 255 }, ip: { required: 'blank', max: 45 } };
+const KEY_RULES = { iv: { required: 'null', max: 64 }, salt: { max: 256 }, randomKey: { max: 256 }, host: { required: 'blank', max: 255 }, ip: { required: 'blank', max: 45 } };
 
 /** A record as the API returns it: the stored row plus its derived Secret Key. */
 const toDto = (row) => ({ ...row, randomKey: row.randomKey ?? null, secretKey: aesSecretKey(row.randomKey, row.host, row.ip) });
 
-/** What one saved item carries: the plain value and IV are used and dropped; the ciphertext is made per server. */
+/** What one saved item carries: the plain value, IV and salt are used and dropped; the ciphertext is made per server. */
 const SAVE_ITEM_RULES = {
   propertyKey: { required: 'blank', max: 255 }, plainValue: { required: 'null', max: 4000 }, iv: { required: 'null', max: 64 },
+  salt: { max: 256 },
   randomKey: { max: 256 }, note: { max: 512 },
 };
 
@@ -140,6 +172,7 @@ export function createAesRoutes(data, readBody) {
     let updated = 0;
     const saved = [];
     const now = new Date().toISOString();
+    const keys = keyCache();
     for (const item of items) {
       const propertyKey = item.propertyKey.trim();
       const note = trimOrNull(item.note);
@@ -147,7 +180,7 @@ export function createAesRoutes(data, readBody) {
       const randomKey = item.randomKey ? item.randomKey : null;
       for (const server of unique.values()) {
         // CBC with a fixed IV is deterministic, so an unchanged value re-encrypts to the same bytes.
-        const value = aesEncrypt(aesSecretKey(randomKey, server.host, server.ip), item.iv, item.plainValue);
+        const value = aesEncrypt(aesSecretKey(randomKey, server.host, server.ip), item.salt, item.iv, item.plainValue, keys);
         let row = findIdentity(server.appSystem, server.host, server.ip, propertyKey);
         if (!row) {
           row = { id: data.nextId(), ...server, propertyKey, encryptedValue: value, randomKey, note, createdAt: now, updatedAt: now, version: 0 };
@@ -191,12 +224,12 @@ export function createAesRoutes(data, readBody) {
         const body = await readBody(req);
         check(body, { ...KEY_RULES, plainValue: { required: 'null', max: 4000 } });
         const secretKey = aesSecretKey(body.randomKey, body.host, body.ip);
-        send(res, 200, { encryptedValue: aesEncrypt(secretKey, body.iv, body.plainValue), plainValue: null, algorithm: ALGORITHM });
+        send(res, 200, { encryptedValue: aesEncrypt(secretKey, body.salt, body.iv, body.plainValue), plainValue: null, algorithm: ALGORITHM });
       } else if (req.method === 'POST' && path === '/aes/decrypt') {
         const body = await readBody(req);
         check(body, { ...KEY_RULES, encryptedValue: { required: 'blank', max: 16384 } });
         const secretKey = aesSecretKey(body.randomKey, body.host, body.ip);
-        send(res, 200, { encryptedValue: null, plainValue: aesDecrypt(secretKey, body.iv, body.encryptedValue), algorithm: ALGORITHM }, NO_STORE);
+        send(res, 200, { encryptedValue: null, plainValue: aesDecrypt(secretKey, body.salt, body.iv, body.encryptedValue), algorithm: ALGORITHM }, NO_STORE);
       } else if (req.method === 'GET' && path === '/aes/records') {
         const app = params.get('appSystem');
         const key = params.get('propertyKey')?.trim();
@@ -206,8 +239,8 @@ export function createAesRoutes(data, readBody) {
       } else if (req.method === 'POST' && path === '/aes/records') {
         const body = await readBody(req);
         check(body, { ...SAVE_ITEM_RULES, servers: { list: 500 } });
-        ivBytes(body.iv);
-        send(res, 200, saveItems([{ propertyKey: body.propertyKey, plainValue: body.plainValue, iv: body.iv, randomKey: body.randomKey, note: body.note }], body.servers));
+        requireUsableKeyMaterial(body.iv, body.salt);
+        send(res, 200, saveItems([{ propertyKey: body.propertyKey, plainValue: body.plainValue, iv: body.iv, salt: body.salt, randomKey: body.randomKey, note: body.note }], body.servers));
       } else if (req.method === 'POST' && path === '/aes/records/batch') {
         const body = await readBody(req);
         check(body, { items: { list: 200 }, servers: { list: 500 } });
@@ -219,7 +252,7 @@ export function createAesRoutes(data, readBody) {
           seen.set(key, i);
           // Checked for every item before anything is written, and named by position.
           try {
-            ivBytes(item.iv);
+            requireUsableKeyMaterial(item.iv, item.salt);
           } catch (e) {
             e.field = `items[${i}].${e.field}`;
             throw e;
@@ -230,13 +263,16 @@ export function createAesRoutes(data, readBody) {
         const body = await readBody(req);
         check(body, { items: { list: 200 } });
         body.items.forEach((item, i) => checkItem(item, `items[${i}].`, {
-          iv: { max: 64 }, randomKey: { max: 256 }, host: { required: 'null', max: 255 }, ip: { required: 'null', max: 45 }, value: { required: 'null', max: 16384 },
+          iv: { max: 64 }, salt: { max: 256 }, randomKey: { max: 256 }, host: { required: 'null', max: 255 }, ip: { required: 'null', max: 45 }, value: { required: 'null', max: 16384 },
         }));
         const encrypting = path === '/aes/encrypt/batch';
+        const keys = keyCache();
         const results = body.items.map((item, index) => {
           try {
             const secretKey = aesSecretKey(item.randomKey, item.host, item.ip);
-            const value = encrypting ? aesEncrypt(secretKey, item.iv, item.value) : aesDecrypt(secretKey, item.iv, item.value);
+            const value = encrypting
+              ? aesEncrypt(secretKey, item.salt, item.iv, item.value, keys)
+              : aesDecrypt(secretKey, item.salt, item.iv, item.value, keys);
             return { index, value, error: null, field: null, message: null };
           } catch (e) {
             if (!(e instanceof AesError)) throw e;
@@ -279,10 +315,11 @@ export function createAesRoutes(data, readBody) {
         check(body, { items: { list: 500 } });
         body.items.forEach((item, i) => {
           if (item?.id == null) throw invalid(`items[${i}].id`, 'must not be null');
-          checkItem(item, `items[${i}].`, { iv: { max: 64 } });
+          checkItem(item, `items[${i}].`, { iv: { max: 64 }, salt: { max: 256 } });
         });
         const answered = new Set();
         const results = [];
+        const keys = keyCache();
         for (const item of body.items) {
           const id = Number(item.id);
           if (answered.has(id)) continue;
@@ -293,9 +330,9 @@ export function createAesRoutes(data, readBody) {
             continue;
           }
           try {
-            // The Secret Key comes from the record; only the IV from the request.
+            // The Secret Key comes from the record; only the IV and the salt from the request.
             const secretKey = aesSecretKey(row.randomKey, row.host, row.ip);
-            results.push({ id, plainValue: aesDecrypt(secretKey, item.iv, row.encryptedValue), error: null, message: null });
+            results.push({ id, plainValue: aesDecrypt(secretKey, item.salt, item.iv, row.encryptedValue, keys), error: null, message: null });
           } catch (e) {
             if (!(e instanceof AesError)) throw e;
             results.push(e.field

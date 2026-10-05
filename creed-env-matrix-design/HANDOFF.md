@@ -114,6 +114,17 @@ Complete and verified in a browser against the real backend.
     0123456789abcdef / db-p@ss 密码) matches openssl; `tmp/aes-rows-e2e.mjs` checks every derived value
     against node crypto; `tmp/aes-parity.mjs` mock vs Java on Postgres: identical. Records saved under
     the old rule no longer decrypt.
+  - **Salt (2026-10-05): key = PBKDF2WithHmacSHA256(Secret Key, UTF-8(salt), 65536, 256)**, replacing
+    `SHA-256(Secret Key)`. Salt is **required** (400 naming `salt`; `PBEKeySpec` rejects an empty one)
+    and **never stored** — same handling as the IV, including per-record decrypt (salt of the form row
+    with the same property key). Each form row is now two lines: IV + salt, then the rest. Batch paths
+    derive once per (Secret Key, salt) (`KeyCache` / `keyCache()`), since 65 536 iterations cost tens
+    of ms. Vector `H24JNkxfMPSBHI3vtO41cQ==` (salt `s4lt 盐`, rest as before) — openssl kdf+enc, node
+    and Java agree. Records saved without a salt no longer decrypt.
+    - Verified: Java module 86 tests, `test:server` 35, typecheck, and a headless-Chromium drive against
+      the mock (missing salt marked Required, encrypt equals an independent node computation, save,
+      per-record decrypt, wrong salt → decrypt_failed). The "There may be circular references" console
+      warning after a successful *Encrypt all* predates this change (reproduced on the previous commit).
   - `ServerList` is `memo`'d: unfiltered it is ~717 checkboxes, and re-rendering them per keystroke
     cost 114 ms/char in dev (now 16 ms). Ticking one box still re-renders the group (~200 ms dev,
     all apps listed) — virtualise it if that ever matters.

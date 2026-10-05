@@ -67,13 +67,13 @@ public class AesController {
 
     @PostMapping("/encrypt")
     public AesCryptoResponse encrypt(@Valid @RequestBody AesEncryptRequest body) {
-        String encrypted = crypto.encrypt(AesCryptoService.secretKey(body.randomKey(), body.host(), body.ip()), body.iv(), body.plainValue());
+        String encrypted = crypto.encrypt(AesCryptoService.secretKey(body.randomKey(), body.host(), body.ip()), body.salt(), body.iv(), body.plainValue());
         return new AesCryptoResponse(encrypted, null, AesCryptoService.ALGORITHM);
     }
 
     @PostMapping("/decrypt")
     public ResponseEntity<AesCryptoResponse> decrypt(@Valid @RequestBody AesDecryptRequest body) {
-        String plain = crypto.decrypt(AesCryptoService.secretKey(body.randomKey(), body.host(), body.ip()), body.iv(), body.encryptedValue());
+        String plain = crypto.decrypt(AesCryptoService.secretKey(body.randomKey(), body.host(), body.ip()), body.salt(), body.iv(), body.encryptedValue());
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(new AesCryptoResponse(null, plain, AesCryptoService.ALGORITHM));
     }

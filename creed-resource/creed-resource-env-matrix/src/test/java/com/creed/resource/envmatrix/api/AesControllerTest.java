@@ -39,11 +39,12 @@ class AesControllerTest {
     private static final String BASE = "/api/env-matrix/aes";
     private static final String IV = "0123456789abcdef";
     private static final String RANDOM = "r4nd0m";
+    private static final String SALT = "s4lt 盐";
     private static final String PLAIN = "db-p@ss 密码";
     /** PLAIN on ms1.cn.uat1 / 10.1.1.11 — see AesCryptoServiceTest. */
-    private static final String VECTOR_MS1 = "jD7BgEr6wW5uZCYJi4j5Rw==";
+    private static final String VECTOR_MS1 = "H24JNkxfMPSBHI3vtO41cQ==";
     /** PLAIN on ms2.cn.uat1 / 10.1.1.12. */
-    private static final String VECTOR_MS2 = "zvgQBvL3DkQo62CFSqDT4w==";
+    private static final String VECTOR_MS2 = "+xwHQYYKsIdcswqiV0wq2Q==";
 
     @Autowired
     MockMvc mockMvc;
@@ -104,7 +105,7 @@ class AesControllerTest {
 
     private JsonNode saveMsBoth() throws Exception {
         String json = postJson("/records", obj(
-                "propertyKey", "spring.datasource.password", "plainValue", PLAIN, "iv", IV, "randomKey", RANDOM,
+                "propertyKey", "spring.datasource.password", "plainValue", PLAIN, "iv", IV, "salt", SALT, "randomKey", RANDOM,
                 "servers", MS_BOTH))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
@@ -130,13 +131,14 @@ class AesControllerTest {
     // ------------------------------------------------------------------ encrypt / decrypt
 
     @Test
-    @DisplayName("encrypt/decrypt for one server: Secret Key = randomkey + host + ip; decrypt is no-store")
+    @DisplayName("encrypt/decrypt for one server: Secret Key = randomkey + host + ip, PBKDF2 with the salt; decrypt is no-store")
     void encryptDecrypt() throws Exception {
-        postJson("/encrypt", obj("iv", IV, "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11", "plainValue", PLAIN))
+        postJson("/encrypt", obj("iv", IV, "salt", SALT, "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11", "plainValue", PLAIN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.encryptedValue").value(VECTOR_MS1))
-                .andExpect(jsonPath("$.algorithm").value(containsString("randomKey + host + ip")));
-        postJson("/decrypt", obj("iv", IV, "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11", "encryptedValue", VECTOR_MS1))
+                .andExpect(jsonPath("$.algorithm").value(containsString("randomKey + host + ip")))
+                .andExpect(jsonPath("$.algorithm").value(containsString("PBKDF2WithHmacSHA256")));
+        postJson("/decrypt", obj("iv", IV, "salt", SALT, "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11", "encryptedValue", VECTOR_MS1))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.plainValue").value(PLAIN));
@@ -146,23 +148,39 @@ class AesControllerTest {
     @DisplayName("another server's ciphertext: 422 decrypt_failed, and the body echoes no secret")
     void wrongServer() throws Exception {
         String response = postJson("/decrypt", obj(
-                "iv", IV, "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11", "encryptedValue", VECTOR_MS2))
+                "iv", IV, "salt", SALT, "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11", "encryptedValue", VECTOR_MS2))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error").value("decrypt_failed"))
                 .andReturn().getResponse().getContentAsString();
-        assertThat(response).doesNotContain(IV, RANDOM, VECTOR_MS2);
+        assertThat(response).doesNotContain(IV, RANDOM, SALT, VECTOR_MS2);
     }
 
     @Test
     @DisplayName("an IV that is not 16 bytes is a 400 naming the iv field; host is required")
     void validation() throws Exception {
-        postJson("/encrypt", obj("iv", "short", "randomKey", RANDOM, "host", "h", "ip", "1.1.1.1", "plainValue", "x"))
+        postJson("/encrypt", obj("iv", "short", "salt", SALT, "randomKey", RANDOM, "host", "h", "ip", "1.1.1.1", "plainValue", "x"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("validation_failed"))
                 .andExpect(jsonPath("$.fields[0].field").value("iv"));
-        postJson("/encrypt", obj("iv", IV, "randomKey", RANDOM, "ip", "1.1.1.1", "plainValue", "x"))
+        postJson("/encrypt", obj("iv", IV, "salt", SALT, "randomKey", RANDOM, "ip", "1.1.1.1", "plainValue", "x"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fields[0].field").value("host"));
+    }
+
+    @Test
+    @DisplayName("the salt is required: missing or empty is a 400 naming salt; another salt does not decrypt")
+    void saltRequired() throws Exception {
+        postJson("/encrypt", obj("iv", IV, "randomKey", RANDOM, "host", "h", "ip", "1.1.1.1", "plainValue", "x"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fields[0].field").value("salt"));
+        postJson("/decrypt", obj("iv", IV, "salt", "", "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11",
+                        "encryptedValue", VECTOR_MS1))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fields[0].field").value("salt"));
+        postJson("/decrypt", obj("iv", IV, "salt", "other", "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11",
+                        "encryptedValue", VECTOR_MS1))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("decrypt_failed"));
     }
 
     // ------------------------------------------------------------------ records
@@ -185,10 +203,10 @@ class AesControllerTest {
         assertThat(again.get("updated").asInt()).isZero();
 
         // A new randomkey changes the Secret Key, so the ciphertext changes.
-        postJson("/records", obj("propertyKey", "spring.datasource.password", "plainValue", PLAIN, "iv", IV,
+        postJson("/records", obj("propertyKey", "spring.datasource.password", "plainValue", PLAIN, "iv", IV, "salt", SALT,
                 "randomKey", "", "servers", List.of(server("MS", "ms1.cn.uat1", "10.1.1.11"))))
                 .andExpect(jsonPath("$.updated").value(1))
-                .andExpect(jsonPath("$.records[0].encryptedValue").value("77E6/C/RavNY+erjoa3itA=="))
+                .andExpect(jsonPath("$.records[0].encryptedValue").value("3kIVwWqttsGhLWV8i/F1pA=="))
                 .andExpect(jsonPath("$.records[0].randomKey").doesNotExist())
                 .andExpect(jsonPath("$.records[0].secretKey").value("ms1.cn.uat110.1.1.11"));
         assertThat(recordRepository.count()).isEqualTo(2);
@@ -198,7 +216,7 @@ class AesControllerTest {
     @DisplayName("list filters by app system and property key, and carries the derived Secret Key")
     void list() throws Exception {
         saveMsBoth();
-        postJson("/records", obj("propertyKey", "token", "plainValue", "t", "iv", IV, "randomKey", "x",
+        postJson("/records", obj("propertyKey", "token", "plainValue", "t", "iv", IV, "salt", SALT, "randomKey", "x",
                 "servers", List.of(server("CCS", "ccs1.cn.sit1", "10.2.1.11"))))
                 .andExpect(status().isOk());
 
@@ -253,17 +271,17 @@ class AesControllerTest {
     }
 
     @Test
-    @DisplayName("decrypt records: Secret Key from each record, IV per item; per-row results in request order")
+    @DisplayName("decrypt records: Secret Key from each record, IV and salt per item; per-row results in request order")
     void decryptRecords() throws Exception {
         JsonNode saved = saveMsBoth();
         long ms1 = saved.get("records").get(0).get("id").asLong();
         long ms2 = saved.get("records").get(1).get("id").asLong();
 
         postJson("/records/decrypt", obj("items", List.of(
-                        obj("id", ms2, "iv", IV),
-                        obj("id", ms1, "iv", "fedcba9876543210"),
-                        obj("id", ms1, "iv", IV),
-                        obj("id", 999999, "iv", IV))))
+                        obj("id", ms2, "iv", IV, "salt", SALT),
+                        obj("id", ms1, "iv", "fedcba9876543210", "salt", SALT),
+                        obj("id", ms1, "iv", IV, "salt", SALT),
+                        obj("id", 999999, "iv", IV, "salt", SALT))))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", "no-store"))
                 // ms1 is answered once, with its first item (the wrong IV).
@@ -272,10 +290,16 @@ class AesControllerTest {
                 .andExpect(jsonPath("$[1].error").value("decrypt_failed"))
                 .andExpect(jsonPath("$[2].error").value("not_found"));
 
-        postJson("/records/decrypt", obj("items", List.of(obj("id", ms1, "iv", "short"))))
+        postJson("/records/decrypt", obj("items", List.of(obj("id", ms1, "iv", "short", "salt", SALT))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].error").value("invalid_key_material"))
                 .andExpect(jsonPath("$[0].message").value(org.hamcrest.Matchers.startsWith("iv:")));
+
+        postJson("/records/decrypt", obj("items", List.of(obj("id", ms1, "iv", IV), obj("id", ms2, "iv", IV, "salt", "other"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].error").value("invalid_key_material"))
+                .andExpect(jsonPath("$[0].message").value(org.hamcrest.Matchers.startsWith("salt:")))
+                .andExpect(jsonPath("$[1].error").value("decrypt_failed"));
     }
 
     // ------------------------------------------------------------------ batches
@@ -284,25 +308,28 @@ class AesControllerTest {
     @DisplayName("encrypt/decrypt batch: every row against its own server, failures per row")
     void cryptoBatch() throws Exception {
         postJson("/encrypt/batch", obj("items", List.of(
-                        obj("iv", IV, "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11", "value", PLAIN),
-                        obj("iv", IV, "randomKey", RANDOM, "host", "ms2.cn.uat1", "ip", "10.1.1.12", "value", PLAIN),
-                        obj("iv", "short", "randomKey", RANDOM, "host", "h", "ip", "1.1.1.1", "value", "x"))))
+                        obj("iv", IV, "salt", SALT, "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11", "value", PLAIN),
+                        obj("iv", IV, "salt", SALT, "randomKey", RANDOM, "host", "ms2.cn.uat1", "ip", "10.1.1.12", "value", PLAIN),
+                        obj("iv", "short", "salt", SALT, "randomKey", RANDOM, "host", "h", "ip", "1.1.1.1", "value", "x"),
+                        obj("iv", IV, "randomKey", RANDOM, "host", "h", "ip", "1.1.1.1", "value", "x"))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(3)))
+                .andExpect(jsonPath("$", hasSize(4)))
+                .andExpect(jsonPath("$[3].error").value("invalid_key_material"))
+                .andExpect(jsonPath("$[3].field").value("salt"))
                 .andExpect(jsonPath("$[0].value").value(VECTOR_MS1))
                 .andExpect(jsonPath("$[1].value").value(VECTOR_MS2))
                 .andExpect(jsonPath("$[2].error").value("invalid_key_material"))
                 .andExpect(jsonPath("$[2].field").value("iv"));
 
         String body = postJson("/decrypt/batch", obj("items", List.of(
-                        obj("iv", IV, "randomKey", RANDOM, "host", "ms2.cn.uat1", "ip", "10.1.1.12", "value", VECTOR_MS1),
-                        obj("iv", IV, "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11", "value", VECTOR_MS1))))
+                        obj("iv", IV, "salt", SALT, "randomKey", RANDOM, "host", "ms2.cn.uat1", "ip", "10.1.1.12", "value", VECTOR_MS1),
+                        obj("iv", IV, "salt", SALT, "randomKey", RANDOM, "host", "ms1.cn.uat1", "ip", "10.1.1.11", "value", VECTOR_MS1))))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$[0].error").value("decrypt_failed"))
                 .andExpect(jsonPath("$[1].value").value(PLAIN))
                 .andReturn().getResponse().getContentAsString();
-        assertThat(body).doesNotContain(IV, RANDOM);
+        assertThat(body).doesNotContain(IV, RANDOM, SALT);
     }
 
     @Test
@@ -310,8 +337,8 @@ class AesControllerTest {
     void saveBatch() throws Exception {
         postJson("/records/batch", obj(
                 "items", List.of(
-                        obj("propertyKey", "db.password", "plainValue", PLAIN, "iv", IV, "randomKey", RANDOM),
-                        obj("propertyKey", "mq.password", "plainValue", "mq", "iv", IV)),
+                        obj("propertyKey", "db.password", "plainValue", PLAIN, "iv", IV, "salt", SALT, "randomKey", RANDOM),
+                        obj("propertyKey", "mq.password", "plainValue", "mq", "iv", IV, "salt", SALT)),
                 "servers", MS_BOTH))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.inserted").value(4))
@@ -322,26 +349,32 @@ class AesControllerTest {
 
         postJson("/records/batch", obj(
                 "items", List.of(
-                        obj("propertyKey", "dup", "plainValue", "a", "iv", IV),
-                        obj("propertyKey", " dup ", "plainValue", "b", "iv", IV)),
+                        obj("propertyKey", "dup", "plainValue", "a", "iv", IV, "salt", SALT),
+                        obj("propertyKey", " dup ", "plainValue", "b", "iv", IV, "salt", SALT)),
                 "servers", MS_BOTH))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fields[0].field").value("items[1].propertyKey"));
 
         postJson("/records/batch", obj(
                 "items", List.of(
-                        obj("propertyKey", "ok", "plainValue", "a", "iv", IV),
-                        obj("propertyKey", "bad", "plainValue", "b", "iv", "short")),
+                        obj("propertyKey", "ok", "plainValue", "a", "iv", IV, "salt", SALT),
+                        obj("propertyKey", "bad", "plainValue", "b", "iv", "short", "salt", SALT)),
                 "servers", MS_BOTH))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fields[0].field").value("items[1].iv"));
+
+        postJson("/records/batch", obj(
+                "items", List.of(obj("propertyKey", "nosalt", "plainValue", "a", "iv", IV)),
+                "servers", MS_BOTH))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fields[0].field").value("items[0].salt"));
         assertThat(recordRepository.count()).isEqualTo(4);
     }
 
     @Test
     @DisplayName("save validation: no servers is a 400")
     void saveValidation() throws Exception {
-        postJson("/records", obj("propertyKey", "k", "plainValue", "v", "iv", IV, "servers", List.of()))
+        postJson("/records", obj("propertyKey", "k", "plainValue", "v", "iv", IV, "salt", SALT, "servers", List.of()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fields[0].field").value("servers"));
     }

@@ -16,6 +16,7 @@ public record AesRecordSaveRequest(
         @NotBlank @Size(max = 255) String propertyKey,
         @NotNull @Size(max = 4000) String plainValue,
         @NotNull @Size(max = 64) String iv,
+        @Size(max = 256) String salt,
         @Size(max = 256) String randomKey,
         @Size(max = 512) String note,
         @NotEmpty @Size(max = 500) List<@Valid Server> servers) {
