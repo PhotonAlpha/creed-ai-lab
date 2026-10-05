@@ -136,9 +136,11 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   Java（`AesCryptoService`）与 mock（`server/aes.js`）必须保持一致 —— 两边测试锁定同一个向量。
 - 「密钥与取值」是一个数组：每行分两排 —— 第一排 IV / salt，第二排 randomkey / Secret Key（预览，只读）/ 属性键 / 明文 / 预览密文；
   可增删行，也可「以 JSON 编辑」导入导出（未知字段拒绝）。表单的全部加密 / 全部解密针对「预览服务器」（勾选的服务器之一）。
-- 服务器列表从配置（`env_endpoint`）读取不重复的 host / ip，按 App system 过滤。
+- 服务器列表从配置（`env_endpoint`）读取不重复的 host / ip，按 App system 和 envInstance（多选）过滤，每台带 envInstance 标签。
+  结果列表有同样的两个过滤（相互独立；记录的 envInstance 取自其服务器）。
 - 保存：发送明文，后端按每台勾选服务器各自的 Secret Key 加密，所有行 × 所有服务器一个事务；属性键重复则拒绝。
-  后端 CRUD 在 `creed-resource-env-matrix`（`env_aes_record`，Flyway V7/V8）：保存密文与 randomkey；**IV 和 salt 从不保存**。
+  后端 CRUD 在 `creed-resource-env-matrix`（`env_aes_record`，Flyway V7/V8/V9）：保存密文、randomkey、**IV 和 salt**
+  （V9，按需求）—— 结果列表无需输入即可解密，但数据库副本也因此可以直接解密全部值。
 - 结果列表显示每条记录的 Secret Key（及 randomkey），用于核对真实配置文件；可勾选后批量解密
   （记录自身的 Secret Key + 表单中属性键相同那一行的 IV 和 salt）或删除。
 

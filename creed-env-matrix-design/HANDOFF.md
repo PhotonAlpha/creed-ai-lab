@@ -117,7 +117,9 @@ Complete and verified in a browser against the real backend.
   - **Salt (2026-10-05): key = PBKDF2WithHmacSHA256(Secret Key, UTF-8(salt), 65536, 256)**, replacing
     `SHA-256(Secret Key)`. Salt is **required** (400 naming `salt`; `PBEKeySpec` rejects an empty one)
     and **never stored** — same handling as the IV, including per-record decrypt (salt of the form row
-    with the same property key). Each form row is now two lines: IV + salt, then the rest. Batch paths
+    with the same property key). Each form row is now two lines: IV + salt, then the rest — with **per-field labels** (vertical
+    form layout): a shared two-line header put line 2's labels above the IV/salt inputs. IV and salt
+    are plain `Input`s (visible, by request), not `Input.Password`. Batch paths
     derive once per (Secret Key, salt) (`KeyCache` / `keyCache()`), since 65 536 iterations cost tens
     of ms. Vector `H24JNkxfMPSBHI3vtO41cQ==` (salt `s4lt 盐`, rest as before) — openssl kdf+enc, node
     and Java agree. Records saved without a salt no longer decrypt.
@@ -125,6 +127,21 @@ Complete and verified in a browser against the real backend.
       the mock (missing salt marked Required, encrypt equals an independent node computation, save,
       per-record decrypt, wrong salt → decrypt_failed). The "There may be circular references" console
       warning after a successful *Encrypt all* predates this change (reproduced on the previous commit).
+  - **IV and salt are stored per record (V9, 2026-10-06, by request).** Decrypt selected sends just
+    `{id}` for records that have them (the record's own win over any supplied); only pre-V9 rows fall
+    back to the form row with the same property key. The Secret Key cell lists randomkey / IV / salt;
+    Load restores IV and salt into the form. Consequence, stated in the README and V9: **a copy of
+    `env_aes_record` decrypts every value in it.** Verified: `tmp/aes-ivsalt-e2e.mjs` (save, clear the
+    form to one empty row, decrypt all four records with nothing typed), V9 applied on Postgres.
+  - **Filters (2026-10-06):** both lists have an app-system + env-instance (multi) `ScopeFilter`,
+    independent of each other. Servers and records are fetched once, unfiltered, and narrowed in the
+    browser: a record's env instance only exists on its server's endpoint rows (`envOf`), so the full
+    server list is needed anyway. Hidden ticks / hidden selected rows are dropped. The env-instance tag
+    now always shows (it was behind the old `showAppSystem` gate, so an app filter hid it). The
+    "saved" tags read **all** records — reading the filtered ones let the result list's filter leak
+    into the server list. Servers de-duplicated by `serverKey` (3 fields) although `/aes/servers` is
+    DISTINCT over 5 (+ envInstance, instance); no such duplicates exist in either dataset today.
+    Verified by `tmp/aes-filter-e2e.mjs`.
   - `ServerList` is `memo`'d: unfiltered it is ~717 checkboxes, and re-rendering them per keystroke
     cost 114 ms/char in dev (now 16 ms). Ticking one box still re-renders the group (~200 ms dev,
     all apps listed) — virtualise it if that ever matters.

@@ -271,34 +271,58 @@ class AesControllerTest {
     }
 
     @Test
-    @DisplayName("decrypt records: Secret Key from each record, IV and salt per item; per-row results in request order")
-    void decryptRecords() throws Exception {
+    @DisplayName("save stores the IV and salt; decrypt records needs no input and ignores a supplied IV/salt")
+    void decryptRecordsWithStoredIvAndSalt() throws Exception {
         JsonNode saved = saveMsBoth();
-        long ms1 = saved.get("records").get(0).get("id").asLong();
+        JsonNode first = saved.get("records").get(0);
+        assertThat(first.get("iv").asText()).isEqualTo(IV);
+        assertThat(first.get("salt").asText()).isEqualTo(SALT);
+        long ms1 = first.get("id").asLong();
         long ms2 = saved.get("records").get(1).get("id").asLong();
 
         postJson("/records/decrypt", obj("items", List.of(
-                        obj("id", ms2, "iv", IV, "salt", SALT),
-                        obj("id", ms1, "iv", "fedcba9876543210", "salt", SALT),
+                        obj("id", ms2),
+                        // A wrong IV/salt in the request is ignored: the record's own are what it was encrypted with.
+                        obj("id", ms1, "iv", "fedcba9876543210", "salt", "other"),
                         obj("id", ms1, "iv", IV, "salt", SALT),
-                        obj("id", 999999, "iv", IV, "salt", SALT))))
+                        obj("id", 999999))))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", "no-store"))
-                // ms1 is answered once, with its first item (the wrong IV).
+                // ms1 is answered once.
                 .andExpect(jsonPath("$", hasSize(3)))
                 .andExpect(jsonPath("$[0].plainValue").value(PLAIN))
-                .andExpect(jsonPath("$[1].error").value("decrypt_failed"))
+                .andExpect(jsonPath("$[1].plainValue").value(PLAIN))
                 .andExpect(jsonPath("$[2].error").value("not_found"));
 
-        postJson("/records/decrypt", obj("items", List.of(obj("id", ms1, "iv", "short", "salt", SALT))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].error").value("invalid_key_material"))
-                .andExpect(jsonPath("$[0].message").value(org.hamcrest.Matchers.startsWith("iv:")));
+        mockMvc.perform(get(BASE + "/records").param("appSystem", "MS"))
+                .andExpect(jsonPath("$[0].iv").value(IV))
+                .andExpect(jsonPath("$[0].salt").value(SALT));
+    }
 
-        postJson("/records/decrypt", obj("items", List.of(obj("id", ms1, "iv", IV), obj("id", ms2, "iv", IV, "salt", "other"))))
+    @Test
+    @DisplayName("records saved before V9 (no IV/salt) decrypt with the request's IV and salt, failures per row")
+    void decryptLegacyRecordsWithSuppliedIvAndSalt() throws Exception {
+        JsonNode saved = saveMsBoth();
+        long ms1 = saved.get("records").get(0).get("id").asLong();
+        long ms2 = saved.get("records").get(1).get("id").asLong();
+        // What a row saved before V9 looks like.
+        recordRepository.findAll().forEach(r -> {
+            r.setIv(null);
+            r.setSalt(null);
+            recordRepository.save(r);
+        });
+
+        postJson("/records/decrypt", obj("items", List.of(obj("id", ms1, "iv", IV, "salt", SALT), obj("id", ms2))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].plainValue").value(PLAIN))
+                .andExpect(jsonPath("$[1].error").value("invalid_key_material"))
+                .andExpect(jsonPath("$[1].message").value(org.hamcrest.Matchers.startsWith("iv:")));
+
+        postJson("/records/decrypt", obj("items", List.of(
+                        obj("id", ms1, "iv", "short", "salt", SALT),
+                        obj("id", ms2, "iv", IV, "salt", "other"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].error").value("invalid_key_material"))
-                .andExpect(jsonPath("$[0].message").value(org.hamcrest.Matchers.startsWith("salt:")))
                 .andExpect(jsonPath("$[1].error").value("decrypt_failed"));
     }
 

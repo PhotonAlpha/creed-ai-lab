@@ -341,6 +341,8 @@ export interface AesServer {
   appSystem: string;
   host: string;
   ip: string;
+  envInstance: string;
+  instance: string;
 }
 
 export interface AesRecord extends AesServer {
@@ -351,6 +353,9 @@ export interface AesRecord extends AesServer {
   randomKey: string | null;
   /** `randomKey + host + ip` — derived by the server, shown to compare against the real config. */
   secretKey: string;
+  /** The IV and salt it was encrypted with — stored since V9; `null` for older records. */
+  iv: string | null;
+  salt: string | null;
   note: string | null;
   createdAt: string;
   updatedAt: string;
@@ -418,6 +423,7 @@ export interface AesRecordBatchSaveRequest {
 /** One stored record to decrypt. Its Secret Key comes from the record; only the IV is supplied. */
 export interface AesRecordDecryptItem {
   id: number;
-  iv: string;
-  salt: string;
+  /** Only for records without a stored IV/salt (saved before V9); otherwise the stored ones are used. */
+  iv?: string;
+  salt?: string;
 }

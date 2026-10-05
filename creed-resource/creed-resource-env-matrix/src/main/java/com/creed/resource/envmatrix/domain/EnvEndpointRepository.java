@@ -42,11 +42,11 @@ public interface EnvEndpointRepository
 
     // Two queries rather than one `(:appSystem is null or …)`: PostgreSQL cannot infer the type of a
     // parameter that is only ever compared with null, and fails the statement.
-    @Query("select distinct new com.creed.resource.envmatrix.domain.EnvServer(e.appSystem, e.host, e.ip) "
+    @Query("select distinct new com.creed.resource.envmatrix.domain.EnvServer(e.appSystem, e.host, e.ip, e.envInstance, e.instance) "
             + "from EnvEndpoint e order by e.appSystem, e.host, e.ip")
     List<EnvServer> findDistinctServers();
 
-    @Query("select distinct new com.creed.resource.envmatrix.domain.EnvServer(e.appSystem, e.host, e.ip) "
+    @Query("select distinct new com.creed.resource.envmatrix.domain.EnvServer(e.appSystem, e.host, e.ip, e.envInstance, e.instance) "
             + "from EnvEndpoint e where e.appSystem = :appSystem order by e.appSystem, e.host, e.ip")
     List<EnvServer> findDistinctServersByAppSystem(@Param("appSystem") String appSystem);
 }

@@ -284,7 +284,7 @@ const enUS = {
   'aes.form.iv': 'Initialization Vector',
   'aes.form.ivHint': 'Exactly 16 bytes in UTF-8 — a Chinese character counts as 3.',
   'aes.form.salt': 'Salt',
-  'aes.form.saltHint': 'PBKDF2 salt, used as UTF-8 bytes. Required. Never stored — like the IV, it has to be entered again to decrypt.',
+  'aes.form.saltHint': 'PBKDF2 salt, used as UTF-8 bytes. Required. Saved with each record, like the IV, so saved records decrypt without input.',
   'aes.form.ivLength': 'Must be exactly 16 bytes in UTF-8 (currently {bytes})',
   'aes.form.randomKey': 'randomkey',
   'aes.form.randomKeyHint': 'First part of the Secret Key (randomkey + host + ip). May be empty. Saved with each record.',
@@ -292,7 +292,7 @@ const enUS = {
   'aes.form.encryptedValue': 'Encrypted value (preview)',
   'aes.form.plainValue': 'Plain value',
   'aes.form.required': 'Required',
-  'aes.form.algorithm': 'AES-256/CBC/PKCS5Padding · Secret Key = randomkey + host + ip · key = PBKDF2WithHmacSHA256(Secret Key, salt, 65536, 256) · Base64. The IV and the salt are never stored; the randomkey is saved with each record.',
+  'aes.form.algorithm': 'AES-256/CBC/PKCS5Padding · Secret Key = randomkey + host + ip · key = PBKDF2WithHmacSHA256(Secret Key, salt, 65536, 256) · Base64. The randomkey, IV and salt are saved with each record — a copy of the stored records decrypts without anything else.',
   'aes.action.encrypt': 'Encrypt all',
   'aes.action.decrypt': 'Decrypt all',
   'aes.action.save': 'Save to selected servers ({count})',
@@ -301,6 +301,7 @@ const enUS = {
   'aes.save.done': 'Saved {items} value(s) to {servers} server(s): {inserted} new, {updated} updated',
   'aes.servers.title': 'Server list',
   'aes.servers.allApps': 'All app systems',
+  'aes.filter.allEnvs': 'All env instances',
   'aes.servers.selectAll': 'Select all ({checked}/{total})',
   'aes.servers.empty': 'No servers in the configuration for this app system',
   'aes.servers.hasValue': 'saved',
@@ -353,7 +354,7 @@ const enUS = {
   'aes.rows.needServer': 'Tick a server first — the Secret Key is randomkey + host + ip',
   'aes.json.secretKeyRemoved': '"secretKey" is not an input any more — it is randomkey + host + ip; remove it',
   'aes.records.secretKey': 'Secret Key',
-  'aes.records.noIv': 'No row in Keys and values has property key {key} and an IV — add one, or keep a single row to use its IV and salt for every record',
+  'aes.records.noIv': 'This record was saved without its IV/salt, and no row in Keys and values has property key {key} and an IV — add one, or keep a single row to use its IV and salt',
 } as const;
 
 export default enUS;

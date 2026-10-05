@@ -11,5 +11,7 @@ public record AesRecordUpdateRequest(
         @NotBlank @Size(max = 255) String propertyKey,
         @NotBlank @Size(max = 16384) String encryptedValue,
         @Size(max = 256) String randomKey,
+        @Size(max = 64) String iv,
+        @Size(max = 256) String salt,
         @Size(max = 512) String note) {
 }

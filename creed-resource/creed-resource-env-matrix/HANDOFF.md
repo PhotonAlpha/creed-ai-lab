@@ -105,15 +105,17 @@ curl on the `dev` profile.
 - `AesCryptoService` — **`secretKey = randomKey + host + ip`** (plain concatenation, the real config
   files' rule; not an input), `key = PBKDF2WithHmacSHA256(secretKey, UTF-8(salt), 65536, 256)`,
   `AES/CBC/PKCS5Padding`, IV = exactly 16 UTF-8 bytes, Base64. **Salt is required** (400 naming
-  `salt`) and never stored. Vector `H24JNkxfMPSBHI3vtO41cQ==` (r4nd0m / ms1.cn.uat1 / 10.1.1.11, salt
+  `salt`). Vector `H24JNkxfMPSBHI3vtO41cQ==` (r4nd0m / ms1.cn.uat1 / 10.1.1.11, salt
   `s4lt 盐`) is pinned here and in the node mock (`server/aes.test.js`) and matches `openssl kdf` +
   `openssl enc` — change both or neither. Batch paths derive once per (secretKey, salt) via
   `AesCryptoService.KeyCache` (request-scoped). Saves take **plain values + IV + salt** and encrypt
-  once per server; `/records/decrypt` takes `{id, iv, salt}` and derives the Secret Key from the
-  record; `AesRecordDto.secretKey` is derived on read (no column). **The Secret Key is made only of
-  stored/public data, so the never-stored IV and salt are the only secrets.** Records saved under the
+  once per server; `/records/decrypt` takes `{id, iv?, salt?}` and derives the Secret Key from the
+  record; `AesRecordDto.secretKey` is derived on read (no column). **V9 stores `iv` and `salt` per
+  record** (nullable; by request): the record's own win in `/records/decrypt`, the request's are the
+  fallback for pre-V9 rows. **With the Secret Key made of stored/public data and V9's IV/salt, a copy
+  of `env_aes_record` decrypts every value in it.** Records saved under the
   earlier `SHA-256(secretKey + randomKey)` and unsalted `SHA-256(secretKey)` rules no longer decrypt.
-- **The IV and the salt are never stored, logged or put in a URL** (nor is the Secret Key — it is derived). Request records override
+- **The IV and the salt are never logged or put in a URL** (stored since V9; the Secret Key is derived, never stored). Request records override
   `toString`; no exception message carries a key, IV or value (a test checks the error body).
 - **V8 adds `random_key`** (nullable — pre-V8 rows are "unknown", not ""): the randomkey in the form
   at save time, shown in the result list. Recorded, not verified (a pasted ciphertext cannot be

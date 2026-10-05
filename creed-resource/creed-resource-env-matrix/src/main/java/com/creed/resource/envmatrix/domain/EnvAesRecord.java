@@ -64,6 +64,17 @@ public class EnvAesRecord {
     @Column(name = "random_key", length = 256)
     private String randomKey;
 
+    /**
+     * The IV and salt the ciphertext was produced with (V9) — stored by request, so the result list
+     * can decrypt without input. With them, this row decrypts on its own: see V9.
+     * {@code null} for rows saved before V9.
+     */
+    @Column(name = "iv", length = 64)
+    private String iv;
+
+    @Column(name = "salt", length = 256)
+    private String salt;
+
     @Column(name = "note", length = 512)
     private String note;
 

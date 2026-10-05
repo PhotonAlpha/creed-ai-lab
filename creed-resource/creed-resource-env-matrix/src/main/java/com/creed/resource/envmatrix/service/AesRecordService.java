@@ -32,7 +32,9 @@ import java.util.stream.Collectors;
  * Stored AES ciphertexts, one per {@code (appSystem, host, ip, propertyKey)}, plus the server list
  * they are saved against.
  *
- * <p>Stores no IV and no salt: decrypting a stored row takes the ones supplied with that request.
+ * <p>Stores the IV and salt with each ciphertext (V9, by request), so a record decrypts with nothing
+ * supplied — and therefore a copy of the table decrypts with nothing else either. Records saved
+ * before V9 have neither, and decrypting them takes the ones supplied with the request.
  * The Secret Key is never stored either, but it needs no storing — it is
  * {@code randomKey + host + ip}, all of which a record holds. Log lines carry ids and counts, never
  * values.
@@ -82,8 +84,8 @@ public class AesRecordService {
      * unchanged value re-encrypts to the same bytes, and "saved to 10 servers" reports what changed.
      *
      * <p>Each server gets its own ciphertext: the Secret Key is {@code randomKey + host + ip}. The
-     * plain value, the IV and the salt are used and dropped; the ciphertext and the randomkey are
-     * stored. Keys are derived once per (server, randomkey, salt), not once per item.
+     * plain value is used and dropped; the ciphertext, randomkey, IV and salt are stored. Keys are
+     * derived once per (server, randomkey, salt), not once per item.
      */
     @Transactional
     public AesRecordSaveResponse saveBatch(AesRecordBatchSaveRequest request) {
@@ -131,7 +133,8 @@ public class AesRecordService {
                     row.setPropertyKey(propertyKey);
                     inserted++;
                 } else if (Objects.equals(row.getEncryptedValue(), value) && Objects.equals(row.getNote(), note)
-                        && Objects.equals(row.getRandomKey(), randomKey)) {
+                        && Objects.equals(row.getRandomKey(), randomKey)
+                        && Objects.equals(row.getIv(), item.iv()) && Objects.equals(row.getSalt(), item.salt())) {
                     saved.add(AesRecordDto.of(row));
                     continue;
                 } else {
@@ -139,6 +142,8 @@ public class AesRecordService {
                 }
                 row.setEncryptedValue(value);
                 row.setRandomKey(randomKey);
+                row.setIv(item.iv());
+                row.setSalt(item.salt());
                 row.setNote(note);
                 saved.add(AesRecordDto.of(repository.saveAndFlush(row)));
             }
@@ -166,6 +171,8 @@ public class AesRecordService {
         row.setPropertyKey(propertyKey);
         row.setEncryptedValue(request.encryptedValue().strip());
         row.setRandomKey(emptyToNull(request.randomKey()));
+        row.setIv(emptyToNull(request.iv()));
+        row.setSalt(emptyToNull(request.salt()));
         row.setNote(blankToNull(request.note()));
         return AesRecordDto.of(repository.saveAndFlush(row));
     }
@@ -181,8 +188,8 @@ public class AesRecordService {
 
     /**
      * Decrypts stored rows, one result per requested id in request order (a repeated id is answered
-     * once). The Secret Key comes from the record — {@code randomKey + host + ip} — and only the IV
-     * and the salt from the request. Every failure is that row's own result: an unusable IV or salt
+     * once). The Secret Key comes from the record — {@code randomKey + host + ip} — and so do the IV
+     * and salt when it has them (since V9); the request's are only used for older records. Every failure is that row's own result: an unusable IV or salt
      * ({@code invalid_key_material}), a value that does not decrypt ({@code decrypt_failed}), or an
      * unknown id ({@code not_found}).
      */
@@ -204,11 +211,15 @@ public class AesRecordService {
                 results.add(new AesRecordDecryptResult(id, null, "not_found", "no AES record with id " + id));
                 continue;
             }
+            // The record's own IV/salt win: they are what it was encrypted with. The request's are the
+            // fallback for rows saved before V9, which have none.
+            String iv = row.getIv() != null ? row.getIv() : item.iv();
+            String salt = row.getSalt() != null ? row.getSalt() : item.salt();
             try {
-                crypto.requireUsableKeyMaterial(item.iv(), item.salt());
+                crypto.requireUsableKeyMaterial(iv, salt);
                 String secretKey = AesCryptoService.secretKey(row.getRandomKey(), row.getHost(), row.getIp());
                 results.add(new AesRecordDecryptResult(id,
-                        crypto.decrypt(keys.key(secretKey, item.salt()), item.iv(), row.getEncryptedValue()), null, null));
+                        crypto.decrypt(keys.key(secretKey, salt), iv, row.getEncryptedValue()), null, null));
             } catch (AesCryptoService.InvalidKeyMaterialException e) {
                 results.add(new AesRecordDecryptResult(id, null, "invalid_key_material", e.field() + ": " + e.getMessage()));
             } catch (AesCryptoService.DecryptException e) {

@@ -8,9 +8,11 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 
 /**
- * {@code POST /aes/records/decrypt}: decrypt stored rows. Only the IV and the salt are supplied — the
- * Secret Key comes from the record itself ({@code randomKey + host + ip}). The page picks, per
- * record, the IV and salt of the "Keys and values" row with the same property key.
+ * {@code POST /aes/records/decrypt}: decrypt stored rows. The Secret Key comes from the record itself
+ * ({@code randomKey + host + ip}). The IV and salt do too when the record has them (saved since V9);
+ * {@code iv} / {@code salt} here are only the fallback for older records — the page sends those of
+ * the "Keys and values" row with the same property key. A value given here for a record that has
+ * its own is ignored.
  */
 public record AesRecordDecryptRequest(@NotEmpty @Size(max = 500) List<@Valid Item> items) {
 

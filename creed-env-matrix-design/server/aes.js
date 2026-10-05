@@ -10,8 +10,8 @@
  *
  * Every server gets its own ciphertext. A value encrypted by either backend decrypts in the other;
  * server/aes.test.js and AesCryptoServiceTest pin the same vector. Records live in mock.json
- * (`aesRecords`): the ciphertext and its randomkey; the Secret Key is derived on read, the IV and the
- * salt never stored. The salt is required (Java's PBEKeySpec rejects an empty one).
+ * (`aesRecords`): the ciphertext, its randomkey, and (since V9 in the Java service) the IV and salt it
+ * was encrypted with, so a record decrypts with nothing supplied; the Secret Key is derived on read. The salt is required (Java's PBEKeySpec rejects an empty one).
  */
 import { createCipheriv, createDecipheriv, pbkdf2Sync } from 'node:crypto';
 
@@ -134,7 +134,7 @@ function check(body, rules) {
 const KEY_RULES = { iv: { required: 'null', max: 64 }, salt: { max: 256 }, randomKey: { max: 256 }, host: { required: 'blank', max: 255 }, ip: { required: 'blank', max: 45 } };
 
 /** A record as the API returns it: the stored row plus its derived Secret Key. */
-const toDto = (row) => ({ ...row, randomKey: row.randomKey ?? null, secretKey: aesSecretKey(row.randomKey, row.host, row.ip) });
+const toDto = (row) => ({ ...row, randomKey: row.randomKey ?? null, iv: row.iv ?? null, salt: row.salt ?? null, secretKey: aesSecretKey(row.randomKey, row.host, row.ip) });
 
 /** What one saved item carries: the plain value, IV and salt are used and dropped; the ciphertext is made per server. */
 const SAVE_ITEM_RULES = {
@@ -183,11 +183,12 @@ export function createAesRoutes(data, readBody) {
         const value = aesEncrypt(aesSecretKey(randomKey, server.host, server.ip), item.salt, item.iv, item.plainValue, keys);
         let row = findIdentity(server.appSystem, server.host, server.ip, propertyKey);
         if (!row) {
-          row = { id: data.nextId(), ...server, propertyKey, encryptedValue: value, randomKey, note, createdAt: now, updatedAt: now, version: 0 };
+          row = { id: data.nextId(), ...server, propertyKey, encryptedValue: value, randomKey, iv: item.iv, salt: item.salt, note, createdAt: now, updatedAt: now, version: 0 };
           data.records().push(row);
           inserted++;
-        } else if (row.encryptedValue !== value || row.note !== note || (row.randomKey ?? null) !== randomKey) {
-          Object.assign(row, { encryptedValue: value, randomKey, note, updatedAt: now, version: row.version + 1 });
+        } else if (row.encryptedValue !== value || row.note !== note || (row.randomKey ?? null) !== randomKey
+          || (row.iv ?? null) !== item.iv || (row.salt ?? null) !== item.salt) {
+          Object.assign(row, { encryptedValue: value, randomKey, iv: item.iv, salt: item.salt, note, updatedAt: now, version: row.version + 1 });
           updated++;
         }
         saved.push(toDto(row));
@@ -216,7 +217,9 @@ export function createAesRoutes(data, readBody) {
         const seen = new Map();
         for (const e of data.endpoints()) {
           if (app && e.appSystem !== app) continue;
-          seen.set(`${e.appSystem}\u0000${e.host}\u0000${e.ip}`, { appSystem: e.appSystem, host: e.host, ip: e.ip });
+          // Same columns and DISTINCT as the Java query (EnvEndpointRepository.findDistinctServers).
+          seen.set([e.appSystem, e.host, e.ip, e.envInstance, e.instance].join('\u0000'),
+            { appSystem: e.appSystem, host: e.host, ip: e.ip, envInstance: e.envInstance, instance: e.instance });
         }
         send(res, 200, [...seen.values()].sort((a, b) =>
           a.appSystem.localeCompare(b.appSystem) || a.host.localeCompare(b.host) || a.ip.localeCompare(b.ip)));
@@ -289,7 +292,8 @@ export function createAesRoutes(data, readBody) {
         const body = await readBody(req);
         check(body, {
           appSystem: { required: 'blank', max: 64 }, host: { required: 'blank', max: 255 }, ip: { required: 'blank', max: 45 },
-          propertyKey: { required: 'blank', max: 255 }, encryptedValue: { required: 'blank', max: 16384 }, randomKey: { max: 256 }, note: { max: 512 },
+          propertyKey: { required: 'blank', max: 255 }, encryptedValue: { required: 'blank', max: 16384 }, randomKey: { max: 256 },
+          iv: { max: 64 }, salt: { max: 256 }, note: { max: 512 },
         });
         const next = { appSystem: body.appSystem.trim(), host: body.host.trim(), ip: body.ip.trim(), propertyKey: body.propertyKey.trim() };
         const other = findIdentity(next.appSystem, next.host, next.ip, next.propertyKey);
@@ -297,7 +301,8 @@ export function createAesRoutes(data, readBody) {
           throw new AesError(409, 'duplicate_aes_record', `that server already has a value for this property key, as record #${other.id}`);
         }
         Object.assign(row, next, {
-          encryptedValue: body.encryptedValue.trim(), randomKey: body.randomKey ? body.randomKey : null, note: trimOrNull(body.note),
+          encryptedValue: body.encryptedValue.trim(), randomKey: body.randomKey ? body.randomKey : null,
+          iv: body.iv ? body.iv : null, salt: body.salt ? body.salt : null, note: trimOrNull(body.note),
           updatedAt: new Date().toISOString(), version: row.version + 1,
         });
         data.persist();
@@ -330,9 +335,12 @@ export function createAesRoutes(data, readBody) {
             continue;
           }
           try {
-            // The Secret Key comes from the record; only the IV and the salt from the request.
+            // The Secret Key comes from the record, and so do the IV and salt when it has them; the
+            // request's are the fallback for records saved without (before V9 in the Java service).
             const secretKey = aesSecretKey(row.randomKey, row.host, row.ip);
-            results.push({ id, plainValue: aesDecrypt(secretKey, item.salt, item.iv, row.encryptedValue, keys), error: null, message: null });
+            const iv = row.iv ?? item.iv;
+            const salt = row.salt ?? item.salt;
+            results.push({ id, plainValue: aesDecrypt(secretKey, salt, iv, row.encryptedValue, keys), error: null, message: null });
           } catch (e) {
             if (!(e instanceof AesError)) throw e;
             results.push(e.field

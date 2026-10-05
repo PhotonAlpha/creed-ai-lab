@@ -441,16 +441,20 @@ ciphertext = Base64( AES/CBC/PKCS5Padding(key, iv, UTF-8(plain value)) )
   character counts as 3.
 - **The salt is required** (any non-empty text, used as UTF-8 bytes); a missing one is a 400 naming
   `salt`, like a bad IV.
-- **What is stored:** the ciphertext and the randomkey, per record. The IV and the salt are never
-  stored, logged or put in a URL — both have to be entered again to decrypt. Note what that means:
-  the Secret Key is built entirely from stored or public data (randomkey, host, ip), so **the IV and
-  the salt are the only things between a copy of the database and the plaintexts**. That is the real system's rule, reproduced here so its files can be checked.
+- **What is stored:** the ciphertext, the randomkey, **the IV and the salt**, per record (V9, by
+  request), so the result list decrypts a record with nothing typed in. Neither is logged or put in a
+  URL. Note what that means: the Secret Key is built from stored or public data (randomkey, host, ip)
+  and the IV and salt are stored too, so **a copy of `env_aes_record` — or any backup of it — decrypts
+  every value in it**. Treat the table as holding the plaintexts. Records saved before V9 have no IV
+  or salt; decrypting them takes the ones in the form.
 - CBC has no integrity check: a wrong key is almost always reported (bad padding, or output that is
   not UTF-8), but rarely decrypts to short garbage instead.
 
 **Keys and values is an array** of rows. Each row takes two lines: **IV and salt** on the first;
 randomkey, a read-only **Secret Key (preview)**, property key, plain value and an encrypted value
-**preview** on the second. Add, duplicate and remove rows, or use *Edit as JSON*:
+**preview** on the second. Every field carries its own label, and the IV and salt are shown in clear
+(not masked) so they can be compared with the configuration being checked. Add, duplicate and remove
+rows, or use *Edit as JSON*:
 
 ```json
 [
@@ -463,8 +467,10 @@ The dialog replaces or appends rows; an unknown field name is rejected rather th
 and an old `secretKey` field is rejected with a note that it is now derived. At most 200 rows.
 
 **Flow.**
-1. Tick servers in the **server list** — every distinct `host:ip` in the configuration, narrowed by
-   the app-system filter.
+1. Tick servers in the **server list** — every distinct `host:ip` in the configuration, each tagged
+   with its env instance (and app system when the list spans several), narrowed by an **app-system**
+   and an **env-instance** filter (several env instances at once). Ticks on servers a filter hides
+   are dropped, so a hidden server is never saved to.
 2. The **preview server** (card header; the first ticked one unless you pick another) is what the
    form previews against: the Secret Key column shows its `randomkey + host + ip`, and *Encrypt all*
    / *Decrypt all* use it. Rows with an unusable IV or no salt are marked and skipped; the rest go
@@ -474,13 +480,15 @@ and an old `secretKey` field is rejected with a note that it is now derived. At 
    Saving the same property for a server again replaces its value; the same property key on two rows
    is rejected. A server that already holds any property key in the form is tagged *saved*.
 
-The **result list** shows each record's **Secret Key** (with its randomkey underneath) next to the
-decrypted value — the two things a check against the real config file compares. *Decrypt selected*
-uses each record's own Secret Key and the IV and salt of the form row with **the same property key**
-(with a single form row, that row's for every record); results are per row. Changing an IV, salt or
-randomkey clears the decrypted column. *Load* puts a record into the row with its property key (else
-into a row with no values yet, keeping its IV and salt; else a new row) and makes its server the preview server;
-*Delete* removes rows.
+The **result list** has its own app-system and env-instance filters (independent of the server
+list's; a record's env instance is its server's in the configuration, and selected rows a filter
+hides are deselected) and shows each record's **Secret Key** (with its randomkey underneath) next to the
+decrypted value — the two things a check against the real config file compares; the IV and salt
+are listed under it too. *Decrypt selected* needs no input: each record decrypts with its own Secret
+Key, IV and salt. Only records saved before V9 (no IV/salt) take them from the form row with **the same
+property key** (with a single form row, that row's). Results are per row. *Load* puts a record —
+randomkey, IV and salt included — into the row with its property key (else into a row with no values
+yet; else a new row) and makes its server the preview server; *Delete* removes rows.
 
 Records saved under the earlier rules (`SHA-256(Secret Key + randomkey)` with a typed Secret Key, and
 `SHA-256(randomkey + host + ip)` without a salt) do not decrypt under this one.
