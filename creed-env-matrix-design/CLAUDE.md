@@ -122,6 +122,10 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 页面轮流显示当前 OTP（`ENV_MATRIX_TOTP_EXPOSE_CODE`，按需求默认开启），用户手动输入后发起请求。
 - Splunk 调用使用 `node:https`；**默认返回 mock 值**，`SPLUNK_ENABLED=true` 后才真正调用获取 cookie。
   **按需求默认跳过 Splunk 证书校验**（`SPLUNK_TLS_INSECURE=true`，证书链与主机名都不校验）。
+- 登录目标为下拉框：`SPLUNK_TARGETS=SIT,UAT` 配置多个 Splunk 实例，每个目标有自己的
+  `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD`（不回退到全局变量）；切换目标时页面显示的
+  登录地址、用户名随之改变，BFF 也用该目标的账号登录，密码从不发给浏览器。未设置 `SPLUNK_TARGETS` 时只有一个
+  `default` 目标（`SPLUNK_LOGIN_URL` / `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`）。
 - OTP 通过后由 BFF 表单登录 Splunk，从响应 cookie 取 `splunkd_8000`，返回
   `document.cookie = "splunkd_8089=…; path=/; Secure; SameSite=Lax";` 供复制。
 - 审计：每次 OTP 校验与 Splunk 调用都记一行（不保存 cookie 值，只保存指纹）；写不进审计则请求失败。

@@ -57,6 +57,18 @@ Complete and verified in a browser against the real backend.
   `Input.OTP`, the returned `document.cookie` script (copyable), and the audit table. The input is
   cleared once a code is spent (success, `otp_replayed`, any `splunk_*` error) — the stale code left
   in the box is what produced the first reported "replayed".
+- **Splunk login targets (2026-10-06).** The page's *Login target* is a dropdown over
+  `SPLUNK_TARGETS` (each `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD[_FILE]` / `_LABEL` /
+  `_SESSION_COOKIE`; no fallback to the global credentials; unset → one `default` target from the old
+  variables, so existing environments are unchanged). `/splunk/totp` lists targets with URL, username,
+  `passwordSet` and `configured` — never the password; `/splunk/session` takes `{code, target?}` and
+  resolves the target **before** verifying the code (unknown 400 / unconfigured 503 keep the code).
+  The audit detail names the target (`as <user> on <ID>`). Also removed two debug `console.log`s that
+  had shipped in `broker.js` / `login-client.js` — the first printed the whole Splunk config,
+  **password included**, on every session request. Verified: `test:server` 43 (33 broker), typecheck, and the real
+  BFF (`SPLUNK_ENABLED=true`) against two loopback Splunk stand-ins that each accept only their own
+  account, driven from headless Chromium (switch target → username follows, each stub received only
+  its own credentials, PROD without a password marked and blocked, choice survives reload).
 - **Splunk broker = Node BFF (`server/bff.js` + `server/splunk/`), moved out of the Java service on
   2026-10-02.** Same contract, same env-var names. The BFF serves `dist/`, answers
   `/api/env-matrix/splunk/*` itself and proxies the rest of `/api` to `ENV_MATRIX_API_TARGET`. The

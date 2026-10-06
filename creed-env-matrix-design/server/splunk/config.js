@@ -7,6 +7,15 @@
  * named by `NAME_FILE` — the shape Docker/Kubernetes secrets and a Vault agent's file sink produce,
  * so a secret never has to sit in an env var readable from `ps e` or /proc. `_FILE` wins when both
  * are set. `npm run bff` additionally loads `.env.server.local` (git-ignored via `*.local`).
+ *
+ * **Login targets.** `SPLUNK_TARGETS=SIT,UAT` declares several Splunk instances the page offers in a
+ * dropdown, each with its own `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD` (or
+ * `_PASSWORD_FILE`) and optional `_LABEL` / `_SESSION_COOKIE`. There is deliberately no fallback from
+ * a target's credentials to the global ones: that would send one instance's password to another
+ * host. Without `SPLUNK_TARGETS` there is one target, `default`, built from the original
+ * `SPLUNK_LOGIN_URL` / `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`, so an existing environment carries over.
+ * The `SPLUNK_TARGET_` prefix keeps a target id from colliding with a global (an id `DB` would
+ * otherwise read `SPLUNK_DB_URL`).
  */
 import { readFileSync } from 'node:fs';
 
@@ -29,6 +38,44 @@ function int(env, name, fallback, min, max) {
 }
 
 const IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
+/** Becomes part of an env var name, so letters, digits and underscores only. */
+const TARGET_ID = /^[A-Z0-9_]{1,32}$/;
+
+/**
+ * The login targets. Each is everything a login needs; the shared settings (TLS, timeouts, cval,
+ * script cookie) stay on the splunk section.
+ */
+function loadTargets(env, sessionCookie) {
+  const ids = (env.SPLUNK_TARGETS ?? '').split(',').map((id) => id.trim().toUpperCase()).filter(Boolean);
+  if (ids.length === 0) {
+    return [{
+      id: 'default',
+      label: env.SPLUNK_LABEL || 'default',
+      loginUrl: env.SPLUNK_LOGIN_URL ?? 'https://splunk.example.invalid:8000/en-US/account/login',
+      username: env.SPLUNK_USERNAME ?? 'admin',
+      password: readSecret(env, 'SPLUNK_PASSWORD', 'admin'),
+      sessionCookie,
+      // What a missing value is called in this configuration, for the audit trail and the 503.
+      settings: 'SPLUNK_LOGIN_URL / SPLUNK_USERNAME / SPLUNK_PASSWORD',
+    }];
+  }
+  const seen = new Set();
+  return ids.map((id) => {
+    if (!TARGET_ID.test(id)) throw new Error(`SPLUNK_TARGETS: '${id}' must match ${TARGET_ID}`);
+    if (seen.has(id)) throw new Error(`SPLUNK_TARGETS: '${id}' is listed twice`);
+    seen.add(id);
+    const prefix = `SPLUNK_TARGET_${id}_`;
+    return {
+      id,
+      label: env[`${prefix}LABEL`] || id,
+      loginUrl: env[`${prefix}LOGIN_URL`] ?? '',
+      username: env[`${prefix}USERNAME`] ?? '',
+      password: readSecret(env, `${prefix}PASSWORD`, ''),
+      sessionCookie: env[`${prefix}SESSION_COOKIE`] || sessionCookie,
+      settings: `${prefix}LOGIN_URL / ${prefix}USERNAME / ${prefix}PASSWORD`,
+    };
+  });
+}
 
 export function loadConfig(env = process.env) {
   const totp = {
@@ -47,9 +94,7 @@ export function loadConfig(env = process.env) {
   const splunk = {
     // The switch for the real call. false: a fabricated cookie, no network.
     enabled: bool(env.SPLUNK_ENABLED, false),
-    loginUrl: env.SPLUNK_LOGIN_URL ?? 'https://splunk.example.invalid:8000/en-US/account/login',
-    username: env.SPLUNK_USERNAME ?? 'admin',
-    password: readSecret(env, 'SPLUNK_PASSWORD', 'admin'),
+    // The default for every target's own session cookie (splunkd_<port> — it follows Splunk Web's port).
     sessionCookie: env.SPLUNK_SESSION_COOKIE ?? 'splunkd_8000',
     scriptCookieName: env.SPLUNK_SCRIPT_COOKIE_NAME ?? 'splunkd_8089',
     scriptCookiePath: env.SPLUNK_SCRIPT_COOKIE_PATH ?? '/',
@@ -61,6 +106,15 @@ export function loadConfig(env = process.env) {
     tlsInsecure: bool(env.SPLUNK_TLS_INSECURE, true),
     caFile: env.SPLUNK_CA_FILE || null,
   };
+  splunk.targets = loadTargets(env, splunk.sessionCookie);
+  // The dropdown's initial choice, and the target of a request that names none.
+  splunk.defaultTarget = splunk.targets[0].id;
+  const wanted = (env.SPLUNK_DEFAULT_TARGET ?? '').trim();
+  if (wanted) {
+    const found = splunk.targets.find((t) => t.id === wanted.toUpperCase() || t.id === wanted);
+    if (!found) throw new Error(`SPLUNK_DEFAULT_TARGET '${wanted}' is not one of SPLUNK_TARGETS`);
+    splunk.defaultTarget = found.id;
+  }
 
   const audit = {
     // memory (default) | pg | mysql. memory keeps the newest 500 rows and forgets them on restart;
@@ -92,15 +146,16 @@ export function loadConfig(env = process.env) {
   return { totp, splunk, audit };
 }
 
-/** Whether a login can be attempted; the mock needs nothing. */
-export const splunkConfigured = (s) => !s.enabled || Boolean(s.loginUrl && s.username && s.password);
+/** Whether a login to this target can be attempted; the mock needs nothing. */
+export const targetConfigured = (s, target) =>
+  !s.enabled || Boolean(target?.loginUrl && target.username && target.password);
 
 /** For the startup log line — every credential masked. */
 export function describe({ totp, splunk, audit }) {
   const mask = (v) => (v ? '***' : '<unset>');
   return {
     totp: { ...totp, secret: mask(totp.secret) },
-    splunk: { ...splunk, password: mask(splunk.password) },
+    splunk: { ...splunk, targets: splunk.targets.map(({ settings, ...t }) => ({ ...t, password: mask(t.password) })) },
     audit: { ...audit, dbPassword: mask(audit.dbPassword) },
   };
 }

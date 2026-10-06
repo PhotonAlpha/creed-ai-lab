@@ -1,6 +1,7 @@
 /**
  * Splunk Web form login: `POST <loginUrl>` with `username=…&password=…`, then the session cookie
- * (`splunkd_8000` by default) read off the response's `Set-Cookie`.
+ * (`splunkd_8000` by default) read off the response's `Set-Cookie`. The URL, credentials and cookie
+ * name come from the login target passed to login(); everything else (TLS, timeouts, cval) is shared.
  *
  * `SPLUNK_ENABLED` is the switch. Off (the default), login() returns a fabricated value and sends
  * nothing, so the page and the audit trail work with no Splunk to reach.
@@ -94,19 +95,22 @@ export function createLoginClient(config) {
   return {
     mode,
 
-    /** @returns {Promise<{cookieValue: string, httpStatus: number}>} cookieValue is a credential — never log it */
-    async login() {
-      console.log('login config.enabled', config.enabled)
+    /**
+     * @param target {loginUrl, username, password, sessionCookie?} — one of config.targets
+     * @returns {Promise<{cookieValue: string, httpStatus: number}>} cookieValue is a credential — never log it
+     */
+    async login(target) {
       if (!config.enabled) return { cookieValue: `mock-${randomBytes(32).toString('hex')}`, httpStatus: 0 };
 
-      const url = new URL(config.loginUrl);
+      const sessionCookie = target.sessionCookie ?? config.sessionCookie;
+      const url = new URL(target.loginUrl);
       const cookies = new Map();
       if (config.prefetchCval) {
         const page = await call(url, 'GET', {});
         for (const [k, v] of page.cookies) cookies.set(k, v);
       }
 
-      const form = new URLSearchParams({ username: config.username, password: config.password });
+      const form = new URLSearchParams({ username: target.username, password: target.password });
       if (cookies.has('cval')) form.set('cval', cookies.get('cval'));
       const body = form.toString();
       const headers = {
@@ -116,11 +120,11 @@ export function createLoginClient(config) {
       if (cookies.size) headers.Cookie = [...cookies].map(([k, v]) => `${k}=${v}`).join('; ');
 
       const reply = await call(url, 'POST', headers, body);
-      const value = reply.cookies.get(config.sessionCookie);
+      const value = reply.cookies.get(sessionCookie);
       if (!value) {
         // 401 is a bad password; 200 without the cookie is usually a cval/CSRF rejection.
         throw new SplunkLoginError('no_session_cookie', reply.status,
-          `Splunk answered ${reply.status} without a ${config.sessionCookie} cookie`);
+          `Splunk answered ${reply.status} without a ${sessionCookie} cookie`);
       }
       return { cookieValue: value, httpStatus: reply.status };
     },

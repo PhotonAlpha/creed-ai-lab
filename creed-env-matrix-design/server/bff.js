@@ -138,7 +138,7 @@ const server = http.createServer(async (req, res) => {
 
 console.log('[bff] config', JSON.stringify(describe(config)));
 if (config.splunk.enabled && config.splunk.tlsInsecure) {
-  console.warn(`[bff] SPLUNK_TLS_INSECURE: Splunk's certificate is not verified (${config.splunk.loginUrl})`);
+  console.warn(`[bff] SPLUNK_TLS_INSECURE: Splunk's certificate is not verified (${config.splunk.targets.map((t) => t.loginUrl).join(', ')})`);
 }
 if (config.audit.store === 'memory') {
   console.warn('[bff] SPLUNK_AUDIT_STORE=memory: the audit keeps the newest 500 rows and is lost on restart — set pg or mysql to persist it');

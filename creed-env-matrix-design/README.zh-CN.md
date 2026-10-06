@@ -346,9 +346,13 @@ Java 服务现已不再提供这些接口。
    显示当前验证码 —— 因此任何能打开本页的人都能通过校验。关闭它，验证码就必须来自用
    `ENV_MATRIX_TOTP_SECRET` 绑定的身份验证器 App。一个验证码**只能使用一次**；同一地址一分钟内输错
    5 次，之后一分钟内返回 `429`。
-2. **登录 Splunk。** 在校验验证码**之前**先检查 Splunk 是否配置齐全：未配置时直接返回 `503`，验证码
-   不会被消耗。验证码通过后，BFF 先 `GET` 登录页拿到 `cval` cookie，再把
-   `username=…&password=…&cval=…` 以表单 `POST` 到 `SPLUNK_LOGIN_URL`，**不跟随重定向**
+2. **登录 Splunk。** **登录目标**下拉框列出 BFF 配置的各个 Splunk 实例（`SPLUNK_TARGETS=SIT,UAT`，
+   每个目标配置 `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD`；未设置时只有一个 `default`
+   目标，取自 `SPLUNK_LOGIN_URL` / `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`）。选择后页面显示该目标的登录地址和
+   用户名，BFF 登录时也随之换成该目标的账号；密码不会离开服务端 —— 页面只显示是否已配置。所选目标按浏览器
+   记住。缺少地址、用户名或密码的目标会被标出，且无法提交。这些都在校验验证码**之前**检查：未知目标返回
+   `400`，未配置齐全返回 `503`，两种情况验证码都不会被消耗。验证码通过后，BFF 先 `GET` 登录页拿到 `cval`
+   cookie，再把 `username=…&password=…&cval=…` 以表单 `POST` 到该目标的登录地址，**不跟随重定向**
    （cookie 在 303 响应上），从 `Set-Cookie` 中读取 `splunkd_8000`。**默认不校验 Splunk 的 TLS
    证书**（`SPLUNK_TLS_INSECURE=true`：既不校验证书链，也不校验主机名）；设为 `false`（私有 CA 再配
    `SPLUNK_CA_FILE`）即开启校验。
@@ -467,7 +471,7 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
 | `POST` | `/health/recheck` | 重新执行探测（轮换模拟种子） |
 | `GET` | `/splunk/totp` | TOTP 周期 / 位数 / 误差 + 服务端时间、Splunk 模式 —— **`/splunk/*` 由 BFF / mock 提供，不在 Java 服务中** |
 | `GET` | `/splunk/totp/current` | 当前验证码（仅在开启 `expose-current-code` 时；否则 `404`） |
-| `POST` | `/splunk/session` | `{code}` → cookie 脚本；`401` 验证码错误/已使用，`429` 已锁定，`502` Splunk 失败，`503` 未配置 |
+| `POST` | `/splunk/session` | `{code, target?}` → cookie 脚本（`target` 为登录目标 id，省略时用默认目标）；`400` 未知目标，`401` 验证码错误/已使用，`429` 已锁定，`502` Splunk 失败，`503` 未配置 |
 | `GET` | `/splunk/audit` | 审计记录，按时间倒序（`?limit=`，默认 50） |
 | `GET` | `/aes/servers` | 从 endpoint 中取不重复的 `(appSystem, host, ip)`；`?appSystem=` 过滤 |
 | `POST` | `/aes/encrypt` | `{iv, randomKey, host, ip, plainValue}` → `{encryptedValue}`；Secret Key = randomKey + host + ip；IV 不是 16 字节时返回 `400` 并指出 `iv` |

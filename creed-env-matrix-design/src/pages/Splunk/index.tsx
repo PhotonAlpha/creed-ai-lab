@@ -8,6 +8,7 @@ import {
   Empty,
   Input,
   Progress,
+  Select,
   Space,
   Table,
   Tag,
@@ -24,6 +25,23 @@ import type { SplunkAuditRow, SplunkSession, TotpCode, TotpInfo } from '../../ap
 
 const { Text, Paragraph } = Typography;
 
+/** Per-browser convenience only — storage can be unavailable (private mode), so every access is guarded. */
+const TARGET_KEY = 'env-matrix.splunk.target';
+const readStoredTarget = () => {
+  try {
+    return window.localStorage.getItem(TARGET_KEY);
+  } catch {
+    return null;
+  }
+};
+const storeTarget = (id: string) => {
+  try {
+    window.localStorage.setItem(TARGET_KEY, id);
+  } catch {
+    // Not remembered; nothing else depends on it.
+  }
+};
+
 /**
  * Splunk session broker.
  *
@@ -31,6 +49,11 @@ const { Text, Paragraph } = Typography;
  * to the browser's, and a code is only valid relative to the verifier — a browser a minute fast would
  * otherwise count down against the wrong window. The code itself is refetched whenever the step
  * rolls over rather than recomputed here, so the secret never reaches the browser.
+ *
+ * The login target is a dropdown over the server's configured Splunk instances. Picking one shows
+ * that target's login URL and username; its password stays on the server (the page only learns
+ * whether it is set), and the session request names the target so the server logs in with that
+ * target's own credentials.
  */
 export function SplunkPage() {
   const { t } = useI18n();
@@ -43,6 +66,7 @@ export function SplunkPage() {
   const [now, setNow] = useState(() => Date.now());
   const [code, setCode] = useState<TotpCode | null>(null);
 
+  const [targetId, setTargetId] = useState<string | undefined>();
   const [input, setInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [session, setSession] = useState<SplunkSession | null>(null);
@@ -68,6 +92,9 @@ export function SplunkPage() {
       .then((response) => {
         offsetRef.current = response.serverTimeMillis - Date.now();
         setInfo(response);
+        // The last target this browser used, if the server still offers it; else the server's default.
+        const stored = readStoredTarget();
+        setTargetId(response.targets.some((t) => t.id === stored) ? (stored as string) : response.defaultTarget);
       })
       .catch((e: Error) => setInfoError(e.message));
     void loadAudit();
@@ -105,7 +132,7 @@ export function SplunkPage() {
     setFailure(null);
     setSession(null);
     try {
-      const result = await splunkApi.session(input);
+      const result = await splunkApi.session(input, targetId);
       setSession(result);
       setInput('');
       message.success(t('splunk.issued'));
@@ -130,6 +157,8 @@ export function SplunkPage() {
 
   const digits = info?.digits ?? 6;
   const expiring = remaining <= 5;
+  const target = info?.targets.find((t) => t.id === targetId);
+  const targetLabel = (id: string) => info?.targets.find((t) => t.id === id)?.label ?? id;
 
   const columns: TableColumnsType<SplunkAuditRow> = [
     {
@@ -275,17 +304,64 @@ export function SplunkPage() {
             bordered
           >
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              {info?.loginUrl && (
-                <Text type="secondary">
-                  {t('splunk.session.target')} <Text code>{info.loginUrl}</Text>
-                </Text>
-              )}
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Space wrap>
+                  <Text>{t('splunk.session.target')}</Text>
+                  <Select
+                    style={{ minWidth: 260 }}
+                    value={targetId}
+                    onChange={(id: string) => {
+                      setTargetId(id);
+                      storeTarget(id);
+                      // A session shown under another target's name would be misleading.
+                      setSession(null);
+                      setFailure(null);
+                    }}
+                    options={(info?.targets ?? []).map((option) => ({
+                      value: option.id,
+                      label: option.label,
+                      title: option.loginUrl ?? undefined,
+                    }))}
+                    optionRender={(option) => {
+                      const item = info?.targets.find((x) => x.id === option.value);
+                      return (
+                        <Space direction="vertical" size={0}>
+                          <Space size="small">
+                            <Text>{option.label}</Text>
+                            {item && !item.configured && <Tag color="warning" bordered={false}>{t('splunk.session.unset')}</Tag>}
+                          </Space>
+                          {item?.loginUrl && <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>{item.loginUrl}</Text>}
+                        </Space>
+                      );
+                    }}
+                    loading={!info && !infoError}
+                  />
+                </Space>
+                {target && (
+                  <Descriptions size="small" column={1} bordered>
+                    <Descriptions.Item label={t('splunk.session.loginUrl')}>
+                      {target.loginUrl ? <Text code>{target.loginUrl}</Text> : <Text type="danger">{t('splunk.session.unset')}</Text>}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t('splunk.session.username')}>
+                      {target.username ? <Text code>{target.username}</Text> : <Text type="danger">{t('splunk.session.unset')}</Text>}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t('splunk.session.password')}>
+                      {target.passwordSet
+                        ? <Text type="secondary">•••••••• {t('splunk.session.passwordSet')}</Text>
+                        : <Text type="danger">{t('splunk.session.passwordUnset')}</Text>}
+                    </Descriptions.Item>
+                  </Descriptions>
+                )}
+                {target && !target.configured && (
+                  <Alert type="warning" showIcon message={t('splunk.session.targetNotConfigured')} />
+                )}
+              </Space>
               <Space wrap>
                 <Input.OTP length={digits} value={input} onChange={setInput} />
                 <Button
                   type="primary"
                   loading={submitting}
-                  disabled={input.length !== digits || !info?.configured || !info.splunkConfigured}
+                  disabled={input.length !== digits || !info?.configured || !target?.configured}
                   onClick={submit}
                 >
                   {t('splunk.session.submit')}
@@ -309,6 +385,7 @@ export function SplunkPage() {
                     <Text type="secondary">{t('splunk.session.scriptHint')}</Text>
                   </div>
                   <Descriptions size="small" column={1} bordered>
+                    <Descriptions.Item label={t('splunk.session.target')}>{targetLabel(session.target)}</Descriptions.Item>
                     <Descriptions.Item label={t('splunk.session.source')}>
                       <Text code>{session.sourceCookie}</Text> → <Text code>{session.cookieName}</Text>
                     </Descriptions.Item>

@@ -1,6 +1,8 @@
 /**
- * The broker: verify a TOTP, then log the shared account into Splunk and hand back the session cookie
- * as a `document.cookie` script.
+ * The broker: verify a TOTP, then log the chosen target's shared account into Splunk and hand back
+ * the session cookie as a `document.cookie` script. Each target (config.splunk.targets) carries its
+ * own login URL and credentials; the page only ever learns a target's id, label, URL, username and
+ * whether a password is set.
  *
  * Every step is audited, including the ones that fail — a rejected code is exactly what an audit
  * trail is for. Each row is saved on its own as its step finishes, so a Splunk failure cannot lose
@@ -8,7 +10,7 @@
  * fails (500) rather than issuing an unrecorded session.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { splunkConfigured } from './config.js';
+import { targetConfigured } from './config.js';
 import { SplunkLoginError } from './login-client.js';
 
 /** A failure with the status and `{error, message}` the page expects. */
@@ -40,7 +42,7 @@ export function script(name, value, path) {
 /**
  * @param totp        a Totp
  * @param loginClient from createLoginClient
- * @param splunk      the splunk config section
+ * @param splunk      the splunk config section, with `targets` and `defaultTarget`
  * @param store       an audit store
  */
 export function createBroker({ totp, loginClient, splunk, store, log = console, now = Date.now }) {
@@ -72,6 +74,24 @@ export function createBroker({ totp, loginClient, splunk, store, log = console, 
   });
   const fail = (r, reason, detail) => ({ ...r, outcome: 'FAILURE', reason: truncate(reason, 32), detail: truncate(detail, 512) });
 
+  /** What the page may know about a target — never the password itself. */
+  const publicTarget = (t) => ({
+    id: t.id,
+    label: t.label,
+    loginUrl: t.loginUrl || null,
+    username: t.username || null,
+    passwordSet: Boolean(t.password),
+    configured: targetConfigured(splunk, t),
+  });
+
+  /** A request naming no target gets the default; one naming an unknown target is a 400. */
+  const resolveTarget = (id) => {
+    const wanted = id ?? splunk.defaultTarget;
+    const target = splunk.targets.find((t) => t.id === wanted);
+    if (!target) throw new BrokerError(400, 'unknown_target', `no Splunk login target '${wanted}' — the code was not used`);
+    return target;
+  };
+
   return {
     info() {
       const c = totp.config;
@@ -83,8 +103,10 @@ export function createBroker({ totp, loginClient, splunk, store, log = console, 
         serverTimeMillis: now(),
         codeVisible: c.exposeCurrentCode && totp.configured,
         splunkMode: loginClient.mode,
-        splunkConfigured: splunkConfigured(splunk),
-        loginUrl: splunk.enabled ? splunk.loginUrl : null,
+        // At least one target can log in; the page checks the one it has selected.
+        splunkConfigured: splunk.targets.some((t) => targetConfigured(splunk, t)),
+        targets: splunk.targets.map(publicTarget),
+        defaultTarget: splunk.defaultTarget,
         scriptCookieName: splunk.scriptCookieName,
       };
     },
@@ -107,18 +129,22 @@ export function createBroker({ totp, loginClient, splunk, store, log = console, 
       return store.list(Math.min(Math.max(limit, 1), 500));
     },
 
-    /** @param client {ip, forwardedFor, userAgent} — recorded, never trusted */
-    async issue(code, client) {
+    /**
+     * @param client   {ip, forwardedFor, userAgent} — recorded, never trusted
+     * @param targetId a configured target's id; the default target when omitted
+     */
+    async issue(code, client, targetId) {
       const correlationId = randomUUID();
 
-      // --- 0. Splunk configured? -------------------------------------------------------------
+      // --- 0. Target known and configured? ---------------------------------------------------
       // Checked before the code is verified: verifying consumes it (replay protection), and a code
       // burned on a request that could never succeed sends the user's retry into a "replayed" 401.
-      console.log('splunk configuration', splunk);
-      if (!splunkConfigured(splunk)) {
+      const target = resolveTarget(targetId);
+      if (!targetConfigured(splunk, target)) {
         await store.save(fail({ ...row(correlationId, 'SPLUNK_LOGIN', client), splunkMode: loginClient.mode },
-          'not_configured', 'SPLUNK_LOGIN_URL / SPLUNK_USERNAME / SPLUNK_PASSWORD missing'));
-        throw new BrokerError(503, 'not_configured', 'Splunk login is not configured on the server — the code was not used');
+          'not_configured', `target ${target.id}: ${target.settings ?? 'login URL / username / password'} missing`));
+        throw new BrokerError(503, 'not_configured',
+          `Splunk login target '${target.label}' is not configured on the server — the code was not used`);
       }
 
       // --- 1. OTP ---------------------------------------------------------------------------
@@ -154,14 +180,14 @@ export function createBroker({ totp, loginClient, splunk, store, log = console, 
       const started = performance.now();
       let result;
       try {
-        result = await loginClient.login();
+        result = await loginClient.login(target);
       } catch (e) {
         if (!(e instanceof SplunkLoginError)) throw e;
         await store.save(fail({
           ...loginRow,
           durationMs: Math.round(performance.now() - started),
           httpStatus: e.httpStatus || null,
-        }, e.reason, e.message));
+        }, e.reason, `[${target.id}] ${e.message}`));
         log.warn(`[splunk] login failed (${e.reason}) [${correlationId}]: ${e.message}`);
         // Splunk, not this service, is what failed — hence 502, with the audit reason as the error code.
         throw new BrokerError(502, `splunk_${e.reason}`, e.message);
@@ -174,12 +200,13 @@ export function createBroker({ totp, loginClient, splunk, store, log = console, 
         durationMs: Math.round(performance.now() - started),
         httpStatus: result.httpStatus || null,
         cookieFingerprint,
-        detail: `as ${splunk.username}`,
+        detail: `as ${target.username} on ${target.id}`,
       });
-      log.info(`[splunk] session issued to ${client.ip} fingerprint=${cookieFingerprint} [${correlationId}]`);
+      log.info(`[splunk] session issued to ${client.ip} target=${target.id} fingerprint=${cookieFingerprint} [${correlationId}]`);
 
       return {
-        sourceCookie: splunk.sessionCookie,
+        target: target.id,
+        sourceCookie: target.sessionCookie ?? splunk.sessionCookie,
         cookieName: splunk.scriptCookieName,
         cookieValue: result.cookieValue,
         script: script(splunk.scriptCookieName, result.cookieValue, splunk.scriptCookiePath),

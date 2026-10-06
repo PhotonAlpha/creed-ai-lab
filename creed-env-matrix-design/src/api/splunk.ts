@@ -11,9 +11,12 @@ export const splunkApi = {
   /** 404 `code_hidden` unless the server runs with `env-matrix.totp.expose-current-code`. */
   currentCode: () => request<TotpCode>('/splunk/totp/current'),
 
-  /** 401 bad/replayed code · 429 locked out · 502 Splunk failed · 503 not configured. */
-  session: (code: string) =>
-    request<SplunkSession>('/splunk/session', { method: 'POST', body: JSON.stringify({ code }) }),
+  /**
+   * Logs into `target` (a target id; the server's default when omitted).
+   * 400 unknown target · 401 bad/replayed code · 429 locked out · 502 Splunk failed · 503 not configured.
+   */
+  session: (code: string, target?: string) =>
+    request<SplunkSession>('/splunk/session', { method: 'POST', body: JSON.stringify({ code, target }) }),
 
   audit: (limit = 50) => request<SplunkAuditRow[]>(`/splunk/audit${toQuery({ limit: String(limit) })}`),
 };

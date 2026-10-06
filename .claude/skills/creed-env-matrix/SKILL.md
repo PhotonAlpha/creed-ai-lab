@@ -114,6 +114,16 @@ The config page's "save": the whole table in one transaction.
 TOTP-gated credential broker: the shared Splunk account lives with the BFF, a valid code gets a
 Splunk Web session cookie back as a `document.cookie` script. Shares nothing with endpoints.
 
+- **Login targets.** `SPLUNK_TARGETS=SIT,UAT` → a dropdown; each target's URL / username / password
+  are `SPLUNK_TARGET_<ID>_*`. **No fallback to the global credentials** — that would post one
+  instance's password to another host. The `SPLUNK_TARGET_` prefix exists because a bare
+  `SPLUNK_<ID>_*` lets an id `DB` read `SPLUNK_DB_URL`. Unset → one `default` target from the old
+  variables. The page gets id/label/URL/username/`passwordSet`/`configured`, never the password; the
+  target is resolved before the OTP is verified, like the configured check, so a bad target never
+  burns a code.
+- **Never `console.log` a config object** — one in `broker.issue` printed the Splunk password on every
+  request until 2026-10-06. Use `describe(config)`, which masks every credential.
+
 **It is NOT in the Java service any more** (moved 2026-10-02). `server/bff.js` (`npm run bff`, :3002)
 serves `dist/`, answers `/api/env-matrix/splunk/*` itself and proxies the rest of `/api` to
 `ENV_MATRIX_API_TARGET`. `server/index.js` (the mock) imports the same `server/splunk/` code with
