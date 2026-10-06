@@ -382,8 +382,11 @@ It used to live in `creed-resource-env-matrix`; the Java service no longer has t
 2. **Splunk login.** The **login target** dropdown lists the Splunk instances the BFF is configured
    for (`SPLUNK_TARGETS=SIT,UAT` with `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD`;
    without it, one `default` target from `SPLUNK_LOGIN_URL` / `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`).
-   Picking one shows its login URL and username and switches the account the BFF logs in with; the
-   password never leaves the server — the page only shows whether it is set. The choice is remembered
+   Picking one shows its login URL and its username **with the first three characters masked**
+   (`admin` → `***in`) and switches the account the BFF logs in with. The password never leaves the
+   server, and the page shows neither the password nor the session / script cookie names (the target's
+   names are still sent with the request; the audit detail is shown with the username masked and
+   the cookie names dropped). The choice is remembered
    per browser. A target with a missing URL, username or password is marked and cannot be submitted.
    Checked **before** the code: an unknown target is a `400` and an unconfigured one a `503`, and in
    both cases the code is not used up. Once the code is accepted the BFF `GET`s the login page for its
@@ -394,7 +397,11 @@ It used to live in `creed-resource-env-matrix`; the Java service no longer has t
    to verify.
 3. **Script.** The value comes back as a script to paste into the Splunk tab's devtools console:
    `document.cookie = "splunkd_8089=<value>; path=/; Secure; SameSite=Lax";` The name read and the
-   name written are separate settings (`SPLUNK_SESSION_COOKIE` / `SPLUNK_SCRIPT_COOKIE_NAME`).
+   name written are separate settings (`SPLUNK_SESSION_COOKIE` / `SPLUNK_SCRIPT_COOKIE_NAME`), each
+   overridable per target (`SPLUNK_TARGET_<ID>_…`) and editable on the page for one login.
+   **Tunnel:** a target with `SPLUNK_TARGET_<ID>_TUNNEL=<server-host>:3000` gets a *Via tunnel* switch —
+   the BFF then opens its socket to the tunnel while the request still addresses the login URL's host
+   (`Host` header and TLS SNI), like curl `--connect-to`.
 4. **Audit.** Every code check and every Splunk call is an audit row —
    outcome, reason, client address, `X-Forwarded-For`, user agent, time steps, Splunk status,
    duration. The two rows of one request share a correlation id. The cookie is **never** stored —

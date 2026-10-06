@@ -1,0 +1,25 @@
+# The entry document of the Order API. Every file in paths/ is a complete OpenAPI document; this
+# one combines their paths. `paths:` and `components.securitySchemes` below are GENERATED — run
+#   corepack yarn openapi:build creed-order
+# after adding, removing or changing a file in paths/. Edit info and servers here by hand.
+openapi: 3.1.0
+info:
+  title: Order API
+  version: 1.0.0
+  description: creed-resource-order — combined from catalog/creed-order/paths/*.yml
+servers:
+  - url: https://localhost:18091
+    description: primary (secondary is 18092)
+paths:
+  /api/order/ping:
+    $ref: ./paths/order-health.yml#/paths/~1api~1order~1ping
+  /api/order:
+    $ref: ./paths/orders.yml#/paths/~1api~1order
+  /api/order/checkout:
+    $ref: ./paths/orders.yml#/paths/~1api~1order~1checkout
+  /api/order/{id}:
+    $ref: ./paths/orders.yml#/paths/~1api~1order~1{id}
+components:
+  securitySchemes:
+    BearerAuth:
+      $ref: ./paths/order-health.yml#/components/securitySchemes/BearerAuth

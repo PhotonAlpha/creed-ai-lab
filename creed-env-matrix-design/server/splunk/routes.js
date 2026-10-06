@@ -4,7 +4,8 @@
  *
  *   GET  /splunk/totp          period/digits/server time, the login targets — drives the page
  *   GET  /splunk/totp/current  the current code (only with ENV_MATRIX_TOTP_EXPOSE_CODE)
- *   POST /splunk/session       {code, target?} → 200 session | 400 malformed or unknown target
+ *   POST /splunk/session       {code, target?, sessionCookie?, scriptCookieName?, viaTunnel?}
+ *                              → 200 session | 400 malformed, unknown target or no tunnel
  *                              | 401 bad code | 429 locked out | 502 Splunk | 503 unset
  *   GET  /splunk/audit?limit=  newest audit rows
  */
@@ -69,13 +70,21 @@ export async function handleSplunk(broker, req, res, path, params) {
       } else if (body.target != null && (typeof body.target !== 'string' || body.target.length > 64)) {
         error(res, 400, 'validation_failed', 'request payload is invalid',
           { fields: [{ field: 'target', message: 'must be a login target id' }] });
+      } else if (body.viaTunnel != null && typeof body.viaTunnel !== 'boolean') {
+        error(res, 400, 'validation_failed', 'request payload is invalid',
+          { fields: [{ field: 'viaTunnel', message: 'must be a boolean' }] });
       } else {
         const client = {
           ip: req.socket.remoteAddress ?? null,
           forwardedFor: req.headers['x-forwarded-for'] ?? null,
           userAgent: req.headers['user-agent'] ?? null,
         };
-        send(res, 200, await broker.issue(body.code, client, body.target ?? undefined), NO_STORE);
+        const options = {
+          sessionCookie: body.sessionCookie ?? undefined,
+          scriptCookieName: body.scriptCookieName ?? undefined,
+          viaTunnel: body.viaTunnel ?? undefined,
+        };
+        send(res, 200, await broker.issue(body.code, client, body.target ?? undefined, options), NO_STORE);
       }
     } else if (req.method === 'GET' && path === '/splunk/audit') {
       send(res, 200, await broker.audit(Number(params.get('limit') ?? 50) || 50));

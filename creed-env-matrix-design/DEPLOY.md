@@ -117,7 +117,11 @@ cp .env.server.example .env.server.local && chmod 600 .env.server.local
 | `SPLUNK_LOGIN_URL` | `splunk.example.invalid` | `https://<splunk>:8000/en-US/account/login` — the single target, when `SPLUNK_TARGETS` is unset |
 | `SPLUNK_USERNAME` / `SPLUNK_PASSWORD` (`_FILE`) | `admin` / `admin` | the shared account of that single target |
 | `SPLUNK_TARGETS` | unset — one target, `default` | several instances for the page's dropdown, e.g. `SIT,UAT` |
-| `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD` (`_FILE`) / `_LABEL` / `_SESSION_COOKIE` | — | per target; **no fallback** to the single-target variables |
+| `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD` (`_FILE`) / `_LABEL` | — | per target; **no fallback** to the single-target variables |
+| `SPLUNK_SESSION_COOKIE` / `SPLUNK_SCRIPT_COOKIE_NAME` / `SPLUNK_SCRIPT_COOKIE_PATH` | `splunkd_8000` / `splunkd_8089` / `/` | the defaults for every target; `splunkd_<port>` follows Splunk Web's port |
+| `SPLUNK_TARGET_<ID>_SESSION_COOKIE` / `_SCRIPT_COOKIE_NAME` / `_SCRIPT_COOKIE_PATH` | the globals above | per target; the page can still change both names for one login |
+| `SPLUNK_TARGET_<ID>_TUNNEL` (`SPLUNK_TUNNEL` for the single target) | unset | `host:port` of a TCP forward to that Splunk (e.g. `<server-host>:3000` → `<uat-host>:3000`); the login connects there but keeps the login URL's `Host`/SNI. The page shows a *Via tunnel* switch |
+| `SPLUNK_TARGET_<ID>_TUNNEL_DEFAULT` | `false` — the switch starts off (direct) | `true` starts it on (via tunnel) |
 | `SPLUNK_DEFAULT_TARGET` | the first of `SPLUNK_TARGETS` | the dropdown's initial choice |
 | `SPLUNK_TLS_INSECURE` | `true` — certificate **not verified** | as required; `false` + `SPLUNK_CA_FILE` to verify |
 | `SPLUNK_AUDIT_STORE` | `memory` — newest 500 rows, **lost on restart** | `pg` or `mysql` to keep an audit trail |

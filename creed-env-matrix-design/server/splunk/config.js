@@ -10,12 +10,23 @@
  *
  * **Login targets.** `SPLUNK_TARGETS=SIT,UAT` declares several Splunk instances the page offers in a
  * dropdown, each with its own `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD` (or
- * `_PASSWORD_FILE`) and optional `_LABEL` / `_SESSION_COOKIE`. There is deliberately no fallback from
+ * `_PASSWORD_FILE`) and optional `_LABEL` / `_SESSION_COOKIE` / `_SCRIPT_COOKIE_NAME` / `_SCRIPT_COOKIE_PATH` /
+ * `_TUNNEL` / `_TUNNEL_DEFAULT`. There is deliberately no fallback from
  * a target's credentials to the global ones: that would send one instance's password to another
  * host. Without `SPLUNK_TARGETS` there is one target, `default`, built from the original
  * `SPLUNK_LOGIN_URL` / `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`, so an existing environment carries over.
  * The `SPLUNK_TARGET_` prefix keeps a target id from colliding with a global (an id `DB` would
  * otherwise read `SPLUNK_DB_URL`).
+ *
+ * **Cookie names are per target and overridable per request.** `splunkd_<port>` follows the port
+ * Splunk Web runs on, so a :3000 instance answers `splunkd_3000`; the globals are only the default for
+ * a target that sets none, and the page may override both names for one login (see broker.issue).
+ *
+ * **Tunnel.** `_TUNNEL=<host>:<port>` names a TCP forward (e.g. `<server-host>:3000` → `<uat-host>:3000`)
+ * the login may connect through instead of the login URL's own address — curl `--connect-to`
+ * semantics: the socket goes to the tunnel, while the URL, `Host` header and TLS SNI stay the target's,
+ * so Splunk sees a request for itself and certificate checks (when on) still name the real host. The
+ * page offers it as a switch, off (direct) unless `_TUNNEL_DEFAULT=true`.
  */
 import { readFileSync } from 'node:fs';
 
@@ -40,12 +51,34 @@ function int(env, name, fallback, min, max) {
 const IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
 /** Becomes part of an env var name, so letters, digits and underscores only. */
 const TARGET_ID = /^[A-Z0-9_]{1,32}$/;
+/** An RFC 6265 cookie-name token, narrowed: it is interpolated into a `document.cookie` script. */
+export const COOKIE_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+
+function cookieName(env, name, fallback) {
+  const value = env[name] || fallback;
+  if (!COOKIE_NAME.test(value)) throw new Error(`${name} must match ${COOKIE_NAME}, got '${value}'`);
+  return value;
+}
+
+/** `host:port` (or `[v6]:port`) → {host, port}; null when unset. Fails at startup, not on a login. */
+export function parseTunnel(name, raw) {
+  if (raw == null || raw.trim() === '') return null;
+  const m = /^(?:\[([0-9a-fA-F:.]+)\]|([A-Za-z0-9.-]+)):(\d{1,5})$/.exec(raw.trim());
+  const port = m && Number(m[3]);
+  if (!m || port < 1 || port > 65535) throw new Error(`${name} must be host:port, got '${raw}'`);
+  return { host: m[1] ?? m[2], port };
+}
+
+const tunnelOf = (env, name) => {
+  const tunnel = parseTunnel(name, env[name]);
+  return { tunnel, tunnelDefault: tunnel ? bool(env[`${name}_DEFAULT`], false) : false };
+};
 
 /**
  * The login targets. Each is everything a login needs; the shared settings (TLS, timeouts, cval,
  * script cookie) stay on the splunk section.
  */
-function loadTargets(env, sessionCookie) {
+function loadTargets(env, defaults) {
   const ids = (env.SPLUNK_TARGETS ?? '').split(',').map((id) => id.trim().toUpperCase()).filter(Boolean);
   if (ids.length === 0) {
     return [{
@@ -54,7 +87,8 @@ function loadTargets(env, sessionCookie) {
       loginUrl: env.SPLUNK_LOGIN_URL ?? 'https://splunk.example.invalid:8000/en-US/account/login',
       username: env.SPLUNK_USERNAME ?? 'admin',
       password: readSecret(env, 'SPLUNK_PASSWORD', 'admin'),
-      sessionCookie,
+      ...defaults,
+      ...tunnelOf(env, 'SPLUNK_TUNNEL'),
       // What a missing value is called in this configuration, for the audit trail and the 503.
       settings: 'SPLUNK_LOGIN_URL / SPLUNK_USERNAME / SPLUNK_PASSWORD',
     }];
@@ -71,7 +105,10 @@ function loadTargets(env, sessionCookie) {
       loginUrl: env[`${prefix}LOGIN_URL`] ?? '',
       username: env[`${prefix}USERNAME`] ?? '',
       password: readSecret(env, `${prefix}PASSWORD`, ''),
-      sessionCookie: env[`${prefix}SESSION_COOKIE`] || sessionCookie,
+      sessionCookie: cookieName(env, `${prefix}SESSION_COOKIE`, defaults.sessionCookie),
+      scriptCookieName: cookieName(env, `${prefix}SCRIPT_COOKIE_NAME`, defaults.scriptCookieName),
+      scriptCookiePath: env[`${prefix}SCRIPT_COOKIE_PATH`] || defaults.scriptCookiePath,
+      ...tunnelOf(env, `${prefix}TUNNEL`),
       settings: `${prefix}LOGIN_URL / ${prefix}USERNAME / ${prefix}PASSWORD`,
     };
   });
@@ -94,10 +131,10 @@ export function loadConfig(env = process.env) {
   const splunk = {
     // The switch for the real call. false: a fabricated cookie, no network.
     enabled: bool(env.SPLUNK_ENABLED, false),
-    // The default for every target's own session cookie (splunkd_<port> — it follows Splunk Web's port).
-    sessionCookie: env.SPLUNK_SESSION_COOKIE ?? 'splunkd_8000',
-    scriptCookieName: env.SPLUNK_SCRIPT_COOKIE_NAME ?? 'splunkd_8089',
-    scriptCookiePath: env.SPLUNK_SCRIPT_COOKIE_PATH ?? '/',
+    // Defaults for every target's own cookie settings (splunkd_<port> — it follows Splunk Web's port).
+    sessionCookie: cookieName(env, 'SPLUNK_SESSION_COOKIE', 'splunkd_8000'),
+    scriptCookieName: cookieName(env, 'SPLUNK_SCRIPT_COOKIE_NAME', 'splunkd_8089'),
+    scriptCookiePath: env.SPLUNK_SCRIPT_COOKIE_PATH || '/',
     prefetchCval: bool(env.SPLUNK_PREFETCH_CVAL, true),
     connectTimeoutMs: int(env, 'SPLUNK_CONNECT_TIMEOUT_MS', 5000, 1, 600000),
     readTimeoutMs: int(env, 'SPLUNK_READ_TIMEOUT_MS', 15000, 1, 600000),
@@ -106,7 +143,11 @@ export function loadConfig(env = process.env) {
     tlsInsecure: bool(env.SPLUNK_TLS_INSECURE, true),
     caFile: env.SPLUNK_CA_FILE || null,
   };
-  splunk.targets = loadTargets(env, splunk.sessionCookie);
+  splunk.targets = loadTargets(env, {
+    sessionCookie: splunk.sessionCookie,
+    scriptCookieName: splunk.scriptCookieName,
+    scriptCookiePath: splunk.scriptCookiePath,
+  });
   // The dropdown's initial choice, and the target of a request that names none.
   splunk.defaultTarget = splunk.targets[0].id;
   const wanted = (env.SPLUNK_DEFAULT_TARGET ?? '').trim();

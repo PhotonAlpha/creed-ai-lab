@@ -1,0 +1,6 @@
+# Redocly CLI config for `corepack yarn openapi:lint` (also part of openapi:check / CI).
+# `minimal`: structural problems are errors — e.g. an unquoted ", " inside a { flow: mapping } that
+# YAML silently turns into a second key — while style rules (license, 4xx responses, security on
+# every operation) only warn, so an example API without auth still passes.
+extends:
+  - minimal

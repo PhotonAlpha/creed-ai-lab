@@ -349,7 +349,9 @@ Java 服务现已不再提供这些接口。
 2. **登录 Splunk。** **登录目标**下拉框列出 BFF 配置的各个 Splunk 实例（`SPLUNK_TARGETS=SIT,UAT`，
    每个目标配置 `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD`；未设置时只有一个 `default`
    目标，取自 `SPLUNK_LOGIN_URL` / `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`）。选择后页面显示该目标的登录地址和
-   用户名，BFF 登录时也随之换成该目标的账号；密码不会离开服务端 —— 页面只显示是否已配置。所选目标按浏览器
+   **前 3 个字符打码**的用户名（`admin` → `***in`），BFF 登录时也随之换成该目标的账号。密码不会离开服务端；
+   页面既不显示密码，也不显示 session / script cookie 名称（请求仍会带上该目标的 cookie 名称；审计详情中的
+   用户名同样打码，cookie 名称不显示）。所选目标按浏览器
    记住。缺少地址、用户名或密码的目标会被标出，且无法提交。这些都在校验验证码**之前**检查：未知目标返回
    `400`，未配置齐全返回 `503`，两种情况验证码都不会被消耗。验证码通过后，BFF 先 `GET` 登录页拿到 `cval`
    cookie，再把 `username=…&password=…&cval=…` 以表单 `POST` 到该目标的登录地址，**不跟随重定向**
@@ -358,7 +360,10 @@ Java 服务现已不再提供这些接口。
    `SPLUNK_CA_FILE`）即开启校验。
 3. **脚本。** 该值以脚本形式返回，粘贴到 Splunk 页面的开发者工具控制台执行：
    `document.cookie = "splunkd_8089=<值>; path=/; Secure; SameSite=Lax";` 读取的 cookie 名与写入的
-   cookie 名是两个独立配置（`SPLUNK_SESSION_COOKIE` / `SPLUNK_SCRIPT_COOKIE_NAME`）。
+   cookie 名是两个独立配置（`SPLUNK_SESSION_COOKIE` / `SPLUNK_SCRIPT_COOKIE_NAME`），均可按目标覆盖
+   （`SPLUNK_TARGET_<ID>_…`），并可在页面上为单次登录修改。
+   **Tunnel：** 配置了 `SPLUNK_TARGET_<ID>_TUNNEL=<server-host>:3000` 的目标会显示「通过 tunnel」开关 ——
+   开启后 BFF 的连接打到 tunnel，而请求仍指向登录地址的主机（`Host` 头与 TLS SNI），等同 curl `--connect-to`。
 4. **审计。** 每一次验证码校验、每一次 Splunk 调用都记一行审计 ——
    结果、原因、客户端地址、`X-Forwarded-For`、User-Agent、时间窗口、Splunk 状态码、耗时。同一次请求的
    两行共享一个关联 ID。cookie 本身**从不**保存 —— 只保存其 SHA-256 的前 16 个十六进制字符，足以与

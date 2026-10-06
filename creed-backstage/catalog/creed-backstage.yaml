@@ -1,0 +1,11 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: creed-backstage
+  title: Creed Developer Portal
+  description: Backstage app — Software Catalog and API docs (Swagger UI) for the Creed services
+  tags: [backstage, developer-portal, typescript, react]
+spec:
+  type: website
+  lifecycle: experimental
+  owner: group:default/creed-platform

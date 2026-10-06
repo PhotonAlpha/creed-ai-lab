@@ -114,7 +114,11 @@ cp .env.server.example .env.server.local && chmod 600 .env.server.local
 | `SPLUNK_LOGIN_URL` | `splunk.example.invalid` | `https://<splunk>:8000/en-US/account/login` —— 未设置 `SPLUNK_TARGETS` 时的唯一目标 |
 | `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`（`_FILE`） | `admin` / `admin` | 该唯一目标的共享账号 |
 | `SPLUNK_TARGETS` | 未设置 —— 只有一个目标 `default` | 页面下拉框中的多个实例，如 `SIT,UAT` |
-| `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD`（`_FILE`）/ `_LABEL` / `_SESSION_COOKIE` | — | 每个目标各自配置；**不会回退**到单目标变量 |
+| `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD`（`_FILE`）/ `_LABEL` | — | 每个目标各自配置；**不会回退**到单目标变量 |
+| `SPLUNK_SESSION_COOKIE` / `SPLUNK_SCRIPT_COOKIE_NAME` / `SPLUNK_SCRIPT_COOKIE_PATH` | `splunkd_8000` / `splunkd_8089` / `/` | 所有目标的默认值；`splunkd_<端口>` 跟随 Splunk Web 的端口 |
+| `SPLUNK_TARGET_<ID>_SESSION_COOKIE` / `_SCRIPT_COOKIE_NAME` / `_SCRIPT_COOKIE_PATH` | 上面的全局值 | 每个目标各自配置；页面上仍可为单次登录修改这两个 cookie 名 |
+| `SPLUNK_TARGET_<ID>_TUNNEL`（单目标时为 `SPLUNK_TUNNEL`） | 未设置 | 通往该 Splunk 的 TCP 转发 `host:port`（如 `<server-host>:3000` → `<uat-host>:3000`）；登录时连接到这里，但 `Host`/SNI 仍为登录地址的主机。页面显示「通过 tunnel」开关 |
+| `SPLUNK_TARGET_<ID>_TUNNEL_DEFAULT` | `false` —— 开关默认关闭（直连） | `true` 时开关默认开启（走 tunnel） |
 | `SPLUNK_DEFAULT_TARGET` | `SPLUNK_TARGETS` 中的第一个 | 下拉框的初始选项 |
 | `SPLUNK_TLS_INSECURE` | `true` —— **不校验**证书 | 按需求；校验时设为 `false` + `SPLUNK_CA_FILE` |
 | `SPLUNK_AUDIT_STORE` | `memory` —— 保留最新 500 条，**重启即丢失** | 需要保留审计时设为 `pg` 或 `mysql` |

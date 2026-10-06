@@ -1,5 +1,5 @@
 import { request, toQuery } from './client';
-import type { SplunkAuditRow, SplunkSession, TotpCode, TotpInfo } from './types';
+import type { SplunkAuditRow, SplunkSession, SplunkSessionOptions, TotpCode, TotpInfo } from './types';
 
 /**
  * Splunk session broker: a TOTP gates a server-side Splunk Web login, and the session cookie comes
@@ -13,10 +13,12 @@ export const splunkApi = {
 
   /**
    * Logs into `target` (a target id; the server's default when omitted).
-   * 400 unknown target · 401 bad/replayed code · 429 locked out · 502 Splunk failed · 503 not configured.
+   * `options` overrides the target's cookie names and tunnel choice for this login only.
+   * 400 unknown target / no tunnel / bad cookie name · 401 bad/replayed code · 429 locked out ·
+   * 502 Splunk failed · 503 not configured. Every 400 and the 503 leave the code unused.
    */
-  session: (code: string, target?: string) =>
-    request<SplunkSession>('/splunk/session', { method: 'POST', body: JSON.stringify({ code, target }) }),
+  session: (code: string, target?: string, options: SplunkSessionOptions = {}) =>
+    request<SplunkSession>('/splunk/session', { method: 'POST', body: JSON.stringify({ code, target, ...options }) }),
 
   audit: (limit = 50) => request<SplunkAuditRow[]>(`/splunk/audit${toQuery({ limit: String(limit) })}`),
 };

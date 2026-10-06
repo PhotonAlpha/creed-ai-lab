@@ -1,0 +1,134 @@
+openapi: 3.1.0
+info:
+  title: Order — orders
+  version: 1.0.0
+paths:
+  /api/order:
+    get:
+      tags: [orders]
+      summary: List every order in the store
+      operationId: listOrders
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: All orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Order' }
+    post:
+      tags: [orders]
+      summary: Create an order — the server assigns id, status NEW and timestamp
+      description: Lenient — missing fields default (total 0). Use /checkout for validation.
+      operationId: createOrder
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRequest' }
+      responses:
+        '200':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+  /api/order/checkout:
+    post:
+      tags: [orders]
+      summary: Strict create for the creed-simple-metrics checkout chain
+      operationId: checkoutOrder
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRequest' }
+      responses:
+        '201':
+          description: Created, status NEW
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400':
+          description: Blank customer/item, quantity not positive, or total missing/negative
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+  /api/order/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, example: ORD-900 } }
+    get:
+      tags: [orders]
+      summary: Fetch one order
+      operationId: getOrder
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '404': { description: Unknown id }
+    put:
+      tags: [orders]
+      summary: Replace an order's mutable fields (omitted fields keep their value)
+      operationId: updateOrder
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRequest' }
+      responses:
+        '200':
+          description: The updated order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '404': { description: Unknown id }
+    delete:
+      tags: [orders]
+      summary: Delete an order
+      operationId: deleteOrder
+      security:
+        - BearerAuth: []
+      responses:
+        '204': { description: Deleted }
+        '404': { description: Unknown id }
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token issued by creed-author-server
+  schemas:
+    Order:
+      type: object
+      properties:
+        id: { type: string, example: ORD-900 }
+        customer: { type: string, example: Alice }
+        item: { type: string, example: Keyboard }
+        quantity: { type: integer, example: 1 }
+        total: { type: number, example: 42.5 }
+        status: { type: string, example: NEW }
+        createdAt: { type: string, format: date-time }
+    OrderRequest:
+      type: object
+      description: Every field optional for create/update; /checkout requires customer, item, quantity > 0 and total >= 0.
+      properties:
+        customer: { type: string }
+        item: { type: string }
+        quantity: { type: integer }
+        total: { type: number }
+        status: { type: string }

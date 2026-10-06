@@ -69,6 +69,23 @@ Complete and verified in a browser against the real backend.
   BFF (`SPLUNK_ENABLED=true`) against two loopback Splunk stand-ins that each accept only their own
   account, driven from headless Chromium (switch target → username follows, each stub received only
   its own credentials, PROD without a password marked and blocked, choice survives reload).
+- **Splunk cookie names per target + tunnel (2026-10-06).** `SPLUNK_TARGET_<ID>_SCRIPT_COOKIE_NAME` /
+  `_SCRIPT_COOKIE_PATH` join `_SESSION_COOKIE` (globals are the default; names validated against
+  `COOKIE_NAME` at startup, since the script name lands inside a JS string). The page shows both names
+  as editable fields seeded from the target, and `/splunk/session` takes optional
+  `sessionCookie` / `scriptCookieName` overrides. `SPLUNK_TARGET_<ID>_TUNNEL=host:port` (`SPLUNK_TUNNEL`
+  for `default`) adds a *Via tunnel* switch (`_TUNNEL_DEFAULT`, default **off** — direct): the login client opens its
+  socket to the tunnel but keeps the URL's `Host` and SNI (curl `--connect-to`). `viaTunnel` on a
+  target without a tunnel is 400 `no_tunnel`; a bad cookie name is 400 — both before the OTP is
+  verified. Audit detail now reads `as <user> on <ID>[ via tunnel h:p], <session> -> <script>`.
+- **UI hides credentials (2026-10-06, by request):** the Splunk page no longer shows the password
+  row, the session/script cookie name fields, or the issued session's `source → cookie` row; the
+  username is shown with its first 3 characters masked (`maskUsername`), and so is the audit detail
+  (`displayDetail` masks the user and drops the `, <session> -> <script>` suffix — the stored row is
+  unchanged). The cookie names still go with `/splunk/session`, preset from the selected target; the
+  per-request override fields are gone from the UI, though the API still accepts them.
+  Verified: `test:server` 51, typecheck + build, and the real BFF through a loopback "tunnel" to a stub
+  (stub saw `Host: uat-host.invalid:3000` on both requests). The page itself was not browser-tested.
 - **Splunk broker = Node BFF (`server/bff.js` + `server/splunk/`), moved out of the Java service on
   2026-10-02.** Same contract, same env-var names. The BFF serves `dist/`, answers
   `/api/env-matrix/splunk/*` itself and proxies the rest of `/api` to `ENV_MATRIX_API_TARGET`. The

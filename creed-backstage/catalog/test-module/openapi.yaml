@@ -1,0 +1,14 @@
+# The entry document of the Test Module API. Every file in paths/ is a complete OpenAPI document; this
+# one combines their paths. `paths:` and `components.securitySchemes` below are GENERATED — run
+#   corepack yarn openapi:build test-module
+# after adding, removing or changing a file in paths/. Edit info and servers here by hand.
+openapi: 3.1.0
+info:
+  title: Test Module API
+  version: 1.0.0
+  description: creed-resource-test-module — combined from catalog/test-module/paths/*.yml
+servers:
+  - url: http://localhost:8080/api/test-module
+paths:
+  /ping:
+    $ref: ./paths/test-module-health.yml#/paths/~1ping

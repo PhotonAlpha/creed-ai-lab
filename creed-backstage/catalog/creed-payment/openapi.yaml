@@ -1,0 +1,31 @@
+# The entry document of the Payment API. Every file in paths/ is a complete OpenAPI document; this
+# one combines their paths. `paths:` and `components.securitySchemes` below are GENERATED — run
+#   corepack yarn openapi:build creed-payment
+# after adding, removing or changing a file in paths/. Edit info and servers here by hand.
+openapi: 3.1.0
+info:
+  title: Payment API
+  version: 1.0.0
+  description: creed-resource-payment — combined from catalog/creed-payment/paths/*.yml
+servers:
+  - url: https://localhost:18093
+    description: primary (secondary is 18094)
+paths:
+  /api/payment/ping:
+    $ref: ./paths/payment-health.yml#/paths/~1api~1payment~1ping
+  /api/payment:
+    $ref: ./paths/payments.yml#/paths/~1api~1payment
+  /api/payment/checkout:
+    $ref: ./paths/payments.yml#/paths/~1api~1payment~1checkout
+  /api/payment/{id}:
+    $ref: ./paths/payments.yml#/paths/~1api~1payment~1{id}
+  /api/payment/{id}/authorize:
+    $ref: ./paths/payments.yml#/paths/~1api~1payment~1{id}~1authorize
+  /api/payment/{id}/capture:
+    $ref: ./paths/payments.yml#/paths/~1api~1payment~1{id}~1capture
+  /api/payment/{id}/refund:
+    $ref: ./paths/payments.yml#/paths/~1api~1payment~1{id}~1refund
+components:
+  securitySchemes:
+    BearerAuth:
+      $ref: ./paths/payment-health.yml#/components/securitySchemes/BearerAuth

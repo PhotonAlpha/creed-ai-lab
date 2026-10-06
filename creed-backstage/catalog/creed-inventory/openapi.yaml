@@ -1,0 +1,14 @@
+# The entry document of the Inventory API. Every file in paths/ is a complete OpenAPI document; this
+# one combines their paths. `paths:` and `components.securitySchemes` below are GENERATED — run
+#   corepack yarn openapi:build creed-inventory
+# after adding, removing or changing a file in paths/. Edit info and servers here by hand.
+openapi: 3.1.0
+info:
+  title: Inventory API
+  version: 1.0.0
+  description: creed-resource-inventory — combined from catalog/creed-inventory/paths/*.yml
+servers:
+  - url: https://localhost:18097
+paths:
+  /ping:
+    $ref: ./paths/inventory-health.yml#/paths/~1ping

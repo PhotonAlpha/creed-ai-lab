@@ -1,0 +1,13 @@
+app:
+  scope:
+    name: normal
+
+---
+spring:
+  config:
+    activate:
+      on-profile: lc
+
+app:
+  scope:
+    name: lc

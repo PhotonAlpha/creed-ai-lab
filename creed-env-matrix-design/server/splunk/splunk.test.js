@@ -118,6 +118,37 @@ describe('config', () => {
     assert.equal(splunk.defaultTarget, 'UAT');
   });
 
+  test('cookie names and path per target, the globals as their default', () => {
+    const { splunk } = loadConfig({
+      SPLUNK_TARGETS: 'sit,uat', SPLUNK_SCRIPT_COOKIE_NAME: 'splunkd_9000', SPLUNK_SCRIPT_COOKIE_PATH: '/en-US',
+      SPLUNK_TARGET_UAT_SESSION_COOKIE: 'splunkd_3000', SPLUNK_TARGET_UAT_SCRIPT_COOKIE_NAME: 'splunkd_3000',
+      SPLUNK_TARGET_UAT_SCRIPT_COOKIE_PATH: '/',
+    });
+    assert.deepEqual(splunk.targets.map((t) => [t.id, t.sessionCookie, t.scriptCookieName, t.scriptCookiePath]), [
+      ['SIT', 'splunkd_8000', 'splunkd_9000', '/en-US'],
+      ['UAT', 'splunkd_3000', 'splunkd_3000', '/'],
+    ]);
+    assert.throws(() => loadConfig({ SPLUNK_TARGETS: 'a', SPLUNK_TARGET_A_SCRIPT_COOKIE_NAME: 'x"; alert(1)//' }),
+      /SPLUNK_TARGET_A_SCRIPT_COOKIE_NAME/);
+    assert.throws(() => loadConfig({ SPLUNK_SESSION_COOKIE: 'a b' }), /SPLUNK_SESSION_COOKIE/);
+  });
+
+  test('a tunnel is host:port, off unless _TUNNEL_DEFAULT=true, and validated at startup', () => {
+    const { splunk } = loadConfig({
+      SPLUNK_TARGETS: 'sit,uat,id',
+      SPLUNK_TARGET_UAT_TUNNEL: 'server-host:3000', SPLUNK_TARGET_UAT_TUNNEL_DEFAULT: 'true',
+      SPLUNK_TARGET_ID_TUNNEL: '[::1]:3001',
+    });
+    assert.deepEqual(splunk.targets.map((t) => [t.id, t.tunnel, t.tunnelDefault]), [
+      ['SIT', null, false],
+      ['UAT', { host: 'server-host', port: 3000 }, true],
+      ['ID', { host: '::1', port: 3001 }, false],
+    ]);
+    assert.deepEqual(loadConfig({ SPLUNK_TUNNEL: '10.0.0.5:8000' }).splunk.targets[0].tunnel, { host: '10.0.0.5', port: 8000 });
+    assert.throws(() => loadConfig({ SPLUNK_TARGETS: 'a', SPLUNK_TARGET_A_TUNNEL: 'server-host' }), /SPLUNK_TARGET_A_TUNNEL/);
+    assert.throws(() => loadConfig({ SPLUNK_TARGETS: 'a', SPLUNK_TARGET_A_TUNNEL: 'h:70000' }), /host:port/);
+  });
+
   test('SPLUNK_TARGETS rejects a bad or repeated id and an unknown default', () => {
     assert.throws(() => loadConfig({ SPLUNK_TARGETS: 'si-t' }), /SPLUNK_TARGETS/);
     assert.throws(() => loadConfig({ SPLUNK_TARGETS: 'sit,SIT' }), /listed twice/);
@@ -221,6 +252,28 @@ describe('login client', () => {
       { reason: 'no_session_cookie', message: /splunkd_8443/ });
   });
 
+  test('this login may override the session cookie name', async () => {
+    await assert.rejects(createLoginClient(splunkConfig()).login(target({ loginUrl: url }), { sessionCookie: 'splunkd_3000' }),
+      { reason: 'no_session_cookie', message: /splunkd_3000/ });
+  });
+
+  test('via tunnel: the socket goes to the tunnel, Host stays the login URL\'s', async () => {
+    const hosts = [];
+    const tunnelled = http.createServer((req, res) => { hosts.push(req.headers.host); splunkStub(goodLogin)(req, res); });
+    const port = await listen(tunnelled);
+    try {
+      const t = target({ loginUrl: 'http://uat-host.invalid:3000/en-US/account/login', tunnel: { host: '127.0.0.1', port } });
+      assert.deepEqual(await createLoginClient(splunkConfig()).login(t, { viaTunnel: true }), { cookieValue: 'abc123', httpStatus: 303 });
+      assert.deepEqual(hosts, ['uat-host.invalid:3000', 'uat-host.invalid:3000']);
+      // Without the tunnel the same target is unreachable — and the error names the route taken.
+      await assert.rejects(createLoginClient(splunkConfig()).login(t), { reason: 'io_error' });
+      await assert.rejects(createLoginClient(splunkConfig()).login({ ...t, tunnel: { host: '127.0.0.1', port: 1 } }, { viaTunnel: true }),
+        { reason: 'io_error', message: /via tunnel 127\.0\.0\.1:1/ });
+    } finally {
+      tunnelled.close();
+    }
+  });
+
   test('cookiesOf: later header wins, quotes stripped', () => {
     assert.deepEqual([...cookiesOf(['a=1; Path=/', 'b="2"', 'a=3'])], [['a', '3'], ['b', '2']]);
   });
@@ -253,6 +306,23 @@ describe('login client over https with a self-signed certificate', () => {
     if (!openssl) return t.skip('openssl not available');
     const r = await createLoginClient(splunkConfig({ tlsInsecure: true })).login(target({ loginUrl: url }));
     assert.equal(r.cookieValue, 'abc123');
+  });
+
+  test('via tunnel over https: SNI names the real host, not the tunnel', async (t) => {
+    if (!openssl) return t.skip('openssl not available');
+    const names = [];
+    const onConnection = (socket) => names.push(socket.servername);
+    server.on('secureConnection', onConnection);
+    try {
+      const port = new URL(url).port;
+      const r = await createLoginClient(splunkConfig({ tlsInsecure: true })).login(target({
+        loginUrl: 'https://uat-host.example:3000/en-US/account/login', tunnel: { host: '127.0.0.1', port: Number(port) },
+      }), { viaTunnel: true });
+      assert.equal(r.cookieValue, 'abc123');
+      assert.deepEqual(names, ['uat-host.example', 'uat-host.example']);
+    } finally {
+      server.off('secureConnection', onConnection);
+    }
   });
 
   test('verification on rejects the same server', async (t) => {
@@ -302,7 +372,7 @@ describe('broker', () => {
     assert.equal(s.target, 'UAT');
     assert.equal(s.sourceCookie, 'splunkd_8443');
     assert.deepEqual([seen[0].loginUrl, seen[0].username, seen[0].password], ['https://uat/login', 'uat-user', 'uat-pw']);
-    assert.equal((await store.list(1))[0].detail, 'as uat-user on UAT');
+    assert.equal((await store.list(1))[0].detail, 'as uat-user on UAT, splunkd_8443 -> splunkd_8089');
     now += 60_000;
     assert.equal((await broker.issue(totp.currentCode(), client)).target, 'SIT');
     assert.equal(seen[1].username, 'sit-user');
@@ -323,6 +393,50 @@ describe('broker', () => {
     const { broker, totp } = setup();
     const code = totp.currentCode();
     await assert.rejects(broker.issue(code, client, 'PROD'), { status: 400, error: 'unknown_target' });
+    assert.equal(totp.verify(code).valid, true);
+  });
+
+  test('cookie names: the target\'s by default, the request\'s when given', async () => {
+    now += 60_000;
+    const seen = [];
+    const { broker, totp } = setup({
+      targets: [{ ...TARGETS[1], scriptCookieName: 'splunkd_3000', scriptCookiePath: '/en-US' }],
+      defaultTarget: 'UAT',
+    }, async (_t, o) => { seen.push(o); return { cookieValue: 'x', httpStatus: 303 }; });
+    const s = await broker.issue(totp.currentCode(), client);
+    assert.deepEqual([s.sourceCookie, s.cookieName, s.script],
+      ['splunkd_8443', 'splunkd_3000', 'document.cookie = "splunkd_3000=x; path=/en-US; Secure; SameSite=Lax";']);
+    assert.deepEqual(broker.info().targets.map((t) => [t.sessionCookie, t.scriptCookieName, t.tunnel]),
+      [['splunkd_8443', 'splunkd_3000', null]]);
+    now += 60_000;
+    const o = await broker.issue(totp.currentCode(), client, 'UAT', { sessionCookie: 'splunkd_9000', scriptCookieName: 'splunkd_9001' });
+    assert.deepEqual([o.sourceCookie, o.cookieName, seen[1].sessionCookie], ['splunkd_9000', 'splunkd_9001', 'splunkd_9000']);
+  });
+
+  test('a bad cookie name override is a 400 and the code is NOT consumed', async () => {
+    now += 60_000;
+    const { broker, totp } = setup();
+    const code = totp.currentCode();
+    await assert.rejects(broker.issue(code, client, 'SIT', { scriptCookieName: 'a"; alert(1)//' }), { status: 400, error: 'validation_failed' });
+    assert.equal(totp.verify(code).valid, true);
+  });
+
+  test('tunnel: the target\'s default unless the request says, a 400 without one, the route audited', async () => {
+    now += 60_000;
+    const seen = [];
+    const tunnelled = { ...TARGETS[1], tunnel: { host: 'server-host', port: 3000 }, tunnelDefault: true };
+    const { broker, store, totp } = setup({ targets: [TARGETS[0], tunnelled] },
+      async (_t, o) => { seen.push(o.viaTunnel); return { cookieValue: 'x', httpStatus: 303 }; });
+    assert.equal(broker.info().targets[1].tunnel, 'server-host:3000');
+    const s = await broker.issue(totp.currentCode(), client, 'UAT');
+    assert.equal(s.tunnel, 'server-host:3000');
+    assert.match((await store.list(1))[0].detail, /on UAT via tunnel server-host:3000/);
+    now += 60_000;
+    assert.equal((await broker.issue(totp.currentCode(), client, 'UAT', { viaTunnel: false })).tunnel, null);
+    assert.deepEqual(seen, [true, false]);
+    now += 60_000;
+    const code = totp.currentCode();
+    await assert.rejects(broker.issue(code, client, 'SIT', { viaTunnel: true }), { status: 400, error: 'no_tunnel' });
     assert.equal(totp.verify(code).valid, true);
   });
 

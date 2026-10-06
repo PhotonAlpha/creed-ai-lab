@@ -1,0 +1,120 @@
+openapi: 3.1.0
+info:
+  title: Env Matrix — AES records
+  version: 1.0.0
+paths:
+  /aes/servers:
+    get:
+      tags: [aes]
+      summary: Distinct servers from the endpoint table
+      operationId: listAesServers
+      parameters:
+        - name: appSystem
+          in: query
+          schema: { type: string }
+          example: MS
+      responses:
+        '200':
+          description: One row per server
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AesServer'
+  /aes/records:
+    get:
+      tags: [aes]
+      summary: Saved ciphertexts with their derived Secret Key
+      operationId: listAesRecords
+      parameters:
+        - name: appSystem
+          in: query
+          schema: { type: string }
+        - name: propertyKey
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Records, ordered by app system, property key, host, ip
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AesRecord'
+    post:
+      tags: [aes]
+      summary: Encrypt one plain value per server and save it
+      operationId: saveAesRecord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AesRecordSaveRequest'
+      responses:
+        '200':
+          description: Rows inserted / updated
+        '400':
+          description: Validation failed (e.g. an IV that is not 16 bytes)
+    delete:
+      tags: [aes]
+      summary: Delete several records
+      operationId: deleteAesRecords
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema:
+            type: array
+            items: { type: integer, format: int64 }
+          style: form
+          explode: true
+      responses:
+        '204':
+          description: Deleted; unknown ids are ignored
+components:
+  schemas:
+    AesServer:
+      type: object
+      properties:
+        appSystem: { type: string, example: MS }
+        host: { type: string, example: ms1.cn.uat1 }
+        ip: { type: string, example: 10.1.1.11 }
+        envInstance: { type: string, example: UAT1 }
+        instance: { type: string, example: Green }
+    AesRecord:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        appSystem: { type: string }
+        host: { type: string }
+        ip: { type: string }
+        propertyKey: { type: string, example: spring.datasource.password }
+        encryptedValue: { type: string, description: Base64 AES/CBC/PKCS5Padding }
+        randomKey: { type: [string, 'null'] }
+        secretKey: { type: string, description: 'randomKey + host + ip — derived, not stored' }
+        iv: { type: [string, 'null'] }
+        salt: { type: [string, 'null'] }
+        note: { type: [string, 'null'] }
+        updatedAt: { type: string, format: date-time }
+    AesRecordSaveRequest:
+      type: object
+      required: [propertyKey, plainValue, iv, salt, servers]
+      properties:
+        propertyKey: { type: string }
+        plainValue: { type: string, maxLength: 4000 }
+        iv: { type: string, description: exactly 16 bytes in UTF-8 }
+        salt: { type: string }
+        randomKey: { type: string }
+        note: { type: string }
+        servers:
+          type: array
+          items:
+            type: object
+            required: [appSystem, host, ip]
+            properties:
+              appSystem: { type: string }
+              host: { type: string }
+              ip: { type: string }

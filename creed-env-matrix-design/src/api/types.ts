@@ -283,6 +283,22 @@ export interface SplunkTarget {
   passwordSet: boolean;
   /** URL, username and password all set — or Splunk is mocked, which needs none of them. */
   configured: boolean;
+  /** The cookie read off Splunk's login response by default (`splunkd_<web port>`). */
+  sessionCookie: string;
+  /** The cookie the script sets by default. */
+  scriptCookieName: string;
+  scriptCookiePath: string;
+  /** `host:port` of a TCP forward the login can connect through; null when the target has none. */
+  tunnel: string | null;
+  /** Whether a login goes through the tunnel when the request does not say. */
+  tunnelDefault: boolean;
+}
+
+/** This login's overrides of the target's settings; anything omitted takes the target's. */
+export interface SplunkSessionOptions {
+  sessionCookie?: string;
+  scriptCookieName?: string;
+  viaTunnel?: boolean;
 }
 
 export interface TotpCode {
@@ -302,6 +318,8 @@ export interface SplunkSession {
   cookieName: string;
   cookieValue: string;
   script: string;
+  /** The tunnel the login went through, or null for a direct connection. */
+  tunnel: string | null;
   mode: 'real' | 'mock';
   correlationId: string;
   cookieFingerprint: string;

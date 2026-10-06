@@ -1,0 +1,17 @@
+# Everything this portal loads, as one Location. The backend reads it through its own catalog-files
+# route (packages/backend/src/catalogFiles.ts), in development and in the image alike. Targets are
+# relative to this file and must stay inside catalog/.
+# Add a service by adding its catalog-info.yaml here.
+apiVersion: backstage.io/v1alpha1
+kind: Location
+metadata:
+  name: creed-catalog
+  description: Creed AI Lab — systems, components and APIs
+spec:
+  targets:
+    - ./org.yaml
+    - ./creed-backstage.yaml
+    - ./creed-env-matrix/catalog-info.yaml
+    - ./creed-payment/catalog-info.yaml
+    - ./creed-order/catalog-info.yaml
+    - ./test-module/catalog-info.yaml

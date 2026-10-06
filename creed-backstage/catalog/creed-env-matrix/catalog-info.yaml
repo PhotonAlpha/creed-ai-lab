@@ -1,0 +1,42 @@
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: creed-env-matrix
+  title: Env Matrix
+  description: Environment host / ip / port matrix, release topology and AES records
+  tags: [env-matrix]
+spec:
+  owner: group:default/creed-platform
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: creed-resource-env-matrix
+  title: creed-resource-env-matrix
+  description: Spring Boot resource server behind the Env Matrix Viewer
+  tags: [env-matrix, java, spring-boot, postgresql, oauth2]
+spec:
+  type: service
+  lifecycle: experimental
+  owner: group:default/creed-platform
+  system: creed-env-matrix
+  providesApis:
+    - creed-env-matrix-api
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: creed-env-matrix-api
+  title: Env Matrix API
+  description: REST API of creed-resource-env-matrix
+  tags: [env-matrix, rest, aes, health]
+spec:
+  type: openapi
+  lifecycle: experimental
+  owner: group:default/creed-platform
+  system: creed-env-matrix
+  definition:
+    # The single-file bundle of ./openapi.yaml + paths/*.yml, written by Redocly CLI
+    # (`corepack yarn openapi:bundle`, also run by bitbucket-pipelines.yml) and committed. $text
+    # inserts it verbatim — pointing $text at ./openapi.yaml would hand Swagger UI unresolved $refs.
+    $text: ./dist/openapi.yaml

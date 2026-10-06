@@ -1,0 +1,27 @@
+# Starter fragment from `catalog:new` — replace it with the module's real endpoints. Each file in
+# paths/ is a complete OpenAPI document; give every operation a tag (Swagger UI filters on them).
+openapi: 3.1.0
+info:
+  title: Test Module — health
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      tags: [health]
+      summary: Liveness
+      operationId: ping
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ping'
+components:
+  schemas:
+    Ping:
+      type: object
+      properties:
+        service: { type: string, example: creed-resource-test-module }
+        status: { type: string, example: UP }
+        time: { type: string, format: date-time }

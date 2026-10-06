@@ -1,0 +1,44 @@
+# Module test-module: one System, the Component that implements it, and the API it provides.
+# Scaffolded by `corepack yarn catalog:new`. The API definition is the Redocly bundle in dist/ —
+# edit paths/*.yml, then `corepack yarn openapi:build test-module` and commit dist/ too.
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: test-module
+  title: Test Module
+  description: Test Module — functional module
+  tags: [test-module]
+spec:
+  owner: group:default/creed-platform
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: creed-resource-test-module
+  title: creed-resource-test-module
+  description: Service implementing Test Module
+  tags: [test-module]
+spec:
+  type: service
+  lifecycle: experimental
+  owner: group:default/creed-platform
+  system: test-module
+  providesApis:
+    - test-module-api
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: test-module-api
+  title: Test Module API
+  description: REST API of creed-resource-test-module
+  tags: [test-module, rest]
+spec:
+  type: openapi
+  lifecycle: experimental
+  owner: group:default/creed-platform
+  system: test-module
+  definition:
+    # The single-file bundle of ./openapi.yaml + paths/*.yml (`corepack yarn openapi:build test-module`),
+    # committed. $text inserts it verbatim; ./openapi.yaml itself would reach Swagger UI with $refs.
+    $text: ./dist/openapi.yaml

@@ -1,0 +1,8 @@
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: creed-platform
+  description: Owners of the Creed AI Lab services
+spec:
+  type: team
+  children: []

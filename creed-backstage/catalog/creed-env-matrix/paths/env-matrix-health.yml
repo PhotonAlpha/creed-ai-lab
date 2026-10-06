@@ -1,0 +1,26 @@
+openapi: 3.1.0
+info:
+  title: Env Matrix — health
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      tags: [health]
+      summary: Liveness and the active health-probe mode
+      operationId: ping
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ping'
+components:
+  schemas:
+    Ping:
+      type: object
+      properties:
+        service: { type: string, example: creed-resource-env-matrix }
+        status: { type: string, example: UP }
+        healthProbeMode: { type: string, enum: [mock, real] }
+        time: { type: string, format: date-time }

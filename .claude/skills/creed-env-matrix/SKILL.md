@@ -121,6 +121,14 @@ Splunk Web session cookie back as a `document.cookie` script. Shares nothing wit
   variables. The page gets id/label/URL/username/`passwordSet`/`configured`, never the password; the
   target is resolved before the OTP is verified, like the configured check, so a bad target never
   burns a code.
+- **Cookie names are per target and per request.** `_SESSION_COOKIE` / `_SCRIPT_COOKIE_NAME` /
+  `_SCRIPT_COOKIE_PATH` per target, globals as default; the page may override both names for one
+  login. Names must match `COOKIE_NAME` (config.js) — the script name is interpolated into JS.
+- **Tunnel = curl `--connect-to`, not a proxy.** `SPLUNK_TARGET_<ID>_TUNNEL=host:port` moves only the
+  socket; the `Host` header and SNI stay the login URL's, so Splunk behind a TCP forward sees a
+  request for itself and verified TLS still checks the real name. The client builds request options
+  by hand (not `request(url)`) for that. The switch starts **off** (`_TUNNEL_DEFAULT=false`); `viaTunnel`
+  without a tunnel is a 400 *before* the OTP check.
 - **Never `console.log` a config object** — one in `broker.issue` printed the Splunk password on every
   request until 2026-10-06. Use `describe(config)`, which masks every credential.
 

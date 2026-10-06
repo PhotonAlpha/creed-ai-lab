@@ -1,0 +1,65 @@
+# Bitbucket Pipelines — only the Backstage catalog's OpenAPI bundle for now.
+#
+# creed-backstage/catalog/<service>/dist/openapi.yaml is the single-file Redocly bundle the catalog
+# reads through $text. It is GENERATED from openapi.yaml + paths/*.yml and COMMITTED:
+#   - pull requests: fail when a committed bundle does not match its sources, or does not lint
+#     (openapi:check, every module), so a reviewer sees the exact document Swagger UI will show;
+#   - the main branches: regenerate every module's bundle and push it back with [skip ci] (which stops Bitbucket from
+#     running this pipeline again on that commit).
+#
+# Pushing back uses the pipeline's own repository access. If the branch has write restrictions, add
+# "Bitbucket Pipelines" to the users allowed to push to it, or the push step fails.
+
+image: node:22
+
+# Both steps install only the root workspace (`workspaces focus root` — Redocly CLI + yaml): the app
+# and backend workspaces are not needed to bundle a YAML file and would be most of the step's time.
+definitions:
+  caches:
+    backstage-node: creed-backstage/node_modules
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: OpenAPI bundle is up to date
+          caches: [backstage-node]
+          condition:
+            changesets:
+              includePaths:
+                - creed-backstage/catalog/**
+                - creed-backstage/scripts/**
+                - creed-backstage/redocly.yaml
+          script:
+            - corepack enable
+            - cd creed-backstage
+            - yarn workspaces focus root
+            - yarn openapi:check
+
+  branches:
+    '{master,master-spring-boot-3}':
+      - step:
+          name: Bundle OpenAPI and commit dist/
+          caches: [backstage-node]
+          condition:
+            changesets:
+              includePaths:
+                - creed-backstage/catalog/**
+                - creed-backstage/scripts/**
+                - creed-backstage/redocly.yaml
+          script:
+            - corepack enable
+            - cd creed-backstage
+            - yarn workspaces focus root
+            - yarn openapi:build
+            - yarn openapi:lint
+            - git add catalog/*/openapi.yaml catalog/*/dist/openapi.yaml
+            - |
+              if git diff --cached --quiet; then
+                echo "bundle already up to date"
+              else
+                git config user.name "bitbucket-pipelines"
+                git config user.email "commits-noreply@bitbucket.org"
+                git commit -m "catalog: regenerate OpenAPI bundle [skip ci]"
+                git push origin "HEAD:${BITBUCKET_BRANCH}"
+              fi

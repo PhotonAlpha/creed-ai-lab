@@ -17,8 +17,9 @@ PostgreSQL on the `creed-artifactory-db` container (env-matrix only; everything 
 Versions live in the root `pom.xml`. Only pin in a module pom when the BOM doesn't manage the
 artifact (e.g. POI in creed-report).
 
-Two modules are **Node, not Maven**, and are absent from the root `pom.xml`: `creed-env-matrix-design`
-(the frontend) and `creed-mock-buddy` (Fastify 5 + TS, Node ≥22). Both are driven with `npm`.
+Three modules are **Node, not Maven**, and are absent from the root `pom.xml`: `creed-env-matrix-design`
+(the frontend) and `creed-mock-buddy` (Fastify 5 + TS, Node ≥22), driven with `npm`; and
+`creed-backstage` (Backstage developer portal, Yarn 4 via `corepack yarn` — no global yarn here).
 
 ## 2. Build & run
 
@@ -58,6 +59,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
 | `creed-env-matrix-design` | 5173 / 3002 | — | Vite, proxies `/api` → `VITE_API_TARGET` (`.env`: 18095); **BFF** `npm run bff` on 3002 owns the Splunk broker (moved out of Java) |
 | `creed-mock-buddy` | 5173 / 4000 | — | HTTP / HTTPS (borrows `creed-gateway` cert), **Node/Fastify**; YAML mock server, standalone |
+| `creed-backstage` | 3003 / 7007 | — | **Backstage**: Software Catalog (`catalog/**/catalog-info.yaml`) + Swagger UI; one `catalog/<module>/` per functional area; multi-file OpenAPI → Redocly bundle `dist/openapi.yaml` (committed, `$text`), `yarn openapi:build [module]` |
 | `.support/httpd` (docker) | 6666 / 16666 / 9443 | `/mod_cluster_manager` | Apache + mod_proxy_cluster: MCMP over **mTLS** / browser status page (loopback, no client cert; 666x is browser-blocked) / HTTPS traffic; `creed-simple-metrics` registers here |
 | `creed-common-metrics` | — | — | library: `application-actuator.yml` + OTel helpers |
 

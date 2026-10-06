@@ -10,8 +10,8 @@
  * fails (500) rather than issuing an unrecorded session.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { targetConfigured } from './config.js';
-import { SplunkLoginError } from './login-client.js';
+import { COOKIE_NAME, targetConfigured } from './config.js';
+import { SplunkLoginError, tunnelAddress } from './login-client.js';
 
 /** A failure with the status and `{error, message}` the page expects. */
 export class BrokerError extends Error {
@@ -82,6 +82,11 @@ export function createBroker({ totp, loginClient, splunk, store, log = console, 
     username: t.username || null,
     passwordSet: Boolean(t.password),
     configured: targetConfigured(splunk, t),
+    sessionCookie: t.sessionCookie ?? splunk.sessionCookie,
+    scriptCookieName: t.scriptCookieName ?? splunk.scriptCookieName,
+    scriptCookiePath: t.scriptCookiePath ?? splunk.scriptCookiePath,
+    tunnel: t.tunnel ? tunnelAddress(t.tunnel) : null,
+    tunnelDefault: Boolean(t.tunnel && t.tunnelDefault),
   });
 
   /** A request naming no target gets the default; one naming an unknown target is a 400. */
@@ -132,14 +137,31 @@ export function createBroker({ totp, loginClient, splunk, store, log = console, 
     /**
      * @param client   {ip, forwardedFor, userAgent} — recorded, never trusted
      * @param targetId a configured target's id; the default target when omitted
+     * @param options  this login's overrides of the target's settings, each optional:
+     *                 {sessionCookie, scriptCookieName, viaTunnel} — viaTunnel omitted = the target's
+     *                 `tunnelDefault`
      */
-    async issue(code, client, targetId) {
+    async issue(code, client, targetId, options = {}) {
       const correlationId = randomUUID();
 
-      // --- 0. Target known and configured? ---------------------------------------------------
+      // --- 0. Target known and configured, overrides usable? ----------------------------------
       // Checked before the code is verified: verifying consumes it (replay protection), and a code
       // burned on a request that could never succeed sends the user's retry into a "replayed" 401.
       const target = resolveTarget(targetId);
+      for (const field of ['sessionCookie', 'scriptCookieName']) {
+        const value = options[field];
+        if (value != null && (typeof value !== 'string' || !COOKIE_NAME.test(value))) {
+          throw new BrokerError(400, 'validation_failed', `${field} must match ${COOKIE_NAME} — the code was not used`);
+        }
+      }
+      const viaTunnel = options.viaTunnel ?? Boolean(target.tunnel && target.tunnelDefault);
+      if (viaTunnel && !target.tunnel) {
+        throw new BrokerError(400, 'no_tunnel', `Splunk login target '${target.label}' has no tunnel configured — the code was not used`);
+      }
+      const sessionCookie = options.sessionCookie || (target.sessionCookie ?? splunk.sessionCookie);
+      const scriptCookieName = options.scriptCookieName || (target.scriptCookieName ?? splunk.scriptCookieName);
+      const scriptCookiePath = target.scriptCookiePath ?? splunk.scriptCookiePath;
+      const route = viaTunnel ? ` via tunnel ${tunnelAddress(target.tunnel)}` : '';
       if (!targetConfigured(splunk, target)) {
         await store.save(fail({ ...row(correlationId, 'SPLUNK_LOGIN', client), splunkMode: loginClient.mode },
           'not_configured', `target ${target.id}: ${target.settings ?? 'login URL / username / password'} missing`));
@@ -180,14 +202,14 @@ export function createBroker({ totp, loginClient, splunk, store, log = console, 
       const started = performance.now();
       let result;
       try {
-        result = await loginClient.login(target);
+        result = await loginClient.login(target, { sessionCookie, viaTunnel });
       } catch (e) {
         if (!(e instanceof SplunkLoginError)) throw e;
         await store.save(fail({
           ...loginRow,
           durationMs: Math.round(performance.now() - started),
           httpStatus: e.httpStatus || null,
-        }, e.reason, `[${target.id}] ${e.message}`));
+        }, e.reason, `[${target.id}${route}] ${e.message}`));
         log.warn(`[splunk] login failed (${e.reason}) [${correlationId}]: ${e.message}`);
         // Splunk, not this service, is what failed — hence 502, with the audit reason as the error code.
         throw new BrokerError(502, `splunk_${e.reason}`, e.message);
@@ -200,16 +222,17 @@ export function createBroker({ totp, loginClient, splunk, store, log = console, 
         durationMs: Math.round(performance.now() - started),
         httpStatus: result.httpStatus || null,
         cookieFingerprint,
-        detail: `as ${target.username} on ${target.id}`,
+        detail: `as ${target.username} on ${target.id}${route}, ${sessionCookie} -> ${scriptCookieName}`,
       });
-      log.info(`[splunk] session issued to ${client.ip} target=${target.id} fingerprint=${cookieFingerprint} [${correlationId}]`);
+      log.info(`[splunk] session issued to ${client.ip} target=${target.id}${route} fingerprint=${cookieFingerprint} [${correlationId}]`);
 
       return {
         target: target.id,
-        sourceCookie: target.sessionCookie ?? splunk.sessionCookie,
-        cookieName: splunk.scriptCookieName,
+        sourceCookie: sessionCookie,
+        cookieName: scriptCookieName,
         cookieValue: result.cookieValue,
-        script: script(splunk.scriptCookieName, result.cookieValue, splunk.scriptCookiePath),
+        script: script(scriptCookieName, result.cookieValue, scriptCookiePath),
+        tunnel: viaTunnel ? tunnelAddress(target.tunnel) : null,
         mode: loginClient.mode,
         correlationId,
         cookieFingerprint,

@@ -19,11 +19,17 @@
  * `cval` is fetched first (`SPLUNK_PREFETCH_CVAL`): Splunk Web 7+ sets a `cval` cookie on the login
  * page and rejects a POST that does not echo it — as both a cookie and a form field — answering 200
  * without the session cookie, which looks exactly like a wrong password.
+ *
+ * **Tunnel** (`login(target, {viaTunnel: true})`): both requests open their socket to `target.tunnel`
+ * instead of the login URL's host:port, and keep the URL's `Host` header and SNI — curl `--connect-to`.
+ * Splunk behind a plain TCP forward then sees a request addressed to itself, and a verified
+ * certificate is still checked against the real host name rather than the tunnel's.
  */
 import http from 'node:http';
 import https from 'node:https';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { isIP } from 'node:net';
 
 export class SplunkLoginError extends Error {
   /**
@@ -49,6 +55,9 @@ export function cookiesOf(setCookie = []) {
   return cookies;
 }
 
+/** `host:port`, bracketing an IPv6 host. */
+export const tunnelAddress = ({ host, port }) => `${host.includes(':') ? `[${host}]` : host}:${port}`;
+
 export function createLoginClient(config) {
   const mode = config.enabled ? 'real' : 'mock';
   // keepAlive off: every login is two requests minutes apart, and a fresh socket is what makes the
@@ -59,15 +68,24 @@ export function createLoginClient(config) {
     ...(config.tlsInsecure ? {} : config.caFile ? { ca: readFileSync(config.caFile) } : {}),
   });
 
-  function send(url, method, headers, body) {
+  function send(url, method, headers, body, tunnel) {
     const isHttps = url.protocol === 'https:';
+    const realHost = url.hostname.replace(/^\[(.*)\]$/, '$1'); // URL keeps IPv6 brackets; sockets don't
+    // Without a tunnel this is exactly the URL's own address; with one, only the socket moves.
+    const options = {
+      protocol: url.protocol,
+      hostname: tunnel ? tunnel.host : realHost,
+      port: tunnel ? tunnel.port : url.port || (isHttps ? 443 : 80),
+      path: url.pathname + url.search,
+      method,
+      headers: { Host: url.host, ...headers },
+      agent: isHttps ? agent : false,
+      signal: AbortSignal.timeout(config.readTimeoutMs),
+    };
+    // SNI must name the real host (node would otherwise send the tunnel's); an IP is not allowed in SNI.
+    if (isHttps && tunnel && !isIP(realHost)) options.servername = realHost;
     return new Promise((resolve, reject) => {
-      const req = (isHttps ? https : http).request(url, {
-        method,
-        headers,
-        agent: isHttps ? agent : false,
-        signal: AbortSignal.timeout(config.readTimeoutMs),
-      }, (res) => {
+      const req = (isHttps ? https : http).request(options, (res) => {
         const cookies = cookiesOf(res.headers['set-cookie']);
         res.resume(); // drain: only the status and headers matter
         res.on('end', () => resolve({ status: res.statusCode, cookies }));
@@ -84,11 +102,12 @@ export function createLoginClient(config) {
     });
   }
 
-  async function call(url, method, headers, body) {
+  async function call(url, method, headers, body, tunnel) {
     try {
-      return await send(url, method, headers, body);
+      return await send(url, method, headers, body, tunnel);
     } catch (e) {
-      throw new SplunkLoginError('io_error', 0, `could not reach Splunk at ${url.href}: ${e.message}`, e);
+      const via = tunnel ? ` via tunnel ${tunnelAddress(tunnel)}` : '';
+      throw new SplunkLoginError('io_error', 0, `could not reach Splunk at ${url.href}${via}: ${e.message}`, e);
     }
   }
 
@@ -96,17 +115,21 @@ export function createLoginClient(config) {
     mode,
 
     /**
-     * @param target {loginUrl, username, password, sessionCookie?} — one of config.targets
+     * @param target  {loginUrl, username, password, sessionCookie?, tunnel?} — one of config.targets
+     * @param options {sessionCookie?: string, viaTunnel?: boolean} — this login's overrides
      * @returns {Promise<{cookieValue: string, httpStatus: number}>} cookieValue is a credential — never log it
      */
-    async login(target) {
+    async login(target, { sessionCookie: override, viaTunnel = false } = {}) {
       if (!config.enabled) return { cookieValue: `mock-${randomBytes(32).toString('hex')}`, httpStatus: 0 };
 
-      const sessionCookie = target.sessionCookie ?? config.sessionCookie;
+      const sessionCookie = override ?? target.sessionCookie ?? config.sessionCookie;
+      // The broker rejects viaTunnel on a target without one; this is the last line, not the check.
+      if (viaTunnel && !target.tunnel) throw new Error(`target ${target.id} has no tunnel`);
+      const tunnel = viaTunnel ? target.tunnel : null;
       const url = new URL(target.loginUrl);
       const cookies = new Map();
       if (config.prefetchCval) {
-        const page = await call(url, 'GET', {});
+        const page = await call(url, 'GET', {}, undefined, tunnel);
         for (const [k, v] of page.cookies) cookies.set(k, v);
       }
 
@@ -119,7 +142,7 @@ export function createLoginClient(config) {
       };
       if (cookies.size) headers.Cookie = [...cookies].map(([k, v]) => `${k}=${v}`).join('; ');
 
-      const reply = await call(url, 'POST', headers, body);
+      const reply = await call(url, 'POST', headers, body, tunnel);
       const value = reply.cookies.get(sessionCookie);
       if (!value) {
         // 401 is a bad password; 200 without the cookie is usually a cval/CSRF rejection.

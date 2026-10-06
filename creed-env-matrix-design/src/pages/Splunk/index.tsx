@@ -10,6 +10,7 @@ import {
   Progress,
   Select,
   Space,
+  Switch,
   Table,
   Tag,
   Tooltip,
@@ -24,6 +25,43 @@ import { useI18n } from '../../locales';
 import type { SplunkAuditRow, SplunkSession, TotpCode, TotpInfo } from '../../api/types';
 
 const { Text, Paragraph } = Typography;
+
+/** Same rule as the server's COOKIE_NAME (server/splunk/config.js) — it ends up inside a script. */
+const COOKIE_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+
+/**
+ * The shared account's username with its first three characters masked — enough to tell targets'
+ * accounts apart, not enough to copy. Shorter names are masked whole.
+ */
+const maskUsername = (username: string) => '*'.repeat(Math.min(3, username.length)) + username.slice(3);
+
+/**
+ * An audit row's detail as the page shows it. The server writes
+ * `as <username> on <target>[ via <tunnel>], <sessionCookie> -> <scriptCookie>`; the username is
+ * masked and the cookie names dropped, like everywhere else on the page. The stored row is unchanged.
+ */
+const displayDetail = (detail: string) => detail
+  .replace(/^as (\S+)/, (_, user: string) => `as ${maskUsername(user)}`)
+  .replace(/, [A-Za-z0-9_.-]+ -> [A-Za-z0-9_.-]+$/, '');
+
+const hostOf = (loginUrl: string | null) => {
+  try {
+    return loginUrl ? new URL(loginUrl).host : null;
+  } catch {
+    return null;
+  }
+};
+
+/** The login URL as the browser would reach it through the tunnel: same path, the tunnel's host:port. */
+const throughTunnel = (loginUrl: string | null, tunnel: string) => {
+  if (!loginUrl) return null;
+  try {
+    const url = new URL(loginUrl);
+    return `${url.protocol}//${tunnel}${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+};
 
 /** Per-browser convenience only — storage can be unavailable (private mode), so every access is guarded. */
 const TARGET_KEY = 'env-matrix.splunk.target';
@@ -54,6 +92,11 @@ const storeTarget = (id: string) => {
  * that target's login URL and username; its password stays on the server (the page only learns
  * whether it is set), and the session request names the target so the server logs in with that
  * target's own credentials.
+ *
+ * Both cookie names start at the target's configured values and can be changed for one login (the
+ * name Splunk sets follows its web port, and the name the browser needs depends on how it reaches
+ * Splunk). A target with a tunnel gets a switch: on, the server connects through the tunnel's
+ * host:port while still addressing the real Splunk host.
  */
 export function SplunkPage() {
   const { t } = useI18n();
@@ -67,6 +110,9 @@ export function SplunkPage() {
   const [code, setCode] = useState<TotpCode | null>(null);
 
   const [targetId, setTargetId] = useState<string | undefined>();
+  const [sessionCookie, setSessionCookie] = useState('');
+  const [scriptCookieName, setScriptCookieName] = useState('');
+  const [viaTunnel, setViaTunnel] = useState(false);
   const [input, setInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [session, setSession] = useState<SplunkSession | null>(null);
@@ -127,12 +173,30 @@ export function SplunkPage() {
     };
   }, [info?.codeVisible, step, message]);
 
+  const target = info?.targets.find((t) => t.id === targetId);
+
+  // A new target starts from its own defaults — another target's cookie names or tunnel are meaningless here.
+  useEffect(() => {
+    if (!target) return;
+    setSessionCookie(target.sessionCookie);
+    setScriptCookieName(target.scriptCookieName);
+    setViaTunnel(target.tunnelDefault);
+    // Keyed on the id: `target` is a fresh object whenever `info` is.
+  }, [target?.id]);
+
+  const sessionCookieValid = COOKIE_NAME.test(sessionCookie);
+  const scriptCookieValid = COOKIE_NAME.test(scriptCookieName);
+
   const submit = async () => {
     setSubmitting(true);
     setFailure(null);
     setSession(null);
     try {
-      const result = await splunkApi.session(input, targetId);
+      const result = await splunkApi.session(input, targetId, {
+        sessionCookie,
+        scriptCookieName,
+        viaTunnel: Boolean(target?.tunnel) && viaTunnel,
+      });
       setSession(result);
       setInput('');
       message.success(t('splunk.issued'));
@@ -157,7 +221,6 @@ export function SplunkPage() {
 
   const digits = info?.digits ?? 6;
   const expiring = remaining <= 5;
-  const target = info?.targets.find((t) => t.id === targetId);
   const targetLabel = (id: string) => info?.targets.find((t) => t.id === id)?.label ?? id;
 
   const columns: TableColumnsType<SplunkAuditRow> = [
@@ -194,7 +257,7 @@ export function SplunkPage() {
       ellipsis: true,
       render: (value: string | null, row) => {
         const parts = [
-          value,
+          value ? displayDetail(value) : null,
           row.httpStatus != null ? `HTTP ${row.httpStatus}` : null,
           row.splunkMode ? `mode=${row.splunkMode}` : null,
           row.forwardedFor ? `forwardedFor=${row.forwardedFor}` : null,
@@ -343,13 +406,28 @@ export function SplunkPage() {
                       {target.loginUrl ? <Text code>{target.loginUrl}</Text> : <Text type="danger">{t('splunk.session.unset')}</Text>}
                     </Descriptions.Item>
                     <Descriptions.Item label={t('splunk.session.username')}>
-                      {target.username ? <Text code>{target.username}</Text> : <Text type="danger">{t('splunk.session.unset')}</Text>}
+                      {target.username ? <Text code>{maskUsername(target.username)}</Text> : <Text type="danger">{t('splunk.session.unset')}</Text>}
                     </Descriptions.Item>
-                    <Descriptions.Item label={t('splunk.session.password')}>
-                      {target.passwordSet
-                        ? <Text type="secondary">•••••••• {t('splunk.session.passwordSet')}</Text>
-                        : <Text type="danger">{t('splunk.session.passwordUnset')}</Text>}
-                    </Descriptions.Item>
+                    {/* Password, session cookie and script cookie are not shown (by request). The cookie
+                        names still go with the request: they are preset from the target above. */}
+                    {target.tunnel && (
+                      <Descriptions.Item label={t('splunk.session.tunnel')}>
+                        <Space direction="vertical" size={0}>
+                          <Space wrap>
+                            <Switch checked={viaTunnel} onChange={setViaTunnel} />
+                            <Text code>{target.tunnel}</Text>
+                          </Space>
+                          {viaTunnel && (
+                            <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+                              {t('splunk.session.tunnelHint', {
+                                tunnel: target.tunnel,
+                                host: hostOf(target.loginUrl) ?? '—',
+                              })}
+                            </Text>
+                          )}
+                        </Space>
+                      </Descriptions.Item>
+                    )}
                   </Descriptions>
                 )}
                 {target && !target.configured && (
@@ -361,7 +439,9 @@ export function SplunkPage() {
                 <Button
                   type="primary"
                   loading={submitting}
-                  disabled={input.length !== digits || !info?.configured || !target?.configured}
+                  disabled={
+                    input.length !== digits || !info?.configured || !target?.configured || !sessionCookieValid || !scriptCookieValid
+                  }
                   onClick={submit}
                 >
                   {t('splunk.session.submit')}
@@ -383,11 +463,23 @@ export function SplunkPage() {
                       {session.script}
                     </Paragraph>
                     <Text type="secondary">{t('splunk.session.scriptHint')}</Text>
+                    {session.tunnel && throughTunnel(target?.loginUrl ?? null, session.tunnel) && (
+                      <Alert
+                        type="info"
+                        showIcon
+                        style={{ marginTop: token.marginXS }}
+                        message={t('splunk.session.tunnelBrowser', {
+                          url: throughTunnel(target?.loginUrl ?? null, session.tunnel) as string,
+                        })}
+                      />
+                    )}
                   </div>
                   <Descriptions size="small" column={1} bordered>
                     <Descriptions.Item label={t('splunk.session.target')}>{targetLabel(session.target)}</Descriptions.Item>
-                    <Descriptions.Item label={t('splunk.session.source')}>
-                      <Text code>{session.sourceCookie}</Text> → <Text code>{session.cookieName}</Text>
+                    <Descriptions.Item label={t('splunk.session.route')}>
+                      {session.tunnel
+                        ? <>{t('splunk.session.tunnel')} <Text code>{session.tunnel}</Text></>
+                        : t('splunk.session.direct')}
                     </Descriptions.Item>
                     <Descriptions.Item label={t('splunk.audit.fingerprint')}>
                       <Text code>{session.cookieFingerprint}</Text>

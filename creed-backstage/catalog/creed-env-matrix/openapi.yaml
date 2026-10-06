@@ -1,0 +1,34 @@
+# The entry document of the Env Matrix API. Every file in paths/ is a complete OpenAPI document; this
+# one combines their paths. `paths:` and `components.securitySchemes` below are GENERATED — run
+#   corepack yarn openapi:combine
+# after adding, removing or changing a file in paths/. Edit info and servers here by hand.
+#
+# Each path is a $ref INTO a fragment (`#/paths/<path, '/' escaped as ~1>`): OpenAPI allows a $ref per
+# path item, not for the whole `paths` object. This file is NOT what the catalog reads:
+#   corepack yarn openapi:bundle
+# (Redocly CLI) follows the refs into dist/openapi.yaml, which the entity's $text points at — commit
+# both. A fragment's own '#/components/...' refs resolve inside that fragment; Redocly renames a
+# clash (two files' `User`) rather than merging it.
+openapi: 3.1.0
+info:
+  title: Env Matrix API
+  version: 1.0.0
+  description: creed-resource-env-matrix — combined from catalog/creed-env-matrix/paths/*.yml
+servers:
+  - url: http://localhost:3001/api/env-matrix
+    description: dev profile / node mock
+paths:
+  /users:
+    $ref: ./paths/api-example.yml#/paths/~1users
+  /users/{userId}:
+    $ref: ./paths/api-example.yml#/paths/~1users~1{userId}
+  /aes/servers:
+    $ref: ./paths/env-matrix-aes.yml#/paths/~1aes~1servers
+  /aes/records:
+    $ref: ./paths/env-matrix-aes.yml#/paths/~1aes~1records
+  /ping:
+    $ref: ./paths/env-matrix-health.yml#/paths/~1ping
+components:
+  securitySchemes:
+    BearerAuth:
+      $ref: ./paths/api-example.yml#/components/securitySchemes/BearerAuth

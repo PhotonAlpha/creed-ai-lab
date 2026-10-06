@@ -1,0 +1,44 @@
+# Module creed-payment: one System, the Component that implements it, and the API it provides.
+# Scaffolded by `corepack yarn catalog:new`. The API definition is the Redocly bundle in dist/ —
+# edit paths/*.yml, then `corepack yarn openapi:build creed-payment` and commit dist/ too.
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: creed-payment
+  title: Payment
+  description: Payments with an explicit PENDING → AUTHORIZED → CAPTURED → REFUNDED lifecycle
+  tags: [payment]
+spec:
+  owner: group:default/creed-platform
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: creed-resource-payment
+  title: creed-resource-payment
+  description: Service implementing Payment
+  tags: [payment]
+spec:
+  type: service
+  lifecycle: experimental
+  owner: group:default/creed-platform
+  system: creed-payment
+  providesApis:
+    - creed-payment-api
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: creed-payment-api
+  title: Payment API
+  description: REST API of creed-resource-payment
+  tags: [payment, rest]
+spec:
+  type: openapi
+  lifecycle: experimental
+  owner: group:default/creed-platform
+  system: creed-payment
+  definition:
+    # The single-file bundle of ./openapi.yaml + paths/*.yml (`corepack yarn openapi:build creed-payment`),
+    # committed. $text inserts it verbatim; ./openapi.yaml itself would reach Swagger UI with $refs.
+    $text: ./dist/openapi.yaml
