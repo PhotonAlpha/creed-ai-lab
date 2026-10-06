@@ -1,6 +1,6 @@
 # creed-backstage — Creed 开发者门户
 
-[English](README.md)
+[English](README.md) · **第一次使用？请先看图文新手指南：** [docs/guide/GUIDE.zh-CN.md](docs/guide/GUIDE.zh-CN.md)（[English](docs/guide/GUIDE.md)）
 
 一个 [Backstage](https://backstage.io) 应用：Creed 各服务的 **Software Catalog**（软件目录），每个服务的
 REST API 以 **Swagger UI** 展示（只读，带按 tag 过滤）。目录按**模块**划分 —— 每个功能领域一个模块
@@ -175,6 +175,7 @@ corepack yarn catalog:new creed-inventory \
 | `--component` | `creed-resource-<short>`（`<short>` 为去掉 `creed-` 前缀的模块名） |
 | `--server` | `http://localhost:8080/api/<short>` |
 | `--owner` | `group:default/creed-platform` |
+| `--no-register` | （默认关闭）不加入 `all.yaml`，改为在 Backstage → **Register Existing Component** 中用脚本打印的 URL（`http://localhost:7007/api/catalog-files/<模块>/catalog-info.yaml`）注册。两种方式不要同时用：两个 location 登记同一实体会冲突 |
 
 它会创建 `catalog/creed-inventory/` —— `catalog-info.yaml`（System `creed-inventory`、Component
 `creed-resource-inventory`、API `creed-inventory-api`，都带 `inventory` 标签）、`openapi.yaml`，以及一个示例

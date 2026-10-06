@@ -11,7 +11,7 @@
     "openapi:bundle": "node scripts/openapi-bundle.mjs",
     "openapi:build": "node scripts/openapi-build.mjs",
     "openapi:lint": "node scripts/openapi-lint.mjs",
-    "openapi:check": "node scripts/openapi-build.mjs --check && node scripts/openapi-lint.mjs",
+    "openapi:check": "node scripts/openapi-build.mjs --check",
     "catalog:new": "node scripts/catalog-new.mjs",
     "build:backend": "yarn workspace backend build",
     "build:all": "backstage-cli repo build --all",

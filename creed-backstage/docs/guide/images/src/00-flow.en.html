@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;font-family:-apple-system,"Helvetica Neue",sans-serif;background:#fff}
+.wrap{display:flex;align-items:stretch;gap:0;padding:28px 24px;width:1232px;box-sizing:border-box}
+.step{flex:1 1 0;min-width:0;border:2px solid #1f5c99;border-radius:12px;padding:14px 12px;background:#f3f7fb;text-align:center}
+.step.dev{border-color:#2e7d32;background:#f1f8f1}.step.bs{border-color:#00695c;background:#eef7f6}
+.n{display:inline-block;width:30px;height:30px;line-height:30px;border-radius:50%;background:#1f5c99;color:#fff;font-weight:700;margin-bottom:6px}
+.dev .n{background:#2e7d32}.bs .n{background:#00695c}
+.t{font-weight:700;font-size:17px;color:#1a1a1a;margin-bottom:6px}
+.d{font-size:13px;color:#444;line-height:1.45}
+code{font-family:Menlo,monospace;font-size:12px;background:#fff;border:1px solid #ddd;border-radius:4px;padding:1px 4px;white-space:nowrap;font-size:11px}
+.arrow{width:34px;display:flex;align-items:center;justify-content:center;color:#888;font-size:26px}
+.legend{padding:0 24px 22px;font-size:13px;color:#555;display:flex;gap:22px}
+.legend span::before{content:"";display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+</style></head><body>
+<div class="wrap">
+ <div class="step"><div class="n">1</div><div class="t">Set up</div><div class="d">Install Node 22/24<br><code>node -v</code><br><code>corepack --version</code></div></div>
+ <div class="arrow">→</div>
+ <div class="step dev"><div class="n">2</div><div class="t">Create a module</div><div class="d"><code>yarn catalog:new</code><br>catalog-info.yaml<br>openapi.yaml · paths/</div></div>
+ <div class="arrow">→</div>
+ <div class="step dev"><div class="n">3</div><div class="t">Build</div><div class="d">edit <code>paths/*.yml</code><br><code>openapi:build</code><br><code>openapi:check</code><br>→ dist/openapi.yaml</div></div>
+ <div class="arrow">→</div>
+ <div class="step bs"><div class="n">4</div><div class="t">Register in Backstage</div><div class="d">Register Existing<br>Component<br>Analyze → Import</div></div>
+ <div class="arrow">→</div>
+ <div class="step bs"><div class="n">5</div><div class="t">View &amp; commit</div><div class="d">Catalog / APIs<br>Swagger docs<br><code>git commit</code></div></div>
+</div>
+<div class="legend"><span style="--c:#999">Commands are prefixed with corepack, e.g. corepack yarn start</span><span style="--c:#1f5c99">Local setup (once)</span><span style="--c:#2e7d32">Command line: module &amp; docs</span><span style="--c:#00695c">Browser: Backstage UI</span></div>
+</body></html>

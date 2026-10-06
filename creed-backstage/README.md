@@ -1,6 +1,6 @@
 # creed-backstage — Creed Developer Portal
 
-[中文](README.zh-CN.md)
+[中文](README.zh-CN.md) · **New here? Start with the step-by-step guide:** [docs/guide/GUIDE.md](docs/guide/GUIDE.md) ([中文](docs/guide/GUIDE.zh-CN.md))
 
 A [Backstage](https://backstage.io) app: the **Software Catalog** for the Creed services, with each
 service's REST API shown in **Swagger UI** (read-only, with a tag filter). The catalog is split into
@@ -186,6 +186,7 @@ corepack yarn catalog:new creed-inventory \
 | `--component` | `creed-resource-<short>` (`<short>` = the name without `creed-`) |
 | `--server` | `http://localhost:8080/api/<short>` |
 | `--owner` | `group:default/creed-platform` |
+| `--no-register` | (off) — don't add the module to `all.yaml`; register it in Backstage → **Register Existing Component** with the URL the script prints (`http://localhost:7007/api/catalog-files/<module>/catalog-info.yaml`). Never do both: two locations claiming one entity conflict |
 
 It writes `catalog/creed-inventory/` — `catalog-info.yaml` (System `creed-inventory`, Component
 `creed-resource-inventory`, API `creed-inventory-api`, all tagged `inventory`), `openapi.yaml`, a
