@@ -266,9 +266,23 @@ export interface TotpInfo {
   /** Whether `GET /splunk/totp/current` serves the code. */
   codeVisible: boolean;
   splunkMode: 'real' | 'mock';
+  /** At least one login target can log in. */
   splunkConfigured: boolean;
-  loginUrl: string | null;
+  targets: SplunkTarget[];
+  /** The target the dropdown starts on, and the one used when a request names none. */
+  defaultTarget: string;
   scriptCookieName: string;
+}
+
+/** One Splunk instance the broker can log into. The password never leaves the server. */
+export interface SplunkTarget {
+  id: string;
+  label: string;
+  loginUrl: string | null;
+  username: string | null;
+  passwordSet: boolean;
+  /** URL, username and password all set — or Splunk is mocked, which needs none of them. */
+  configured: boolean;
 }
 
 export interface TotpCode {
@@ -280,6 +294,8 @@ export interface TotpCode {
 }
 
 export interface SplunkSession {
+  /** Id of the target logged into. */
+  target: string;
   /** The cookie read from Splunk's login response (`splunkd_8000`). */
   sourceCookie: string;
   /** The cookie the script sets (`splunkd_8089`). */

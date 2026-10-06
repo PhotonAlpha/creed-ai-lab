@@ -114,8 +114,11 @@ cp .env.server.example .env.server.local && chmod 600 .env.server.local
 | `ENV_MATRIX_TOTP_SECRET` (`_FILE`) | `JBSWY3DPEHPK3PXP` — **demo** | a fresh Base32 secret |
 | `ENV_MATRIX_TOTP_EXPOSE_CODE` | `true` — the page shows the code | `false` if the OTP is meant to gate anything |
 | `SPLUNK_ENABLED` | `false` — fabricated cookie | `true` |
-| `SPLUNK_LOGIN_URL` | `splunk.example.invalid` | `https://<splunk>:8000/en-US/account/login` |
-| `SPLUNK_USERNAME` / `SPLUNK_PASSWORD` (`_FILE`) | `admin` / `admin` | the shared account |
+| `SPLUNK_LOGIN_URL` | `splunk.example.invalid` | `https://<splunk>:8000/en-US/account/login` — the single target, when `SPLUNK_TARGETS` is unset |
+| `SPLUNK_USERNAME` / `SPLUNK_PASSWORD` (`_FILE`) | `admin` / `admin` | the shared account of that single target |
+| `SPLUNK_TARGETS` | unset — one target, `default` | several instances for the page's dropdown, e.g. `SIT,UAT` |
+| `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD` (`_FILE`) / `_LABEL` / `_SESSION_COOKIE` | — | per target; **no fallback** to the single-target variables |
+| `SPLUNK_DEFAULT_TARGET` | the first of `SPLUNK_TARGETS` | the dropdown's initial choice |
 | `SPLUNK_TLS_INSECURE` | `true` — certificate **not verified** | as required; `false` + `SPLUNK_CA_FILE` to verify |
 | `SPLUNK_AUDIT_STORE` | `memory` — newest 500 rows, **lost on restart** | `pg` or `mysql` to keep an audit trail |
 | `SPLUNK_DB_URL` (pg / mysql) | `postgres://127.0.0.1:5432/env_matrix`, or `mysql://127.0.0.1:3306/env_matrix` with mysql | the real host; a URL for the other database is rejected at startup |

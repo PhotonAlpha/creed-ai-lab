@@ -2,10 +2,10 @@
  * `/api/env-matrix/splunk/*` — the contract the Splunk page calls, served by both the mock
  * (server/index.js, memory audit, Splunk always mocked) and the BFF (server/bff.js, pg audit):
  *
- *   GET  /splunk/totp          period/digits/server time — drives the countdown
+ *   GET  /splunk/totp          period/digits/server time, the login targets — drives the page
  *   GET  /splunk/totp/current  the current code (only with ENV_MATRIX_TOTP_EXPOSE_CODE)
- *   POST /splunk/session       {code} → 200 session | 400 malformed | 401 bad code | 429 locked out
- *                              | 502 Splunk | 503 unset
+ *   POST /splunk/session       {code, target?} → 200 session | 400 malformed or unknown target
+ *                              | 401 bad code | 429 locked out | 502 Splunk | 503 unset
  *   GET  /splunk/audit?limit=  newest audit rows
  */
 import { BrokerError, createBroker } from './broker.js';
@@ -66,13 +66,16 @@ export async function handleSplunk(broker, req, res, path, params) {
       if (typeof body.code !== 'string' || !/^\d{6,8}$/.test(body.code)) {
         error(res, 400, 'validation_failed', 'request payload is invalid',
           { fields: [{ field: 'code', message: 'must be 6-8 digits' }] });
+      } else if (body.target != null && (typeof body.target !== 'string' || body.target.length > 64)) {
+        error(res, 400, 'validation_failed', 'request payload is invalid',
+          { fields: [{ field: 'target', message: 'must be a login target id' }] });
       } else {
         const client = {
           ip: req.socket.remoteAddress ?? null,
           forwardedFor: req.headers['x-forwarded-for'] ?? null,
           userAgent: req.headers['user-agent'] ?? null,
         };
-        send(res, 200, await broker.issue(body.code, client), NO_STORE);
+        send(res, 200, await broker.issue(body.code, client, body.target ?? undefined), NO_STORE);
       }
     } else if (req.method === 'GET' && path === '/splunk/audit') {
       send(res, 200, await broker.audit(Number(params.get('limit') ?? 50) || 50));

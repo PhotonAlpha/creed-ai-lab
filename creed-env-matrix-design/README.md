@@ -379,9 +379,15 @@ It used to live in `creed-resource-env-matrix`; the Java service no longer has t
    this page can therefore pass the check. Turn it off to make the code come from an authenticator
    app enrolled with `ENV_MATRIX_TOTP_SECRET` instead. A code is accepted **once**; five wrong codes
    from one address within a minute answer `429` for a minute.
-2. **Splunk login.** Checked **before** the code: if Splunk is not configured the answer is `503`
-   and the code is not used up. Once the code is accepted the BFF `GET`s the login page for its
-   `cval` cookie, then `POST`s `username=…&password=…&cval=…` as a form to `SPLUNK_LOGIN_URL`
+2. **Splunk login.** The **login target** dropdown lists the Splunk instances the BFF is configured
+   for (`SPLUNK_TARGETS=SIT,UAT` with `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD`;
+   without it, one `default` target from `SPLUNK_LOGIN_URL` / `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`).
+   Picking one shows its login URL and username and switches the account the BFF logs in with; the
+   password never leaves the server — the page only shows whether it is set. The choice is remembered
+   per browser. A target with a missing URL, username or password is marked and cannot be submitted.
+   Checked **before** the code: an unknown target is a `400` and an unconfigured one a `503`, and in
+   both cases the code is not used up. Once the code is accepted the BFF `GET`s the login page for its
+   `cval` cookie, then `POST`s `username=…&password=…&cval=…` as a form to the target's login URL
    **without following redirects** (the cookie is on the 303), and reads `splunkd_8000` from
    `Set-Cookie`. **Splunk's TLS certificate is not verified by default** (`SPLUNK_TLS_INSECURE=true`:
    neither the chain nor the hostname); set it to `false`, plus `SPLUNK_CA_FILE` for a private CA,
@@ -515,7 +521,7 @@ Base path `/api/env-matrix`. Filters are repeated query parameters —
 | `POST` | `/health/recheck` | Re-run the probe (rotates the mock seed) |
 | `GET` | `/splunk/totp` | TOTP period/digits/drift + server time, Splunk mode — **`/splunk/*` is served by the BFF / mock, not the Java service** |
 | `GET` | `/splunk/totp/current` | Current code (only with `expose-current-code`; else `404`) |
-| `POST` | `/splunk/session` | `{code}` → cookie script; `401` bad/replayed code, `429` locked out, `502` Splunk failed, `503` not configured |
+| `POST` | `/splunk/session` | `{code, target?}` → cookie script (`target` = a login target id, the default when omitted); `400` unknown target, `401` bad/replayed code, `429` locked out, `502` Splunk failed, `503` not configured |
 | `GET` | `/splunk/audit` | Audit rows, newest first (`?limit=`, default 50) |
 | `GET` | `/aes/servers` | Distinct `(appSystem, host, ip)` from the endpoints; `?appSystem=` narrows |
 | `POST` | `/aes/encrypt` | `{iv, randomKey, host, ip, plainValue}` → `{encryptedValue}`; Secret Key = randomKey + host + ip; `400` naming `iv` if not 16 bytes |

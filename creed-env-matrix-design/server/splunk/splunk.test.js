@@ -14,7 +14,7 @@ import { Totp } from './totp.js';
 import { cookiesOf, createLoginClient } from './login-client.js';
 import { MemoryAuditStore } from './audit-store.js';
 import { createBroker, script } from './broker.js';
-import { loadConfig } from './config.js';
+import { describe as describeConfig, loadConfig } from './config.js';
 
 // RFC 6238 appendix B's SHA-1 key ("12345678901234567890"), Base32.
 const RFC_KEY = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
@@ -72,7 +72,9 @@ describe('config', () => {
     try {
       execFileSync('sh', ['-c', `printf 's3cret\\n' > ${join(dir, 'pw')}`]);
       const cfg = loadConfig({ SPLUNK_PASSWORD: 'plain', SPLUNK_PASSWORD_FILE: join(dir, 'pw') });
-      assert.equal(cfg.splunk.password, 's3cret');
+      assert.equal(cfg.splunk.targets[0].password, 's3cret');
+      const multi = loadConfig({ SPLUNK_TARGETS: 'sit', SPLUNK_TARGET_SIT_PASSWORD: 'plain', SPLUNK_TARGET_SIT_PASSWORD_FILE: join(dir, 'pw') });
+      assert.equal(multi.splunk.targets[0].password, 's3cret');
     } finally {
       rmSync(dir, { recursive: true });
     }
@@ -91,6 +93,42 @@ describe('config', () => {
     assert.throws(() => loadConfig({ SPLUNK_AUDIT_STORE: 'mysql', SPLUNK_DB_URL: 'postgres://u:secret@h/db' }),
       (e) => /does not fit SPLUNK_AUDIT_STORE=mysql/.test(e.message) && !e.message.includes('secret'));
     assert.throws(() => loadConfig({ SPLUNK_AUDIT_STORE: 'pg', SPLUNK_DB_URL: 'mysql://h/db' }), /SPLUNK_AUDIT_STORE=pg/);
+  });
+
+  test('without SPLUNK_TARGETS there is one target, default, from the original variables', () => {
+    const { splunk } = loadConfig({ SPLUNK_LOGIN_URL: 'https://a/login', SPLUNK_USERNAME: 'u', SPLUNK_PASSWORD: 'p' });
+    assert.equal(splunk.defaultTarget, 'default');
+    assert.deepEqual(splunk.targets.map(({ id, loginUrl, username, password, sessionCookie }) => ({ id, loginUrl, username, password, sessionCookie })),
+      [{ id: 'default', loginUrl: 'https://a/login', username: 'u', password: 'p', sessionCookie: 'splunkd_8000' }]);
+  });
+
+  test('SPLUNK_TARGETS: each target its own URL, user and password — no fallback to the globals', () => {
+    const { splunk } = loadConfig({
+      SPLUNK_TARGETS: ' sit, uat ',
+      SPLUNK_USERNAME: 'global-user', SPLUNK_PASSWORD: 'global-pw',
+      SPLUNK_TARGET_SIT_LABEL: 'SIT (CN)', SPLUNK_TARGET_SIT_LOGIN_URL: 'https://sit/login',
+      SPLUNK_TARGET_SIT_USERNAME: 'sit-user', SPLUNK_TARGET_SIT_PASSWORD: 'sit-pw',
+      SPLUNK_TARGET_UAT_LOGIN_URL: 'https://uat:8443/login', SPLUNK_TARGET_UAT_SESSION_COOKIE: 'splunkd_8443',
+      SPLUNK_DEFAULT_TARGET: 'uat',
+    });
+    assert.deepEqual(splunk.targets.map(({ id, label, username, password, sessionCookie }) => [id, label, username, password, sessionCookie]), [
+      ['SIT', 'SIT (CN)', 'sit-user', 'sit-pw', 'splunkd_8000'],
+      ['UAT', 'UAT', '', '', 'splunkd_8443'],
+    ]);
+    assert.equal(splunk.defaultTarget, 'UAT');
+  });
+
+  test('SPLUNK_TARGETS rejects a bad or repeated id and an unknown default', () => {
+    assert.throws(() => loadConfig({ SPLUNK_TARGETS: 'si-t' }), /SPLUNK_TARGETS/);
+    assert.throws(() => loadConfig({ SPLUNK_TARGETS: 'sit,SIT' }), /listed twice/);
+    assert.throws(() => loadConfig({ SPLUNK_TARGETS: 'sit', SPLUNK_DEFAULT_TARGET: 'prod' }), /SPLUNK_DEFAULT_TARGET/);
+  });
+
+  test('describe masks every target password', () => {
+    const cfg = loadConfig({ SPLUNK_TARGETS: 'a,b', SPLUNK_TARGET_A_PASSWORD: 'pa', SPLUNK_TARGET_B_PASSWORD: '' });
+    const text = JSON.stringify(describeConfig(cfg));
+    assert.equal(text.includes('"pa"'), false);
+    assert.deepEqual(describeConfig(cfg).splunk.targets.map((t) => t.password), ['***', '<unset>']);
   });
 
   test('rejects a schema name that is not a plain identifier', () => {
@@ -133,10 +171,14 @@ const goodLogin = (form, cookie, res) => {
 
 const listen = (server) => new Promise((r) => server.listen(0, '127.0.0.1', () => r(server.address().port)));
 
+const target = (over = {}) => ({
+  id: 'SIT', label: 'SIT', loginUrl: '', username: 'admin', password: 'pw', sessionCookie: 'splunkd_8000', ...over,
+});
+
 const splunkConfig = (over = {}) => ({
-  enabled: true, loginUrl: '', username: 'admin', password: 'pw', sessionCookie: 'splunkd_8000',
+  enabled: true, sessionCookie: 'splunkd_8000',
   scriptCookieName: 'splunkd_8089', scriptCookiePath: '/', prefetchCval: true, connectTimeoutMs: 2000,
-  readTimeoutMs: 2000, tlsInsecure: true, caFile: null, ...over,
+  readTimeoutMs: 2000, tlsInsecure: true, caFile: null, targets: [target()], defaultTarget: 'SIT', ...over,
 });
 
 describe('login client', () => {
@@ -149,29 +191,34 @@ describe('login client', () => {
   after(() => server.close());
 
   test('disabled returns a mock value and sends nothing', async () => {
-    const r = await createLoginClient(splunkConfig({ enabled: false, loginUrl: 'http://127.0.0.1:1/' })).login();
+    const r = await createLoginClient(splunkConfig({ enabled: false })).login(target({ loginUrl: 'http://127.0.0.1:1/' }));
     assert.match(r.cookieValue, /^mock-[0-9a-f]{64}$/);
     assert.equal(r.httpStatus, 0);
   });
 
   test('echoes cval, does not follow the 303, reads the cookie off it', async () => {
-    const r = await createLoginClient(splunkConfig({ loginUrl: url })).login();
+    const r = await createLoginClient(splunkConfig()).login(target({ loginUrl: url }));
     assert.deepEqual(r, { cookieValue: 'abc123', httpStatus: 303 });
   });
 
   test('wrong password is no_session_cookie with Splunk\'s 401', async () => {
-    await assert.rejects(createLoginClient(splunkConfig({ loginUrl: url, password: 'nope' })).login(),
+    await assert.rejects(createLoginClient(splunkConfig()).login(target({ loginUrl: url, password: 'nope' })),
       { reason: 'no_session_cookie', httpStatus: 401 });
   });
 
   test('without cval Splunk answers 200 and no cookie', async () => {
-    await assert.rejects(createLoginClient(splunkConfig({ loginUrl: url, prefetchCval: false })).login(),
+    await assert.rejects(createLoginClient(splunkConfig({ prefetchCval: false })).login(target({ loginUrl: url })),
       { reason: 'no_session_cookie', httpStatus: 200 });
   });
 
   test('unreachable is io_error', async () => {
-    await assert.rejects(createLoginClient(splunkConfig({ loginUrl: 'http://127.0.0.1:1/x' })).login(),
+    await assert.rejects(createLoginClient(splunkConfig()).login(target({ loginUrl: 'http://127.0.0.1:1/x' })),
       { reason: 'io_error', httpStatus: 0 });
+  });
+
+  test("a target's own session cookie name is the one read", async () => {
+    await assert.rejects(createLoginClient(splunkConfig()).login(target({ loginUrl: url, sessionCookie: 'splunkd_8443' })),
+      { reason: 'no_session_cookie', message: /splunkd_8443/ });
   });
 
   test('cookiesOf: later header wins, quotes stripped', () => {
@@ -204,13 +251,13 @@ describe('login client over https with a self-signed certificate', () => {
 
   test('tlsInsecure skips chain and hostname verification', async (t) => {
     if (!openssl) return t.skip('openssl not available');
-    const r = await createLoginClient(splunkConfig({ loginUrl: url, tlsInsecure: true })).login();
+    const r = await createLoginClient(splunkConfig({ tlsInsecure: true })).login(target({ loginUrl: url }));
     assert.equal(r.cookieValue, 'abc123');
   });
 
   test('verification on rejects the same server', async (t) => {
     if (!openssl) return t.skip('openssl not available');
-    await assert.rejects(createLoginClient(splunkConfig({ loginUrl: url, tlsInsecure: false })).login(),
+    await assert.rejects(createLoginClient(splunkConfig({ tlsInsecure: false })).login(target({ loginUrl: url })),
       { reason: 'io_error' });
   });
 });
@@ -218,10 +265,14 @@ describe('login client over https with a self-signed certificate', () => {
 describe('broker', () => {
   const client = { ip: '10.0.0.1', forwardedFor: null, userAgent: 'test' };
   let now = 1111111111_000;
+  const TARGETS = [
+    target({ id: 'SIT', label: 'SIT', loginUrl: 'https://sit/login', username: 'sit-user', password: 'sit-pw' }),
+    target({ id: 'UAT', label: 'UAT', loginUrl: 'https://uat/login', username: 'uat-user', password: 'uat-pw', sessionCookie: 'splunkd_8443' }),
+  ];
   const setup = (splunkOver = {}, login = async () => ({ cookieValue: 'v"al', httpStatus: 303 })) => {
     const store = new MemoryAuditStore();
     const totp = new Totp(totpConfig(), () => now);
-    const splunk = splunkConfig({ loginUrl: 'https://splunk/login', ...splunkOver });
+    const splunk = splunkConfig({ targets: TARGETS, ...splunkOver });
     const broker = createBroker({
       totp, splunk, store, now: () => now, log: { info() {}, warn() {} },
       loginClient: { mode: splunk.enabled ? 'real' : 'mock', login },
@@ -243,9 +294,41 @@ describe('broker', () => {
     assert.equal(JSON.stringify(rows).includes('v"al'), false, 'the cookie value is never audited');
   });
 
+  test("the chosen target's URL and credentials are the ones logged in with; the default when none is named", async () => {
+    now += 60_000;
+    const seen = [];
+    const { broker, store, totp } = setup({}, async (t) => { seen.push(t); return { cookieValue: 'x', httpStatus: 303 }; });
+    const s = await broker.issue(totp.currentCode(), client, 'UAT');
+    assert.equal(s.target, 'UAT');
+    assert.equal(s.sourceCookie, 'splunkd_8443');
+    assert.deepEqual([seen[0].loginUrl, seen[0].username, seen[0].password], ['https://uat/login', 'uat-user', 'uat-pw']);
+    assert.equal((await store.list(1))[0].detail, 'as uat-user on UAT');
+    now += 60_000;
+    assert.equal((await broker.issue(totp.currentCode(), client)).target, 'SIT');
+    assert.equal(seen[1].username, 'sit-user');
+  });
+
+  test('info lists the targets without any password', () => {
+    const { broker } = setup({ targets: [TARGETS[0], { ...TARGETS[1], password: '' }] });
+    const info = broker.info();
+    assert.deepEqual(info.targets.map((t) => [t.id, t.username, t.passwordSet, t.configured]),
+      [['SIT', 'sit-user', true, true], ['UAT', 'uat-user', false, false]]);
+    assert.equal(info.defaultTarget, 'SIT');
+    assert.equal(info.splunkConfigured, true);
+    assert.equal(JSON.stringify(info).includes('-pw'), false);
+  });
+
+  test('an unknown target is a 400 and the code is NOT consumed', async () => {
+    now += 60_000;
+    const { broker, totp } = setup();
+    const code = totp.currentCode();
+    await assert.rejects(broker.issue(code, client, 'PROD'), { status: 400, error: 'unknown_target' });
+    assert.equal(totp.verify(code).valid, true);
+  });
+
   test('Splunk not configured: 503 and the code is NOT consumed', async () => {
     now += 60_000;
-    const { broker, totp } = setup({ password: '' });
+    const { broker, totp } = setup({ targets: [target({ password: '' })] });
     const code = totp.currentCode();
     await assert.rejects(broker.issue(code, client), { status: 503, error: 'not_configured' });
     assert.equal(totp.verify(code).valid, true);

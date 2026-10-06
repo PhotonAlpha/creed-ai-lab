@@ -111,8 +111,11 @@ cp .env.server.example .env.server.local && chmod 600 .env.server.local
 | `ENV_MATRIX_TOTP_SECRET`（`_FILE`） | `JBSWY3DPEHPK3PXP` —— **演示用** | 新生成的 Base32 密钥 |
 | `ENV_MATRIX_TOTP_EXPOSE_CODE` | `true` —— 页面直接显示验证码 | 若 OTP 要真正起到门禁作用，设为 `false` |
 | `SPLUNK_ENABLED` | `false` —— 返回伪造 cookie | `true` |
-| `SPLUNK_LOGIN_URL` | `splunk.example.invalid` | `https://<splunk>:8000/en-US/account/login` |
-| `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`（`_FILE`） | `admin` / `admin` | 共享账号 |
+| `SPLUNK_LOGIN_URL` | `splunk.example.invalid` | `https://<splunk>:8000/en-US/account/login` —— 未设置 `SPLUNK_TARGETS` 时的唯一目标 |
+| `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`（`_FILE`） | `admin` / `admin` | 该唯一目标的共享账号 |
+| `SPLUNK_TARGETS` | 未设置 —— 只有一个目标 `default` | 页面下拉框中的多个实例，如 `SIT,UAT` |
+| `SPLUNK_TARGET_<ID>_LOGIN_URL` / `_USERNAME` / `_PASSWORD`（`_FILE`）/ `_LABEL` / `_SESSION_COOKIE` | — | 每个目标各自配置；**不会回退**到单目标变量 |
+| `SPLUNK_DEFAULT_TARGET` | `SPLUNK_TARGETS` 中的第一个 | 下拉框的初始选项 |
 | `SPLUNK_TLS_INSECURE` | `true` —— **不校验**证书 | 按需求；校验时设为 `false` + `SPLUNK_CA_FILE` |
 | `SPLUNK_AUDIT_STORE` | `memory` —— 保留最新 500 条，**重启即丢失** | 需要保留审计时设为 `pg` 或 `mysql` |
 | `SPLUNK_DB_URL`（pg / mysql） | `postgres://127.0.0.1:5432/env_matrix`；mysql 时为 `mysql://127.0.0.1:3306/env_matrix` | 真实主机；与所选数据库不符的 URL 启动时即报错 |
