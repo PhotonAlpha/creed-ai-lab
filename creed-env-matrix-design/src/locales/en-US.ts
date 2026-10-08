@@ -318,6 +318,7 @@ const enUS = {
   'aes.servers.title': 'Server list',
   'aes.servers.allApps': 'All app systems',
   'aes.filter.allEnvs': 'All env instances',
+  'aes.filter.allHosts': 'All hosts',
   'aes.servers.selectAll': 'Select all ({checked}/{total})',
   'aes.servers.empty': 'No servers in the configuration for this app system',
   'aes.servers.hasValue': 'saved',

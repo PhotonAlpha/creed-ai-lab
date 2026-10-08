@@ -1,0 +1,55 @@
+# creed-gateway-proxy — nginx-style reverse proxy on the SERVER, in front of ssh -R tunnels.
+#
+#   laptop:  ssh -N -R 127.0.0.1:15173:localhost:5173 user@server     (Vite on the laptop's :5173)
+#   server:  this app on :8088  ->  http://127.0.0.1:15173  ->  tunnel  ->  laptop localhost:5173
+#
+# The tunnel port binds to the server's loopback (sshd GatewayPorts=no, the default), so the only
+# way in from the network is this proxy. See README.md.
+server:
+  port: ${CREED_PROXY_PORT:8088}
+  address: ${CREED_PROXY_ADDRESS:0.0.0.0}
+
+spring:
+  application:
+    name: creed-gateway-proxy
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            # A missing tunnel is refused at once; this only bounds a target that does not answer.
+            connect-timeout: ${CREED_PROXY_CONNECT_TIMEOUT_MS:3000}
+          # Unset on purpose → no X-Forwarded-* headers. Gateway 4.3 adds them only when the CLIENT's
+          # address matches this regex, and also trusts that client's own X-Forwarded-For — for
+          # browsers arriving from anywhere that means ".*", i.e. trusting spoofed headers. Vite does
+          # not need them; set it (e.g. "10\.0\..*") if an app behind a tunnel builds absolute URLs.
+          # trusted-proxies: ...
+
+creed:
+  proxy:
+    health-timeout: 1s
+    # Matched in list order — catch-all /** last. More tunnels = more entries (each its own -R port).
+    # Override from the environment: CREED_PROXY_TARGET, or CREED_PROXY_ROUTES_<n>_<FIELD>.
+    routes:
+      - id: vite
+        path: /**
+        uri: ${CREED_PROXY_TARGET:http://127.0.0.1:5173}
+        strip-prefix: 0
+        # Off: Vite answers an unknown Host with 403 ("Blocked request. This host is not allowed").
+        preserve-host: false
+
+# Actuator on its own loopback port: /actuator/** on :8088 would be routed to the tunnel like any
+# other path (the app behind it owns the whole URL space), and the health details name internal ports.
+management:
+  server:
+    port: ${CREED_PROXY_MANAGEMENT_PORT:8089}
+    address: 127.0.0.1
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
+  endpoint:
+    health:
+      show-details: always
+    gateway:
+      access: read-only

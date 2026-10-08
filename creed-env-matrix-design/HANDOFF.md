@@ -174,6 +174,13 @@ Complete and verified in a browser against the real backend.
   - `ServerList` is `memo`'d: unfiltered it is ~717 checkboxes, and re-rendering them per keystroke
     cost 114 ms/char in dev (now 16 ms). Ticking one box still re-renders the group (~200 ms dev,
     all apps listed) — virtualise it if that ever matters.
+  - **Host filter + layout (2026-10-08):** the result list's `ScopeFilter` gains a host multi-select
+    (searchable; `Scope.hosts`, the server list keeps it empty). Options are the hosts under the
+    list's current app-system / env choices, and picks those choices no longer offer are pruned
+    (they would keep filtering while invisible). Server list and result list are now **one full row
+    each** (were 8/16 columns): server checkboxes flow into an `auto-fill, minmax(440px)` grid, the
+    table's Server column is 360 px and its body 600 px high. Verified by `tmp/aes-host-e2e.mjs`
+    (24 records → 2 hosts → 4 rows; env change prunes the hidden host) + screenshot.
   - Claude-in-Chrome could not screenshot any page in this session (even a JSON URL); headless
     Chrome over CDP (`--remote-debugging-port`) was used instead.
 - **i18n** en / zh-CN throughout, including the antd locale bundle; persisted in `localStorage`.

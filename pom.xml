@@ -57,6 +57,7 @@
         <module>creed-common-metrics</module>
         <module>creed-simple-metrics</module>
         <module>creed-jasper-report</module>
+        <module>creed-gateway-proxy</module>
     </modules>
 
     <dependencyManagement>

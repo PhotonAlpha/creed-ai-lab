@@ -58,12 +58,16 @@ const MAX_ROWS = 200;
 const utf8Length = (text: string) => new TextEncoder().encode(text).length;
 const serverKey = (s: Pick<AesServer, 'appSystem' | 'host' | 'ip'>) => `${s.appSystem}\u0000${s.host}\u0000${s.ip}`;
 
-/** What a list is narrowed to: one app system (or all) and any number of env instances (none = all). */
+/**
+ * What a list is narrowed to: one app system (or all), any number of env instances and hosts (none =
+ * all). Only the result list offers the host filter; the server list's scope keeps `hosts` empty.
+ */
 interface Scope {
   appSystem?: string;
   envInstances: string[];
+  hosts: string[];
 }
-const NO_SCOPE: Scope = { envInstances: [] };
+const NO_SCOPE: Scope = { envInstances: [], hosts: [] };
 const sortedDistinct = (values: (string | undefined)[]) => [...new Set(values.filter((v): v is string => !!v))].sort();
 /** The real config files' rule — randomkey + host + ip, no separator. The server derives the same. */
 const secretKeyOf = (randomKey: string | null | undefined, s: Pick<AesServer, 'host' | 'ip'>) => `${randomKey ?? ''}${s.host}${s.ip}`;
@@ -214,7 +218,8 @@ export function AesPage() {
   const servers = useMemo(() => allServers.filter((s) => (!serverScope.appSystem || s.appSystem === serverScope.appSystem)
     && (serverScope.envInstances.length === 0 || serverScope.envInstances.includes(s.envInstance))), [allServers, serverScope]);
   const records = useMemo(() => allRecords.filter((r) => (!recordScope.appSystem || r.appSystem === recordScope.appSystem)
-    && (recordScope.envInstances.length === 0 || recordScope.envInstances.includes(envOf.get(serverKey(r)) ?? ''))),
+    && (recordScope.envInstances.length === 0 || recordScope.envInstances.includes(envOf.get(serverKey(r)) ?? ''))
+    && (recordScope.hosts.length === 0 || recordScope.hosts.includes(r.host))),
   [allRecords, recordScope, envOf]);
 
   /** Env-instance options: those present under the list's current app-system choice. */
@@ -224,6 +229,19 @@ export function AesPage() {
   const recordEnvOptions = useMemo(() => sortedDistinct(allRecords
     .filter((r) => !recordScope.appSystem || r.appSystem === recordScope.appSystem).map((r) => envOf.get(serverKey(r)))),
   [allRecords, recordScope.appSystem, envOf]);
+  /** Host options: those under the result list's current app-system and env-instance choices. */
+  const recordHostOptions = useMemo(() => sortedDistinct(allRecords
+    .filter((r) => (!recordScope.appSystem || r.appSystem === recordScope.appSystem)
+      && (recordScope.envInstances.length === 0 || recordScope.envInstances.includes(envOf.get(serverKey(r)) ?? '')))
+    .map((r) => r.host)),
+  [allRecords, recordScope.appSystem, recordScope.envInstances, envOf]);
+  // Drop picked hosts a narrower app-system / env choice no longer offers — they would otherwise keep
+  // filtering while invisible in the select.
+  useEffect(() => {
+    const offered = new Set(recordHostOptions);
+    setRecordScope((scope) => (scope.hosts.every((h) => offered.has(h)) ? scope
+      : { ...scope, hosts: scope.hosts.filter((h) => offered.has(h)) }));
+  }, [recordHostOptions]);
 
   // Keep only selected records that are still listed — Delete selected must never reach a row the
   // filter is hiding.
@@ -534,7 +552,7 @@ export function AesPage() {
     {
       title: t('aes.records.server'),
       key: 'server',
-      width: 240,
+      width: 360,
       render: (_, r) => (
         <Space direction="vertical" size={0}>
           <Text>{`${r.host}:${r.ip}`}</Text>
@@ -812,88 +830,90 @@ export function AesPage() {
           </Space>
         </Modal>
 
-        <Row gutter={16}>
-          <Col xs={24} lg={8}>
-            <ProCard
-              title={t('aes.servers.title')}
-              bordered
-            >
-              <ScopeFilter scope={serverScope} onChange={setServerScope} apps={dimensions.appSystem} envs={serverEnvOptions} />
-              <Checkbox
-                indeterminate={checked.length > 0 && !allChecked}
-                checked={allChecked}
-                disabled={servers.length === 0}
-                onChange={(e) => setChecked(e.target.checked ? servers.map(serverKey) : [])}
+        {/* Server list, then the result list — each a full row: the result table has seven wide
+            columns and was cramped in two thirds of the page. */}
+        <ProCard
+          title={t('aes.servers.title')}
+          bordered
+        >
+          <ScopeFilter scope={serverScope} onChange={setServerScope} apps={dimensions.appSystem} envs={serverEnvOptions} />
+          <Checkbox
+            indeterminate={checked.length > 0 && !allChecked}
+            checked={allChecked}
+            disabled={servers.length === 0}
+            onChange={(e) => setChecked(e.target.checked ? servers.map(serverKey) : [])}
+          >
+            {t('aes.servers.selectAll', { checked: checked.length, total: servers.length })}
+          </Checkbox>
+          <div
+            style={{
+              marginTop: token.marginXS,
+              maxHeight: 320,
+              overflowY: 'auto',
+              border: `1px solid ${token.colorBorderSecondary}`,
+              borderRadius: token.borderRadius,
+              padding: token.paddingXS,
+            }}
+          >
+            <ServerList
+              servers={servers}
+              checked={checked}
+              onChange={setChecked}
+              saved={savedForProperty}
+              showAppSystem={!serverScope.appSystem}
+              emptyText={serversLoading ? t('aes.loading') : t('aes.servers.empty')}
+              savedLabel={t('aes.servers.hasValue')}
+            />
+          </div>
+        </ProCard>
+        <ProCard
+          title={t('aes.records.title')}
+          subTitle={t('aes.records.subtitle')}
+          bordered
+          extra={(
+            <Space wrap>
+              <Button
+                icon={<UnlockOutlined />}
+                disabled={selectedIds.length === 0}
+                loading={busy === 'decryptRows'}
+                onClick={decryptSelected}
               >
-                {t('aes.servers.selectAll', { checked: checked.length, total: servers.length })}
-              </Checkbox>
-              <div
-                style={{
-                  marginTop: token.marginXS,
-                  maxHeight: 420,
-                  overflowY: 'auto',
-                  border: `1px solid ${token.colorBorderSecondary}`,
-                  borderRadius: token.borderRadius,
-                  padding: token.paddingXS,
-                }}
+                {t('aes.records.decryptSelected', { count: selectedIds.length })}
+              </Button>
+              <Popconfirm
+                title={t('aes.records.deleteSelectedConfirm', { count: selectedIds.length })}
+                disabled={selectedIds.length === 0}
+                onConfirm={() => remove(selectedIds)}
               >
-                <ServerList
-                  servers={servers}
-                  checked={checked}
-                  onChange={setChecked}
-                  saved={savedForProperty}
-                  showAppSystem={!serverScope.appSystem}
-                  emptyText={serversLoading ? t('aes.loading') : t('aes.servers.empty')}
-                  savedLabel={t('aes.servers.hasValue')}
-                />
-              </div>
-            </ProCard>
-          </Col>
-          <Col xs={24} lg={16}>
-            <ProCard
-              title={t('aes.records.title')}
-              subTitle={t('aes.records.subtitle')}
-              bordered
-              extra={(
-                <Space wrap>
-                  <Button
-                    icon={<UnlockOutlined />}
-                    disabled={selectedIds.length === 0}
-                    loading={busy === 'decryptRows'}
-                    onClick={decryptSelected}
-                  >
-                    {t('aes.records.decryptSelected', { count: selectedIds.length })}
-                  </Button>
-                  <Popconfirm
-                    title={t('aes.records.deleteSelectedConfirm', { count: selectedIds.length })}
-                    disabled={selectedIds.length === 0}
-                    onConfirm={() => remove(selectedIds)}
-                  >
-                    <Button danger icon={<DeleteOutlined />} disabled={selectedIds.length === 0} loading={busy === 'delete'}>
-                      {t('aes.records.deleteSelected', { count: selectedIds.length })}
-                    </Button>
-                  </Popconfirm>
-                  <Button icon={<ReloadOutlined />} onClick={() => loadRecords()} loading={recordsLoading}>
-                    {t('aes.records.reload')}
-                  </Button>
-                </Space>
-              )}
-            >
-              <ScopeFilter scope={recordScope} onChange={setRecordScope} apps={dimensions.appSystem} envs={recordEnvOptions} />
-              <Table<AesRecord>
-                rowKey="id"
-                size="small"
-                columns={columns}
-                dataSource={records}
-                loading={recordsLoading}
-                scroll={{ x: 1540, y: 420 }}
-                pagination={false}
-                rowSelection={{ selectedRowKeys: selectedIds, onChange: (keys) => setSelectedIds(keys as number[]) }}
-                locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('aes.records.empty')} /> }}
-              />
-            </ProCard>
-          </Col>
-        </Row>
+                <Button danger icon={<DeleteOutlined />} disabled={selectedIds.length === 0} loading={busy === 'delete'}>
+                  {t('aes.records.deleteSelected', { count: selectedIds.length })}
+                </Button>
+              </Popconfirm>
+              <Button icon={<ReloadOutlined />} onClick={() => loadRecords()} loading={recordsLoading}>
+                {t('aes.records.reload')}
+              </Button>
+            </Space>
+          )}
+        >
+          <ScopeFilter
+            scope={recordScope}
+            onChange={setRecordScope}
+            apps={dimensions.appSystem}
+            envs={recordEnvOptions}
+            hosts={recordHostOptions}
+          />
+          <Table<AesRecord>
+            rowKey="id"
+            size="small"
+            columns={columns}
+            dataSource={records}
+            loading={recordsLoading}
+            scroll={{ x: 1700, y: 600 }}
+            pagination={false}
+            rowSelection={{ selectedRowKeys: selectedIds, onChange: (keys) => setSelectedIds(keys as number[]) }}
+            locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('aes.records.empty')} /> }}
+          />
+        </ProCard>
       </Space>
     </PageContainer>
   );
@@ -922,7 +942,15 @@ const ServerList = memo(function ServerList({
   }
   return (
     <Checkbox.Group value={checked} onChange={(values) => onChange(values as string[])} style={{ width: '100%' }}>
-      <Space direction="vertical" size={2} style={{ width: '100%' }}>
+      {/* Columns fill the full-width card; a single column would leave most of it empty. */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(440px, 1fr))',
+          gap: `${token.marginXXS}px ${token.marginSM}px`,
+          width: '100%',
+        }}
+      >
         {servers.map((s) => (
           <Checkbox key={serverKey(s)} value={serverKey(s)}>
             <Text>{`${s.host}:${s.ip}`}</Text>
@@ -941,7 +969,7 @@ const ServerList = memo(function ServerList({
             )}
           </Checkbox>
         ))}
-      </Space>
+      </div>
     </Checkbox.Group>
   );
 });
@@ -951,10 +979,12 @@ interface ScopeFilterProps {
   onChange: (scope: Scope) => void;
   apps: string[];
   envs: string[];
+  /** Host options; omitted, the list has no host filter. */
+  hosts?: string[];
 }
 
-/** App system (one or all) + env instances (any), the same control on both lists. */
-function ScopeFilter({ scope, onChange, apps, envs }: ScopeFilterProps) {
+/** App system (one or all) + env instances (any) on both lists, + hosts (any) where offered. */
+function ScopeFilter({ scope, onChange, apps, envs, hosts }: ScopeFilterProps) {
   const { t } = useI18n();
   const { token } = theme.useToken();
   return (
@@ -978,6 +1008,20 @@ function ScopeFilter({ scope, onChange, apps, envs }: ScopeFilterProps) {
         onChange={(envInstances: string[]) => onChange({ ...scope, envInstances })}
         options={envs.map((e) => ({ label: e, value: e }))}
       />
+      {hosts && (
+        <Select
+          mode="multiple"
+          allowClear
+          showSearch
+          // Host names are long; narrower, two picks already collapse into "+ 2 ...".
+          style={{ width: 520, maxWidth: '100%' }}
+          maxTagCount="responsive"
+          placeholder={t('aes.filter.allHosts')}
+          value={scope.hosts}
+          onChange={(picked: string[]) => onChange({ ...scope, hosts: picked })}
+          options={hosts.map((h) => ({ label: h, value: h }))}
+        />
+      )}
     </Space>
   );
 }

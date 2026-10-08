@@ -309,6 +309,7 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'aes.servers.title': '服务器列表',
   'aes.servers.allApps': '全部应用系统',
   'aes.filter.allEnvs': '全部环境实例',
+  'aes.filter.allHosts': '全部主机',
   'aes.servers.selectAll': '全选（{checked}/{total}）',
   'aes.servers.empty': '配置中没有该应用系统的服务器',
   'aes.servers.hasValue': '已保存',

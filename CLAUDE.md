@@ -1,7 +1,8 @@
 # creed-ai-lab — project conventions
 
-Multi-module OAuth2 mesh: authorization server, two edge gateways (reactive + servlet), four resource
-servers, config server, Camel gateway, two reporting apps, one React frontend, one Node mock server.
+Multi-module OAuth2 mesh: authorization server, two edge gateways (reactive + servlet) plus a
+standalone tunnel proxy, four resource servers, config server, Camel gateway, two reporting apps,
+one React frontend, one Node mock server.
 
 **Invariant conventions only** — this file loads in full every turn. Module-specific, changing, or
 narrative content belongs in a skill or a `HANDOFF.md` (§6).
@@ -50,6 +51,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-config-server` | 8443 | `/config-server` | HTTPS, Basic auth, `{cipher}` |
 | `creed-gateway` | 8080 | — | HTTPS, **reactive** |
 | `creed-gateway-partner` | 8095 | — | HTTPS, **servlet** |
+| `creed-gateway-proxy` | 8088 / 8089 | — | HTTP, **reactive**, standalone; nginx-style proxy on a remote server onto `ssh -R` tunnel ports (`creed.proxy.routes`); actuator on loopback 8089 |
 | `creed-simple-metrics` | 8096 | `/simple` (+ `/camel/*`) | HTTPS, Camel; **pull-mode** metrics; httpd forwards `/simple/*` |
 | `creed-report` | 9100 | `/report` | HTTP, standalone (outside the mesh) |
 | `creed-jasper-report` | 9110 | `/jasper-report` | HTTP, standalone; **JasperReports jrxml** twin of creed-report's approval-status PDF (+ xlsx/csv/html) |

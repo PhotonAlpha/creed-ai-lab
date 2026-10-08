@@ -212,7 +212,9 @@ Encrypt/decrypt a property value; save the ciphertext **and its randomkey** per 
   `/aes/records/decrypt` with a per-record IV and salt (Secret Key from the record) — the page takes
   them from the form row with the same property key, or from the only row. Mock and Java must stay byte-identical: `tmp/aes-parity.mjs` diffs them.
 - **Both lists filter in the browser** (`ScopeFilter`: app system + env instances, independent per
-  list) over one unfiltered fetch each; a record's env instance comes from its server (`envOf`).
+  list; the result list adds hosts) over one unfiltered fetch each; a record's env instance comes
+  from its server (`envOf`). Host picks a narrower app/env choice no longer offers are pruned — a
+  hidden pick would keep filtering invisibly. Both lists are full-width rows.
   Anything derived across lists (the "saved" tags) must read the *unfiltered* records. Identity stays
   `serverKey` = (appSystem, host, ip) even though `/aes/servers` is DISTINCT over 5 columns.
 - `List<Outer.@Valid Inner>`, not `List<@Valid Outer.Inner>` — the latter is a javac error that shows
