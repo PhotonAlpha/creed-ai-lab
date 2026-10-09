@@ -1,10 +1,16 @@
-# creed-gateway-proxy — nginx-style reverse proxy on the SERVER, in front of ssh -R tunnels.
+# creed-gateway-proxy — the Env Matrix front door on a server (replaces the Node BFF):
 #
-#   laptop:  ssh -N -R 127.0.0.1:15173:localhost:5173 user@server     (Vite on the laptop's :5173)
-#   server:  this app on :8088  ->  http://127.0.0.1:15173  ->  tunnel  ->  laptop localhost:5173
+#   /api/env-matrix/splunk/*   Splunk session broker, answered here (SplunkController)
+#   /api/**                    proxied to creed-resource-env-matrix (creed.proxy.routes, below)
+#   everything else            the built frontend in classpath:/static/, index.html for client routes
 #
-# The tunnel port binds to the server's loopback (sshd GatewayPorts=no, the default), so the only
-# way in from the network is this proxy. See README.md.
+# NO PASSWORD IN THIS FILE. Each one is supplied when the process starts — an environment variable,
+# a NAME_FILE, or (on a terminal) a hidden prompt:
+#   SPLUNK_TARGET_<ID>_PASSWORD   per Splunk target (only with creed.splunk.enabled=true)
+#   ENV_MATRIX_TOTP_SECRET        the TOTP secret (Base32; random for the run when not given)
+#   SPLUNK_DB_PASSWORD            the audit database (only with audit.store pg / mysql)
+#
+# Profile `tunnel` (application-tunnel.yml) is the original use: a catch-all onto an ssh -R tunnel.
 server:
   port: ${CREED_PROXY_PORT:8088}
   address: ${CREED_PROXY_ADDRESS:0.0.0.0}
@@ -12,6 +18,16 @@ server:
 spring:
   application:
     name: creed-gateway-proxy
+  web:
+    resources:
+      # StaticSiteConfig registers the static handlers (cache rules + SPA fallback); Boot's own /**
+      # mapping would sit beside them and serve without either.
+      add-mappings: false
+  webflux:
+    # Boot's welcome page answers GET / with index.html — without StaticSiteConfig's no-cache, so a
+    # browser could keep an index.html that points at assets a new build has replaced. It is only
+    # created for the pattern /**; with Boot's mappings off, this pattern is used for nothing else.
+    static-path-pattern: /boot-welcome-page-disabled/**
   cloud:
     gateway:
       server:
@@ -19,37 +35,105 @@ spring:
           httpclient:
             # A missing tunnel is refused at once; this only bounds a target that does not answer.
             connect-timeout: ${CREED_PROXY_CONNECT_TIMEOUT_MS:3000}
+            ssl:
+              # The env-matrix backend's certificate is issued by the local Creed-CA (the Node BFF and
+              # the Vite proxy did not verify it either). Applies to proxied routes only — never to
+              # the Splunk login, which has creed.splunk.tls-insecure.
+              use-insecure-trust-manager: ${CREED_PROXY_API_INSECURE:true}
           # Unset on purpose → no X-Forwarded-* headers. Gateway 4.3 adds them only when the CLIENT's
           # address matches this regex, and also trusts that client's own X-Forwarded-For — for
-          # browsers arriving from anywhere that means ".*", i.e. trusting spoofed headers. Vite does
-          # not need them; set it (e.g. "10\.0\..*") if an app behind a tunnel builds absolute URLs.
+          # browsers arriving from anywhere that means ".*", i.e. trusting spoofed headers.
           # trusted-proxies: ...
 
 creed:
+  secrets:
+    # Ask on the terminal for a secret the environment does not supply. Off, or without a terminal
+    # (systemd, nohup), a missing secret stays missing.
+    prompt: ${CREED_SECRETS_PROMPT:true}
   proxy:
     health-timeout: 1s
-    # Matched in list order — catch-all /** last. More tunnels = more entries (each its own -R port).
-    # Override from the environment: CREED_PROXY_TARGET, or CREED_PROXY_ROUTES_<n>_<FIELD>.
+    # Where the built frontend is: copy creed-env-matrix-design/dist/* into src/main/resources/static/
+    # before packaging, or point this at a directory (file:/opt/env-matrix/static/) to swap the UI
+    # without rebuilding the jar. Comma-separated; first match wins.
+    static-locations: ${CREED_PROXY_STATIC_LOCATIONS:classpath:/static/}
+    # Matched in list order. The Splunk controller outranks every route.
     routes:
-      - id: vite
-        path: /**
-        uri: ${CREED_PROXY_TARGET:http://127.0.0.1:5173}
-        strip-prefix: 0
-        # Off: Vite answers an unknown Host with 403 ("Blocked request. This host is not allowed").
-        preserve-host: false
+      - id: env-matrix-api
+        path: /api/**
+        uri: ${CREED_PROXY_API_TARGET:https://localhost:18095}
 
-# Actuator on its own loopback port: /actuator/** on :8088 would be routed to the tunnel like any
-# other path (the app behind it owns the whole URL space), and the health details name internal ports.
-management:
-  server:
-    port: ${CREED_PROXY_MANAGEMENT_PORT:8089}
-    address: 127.0.0.1
-  endpoints:
-    web:
-      exposure:
-        include: health,info,gateway
-  endpoint:
-    health:
-      show-details: always
-    gateway:
-      access: read-only
+  # One-time code. 60 s by request; the secret is NOT a property (see the header).
+  totp:
+    period-seconds: ${ENV_MATRIX_TOTP_PERIOD_SECONDS:30}
+    digits: ${ENV_MATRIX_TOTP_DIGITS:6}
+    allowed-drift-steps: ${ENV_MATRIX_TOTP_DRIFT_STEPS:5}
+    reject-replay: true
+    # On by request: the page shows the current code, so the OTP is decorative until this is off.
+    expose-current-code: ${ENV_MATRIX_TOTP_EXPOSE_CODE:true}
+    max-failures: 5
+    failure-window: 60s
+
+  splunk:
+    # false: a fabricated mock-… cookie, no network — and no password asked for.
+    enabled: ${SPLUNK_ENABLED:false}
+    # Defaults for targets that set none. splunkd_<port> follows the port Splunk Web runs on.
+    session-cookie: ${SPLUNK_SESSION_COOKIE:splunkd_8000}
+    script-cookie-name: ${SPLUNK_SCRIPT_COOKIE_NAME:splunkd_8089}
+    script-cookie-path: /
+    prefetch-cval: true
+    connect-timeout: 5s
+    read-timeout: 15s
+    # On by request: Splunk's certificate is not verified. false: system roots, or ca-file (PEM).
+    tls-insecure: ${SPLUNK_TLS_INSECURE:true}
+    ca-file: ${SPLUNK_CA_FILE:}
+    default-target: ${SPLUNK_DEFAULT_TARGET:}
+    # The login targets the page offers. Password: SPLUNK_TARGET_<ID>_PASSWORD (or _FILE, or the prompt).
+    # Per target, optionally: session-cookie, script-cookie-name, script-cookie-path,
+    # tunnel (host:port of a TCP forward to connect through), tunnel-default.
+    # Several targets: copy the block, or put the list in an external file
+    # (--spring.config.additional-location=file:./splunk-targets.yml).
+    targets:
+#      - id: ${SPLUNK_TARGET_ID:default}
+#        label: ${SPLUNK_LABEL:default}
+#        login-url: ${SPLUNK_LOGIN_URL:https://splunk.example.invalid:8000/en-US/account/login}
+#        username: ${SPLUNK_USERNAME:admin}
+#        tunnel: ${SPLUNK_TUNNEL:}
+#        tunnel-default: ${SPLUNK_TUNNEL_DEFAULT:false}
+      - id: UAT
+        label: UAT
+        login-url: https://uat-splunk.example:8000/en-US/account/login
+        username: ${SPLUNK_USERNAME:admin}
+        tunnel-default: false
+      - id: SIT
+        label: SIT
+        login-url: http://sit-splunk.example:8000/en-US/account/login
+        username: ${SPLUNK_USERNAME:admin}
+        tunnel-default: false
+    # No session is issued inside these windows (HH:mm-HH:mm[,…]; an end before the start crosses
+    # midnight). Checked before the code, so a blocked request never spends it. Blank: never blocked.
+    block:
+      windows: ${SPLUNK_BLOCK_WINDOWS:10:00-09:00}
+      # Blank: the server's own time zone.
+      zone: ${SPLUNK_BLOCK_ZONE:}
+    audit:
+      # memory (newest 500, lost on restart) | pg (<schema>.splunk_audit) | mysql (splunk_audit)
+      store: ${SPLUNK_AUDIT_STORE:memory}
+      # JDBC URL; the Node BFF's postgres://… / mysql://… form is accepted too.
+      url: ${SPLUNK_DB_URL:}
+      username: ${SPLUNK_DB_USER:artifactory}
+      schema: ${SPLUNK_AUDIT_SCHEMA:splunk_broker}
+
+# Actuator on its own loopback port: on :8088, /actuator/** would fall to the routes or the SPA.
+#management:
+#  server:
+#    port: ${CREED_PROXY_MANAGEMENT_PORT:8089}
+#    address: 127.0.0.1
+#  endpoints:
+#    web:
+#      exposure:
+#        include: health,info,gateway
+#  endpoint:
+#    health:
+#      show-details: always
+#    gateway:
+#      access: read-only

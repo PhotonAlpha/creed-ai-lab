@@ -118,7 +118,9 @@ export function loadConfig(env = process.env) {
   const totp = {
     // Blank => the broker answers 503 instead of accepting any code. The fallback is a DEMO secret.
     secret: readSecret(env, 'ENV_MATRIX_TOTP_SECRET', 'JBSWY3DPEHPK3PXP'),
-    periodSeconds: int(env, 'ENV_MATRIX_TOTP_PERIOD_SECONDS', 30, 1, 3600),
+    // 60 by request (as creed-gateway-proxy). Authenticator apps assume 30: one reading the same secret
+    // would show different codes — the page's exposed code is what this broker accepts.
+    periodSeconds: int(env, 'ENV_MATRIX_TOTP_PERIOD_SECONDS', 60, 1, 3600),
     digits: int(env, 'ENV_MATRIX_TOTP_DIGITS', 6, 6, 8),
     allowedDriftSteps: int(env, 'ENV_MATRIX_TOTP_DRIFT_STEPS', 1, 0, 5),
     rejectReplay: bool(env.ENV_MATRIX_TOTP_REJECT_REPLAY, true),

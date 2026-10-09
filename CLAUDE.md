@@ -51,7 +51,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-config-server` | 8443 | `/config-server` | HTTPS, Basic auth, `{cipher}` |
 | `creed-gateway` | 8080 | — | HTTPS, **reactive** |
 | `creed-gateway-partner` | 8095 | — | HTTPS, **servlet** |
-| `creed-gateway-proxy` | 8088 / 8089 | — | HTTP, **reactive**, standalone; nginx-style proxy on a remote server onto `ssh -R` tunnel ports (`creed.proxy.routes`); actuator on loopback 8089 |
+| `creed-gateway-proxy` | 8088 / 8089 | — | HTTP, **reactive**, standalone; Env Matrix front door: built frontend from `static/`, **owns the Splunk broker** (moved from the Node BFF; secrets at startup, never in yml), `/api/**` → env-matrix; profile `tunnel` = proxy onto `ssh -R` ports; actuator on loopback 8089 |
 | `creed-simple-metrics` | 8096 | `/simple` (+ `/camel/*`) | HTTPS, Camel; **pull-mode** metrics; httpd forwards `/simple/*` |
 | `creed-report` | 9100 | `/report` | HTTP, standalone (outside the mesh) |
 | `creed-jasper-report` | 9110 | `/jasper-report` | HTTP, standalone; **JasperReports jrxml** twin of creed-report's approval-status PDF (+ xlsx/csv/html) |
@@ -59,7 +59,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-order` | 18091 / 18092 | `/api/order` | primary / secondary |
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
-| `creed-env-matrix-design` | 5173 / 3002 | — | Vite, proxies `/api` → `VITE_API_TARGET` (`.env`: 18095); **BFF** `npm run bff` on 3002 owns the Splunk broker (moved out of Java) |
+| `creed-env-matrix-design` | 5173 / 3002 | — | Vite, proxies `/api` → `VITE_API_TARGET` (`.env`: 18095) and the Splunk API → `VITE_SPLUNK_TARGET` (`.env`: creed-gateway-proxy 8088); legacy Node BFF `npm run bff` on 3002 |
 | `creed-mock-buddy` | 5173 / 4000 | — | HTTP / HTTPS (borrows `creed-gateway` cert), **Node/Fastify**; YAML mock server, standalone |
 | `creed-backstage` | 3003 / 7007 | — | **Backstage**: Software Catalog (`catalog/**/catalog-info.yaml`) + Swagger UI; one `catalog/<module>/` per functional area; multi-file OpenAPI → Redocly bundle `dist/openapi.yaml` (committed, `$text`), `yarn openapi:build [module]` |
 | `.support/httpd` (docker) | 6666 / 16666 / 9443 | `/mod_cluster_manager` | Apache + mod_proxy_cluster: MCMP over **mTLS** / browser status page (loopback, no client cert; 666x is browser-blocked) / HTTPS traffic; `creed-simple-metrics` registers here |

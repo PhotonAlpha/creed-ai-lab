@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { Link, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ProLayout } from '@ant-design/pro-components';
 import { Button, theme } from 'antd';
 import { ApartmentOutlined, GlobalOutlined, KeyOutlined, LockOutlined, SettingOutlined, TableOutlined } from '@ant-design/icons';
@@ -61,6 +61,7 @@ export function App() {
           <Route path="/config" element={<ConfigPage />} />
           <Route path="/splunk" element={<SplunkPage />} />
           <Route path="/aes" element={<AesPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </ProLayout>
     </div>

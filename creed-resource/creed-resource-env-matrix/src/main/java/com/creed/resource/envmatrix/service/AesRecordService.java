@@ -4,13 +4,25 @@ import com.creed.resource.envmatrix.api.dto.AesRecordBatchSaveRequest;
 import com.creed.resource.envmatrix.api.dto.AesRecordDecryptRequest;
 import com.creed.resource.envmatrix.api.dto.AesRecordDecryptResult;
 import com.creed.resource.envmatrix.api.dto.AesRecordDto;
+import com.creed.resource.envmatrix.api.dto.AesRecordFilterOptions;
+import com.creed.resource.envmatrix.api.dto.AesRecordPage;
 import com.creed.resource.envmatrix.api.dto.AesRecordSaveRequest;
 import com.creed.resource.envmatrix.api.dto.AesRecordSaveResponse;
 import com.creed.resource.envmatrix.api.dto.AesRecordUpdateRequest;
+import com.creed.resource.envmatrix.api.dto.AesServerRef;
 import com.creed.resource.envmatrix.domain.EnvAesRecord;
 import com.creed.resource.envmatrix.domain.EnvAesRecordRepository;
+import com.creed.resource.envmatrix.domain.EnvEndpoint;
 import com.creed.resource.envmatrix.domain.EnvEndpointRepository;
 import com.creed.resource.envmatrix.domain.EnvServer;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Order;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -48,6 +60,20 @@ public class AesRecordService {
     private final EnvEndpointRepository endpointRepository;
     private final AesCryptoService crypto;
 
+    /** Criteria queries for the paged list: optional filters, without a null-typed parameter for PG. */
+    @PersistenceContext
+    private EntityManager em;
+
+    /** Largest page the result list may ask for (the page's own size, by request). */
+    public static final int MAX_PAGE_SIZE = 100;
+
+    /** Sortable columns → entity attribute. Anything else is a 400, never a raw path into the query. */
+    private static final Map<String, String> SORTS = Map.of(
+            "appSystem", "appSystem", "host", "host", "propertyKey", "propertyKey", "updatedAt", "updatedAt");
+
+    /** The identity order — the default sort, and the tie-break after any other so pages are stable. */
+    private static final List<String> IDENTITY = List.of("appSystem", "propertyKey", "host", "ip");
+
     /** Distinct {@code (appSystem, host, ip)} from the endpoint table — the page's server list. */
     @Transactional(readOnly = true)
     public List<EnvServer> servers(String appSystem) {
@@ -65,6 +91,107 @@ public class AesRecordService {
                 .filter(r -> !StringUtils.hasText(propertyKey) || r.getPropertyKey().equals(propertyKey.strip()))
                 .map(AesRecordDto::of)
                 .toList();
+    }
+
+    /**
+     * One page of records matching {@code query}, filtered, sorted and counted in the database — the
+     * result list no longer downloads the table.
+     *
+     * @param page  1-based
+     * @param sort  one of {@link #SORTS}, or null for the identity order
+     * @param order {@code asc} (default) or {@code desc}
+     */
+    @Transactional(readOnly = true)
+    public AesRecordPage page(AesRecordQuery query, int page, int size, String sort, String order) {
+        if (page < 1) throw new InvalidQueryException("page", "must be 1 or more");
+        if (size < 1 || size > MAX_PAGE_SIZE) throw new InvalidQueryException("size", "must be between 1 and " + MAX_PAGE_SIZE);
+        if (sort != null && !sort.isBlank() && !SORTS.containsKey(sort)) {
+            throw new InvalidQueryException("sort", "must be one of " + SORTS.keySet().stream().sorted().toList());
+        }
+        boolean desc = "desc".equalsIgnoreCase(order);
+        if (order != null && !order.isBlank() && !desc && !"asc".equalsIgnoreCase(order)) {
+            throw new InvalidQueryException("order", "must be asc or desc");
+        }
+
+        CriteriaBuilder cb = em.getCriteriaBuilder();
+        CriteriaQuery<Long> count = cb.createQuery(Long.class);
+        Root<EnvAesRecord> counted = count.from(EnvAesRecord.class);
+        count.select(cb.count(counted)).where(where(cb, count, counted, query, true, true));
+        long total = em.createQuery(count).getSingleResult();
+
+        CriteriaQuery<EnvAesRecord> select = cb.createQuery(EnvAesRecord.class);
+        Root<EnvAesRecord> r = select.from(EnvAesRecord.class);
+        List<Order> orderBy = new ArrayList<>();
+        if (sort != null && !sort.isBlank()) {
+            orderBy.add(desc ? cb.desc(r.get(SORTS.get(sort))) : cb.asc(r.get(SORTS.get(sort))));
+        }
+        IDENTITY.forEach(attr -> orderBy.add(cb.asc(r.get(attr))));
+        orderBy.add(cb.asc(r.get("id")));
+        select.select(r).where(where(cb, select, r, query, true, true)).orderBy(orderBy);
+        List<AesRecordDto> items = total == 0 ? List.of() : em.createQuery(select)
+                .setFirstResult((int) Math.min(Integer.MAX_VALUE, (long) (page - 1) * size))
+                .setMaxResults(size)
+                .getResultList().stream().map(AesRecordDto::of).toList();
+        return new AesRecordPage(items, total, page, size);
+    }
+
+    /** Filter options for the result list, each narrowed by the filters to its left. */
+    @Transactional(readOnly = true)
+    public AesRecordFilterOptions filterOptions(AesRecordQuery query) {
+        CriteriaBuilder cb = em.getCriteriaBuilder();
+
+        // Env instances live on endpoint rows: those of servers that hold a record (in the app system).
+        CriteriaQuery<String> envs = cb.createQuery(String.class);
+        Root<EnvEndpoint> e = envs.from(EnvEndpoint.class);
+        Subquery<Integer> held = envs.subquery(Integer.class);
+        Root<EnvAesRecord> rec = held.from(EnvAesRecord.class);
+        List<Predicate> heldWhere = new ArrayList<>(List.of(cb.equal(rec.get("appSystem"), e.get("appSystem")),
+                cb.equal(rec.get("host"), e.get("host")), cb.equal(rec.get("ip"), e.get("ip"))));
+        if (query.appSystem() != null) heldWhere.add(cb.equal(rec.get("appSystem"), query.appSystem()));
+        held.select(cb.literal(1)).where(heldWhere.toArray(Predicate[]::new));
+        envs.select(e.get("envInstance")).distinct(true).where(cb.exists(held)).orderBy(cb.asc(e.get("envInstance")));
+
+        return new AesRecordFilterOptions(
+                em.createQuery(envs).getResultList(),
+                distinctRecordColumn(cb, "host", query, false),
+                distinctRecordColumn(cb, "propertyKey", query, true));
+    }
+
+    /** {@code (appSystem, host, ip)} of every server holding a value for any of {@code propertyKeys}. */
+    @Transactional(readOnly = true)
+    public List<AesServerRef> savedServers(List<String> propertyKeys) {
+        List<String> keys = new AesRecordQuery(null, null, null, propertyKeys).propertyKeys();
+        if (keys.isEmpty()) return List.of(); // `in ()` is not valid SQL
+        CriteriaBuilder cb = em.getCriteriaBuilder();
+        CriteriaQuery<AesServerRef> q = cb.createQuery(AesServerRef.class);
+        Root<EnvAesRecord> r = q.from(EnvAesRecord.class);
+        q.select(cb.construct(AesServerRef.class, r.get("appSystem"), r.get("host"), r.get("ip"))).distinct(true)
+                .where(r.get("propertyKey").in(keys));
+        return em.createQuery(q).getResultList();
+    }
+
+    private List<String> distinctRecordColumn(CriteriaBuilder cb, String attribute, AesRecordQuery query, boolean withHosts) {
+        CriteriaQuery<String> q = cb.createQuery(String.class);
+        Root<EnvAesRecord> r = q.from(EnvAesRecord.class);
+        q.select(r.get(attribute)).distinct(true).where(where(cb, q, r, query, withHosts, false)).orderBy(cb.asc(r.get(attribute)));
+        return em.createQuery(q).getResultList();
+    }
+
+    private static Predicate[] where(CriteriaBuilder cb, CriteriaQuery<?> q, Root<EnvAesRecord> r, AesRecordQuery query,
+                                     boolean withHosts, boolean withPropertyKeys) {
+        List<Predicate> where = new ArrayList<>();
+        if (query.appSystem() != null) where.add(cb.equal(r.get("appSystem"), query.appSystem()));
+        if (!query.envInstances().isEmpty()) {
+            Subquery<Integer> sq = q.subquery(Integer.class);
+            Root<EnvEndpoint> e = sq.from(EnvEndpoint.class);
+            sq.select(cb.literal(1)).where(cb.equal(e.get("appSystem"), r.get("appSystem")),
+                    cb.equal(e.get("host"), r.get("host")), cb.equal(e.get("ip"), r.get("ip")),
+                    e.get("envInstance").in(query.envInstances()));
+            where.add(cb.exists(sq));
+        }
+        if (withHosts && !query.hosts().isEmpty()) where.add(r.get("host").in(query.hosts()));
+        if (withPropertyKeys && !query.propertyKeys().isEmpty()) where.add(r.get("propertyKey").in(query.propertyKeys()));
+        return where.toArray(Predicate[]::new);
     }
 
     /** One plain value, encrypted for and saved against every listed server — a batch of one. */
@@ -260,6 +387,20 @@ public class AesRecordService {
 
         public String field() {
             return "items[" + index + "].propertyKey";
+        }
+    }
+
+    /** A paging / sorting parameter out of range — a 400 naming it, shaped like a validation failure. */
+    public static class InvalidQueryException extends RuntimeException {
+        private final String field;
+
+        public InvalidQueryException(String field, String message) {
+            super(message);
+            this.field = field;
+        }
+
+        public String field() {
+            return field;
         }
     }
 

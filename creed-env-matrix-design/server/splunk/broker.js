@@ -23,16 +23,27 @@ export class BrokerError extends Error {
   }
 }
 
+/** True for an https login URL; plain http or anything unparsable is not. */
+export function isHttps(loginUrl) {
+  try {
+    return new URL(loginUrl).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 const truncate = (s, max) => (s == null || s.length <= max ? s ?? null : s.slice(0, max));
 
 export const fingerprint = (value) => createHash('sha256').update(value).digest('hex').slice(0, 16);
 
 /**
- * `document.cookie = "splunkd_8089=<value>; path=/; Secure; SameSite=Lax";` — escaped for a JS string
- * literal; a real Splunk value is hex, but a quote in it would turn a pasted script into something else.
+ * `document.cookie = "splunkd_8089=<value>; path=/; Secure; SameSite=Lax";` — `Secure` only when
+ * Splunk Web is https: the script runs on Splunk Web's own page, and a browser ignores a Secure cookie
+ * set from an http one. Escaped for a JS string literal; a real Splunk value is hex, but a quote in it
+ * would turn a pasted script into something else.
  */
-export function script(name, value, path) {
-  const escaped = `${name}=${value}; path=${path}; Secure; SameSite=Lax`
+export function script(name, value, path, secure = true) {
+  const escaped = `${name}=${value}; path=${path}${secure ? '; Secure' : ''}; SameSite=Lax`
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
     .replace(/[\r\n]/g, '');
@@ -226,12 +237,14 @@ export function createBroker({ totp, loginClient, splunk, store, log = console, 
       });
       log.info(`[splunk] session issued to ${client.ip} target=${target.id}${route} fingerprint=${cookieFingerprint} [${correlationId}]`);
 
+      const secure = isHttps(target.loginUrl);
       return {
         target: target.id,
         sourceCookie: sessionCookie,
         cookieName: scriptCookieName,
         cookieValue: result.cookieValue,
-        script: script(scriptCookieName, result.cookieValue, scriptCookiePath),
+        script: script(scriptCookieName, result.cookieValue, scriptCookiePath, secure),
+        secure,
         tunnel: viaTunnel ? tunnelAddress(target.tunnel) : null,
         mode: loginClient.mode,
         correlationId,

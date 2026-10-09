@@ -272,6 +272,18 @@ export interface TotpInfo {
   /** The target the dropdown starts on, and the one used when a request names none. */
   defaultTarget: string;
   scriptCookieName: string;
+  /** Times of day no session is issued (creed-gateway-proxy); absent from older brokers. */
+  block?: SplunkBlock;
+}
+
+/** `creed.splunk.block` — windows like `22:00-09:00`, read on `zone`. */
+export interface SplunkBlock {
+  windows: string[];
+  zone: string;
+  /** A window is in force right now (on the server's clock). */
+  blocked: boolean;
+  /** Server epoch ms at which `blocked` flips — when the page asks again; null when it never does. */
+  changesAtMillis: number | null;
 }
 
 /** One Splunk instance the broker can log into. The password never leaves the server. */
@@ -318,6 +330,8 @@ export interface SplunkSession {
   cookieName: string;
   cookieValue: string;
   script: string;
+  /** The script's cookie carries `Secure` — only for an https login URL (a browser drops it on http). */
+  secure?: boolean;
   /** The tunnel the login went through, or null for a direct connection. */
   tunnel: string | null;
   mode: 'real' | 'mock';
@@ -449,6 +463,42 @@ export interface AesBatchCryptoResult {
 }
 
 /** Plain values, not ciphertexts: the backend encrypts each item once per server. */
+/** What the result list is narrowed to; empty lists mean "any". */
+export interface AesRecordQuery {
+  appSystem?: string;
+  envInstances: string[];
+  hosts: string[];
+  propertyKeys: string[];
+}
+
+export type AesRecordSortField = 'appSystem' | 'host' | 'propertyKey' | 'updatedAt';
+
+export interface AesRecordSort {
+  field: AesRecordSortField;
+  order: 'asc' | 'desc';
+}
+
+/** One page of `/aes/records/page` — `page` is 1-based, `total` counts every match. */
+export interface AesRecordPage {
+  items: AesRecord[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+/** Filter options, each narrowed by the choices to its left (app → env → host → property key). */
+export interface AesRecordFilterOptions {
+  envInstances: string[];
+  hosts: string[];
+  propertyKeys: string[];
+}
+
+export interface AesServerRef {
+  appSystem: string;
+  host: string;
+  ip: string;
+}
+
 export interface AesRecordBatchSaveRequest {
   items: { propertyKey: string; plainValue: string; iv: string; salt: string; randomKey?: string; note?: string }[];
   servers: AesServer[];

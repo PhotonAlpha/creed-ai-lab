@@ -9,11 +9,15 @@ import com.creed.resource.envmatrix.api.dto.AesRecordBatchSaveRequest;
 import com.creed.resource.envmatrix.api.dto.AesRecordDecryptRequest;
 import com.creed.resource.envmatrix.api.dto.AesRecordDecryptResult;
 import com.creed.resource.envmatrix.api.dto.AesRecordDto;
+import com.creed.resource.envmatrix.api.dto.AesRecordFilterOptions;
+import com.creed.resource.envmatrix.api.dto.AesRecordPage;
 import com.creed.resource.envmatrix.api.dto.AesRecordSaveRequest;
 import com.creed.resource.envmatrix.api.dto.AesRecordSaveResponse;
 import com.creed.resource.envmatrix.api.dto.AesRecordUpdateRequest;
+import com.creed.resource.envmatrix.api.dto.AesServerRef;
 import com.creed.resource.envmatrix.domain.EnvServer;
 import com.creed.resource.envmatrix.service.AesCryptoService;
+import com.creed.resource.envmatrix.service.AesRecordQuery;
 import com.creed.resource.envmatrix.service.AesRecordService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -40,7 +44,11 @@ import java.util.List;
  * POST   /aes/decrypt                   {iv, randomKey, host, ip, encryptedValue} -> {plainValue} | 422
  * POST   /aes/encrypt/batch             {items: [{iv, randomKey, host, ip, value}]} -> per-row results
  * POST   /aes/decrypt/batch             same shape, value = ciphertext                -> per-row results
- * GET    /aes/records?appSystem=&amp;propertyKey=
+ * GET    /aes/records?appSystem=&amp;propertyKey=        every record (kept for scripts; the page uses /page)
+ * GET    /aes/records/page?appSystem=&amp;envInstance=*&amp;host=*&amp;propertyKey=*&amp;page=1&amp;size=100&amp;sort=&amp;order=
+ *                                -> {items, total, page, size}; size &lt;= 100, sort host|propertyKey|updatedAt|appSystem
+ * GET    /aes/records/filters?appSystem=&amp;envInstance=*&amp;host=*   -> {envInstances, hosts, propertyKeys}
+ * GET    /aes/records/saved-servers?propertyKey=*       -> [{appSystem, host, ip}] holding any of them
  * POST   /aes/records                   {propertyKey, plainValue, iv, randomKey, note, servers[]} -> encrypt + upsert per server
  * POST   /aes/records/batch             {items: [{propertyKey, plainValue, iv, randomKey, note}], servers[]}
  * PUT    /aes/records/{id}
@@ -92,6 +100,30 @@ public class AesController {
     public List<AesRecordDto> list(@RequestParam(required = false) String appSystem,
                                    @RequestParam(required = false) String propertyKey) {
         return records.list(appSystem, propertyKey);
+    }
+
+    @GetMapping("/records/page")
+    public AesRecordPage page(@RequestParam(required = false) String appSystem,
+                              @RequestParam(name = "envInstance", required = false) List<String> envInstances,
+                              @RequestParam(name = "host", required = false) List<String> hosts,
+                              @RequestParam(name = "propertyKey", required = false) List<String> propertyKeys,
+                              @RequestParam(defaultValue = "1") int page,
+                              @RequestParam(defaultValue = "" + AesRecordService.MAX_PAGE_SIZE) int size,
+                              @RequestParam(required = false) String sort,
+                              @RequestParam(required = false) String order) {
+        return records.page(new AesRecordQuery(appSystem, envInstances, hosts, propertyKeys), page, size, sort, order);
+    }
+
+    @GetMapping("/records/filters")
+    public AesRecordFilterOptions filters(@RequestParam(required = false) String appSystem,
+                                          @RequestParam(name = "envInstance", required = false) List<String> envInstances,
+                                          @RequestParam(name = "host", required = false) List<String> hosts) {
+        return records.filterOptions(new AesRecordQuery(appSystem, envInstances, hosts, null));
+    }
+
+    @GetMapping("/records/saved-servers")
+    public List<AesServerRef> savedServers(@RequestParam(name = "propertyKey", required = false) List<String> propertyKeys) {
+        return records.savedServers(propertyKeys);
     }
 
     @PostMapping("/records")

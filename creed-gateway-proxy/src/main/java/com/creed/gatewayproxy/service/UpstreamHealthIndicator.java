@@ -14,14 +14,15 @@ import org.springframework.stereotype.Component;
 import com.creed.gatewayproxy.config.ProxyProperties;
 
 /**
- * {@code /actuator/health} component {@code tunnels}: a TCP connect to every route's target. With
+ * {@code /actuator/health} component {@code upstreams}: a TCP connect to every route's target (the
+ * env-matrix backend by default; tunnel ports under the tunnel profile). With
  * {@code ssh -R} the server-side port exists only while the session does, so a refused connect means
  * the tunnel is down. An accepted one proves the tunnel only — the laptop's service behind it may
  * still be stopped, which the proxy then answers with a 502 per request.
  */
-@Component("tunnels")
+@Component("upstreams")
 @RequiredArgsConstructor
-public class TunnelHealthIndicator implements HealthIndicator {
+public class UpstreamHealthIndicator implements HealthIndicator {
 
     private final ProxyProperties properties;
 

@@ -1,8 +1,11 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Locale } from 'antd/es/locale';
-import enUSAntd from 'antd/locale/en_US';
-import zhCNAntd from 'antd/locale/zh_CN';
+// The ESM build, not `antd/locale/*`: that path is a CJS re-export of `lib/`, and Vite 8's pre-bundle
+// hands back the `{ __esModule, default }` wrapper as the default export — a "locale" with no
+// component keys, so the Table filter's OK / Reset buttons rendered blank and zh-CN never reached antd.
+import enUSAntd from 'antd/es/locale/en_US';
+import zhCNAntd from 'antd/es/locale/zh_CN';
 import enUS from './en-US';
 import zhCN from './zh-CN';
 

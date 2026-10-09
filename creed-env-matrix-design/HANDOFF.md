@@ -111,6 +111,14 @@ Complete and verified in a browser against the real backend.
     `package.json` with `"type": "module"` + `pg` only). Verified by `npm start` from the packaged
     copy (UI, SPA fallback, `/api` proxy, Splunk routes, pg audit). Step-by-step in `DEPLOY.md` /
     `DEPLOY.zh-CN.md`; the systemd/Docker/nginx templates there were not run.
+- **Splunk broker moved to creed-gateway-proxy (2026-10-09, by request)** — Java port with the
+  same contract, plus block window (22:00-09:00 default), `Secure` only for https login URLs, TOTP
+  60 s, passwords at startup only. The page: block banner, button disabled, auto-refresh when the
+  window flips (`info.block.changesAtMillis`), countdown default 60. `.env` / `vite.config.ts` send
+  `/api/env-matrix/splunk` to :8088. The Node broker keeps working for the mock and `npm run bff`
+  (`Secure` fix + 60 s default applied, no block window; `test:server` 56). Deploy: `npm run build`,
+  copy `dist/` into `creed-gateway-proxy/src/main/resources/static/`, package the jar — see that
+  module's README.
 - **AES encryption (`/aes`)** — design `creed-resource-env-matrix/docs/design.png`. Keys + values form,
   server list (distinct `host:ip` from the endpoints, app-system filter, "saved" tag for the property
   key in the form), result list (`Table` with row selection: decrypt selected per row, delete, load
@@ -181,6 +189,18 @@ Complete and verified in a browser against the real backend.
     each** (were 8/16 columns): server checkboxes flow into an `auto-fill, minmax(440px)` grid, the
     table's Server column is 360 px and its body 600 px high. Verified by `tmp/aes-host-e2e.mjs`
     (24 records → 2 hosts → 4 rows; env change prunes the hidden host) + screenshot.
+  - **Result list paged on the backend (2026-10-09, by request):** at most 100 per page (sizes
+    20/50/100), filters / sort / paging all server-side via `GET /aes/records/page`, options from
+    `GET /aes/records/filters`, "saved" tags from `GET /aes/records/saved-servers` — the page no
+    longer downloads every record. Property-key column filter and the Server / Property key /
+    Updated sorts are controlled (`filteredValue` / `sortOrder`) and go to the backend. Old
+    `GET /aes/records` kept for scripts. Verified: Java 91 tests (4 new), `test:server` 55 (4 new
+    route tests on the same fixture), `tmp/aes-paging-e2e.mjs` on the mock with 260 records (pages
+    100/100/60, env → host → key narrowing, sort, page size 20, saved tags from the backend), and
+    the Java `dev` profile on Postgres (every new route + a 400 for `size=500`).
+  - **antd locale was never applied (fixed 2026-10-09):** `antd/locale/en_US` came through Vite's
+    pre-bundle as the CJS wrapper, so ConfigProvider got a locale without component keys — Table
+    filter buttons blank, antd strings never Chinese. Now `antd/es/locale/*`.
   - Claude-in-Chrome could not screenshot any page in this session (even a JSON URL); headless
     Chrome over CDP (`--remote-debugging-port`) was used instead.
 - **i18n** en / zh-CN throughout, including the antd locale bundle; persisted in `localStorage`.

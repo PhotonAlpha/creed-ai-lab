@@ -99,7 +99,7 @@ const storeTarget = (id: string) => {
  * host:port while still addressing the real Splunk host.
  */
 export function SplunkPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { message } = App.useApp();
   const { token } = theme.useToken();
 
@@ -146,14 +146,26 @@ export function SplunkPage() {
     void loadAudit();
   }, [loadAudit]);
 
+  /** Re-reads /splunk/totp (block state, targets) without resetting the chosen target. */
+  const refreshInfo = useCallback(() => {
+    splunkApi
+      .totp()
+      .then((response) => {
+        offsetRef.current = response.serverTimeMillis - Date.now();
+        setInfo(response);
+      })
+      .catch((e: Error) => setInfoError(e.message));
+  }, []);
+
   // A quarter-second tick keeps the ring smooth without re-rendering the audit table noticeably.
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
   }, []);
 
-  const period = info?.periodSeconds ?? 30;
-  const serverSeconds = Math.floor((now + offsetRef.current) / 1000);
+  const period = info?.periodSeconds ?? 60;
+  const serverNow = now + offsetRef.current;
+  const serverSeconds = Math.floor(serverNow / 1000);
   const step = Math.floor(serverSeconds / period);
   const remaining = period - (serverSeconds % period);
 
@@ -174,6 +186,20 @@ export function SplunkPage() {
   }, [info?.codeVisible, step, message]);
 
   const target = info?.targets.find((t) => t.id === targetId);
+
+  // The block window is the server's decision; the page only asks again when the server said it flips
+  // (`changesAtMillis`, on the server's clock), so a page left open unlocks at 09:00 by itself.
+  const block = info?.block;
+  const blocked = Boolean(block?.blocked);
+  const blockFlipped = block?.changesAtMillis != null && serverNow >= block.changesAtMillis;
+  useEffect(() => {
+    if (blockFlipped) refreshInfo();
+  }, [blockFlipped, refreshInfo]);
+  /** HH:mm of the flip in the block's own zone — the same wall clock the windows are written in. */
+  const blockUntil = block?.changesAtMillis != null
+    ? new Intl.DateTimeFormat(lang, { timeZone: block.zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .format(block.changesAtMillis)
+    : null;
 
   // A new target starts from its own defaults — another target's cookie names or tunnel are meaningless here.
   useEffect(() => {
@@ -309,6 +335,15 @@ export function SplunkPage() {
           <Alert type="warning" showIcon message={t('splunk.splunkNotConfigured')} />
         )}
         {info?.splunkMode === 'mock' && <Alert type="info" showIcon message={t('splunk.mockNotice')} />}
+        {block && blocked && (
+          <Alert
+            type="warning"
+            showIcon
+            message={blockUntil
+              ? t('splunk.block.active', { windows: block.windows.join(', '), zone: block.zone, until: blockUntil })
+              : t('splunk.block.activeForever', { windows: block.windows.join(', '), zone: block.zone })}
+          />
+        )}
 
         <ProCard gutter={16} wrap ghost>
           <ProCard
@@ -440,13 +475,17 @@ export function SplunkPage() {
                   type="primary"
                   loading={submitting}
                   disabled={
-                    input.length !== digits || !info?.configured || !target?.configured || !sessionCookieValid || !scriptCookieValid
+                    blocked || input.length !== digits || !info?.configured || !target?.configured
+                    || !sessionCookieValid || !scriptCookieValid
                   }
                   onClick={submit}
                 >
                   {t('splunk.session.submit')}
                 </Button>
               </Space>
+              {block && !blocked && block.windows.length > 0 && (
+                <Text type="secondary">{t('splunk.block.schedule', { windows: block.windows.join(', '), zone: block.zone })}</Text>
+              )}
 
               {failure && <Alert type="error" showIcon message={t('splunk.session.failed')} description={failure} />}
 

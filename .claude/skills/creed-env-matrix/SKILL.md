@@ -109,10 +109,23 @@ The config page's "save": the whole table in one transaction.
 - Tests use H2 + ddl-auto (Flyway off — V1/V2 are PostgreSQL-specific) and must set `spring.application.name` + `server.port`, because the `actuator` profile is `include`d from `application.yml` and cannot be un-included by a profile-specific file; OTel interpolates both and an unresolvable placeholder fails the context.
 - DB: `jdbc:postgresql://127.0.0.1:5432/env_matrix` on the `creed-artifactory-db` container. Create once: `docker exec creed-artifactory-db createdb -U artifactory env_matrix`.
 
-## Splunk session broker (Node BFF: `creed-env-matrix-design/server/splunk/*`, page `/splunk`)
+## Splunk session broker (page `/splunk`)
 
-TOTP-gated credential broker: the shared Splunk account lives with the BFF, a valid code gets a
+TOTP-gated credential broker: the shared Splunk account lives server-side, a valid code gets a
 Splunk Web session cookie back as a `document.cookie` script. Shares nothing with endpoints.
+
+**Where it lives (2026-10-09): `creed-gateway-proxy` (Java)** — `api/SplunkController`,
+`service/splunk/*`; see that module's `HANDOFF.md` for its landmines. It also serves the built
+frontend from `static/` and proxies the rest of `/api`, i.e. it replaces the BFF as the deployable.
+Same JSON contract, plus: **block window** (`SPLUNK_BLOCK_WINDOWS`, default `22:00-09:00`, 403
+`blocked` + `Retry-After`, checked before the OTP; the page shows `info.block`, disables the button
+and re-reads `/totp` when `changesAtMillis` passes on the server clock), **`Secure` only for an
+https login URL** (the script runs on Splunk Web's page; browsers drop a Secure cookie set from
+http), **TOTP period 60 s**, and **no password in config**: `SPLUNK_TARGET_<ID>_PASSWORD` /
+`ENV_MATRIX_TOTP_SECRET` / `SPLUNK_DB_PASSWORD` from env, `_FILE`, or a no-echo terminal prompt at
+startup. Targets are yml (`creed.splunk.targets`), not `SPLUNK_TARGETS`. The Node copy below
+(`server/splunk/*`) still runs the mock and `npm run bff`; it has the `Secure` fix and the 60 s
+default but **not** the block window. The rules below hold for both implementations.
 
 - **Login targets.** `SPLUNK_TARGETS=SIT,UAT` → a dropdown; each target's URL / username / password
   are `SPLUNK_TARGET_<ID>_*`. **No fallback to the global credentials** — that would post one
@@ -211,12 +224,21 @@ Encrypt/decrypt a property value; save the ciphertext **and its randomkey** per 
   servers, one transaction, repeated property key → 400 `items[i].propertyKey`), and
   `/aes/records/decrypt` with a per-record IV and salt (Secret Key from the record) — the page takes
   them from the form row with the same property key, or from the only row. Mock and Java must stay byte-identical: `tmp/aes-parity.mjs` diffs them.
-- **Both lists filter in the browser** (`ScopeFilter`: app system + env instances, independent per
-  list; the result list adds hosts) over one unfiltered fetch each; a record's env instance comes
-  from its server (`envOf`). Host picks a narrower app/env choice no longer offers are pruned — a
-  hidden pick would keep filtering invisibly. Both lists are full-width rows.
-  Anything derived across lists (the "saved" tags) must read the *unfiltered* records. Identity stays
-  `serverKey` = (appSystem, host, ip) even though `/aes/servers` is DISTINCT over 5 columns.
+- **The server list filters in the browser; the result list is paged on the backend** (2026-10-09).
+  `GET /aes/records/page` (app system + repeated `envInstance` / `host` / `propertyKey`, 1-based
+  `page`, `size` ≤ 100, `sort` host|propertyKey|updatedAt|appSystem + `order`; identity order as
+  tie-break so pages are stable) and `GET /aes/records/filters` (options cascading app → env → host →
+  key, only values some record carries). A record's env instance is **not a column**: it matches when
+  an `env_endpoint` row with the same `(appSystem, host, ip)` has it — an `exists` subquery, so a
+  server in two env instances matches both. Java builds these with the **Criteria API** (optional
+  filters without a null-typed JPQL parameter, which PG rejects); `server/aes.js` mirrors them and
+  `aes.test.js` pins the same fixture as `AesControllerTest`. The page drops filter picks the new
+  options no longer offer (they would filter invisibly), and ignores out-of-order responses.
+  Server list: `ScopeFilter` over one unfiltered `/aes/servers` fetch; a record's env tag still comes
+  from it (`envOf`).
+- **The "saved" tags ask `GET /aes/records/saved-servers?propertyKey=…`** (debounced, kept as a
+  sorted string so an unchanged answer does not re-render ~700 checkboxes). Never derive them from
+  the result list — it holds one filtered page.
 - `List<Outer.@Valid Inner>`, not `List<@Valid Outer.Inner>` — the latter is a javac error that shows
   up as Lombok's `cannot find symbol: log` everywhere.
 - Page: decrypted column clears whenever a key field changes. `ServerList` is `memo`'d with a
@@ -244,7 +266,11 @@ code. The value is read with `loadEnv` because a Vite config file runs *before* 
 - **`path-to-regexp` override to 8.4.2** — pro-layout pins the ReDoS-affected 8.2.0 exactly.
 - **`react-router-dom` stays at 7.18.1** despite one open advisory (RSC-mode CSRF, unreachable in a plain `BrowserRouter` SPA). Downgrading is worse: 7.11.0 carries 14 advisories 7.18.0 fixed.
 
-**Two traps that hid other bugs — check these before trusting a green run:**
+**Three traps that hid other bugs — check these before trusting a green run:**
+- **Import antd locales from `antd/es/locale/*`, never `antd/locale/*`.** The latter is a CJS
+  re-export, and Vite 8's pre-bundle returns the `{ __esModule, default }` wrapper as the default
+  export: a locale with no component keys. Nothing errors — Table filter OK/Reset render blank, and
+  zh-CN never reached antd (pagination stayed "/ page"). Found 2026-10-09.
 - **`tsc --noEmit` against the root `tsconfig.json` checks nothing.** It is solution-style
   (`files: []` + references) and `--noEmit` does not follow references, so it exits 0 on a codebase
   full of type errors. `npm run typecheck` is now `tsc -b --force`; `npm run build` always used it.

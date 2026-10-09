@@ -10,13 +10,30 @@
     </parent>
     <artifactId>creed-gateway-proxy</artifactId>
     <name>creed-gateway-proxy</name>
-    <description>Server-side reverse proxy (nginx proxy_pass) onto ssh -R tunnels, e.g. a laptop's Vite dev server</description>
+    <description>Env Matrix front door: serves the built frontend, owns the Splunk session broker, proxies the rest of /api (and ssh -R tunnels)</description>
     <dependencies>
         <!-- Standalone on purpose: no config client, no load balancer, no OAuth2. A route's target is
              a loopback port an ssh -R tunnel opened, not a service instance. -->
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-gateway-server-webflux</artifactId>
+        </dependency>
+        <!-- Splunk session broker audit (creed.splunk.audit.store=pg|mysql). Plain JDBC over a pool the
+             store builds itself — deliberately no spring-jdbc, so no DataSource is auto-configured
+             (and demanded) when the store is the default in-memory one. -->
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -1,0 +1,17 @@
+# --spring.profiles.active=tunnel — the original use: everything onto an ssh -R tunnel, e.g. a
+# laptop's Vite dev server.
+#
+#   laptop:  ssh -N -R 127.0.0.1:15173:localhost:5173 user@server
+#   server:  :8088 -> http://127.0.0.1:15173 -> tunnel -> laptop localhost:5173
+#
+# The catch-all replaces the default route list (Spring binds a list as a whole) and outranks the
+# static frontend; the Splunk API is still answered by this process.
+creed:
+  proxy:
+    routes:
+      - id: vite
+        path: /**
+        uri: ${CREED_PROXY_TARGET:http://127.0.0.1:15173}
+        strip-prefix: 0
+        # Off: Vite answers an unknown Host with 403 ("Blocked request. This host is not allowed").
+        preserve-host: false

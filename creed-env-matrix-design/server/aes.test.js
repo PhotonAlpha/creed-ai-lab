@@ -4,7 +4,7 @@
  */
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AesError, aesDecrypt, aesDeriveKey, aesEncrypt, aesSecretKey, keyCache } from './aes.js';
+import { AesError, aesDecrypt, aesDeriveKey, aesEncrypt, aesSecretKey, createAesRoutes, keyCache } from './aes.js';
 
 const RANDOM = 'r4nd0m';
 const IV = '0123456789abcdef';
@@ -75,5 +75,77 @@ describe('aes', () => {
     for (const plain of ['', '值'.repeat(4000)]) {
       assert.equal(aesDecrypt(SECRET, SALT, IV, aesEncrypt(SECRET, SALT, IV, plain)), plain);
     }
+  });
+});
+
+/**
+ * The result list's read routes, on the same fixture as AesControllerTest#seedForPaging: the
+ * datasource password on both MS servers, mq.password on ms1, a token on ccs1 — which has endpoints
+ * in UAT1 and SIT1. Java and the mock must answer alike.
+ */
+describe('aes record list routes', () => {
+  const ep = (appSystem, host, ip, envInstance) => ({ appSystem, host, ip, envInstance, instance: 'Green' });
+  const rec = (id, appSystem, host, ip, propertyKey, updatedAt) => ({
+    id, appSystem, host, ip, propertyKey, encryptedValue: 'x', randomKey: 'r', iv: null, salt: null, note: null,
+    createdAt: updatedAt, updatedAt, version: 0,
+  });
+  const endpoints = [ep('MS', 'ms1.cn.uat1', '10.1.1.11', 'UAT1'), ep('MS', 'ms2.cn.uat1', '10.1.1.12', 'UAT1'),
+    ep('CCS', 'ccs1.cn.sit1', '10.2.1.11', 'UAT1'), ep('CCS', 'ccs1.cn.sit1', '10.2.1.11', 'SIT1')];
+  const records = [rec(1, 'MS', 'ms1.cn.uat1', '10.1.1.11', 'spring.datasource.password', '2026-10-01T00:00:00Z'),
+    rec(2, 'MS', 'ms2.cn.uat1', '10.1.1.12', 'spring.datasource.password', '2026-10-02T00:00:00Z'),
+    rec(3, 'MS', 'ms1.cn.uat1', '10.1.1.11', 'mq.password', '2026-10-03T00:00:00Z'),
+    rec(4, 'CCS', 'ccs1.cn.sit1', '10.2.1.11', 'token', '2026-10-04T00:00:00Z')];
+  const handle = createAesRoutes({ endpoints: () => endpoints, records: () => records, nextId: () => 99, persist() {} }, async () => ({}));
+  const get = async (path, query = '') => {
+    const out = {};
+    const res = { writeHead: (status) => { out.status = status; }, end: (body) => { out.body = body && JSON.parse(body); } };
+    await handle({ method: 'GET' }, res, path, new URLSearchParams(query));
+    return out;
+  };
+
+  test('page: identity order, 1-based, total; env via endpoints; host / key filters; sort', async () => {
+    let r = await get('/aes/records/page', 'size=3');
+    assert.equal(r.body.total, 4);
+    assert.deepEqual(r.body.items.map((i) => i.propertyKey), ['token', 'mq.password', 'spring.datasource.password']);
+    assert.equal(r.body.items[0].secretKey, 'rccs1.cn.sit110.2.1.11');
+    r = await get('/aes/records/page', 'size=3&page=2');
+    assert.deepEqual(r.body.items.map((i) => i.host), ['ms2.cn.uat1']);
+    assert.equal((await get('/aes/records/page', 'envInstance=SIT1')).body.total, 1);
+    assert.equal((await get('/aes/records/page', 'envInstance=UAT1')).body.total, 4);
+    assert.equal((await get('/aes/records/page', 'host=ms1.cn.uat1&host=ccs1.cn.sit1')).body.total, 3);
+    assert.equal((await get('/aes/records/page', 'appSystem=MS&propertyKey=spring.datasource.password')).body.total, 2);
+    r = await get('/aes/records/page', 'sort=host&order=desc');
+    assert.deepEqual(r.body.items.map((i) => i.host), ['ms2.cn.uat1', 'ms1.cn.uat1', 'ms1.cn.uat1', 'ccs1.cn.sit1']);
+    r = await get('/aes/records/page', 'sort=updatedAt&order=desc&size=1');
+    assert.equal(r.body.items[0].id, 4);
+  });
+
+  test('page: out-of-range parameters are 400s naming them', async () => {
+    for (const [query, field] of [['size=101', 'size'], ['page=0', 'page'], ['sort=encryptedValue', 'sort'], ['order=sideways', 'order'], ['size=abc', 'size']]) {
+      const r = await get('/aes/records/page', query);
+      assert.equal(r.status, 400, query);
+      assert.equal(r.body.fields[0].field, field, query);
+    }
+  });
+
+  test('filters: narrowed left to right, values records carry', async () => {
+    assert.deepEqual((await get('/aes/records/filters')).body, {
+      envInstances: ['SIT1', 'UAT1'], hosts: ['ccs1.cn.sit1', 'ms1.cn.uat1', 'ms2.cn.uat1'],
+      propertyKeys: ['mq.password', 'spring.datasource.password', 'token'],
+    });
+    let r = await get('/aes/records/filters', 'appSystem=MS');
+    assert.deepEqual(r.body.envInstances, ['UAT1']);
+    assert.deepEqual(r.body.hosts, ['ms1.cn.uat1', 'ms2.cn.uat1']);
+    r = await get('/aes/records/filters', 'envInstance=SIT1');
+    assert.deepEqual([r.body.hosts, r.body.propertyKeys], [['ccs1.cn.sit1'], ['token']]);
+    r = await get('/aes/records/filters', 'host=ms2.cn.uat1');
+    assert.equal(r.body.hosts.length, 3);
+    assert.deepEqual(r.body.propertyKeys, ['spring.datasource.password']);
+  });
+
+  test('saved-servers: servers holding any listed key; none listed is empty', async () => {
+    const r = await get('/aes/records/saved-servers', 'propertyKey=mq.password&propertyKey=token');
+    assert.deepEqual(r.body.map((s) => s.host).sort(), ['ccs1.cn.sit1', 'ms1.cn.uat1']);
+    assert.deepEqual((await get('/aes/records/saved-servers')).body, []);
   });
 });

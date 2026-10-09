@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -226,6 +227,92 @@ class AesControllerTest {
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].appSystem").value("CCS"))
                 .andExpect(jsonPath("$[0].secretKey").value("xccs1.cn.sit110.2.1.11"));
+    }
+
+    /**
+     * Four records: the datasource password on both MS servers, mq.password on ms1, a token on ccs1.
+     * ccs1 gets a second endpoint in SIT1, so it is in two env instances.
+     */
+    private void seedForPaging() throws Exception {
+        saveMsBoth();
+        postJson("/records", obj("propertyKey", "mq.password", "plainValue", "m", "iv", IV, "salt", SALT, "randomKey", RANDOM,
+                "servers", List.of(server("MS", "ms1.cn.uat1", "10.1.1.11")))).andExpect(status().isOk());
+        postJson("/records", obj("propertyKey", "token", "plainValue", "t", "iv", IV, "salt", SALT, "randomKey", "x",
+                "servers", List.of(server("CCS", "ccs1.cn.sit1", "10.2.1.11")))).andExpect(status().isOk());
+        EnvEndpoint sit = endpoint("CCS", "CCS2", "http", "ccs1.cn.sit1", "10.2.1.11", 9090);
+        sit.setTier("SIT");
+        sit.setEnvInstance("SIT1");
+        endpointRepository.save(sit);
+    }
+
+    @Test
+    @DisplayName("page: identity order, 1-based pages with a total, filters by env (via endpoints) / host / key, sorts")
+    void page() throws Exception {
+        seedForPaging();
+        mockMvc.perform(get(BASE + "/records/page").param("size", "3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(4))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.items", hasSize(3)))
+                .andExpect(jsonPath("$.items[*].propertyKey", contains("token", "mq.password", "spring.datasource.password")))
+                .andExpect(jsonPath("$.items[0].secretKey").value("xccs1.cn.sit110.2.1.11"));
+        mockMvc.perform(get(BASE + "/records/page").param("size", "3").param("page", "2"))
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].host").value("ms2.cn.uat1"));
+        // ccs1 is in UAT1 and SIT1 — one record, matched by either
+        mockMvc.perform(get(BASE + "/records/page").param("envInstance", "SIT1"))
+                .andExpect(jsonPath("$.total").value(1)).andExpect(jsonPath("$.items[0].appSystem").value("CCS"));
+        mockMvc.perform(get(BASE + "/records/page").param("envInstance", "UAT1")).andExpect(jsonPath("$.total").value(4));
+        mockMvc.perform(get(BASE + "/records/page").param("host", "ms1.cn.uat1").param("host", "ccs1.cn.sit1"))
+                .andExpect(jsonPath("$.total").value(3));
+        mockMvc.perform(get(BASE + "/records/page").param("appSystem", "MS").param("propertyKey", "spring.datasource.password"))
+                .andExpect(jsonPath("$.total").value(2));
+        mockMvc.perform(get(BASE + "/records/page").param("sort", "host").param("order", "desc"))
+                .andExpect(jsonPath("$.items[*].host", contains("ms2.cn.uat1", "ms1.cn.uat1", "ms1.cn.uat1", "ccs1.cn.sit1")));
+        mockMvc.perform(get(BASE + "/records/page").param("page", "9")).andExpect(jsonPath("$.items", hasSize(0)))
+                .andExpect(jsonPath("$.total").value(4));
+    }
+
+    @Test
+    @DisplayName("page: size above 100, page 0, an unknown sort or order are 400s naming the parameter")
+    void pageValidation() throws Exception {
+        mockMvc.perform(get(BASE + "/records/page").param("size", "101"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields[0].field").value("size"));
+        mockMvc.perform(get(BASE + "/records/page").param("page", "0"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields[0].field").value("page"));
+        mockMvc.perform(get(BASE + "/records/page").param("sort", "encryptedValue"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields[0].field").value("sort"));
+        mockMvc.perform(get(BASE + "/records/page").param("order", "sideways"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fields[0].field").value("order"));
+    }
+
+    @Test
+    @DisplayName("filters: each option list is narrowed by the choices to its left, and only offers values records carry")
+    void filters() throws Exception {
+        seedForPaging();
+        mockMvc.perform(get(BASE + "/records/filters"))
+                .andExpect(jsonPath("$.envInstances", contains("SIT1", "UAT1")))
+                .andExpect(jsonPath("$.hosts", contains("ccs1.cn.sit1", "ms1.cn.uat1", "ms2.cn.uat1")))
+                .andExpect(jsonPath("$.propertyKeys", contains("mq.password", "spring.datasource.password", "token")));
+        mockMvc.perform(get(BASE + "/records/filters").param("appSystem", "MS"))
+                .andExpect(jsonPath("$.envInstances", contains("UAT1")))
+                .andExpect(jsonPath("$.hosts", contains("ms1.cn.uat1", "ms2.cn.uat1")));
+        mockMvc.perform(get(BASE + "/records/filters").param("envInstance", "SIT1"))
+                .andExpect(jsonPath("$.hosts", contains("ccs1.cn.sit1")))
+                .andExpect(jsonPath("$.propertyKeys", contains("token")));
+        mockMvc.perform(get(BASE + "/records/filters").param("host", "ms2.cn.uat1"))
+                .andExpect(jsonPath("$.hosts", hasSize(3))) // hosts are not narrowed by the host pick itself
+                .andExpect(jsonPath("$.propertyKeys", contains("spring.datasource.password")));
+    }
+
+    @Test
+    @DisplayName("saved-servers: the servers holding any listed property key; none listed is an empty list")
+    void savedServers() throws Exception {
+        seedForPaging();
+        mockMvc.perform(get(BASE + "/records/saved-servers").param("propertyKey", "mq.password").param("propertyKey", "token"))
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[*].host", org.hamcrest.Matchers.containsInAnyOrder("ms1.cn.uat1", "ccs1.cn.sit1")));
+        mockMvc.perform(get(BASE + "/records/saved-servers")).andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(0)));
     }
 
     @Test

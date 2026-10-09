@@ -396,6 +396,15 @@ describe('broker', () => {
     assert.equal(totp.verify(code).valid, true);
   });
 
+  test('script: Secure only for an https login URL', async () => {
+    now += 60_000;
+    const { broker, totp } = setup({ targets: [{ ...TARGETS[1], loginUrl: 'http://uat:8000/login' }], defaultTarget: 'UAT' });
+    const s = await broker.issue(totp.currentCode(), client);
+    assert.equal(s.secure, false);
+    assert.equal(s.script, 'document.cookie = "splunkd_8089=v\\"al; path=/; SameSite=Lax";');
+    assert.equal(script('a', 'b', '/', true), 'document.cookie = "a=b; path=/; Secure; SameSite=Lax";');
+  });
+
   test('cookie names: the target\'s by default, the request\'s when given', async () => {
     now += 60_000;
     const seen = [];

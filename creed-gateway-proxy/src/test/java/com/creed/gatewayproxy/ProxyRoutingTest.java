@@ -19,7 +19,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
-import com.creed.gatewayproxy.service.TunnelHealthIndicator;
+import com.creed.gatewayproxy.service.UpstreamHealthIndicator;
 
 /**
  * The tunnel's server end is just a loopback port, so a JDK HttpServer stands in for
@@ -56,7 +56,7 @@ class ProxyRoutingTest {
     int port;
 
     @Autowired
-    TunnelHealthIndicator tunnels;
+    UpstreamHealthIndicator tunnels;
 
     WebTestClient client() {
         return WebTestClient.bindToServer().baseUrl("http://localhost:" + port).build();

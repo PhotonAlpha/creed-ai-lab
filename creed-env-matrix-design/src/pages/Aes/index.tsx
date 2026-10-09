@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
 import {
   Alert,
@@ -20,7 +20,7 @@ import {
   Typography,
   theme,
 } from 'antd';
-import type { TableColumnsType } from 'antd';
+import type { TableColumnsType, TableProps } from 'antd';
 import {
   ArrowLeftOutlined,
   ArrowRightOutlined,
@@ -39,7 +39,10 @@ import { ApiError } from '../../api/client';
 import { useDimensions } from '../../hooks/useDimensions';
 import { useI18n } from '../../locales';
 import type { MessageKey } from '../../locales';
-import type { AesBatchCryptoResult, AesKeyValueRow, AesRecord, AesRecordDecryptItem, AesRecordDecryptResult, AesServer } from '../../api/types';
+import type {
+  AesBatchCryptoResult, AesKeyValueRow, AesRecord, AesRecordDecryptItem, AesRecordDecryptResult, AesRecordFilterOptions,
+  AesRecordSort, AesRecordSortField, AesServer,
+} from '../../api/types';
 
 const { Text } = Typography;
 
@@ -59,15 +62,23 @@ const utf8Length = (text: string) => new TextEncoder().encode(text).length;
 const serverKey = (s: Pick<AesServer, 'appSystem' | 'host' | 'ip'>) => `${s.appSystem}\u0000${s.host}\u0000${s.ip}`;
 
 /**
- * What a list is narrowed to: one app system (or all), any number of env instances and hosts (none =
- * all). Only the result list offers the host filter; the server list's scope keeps `hosts` empty.
+ * What a list is narrowed to: one app system (or all), any number of env instances, hosts and
+ * property keys (none = all). Only the result list offers hosts and property keys (and sends the
+ * whole scope to the backend); the server list's scope keeps both empty.
  */
 interface Scope {
   appSystem?: string;
   envInstances: string[];
   hosts: string[];
+  propertyKeys: string[];
 }
-const NO_SCOPE: Scope = { envInstances: [], hosts: [] };
+const NO_SCOPE: Scope = { envInstances: [], hosts: [], propertyKeys: [] };
+/** The result list's page sizes — 100 at most, by request (and the backend's limit). */
+const PAGE_SIZES = [20, 50, 100];
+const NO_OPTIONS: AesRecordFilterOptions = { envInstances: [], hosts: [], propertyKeys: [] };
+/** `picked` minus what `offered` no longer has — the same array when nothing goes, so state can bail out. */
+const keepOffered = (picked: string[], offered: string[]) => (picked.every((v) => offered.includes(v)) ? picked
+  : picked.filter((v) => offered.includes(v)));
 const sortedDistinct = (values: (string | undefined)[]) => [...new Set(values.filter((v): v is string => !!v))].sort();
 /** The real config files' rule — randomkey + host + ip, no separator. The server derives the same. */
 const secretKeyOf = (randomKey: string | null | undefined, s: Pick<AesServer, 'host' | 'ip'>) => `${randomKey ?? ''}${s.host}${s.ip}`;
@@ -163,9 +174,20 @@ export function AesPage() {
   const [serversLoading, setServersLoading] = useState(false);
   const [checked, setChecked] = useState<string[]>([]);
 
-  const [allRecords, setAllRecords] = useState<AesRecord[]>([]);
+  /**
+   * The result list is paged, filtered and sorted by the backend (`/aes/records/page`): only the
+   * page on screen is in memory, and the filter options come from `/aes/records/filters`.
+   */
+  const [records, setRecords] = useState<AesRecord[]>([]);
+  const [recordTotal, setRecordTotal] = useState(0);
+  const [recordPage, setRecordPage] = useState({ page: 1, size: 100 });
+  const [recordSort, setRecordSort] = useState<AesRecordSort | undefined>();
   const [recordScope, setRecordScope] = useState<Scope>(NO_SCOPE);
+  const [recordOptions, setRecordOptions] = useState<AesRecordFilterOptions>(NO_OPTIONS);
   const [recordsLoading, setRecordsLoading] = useState(false);
+  /** Bumped after a save / delete / reload: re-runs the page, options and "saved" queries. */
+  const [recordsVersion, setRecordsVersion] = useState(0);
+  const refreshRecords = () => setRecordsVersion((v) => v + 1);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [decrypted, setDecrypted] = useState<Record<number, AesRecordDecryptResult>>({});
 
@@ -196,53 +218,74 @@ export function AesPage() {
     }
   }, [message]);
 
-  const loadRecords = useCallback(async () => {
-    setRecordsLoading(true);
-    try {
-      setAllRecords(await aesApi.records());
-    } catch (e) {
-      message.error((e as Error).message);
-    } finally {
-      setRecordsLoading(false);
-    }
-  }, [message]);
-
   useEffect(() => {
     void loadServers();
-    void loadRecords();
-  }, [loadServers, loadRecords]);
+  }, [loadServers]);
+
+  /** Any filter change goes back to page 1 — page 7 of the old filter means nothing under the new one. */
+  const changeRecordScope = (scope: Scope) => {
+    setRecordScope(scope);
+    setRecordPage((p) => ({ ...p, page: 1 }));
+  };
+
+  // The page on screen. Responses can return out of order while someone types into a filter, so only
+  // the latest request's answer is applied.
+  const pageRequest = useRef(0);
+  useEffect(() => {
+    const seq = ++pageRequest.current;
+    setRecordsLoading(true);
+    aesApi.recordPage(recordScope, recordPage.page, recordPage.size, recordSort)
+      .then((result) => {
+        if (seq !== pageRequest.current) return;
+        // A delete can empty the last page: step back to the new last one instead of showing nothing.
+        const last = Math.max(1, Math.ceil(result.total / recordPage.size));
+        if (result.items.length === 0 && recordPage.page > last) {
+          setRecordPage((p) => ({ ...p, page: last }));
+          return;
+        }
+        setRecords(result.items);
+        setRecordTotal(result.total);
+      })
+      .catch((e: Error) => seq === pageRequest.current && message.error(e.message))
+      .finally(() => seq === pageRequest.current && setRecordsLoading(false));
+  }, [recordScope, recordPage, recordSort, recordsVersion, message]);
+
+  // Filter options for the current app / env / host choices; picks no longer offered are dropped
+  // (they would keep filtering while invisible in their select). Property keys do not narrow anything.
+  const optionsRequest = useRef(0);
+  const { appSystem: scopeApp, envInstances: scopeEnvs, hosts: scopeHosts } = recordScope;
+  const optionsKey = JSON.stringify([scopeApp, scopeEnvs, scopeHosts]);
+  useEffect(() => {
+    const seq = ++optionsRequest.current;
+    const [appSystem, envInstances, hosts] = JSON.parse(optionsKey) as [string | undefined, string[], string[]];
+    aesApi.recordFilters({ appSystem, envInstances, hosts, propertyKeys: [] })
+      .then((options) => {
+        if (seq !== optionsRequest.current) return;
+        setRecordOptions(options);
+        setRecordScope((scope) => {
+          const next = {
+            ...scope,
+            envInstances: keepOffered(scope.envInstances, options.envInstances),
+            hosts: keepOffered(scope.hosts, options.hosts),
+            propertyKeys: keepOffered(scope.propertyKeys, options.propertyKeys),
+          };
+          return next.envInstances === scope.envInstances && next.hosts === scope.hosts
+            && next.propertyKeys === scope.propertyKeys ? scope : next;
+        });
+      })
+      .catch((e: Error) => seq === optionsRequest.current && message.error(e.message));
+  }, [optionsKey, recordsVersion, message]);
 
   /** A record's env instance, read off its server's endpoint rows (records do not store one). */
   const envOf = useMemo(() => new Map(allServers.map((s) => [serverKey(s), s.envInstance])), [allServers]);
 
   const servers = useMemo(() => allServers.filter((s) => (!serverScope.appSystem || s.appSystem === serverScope.appSystem)
     && (serverScope.envInstances.length === 0 || serverScope.envInstances.includes(s.envInstance))), [allServers, serverScope]);
-  const records = useMemo(() => allRecords.filter((r) => (!recordScope.appSystem || r.appSystem === recordScope.appSystem)
-    && (recordScope.envInstances.length === 0 || recordScope.envInstances.includes(envOf.get(serverKey(r)) ?? ''))
-    && (recordScope.hosts.length === 0 || recordScope.hosts.includes(r.host))),
-  [allRecords, recordScope, envOf]);
 
   /** Env-instance options: those present under the list's current app-system choice. */
   const serverEnvOptions = useMemo(() => sortedDistinct(allServers
     .filter((s) => !serverScope.appSystem || s.appSystem === serverScope.appSystem).map((s) => s.envInstance)),
   [allServers, serverScope.appSystem]);
-  const recordEnvOptions = useMemo(() => sortedDistinct(allRecords
-    .filter((r) => !recordScope.appSystem || r.appSystem === recordScope.appSystem).map((r) => envOf.get(serverKey(r)))),
-  [allRecords, recordScope.appSystem, envOf]);
-  /** Host options: those under the result list's current app-system and env-instance choices. */
-  const recordHostOptions = useMemo(() => sortedDistinct(allRecords
-    .filter((r) => (!recordScope.appSystem || r.appSystem === recordScope.appSystem)
-      && (recordScope.envInstances.length === 0 || recordScope.envInstances.includes(envOf.get(serverKey(r)) ?? '')))
-    .map((r) => r.host)),
-  [allRecords, recordScope.appSystem, recordScope.envInstances, envOf]);
-  // Drop picked hosts a narrower app-system / env choice no longer offers — they would otherwise keep
-  // filtering while invisible in the select.
-  useEffect(() => {
-    const offered = new Set(recordHostOptions);
-    setRecordScope((scope) => (scope.hosts.every((h) => offered.has(h)) ? scope
-      : { ...scope, hosts: scope.hosts.filter((h) => offered.has(h)) }));
-  }, [recordHostOptions]);
-
   // Keep only selected records that are still listed — Delete selected must never reach a row the
   // filter is hiding.
   useEffect(() => {
@@ -407,7 +450,7 @@ export function AesPage() {
       message.success(t('aes.save.done', {
         items: picked.length, servers: targets.length, inserted: result.inserted, updated: result.updated,
       }));
-      await loadRecords();
+      refreshRecords();
     } catch (e) {
       report(e, (i) => picked[i]?.index ?? i);
     } finally {
@@ -464,7 +507,7 @@ export function AesPage() {
       await aesApi.remove(ids);
       message.success(t('aes.records.deleted', { count: ids.length }));
       setDecrypted((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !ids.includes(Number(id)))));
-      await loadRecords();
+      refreshRecords();
     } catch (e) {
       message.error((e as Error).message);
     } finally {
@@ -535,18 +578,54 @@ export function AesPage() {
   };
 
   /**
-   * Servers that already hold a value for any property key in the form. Memoised on the *content*:
-   * most keystrokes leave the set unchanged, and a new Set object would re-render all of
-   * ServerList's checkboxes for nothing. From *all* records: the result list's own filter must not
-   * decide which servers the server list calls "saved".
+   * Servers that already hold a value for any property key in the form, asked of the backend
+   * (`/aes/records/saved-servers`) — the result list holds one page, and its filters must not decide
+   * which servers the server list calls "saved" anyway. Debounced: the keys change per keystroke.
+   * Kept as a sorted string, so an unchanged answer is the same state and the ~700 checkboxes of
+   * ServerList do not re-render.
    */
-  const savedSignature = useMemo(() => {
-    const keys = new Set(formPropertyKeys ? formPropertyKeys.split('\n') : []);
-    return allRecords.filter((r) => keys.has(r.propertyKey)).map(serverKey).sort().join('\n');
-  }, [allRecords, formPropertyKeys]);
+  const [savedSignature, setSavedSignature] = useState('');
+  useEffect(() => {
+    const keys = formPropertyKeys ? formPropertyKeys.split('\n') : [];
+    if (keys.length === 0) {
+      setSavedSignature('');
+      return undefined;
+    }
+    let stale = false;
+    const timer = setTimeout(() => {
+      aesApi.savedServers(keys)
+        .then((refs) => !stale && setSavedSignature(refs.map(serverKey).sort().join('\n')))
+        .catch((e: Error) => !stale && message.error(e.message));
+    }, 300);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [formPropertyKeys, recordsVersion, message]);
   const savedForProperty = useMemo(() => new Set(savedSignature ? savedSignature.split('\n') : []), [savedSignature]);
 
   const allChecked = servers.length > 0 && checked.length === servers.length;
+
+  /** The column's controlled sort state — sorting is the backend's, so the table only shows it. */
+  const sortOrderOf = (field: AesRecordSortField) => {
+    if (recordSort?.field !== field) return null;
+    return recordSort.order === 'desc' ? 'descend' as const : 'ascend' as const;
+  };
+
+  /** Paging, the property-key column filter and column sorts, all turned into a new backend query. */
+  const onRecordTableChange: TableProps<AesRecord>['onChange'] = (pagination, filters, sorter, extra) => {
+    if (extra.action === 'paginate') {
+      setRecordPage({ page: pagination.current ?? 1, size: pagination.pageSize ?? 100 });
+    } else if (extra.action === 'filter') {
+      changeRecordScope({ ...recordScope, propertyKeys: (filters.propertyKey ?? []).map(String) });
+    } else if (extra.action === 'sort') {
+      const one = Array.isArray(sorter) ? sorter[0] : sorter;
+      const field = (one?.columnKey ?? one?.field) as string | undefined;
+      const column = field === 'server' ? 'host' : field;
+      setRecordSort(one?.order && column ? { field: column as AesRecordSortField, order: one.order === 'descend' ? 'desc' : 'asc' } : undefined);
+      setRecordPage((p) => ({ ...p, page: 1 }));
+    }
+  };
 
   const columns: TableColumnsType<AesRecord> = [
     {
@@ -562,15 +641,19 @@ export function AesPage() {
           </Space>
         </Space>
       ),
-      sorter: (a, b) => a.host.localeCompare(b.host),
+      sorter: true,
+      sortOrder: sortOrderOf('host'),
     },
     {
       title: t('aes.records.propertyKey'),
       dataIndex: 'propertyKey',
       width: 220,
-      filters: [...new Set(records.map((r) => r.propertyKey))].sort().map((k) => ({ text: k, value: k })),
-      onFilter: (value, r) => r.propertyKey === value,
-      sorter: (a, b) => a.propertyKey.localeCompare(b.propertyKey),
+      // Options and filtering both on the backend: the keys under the current app / env / host choices.
+      filters: recordOptions.propertyKeys.map((k) => ({ text: k, value: k })),
+      filterSearch: true,
+      filteredValue: recordScope.propertyKeys,
+      sorter: true,
+      sortOrder: sortOrderOf('propertyKey'),
     },
     {
       title: t('aes.records.decrypted'),
@@ -613,7 +696,8 @@ export function AesPage() {
       dataIndex: 'updatedAt',
       width: 170,
       render: (value: string) => new Date(value).toLocaleString(),
-      sorter: (a, b) => a.updatedAt.localeCompare(b.updatedAt),
+      sorter: true,
+      sortOrder: sortOrderOf('updatedAt'),
     },
     {
       title: t('aes.records.actions'),
@@ -889,7 +973,7 @@ export function AesPage() {
                   {t('aes.records.deleteSelected', { count: selectedIds.length })}
                 </Button>
               </Popconfirm>
-              <Button icon={<ReloadOutlined />} onClick={() => loadRecords()} loading={recordsLoading}>
+              <Button icon={<ReloadOutlined />} onClick={refreshRecords} loading={recordsLoading}>
                 {t('aes.records.reload')}
               </Button>
             </Space>
@@ -897,10 +981,10 @@ export function AesPage() {
         >
           <ScopeFilter
             scope={recordScope}
-            onChange={setRecordScope}
+            onChange={changeRecordScope}
             apps={dimensions.appSystem}
-            envs={recordEnvOptions}
-            hosts={recordHostOptions}
+            envs={recordOptions.envInstances}
+            hosts={recordOptions.hosts}
           />
           <Table<AesRecord>
             rowKey="id"
@@ -909,7 +993,15 @@ export function AesPage() {
             dataSource={records}
             loading={recordsLoading}
             scroll={{ x: 1700, y: 600 }}
-            pagination={false}
+            onChange={onRecordTableChange}
+            pagination={{
+              current: recordPage.page,
+              pageSize: recordPage.size,
+              total: recordTotal,
+              showSizeChanger: true,
+              pageSizeOptions: PAGE_SIZES,
+              showTotal: (total) => t('aes.records.total', { total }),
+            }}
             rowSelection={{ selectedRowKeys: selectedIds, onChange: (keys) => setSelectedIds(keys as number[]) }}
             locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('aes.records.empty')} /> }}
           />

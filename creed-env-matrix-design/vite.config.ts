@@ -13,8 +13,9 @@ import react from '@vitejs/plugin-react';
  * certificate. Config files run before Vite loads `.env`, so `process.env` is empty here and the
  * value has to be read explicitly with `loadEnv` — a shell-exported VITE_API_TARGET still wins.
  *
- * `/api/env-matrix/splunk` is split off to VITE_SPLUNK_TARGET (`.env`: the Node BFF on :3002) because
- * the Splunk broker no longer exists in the Java service. The mock serves it too, which is why
+ * `/api/env-matrix/splunk` is split off to VITE_SPLUNK_TARGET (`.env`: creed-gateway-proxy on :8088,
+ * which owns the Splunk broker since 2026-10-09; the Node BFF on :3002 still answers the same contract
+ * without the block window). The mock serves it too, which is why
  * `npm run dev:mock` points both targets at :3001. The more specific key must come first — Vite
  * takes the first matching prefix.
  *
@@ -31,7 +32,7 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         '/api/env-matrix/splunk': {
-          target: env.VITE_SPLUNK_TARGET ?? 'http://localhost:3002',
+          target: env.VITE_SPLUNK_TARGET ?? 'http://localhost:8088',
           changeOrigin: true,
           xfwd: true,
         },

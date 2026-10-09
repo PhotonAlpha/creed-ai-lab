@@ -148,6 +148,11 @@ const byIdentity = (a, b) =>
   a.appSystem.localeCompare(b.appSystem) || a.propertyKey.localeCompare(b.propertyKey)
   || a.host.localeCompare(b.host) || a.ip.localeCompare(b.ip);
 
+/** Same limit and sortable columns as AesRecordService (MAX_PAGE_SIZE, SORTS). */
+const MAX_PAGE_SIZE = 100;
+const SORTS = ['appSystem', 'host', 'propertyKey', 'updatedAt'];
+const distinctSorted = (values) => [...new Set(values)].sort((a, b) => a.localeCompare(b));
+
 /**
  * @param data      { endpoints(): rows, records(): rows, nextId(): number, persist(): void }
  * @param readBody  the mock's JSON body reader
@@ -209,6 +214,38 @@ export function createAesRoutes(data, readBody) {
     }
   }
 
+  /**
+   * The result list's query, as AesRecordQuery reads it: repeated params, blanks dropped. A record's
+   * env instance comes from endpoint rows with the same (appSystem, host, ip) — any of them matches.
+   */
+  function recordQuery(params) {
+    const list = (name) => [...new Set(params.getAll(name).map((v) => v.trim()).filter(Boolean))];
+    return { appSystem: params.get('appSystem')?.trim() || null, envInstances: list('envInstance'), hosts: list('host'), propertyKeys: list('propertyKey') };
+  }
+
+  function recordFilter(query, { withHosts = true, withPropertyKeys = true } = {}) {
+    let envsOf = null;
+    if (query.envInstances.length) {
+      envsOf = new Map();
+      for (const e of data.endpoints()) {
+        const k = [e.appSystem, e.host, e.ip].join('\u0000');
+        if (!envsOf.has(k)) envsOf.set(k, new Set());
+        envsOf.get(k).add(e.envInstance);
+      }
+    }
+    return (r) => (!query.appSystem || r.appSystem === query.appSystem)
+      && (!envsOf || query.envInstances.some((env) => envsOf.get([r.appSystem, r.host, r.ip].join('\u0000'))?.has(env)))
+      && (!withHosts || !query.hosts.length || query.hosts.includes(r.host))
+      && (!withPropertyKeys || !query.propertyKeys.length || query.propertyKeys.includes(r.propertyKey));
+  }
+
+  function intParam(params, name, fallback) {
+    const raw = params.get(name);
+    if (raw == null || raw === '') return fallback;
+    if (!/^-?\d+$/.test(raw)) throw invalid(name, 'must be a number');
+    return Number(raw);
+  }
+
   return async function handleAes(req, res, path, params) {
     if (!path.startsWith('/aes/')) return false;
     try {
@@ -239,6 +276,35 @@ export function createAesRoutes(data, readBody) {
         send(res, 200, data.records()
           .filter((r) => (!app || r.appSystem === app) && (!key || r.propertyKey === key))
           .sort(byIdentity).map(toDto));
+      } else if (req.method === 'GET' && path === '/aes/records/page') {
+        const page = intParam(params, 'page', 1);
+        const size = intParam(params, 'size', MAX_PAGE_SIZE);
+        const sort = params.get('sort') || null;
+        const order = params.get('order') || null;
+        if (page < 1) throw invalid('page', 'must be 1 or more');
+        if (size < 1 || size > MAX_PAGE_SIZE) throw invalid('size', `must be between 1 and ${MAX_PAGE_SIZE}`);
+        if (sort && !SORTS.includes(sort)) throw invalid('sort', `must be one of [${SORTS.join(', ')}]`);
+        if (order && !['asc', 'desc'].includes(order.toLowerCase())) throw invalid('order', 'must be asc or desc');
+        const dir = order?.toLowerCase() === 'desc' ? -1 : 1;
+        const rows = data.records().filter(recordFilter(recordQuery(params)))
+          .sort((a, b) => (sort ? dir * String(a[sort]).localeCompare(String(b[sort])) : 0) || byIdentity(a, b) || a.id - b.id);
+        send(res, 200, { items: rows.slice((page - 1) * size, page * size).map(toDto), total: rows.length, page, size });
+      } else if (req.method === 'GET' && path === '/aes/records/filters') {
+        const query = recordQuery(params);
+        const inApp = data.records().filter((r) => !query.appSystem || r.appSystem === query.appSystem);
+        const held = new Set(inApp.map((r) => [r.appSystem, r.host, r.ip].join('\u0000')));
+        send(res, 200, {
+          envInstances: distinctSorted(data.endpoints().filter((e) => held.has([e.appSystem, e.host, e.ip].join('\u0000'))).map((e) => e.envInstance)),
+          hosts: distinctSorted(data.records().filter(recordFilter(query, { withHosts: false, withPropertyKeys: false })).map((r) => r.host)),
+          propertyKeys: distinctSorted(data.records().filter(recordFilter(query, { withPropertyKeys: false })).map((r) => r.propertyKey)),
+        });
+      } else if (req.method === 'GET' && path === '/aes/records/saved-servers') {
+        const keys = new Set(params.getAll('propertyKey').map((k) => k.trim()).filter(Boolean));
+        const seen = new Map();
+        for (const r of data.records()) {
+          if (keys.has(r.propertyKey)) seen.set([r.appSystem, r.host, r.ip].join('\u0000'), { appSystem: r.appSystem, host: r.host, ip: r.ip });
+        }
+        send(res, 200, [...seen.values()]);
       } else if (req.method === 'POST' && path === '/aes/records') {
         const body = await readBody(req);
         check(body, { ...SAVE_ITEM_RULES, servers: { list: 500 } });

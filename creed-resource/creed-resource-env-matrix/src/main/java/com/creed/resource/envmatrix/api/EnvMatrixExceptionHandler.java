@@ -105,6 +105,14 @@ public class EnvMatrixExceptionHandler {
         return ResponseEntity.badRequest().body(body("validation_failed", "request payload is invalid", List.of(field)));
     }
 
+    @ExceptionHandler(AesRecordService.InvalidQueryException.class)
+    ResponseEntity<Map<String, Object>> aesQuery(AesRecordService.InvalidQueryException e) {
+        Map<String, String> field = new LinkedHashMap<>();
+        field.put("field", e.field());
+        field.put("message", e.getMessage());
+        return ResponseEntity.badRequest().body(body("validation_failed", "request payload is invalid", List.of(field)));
+    }
+
     /** The request was well-formed; the value just does not decrypt with these keys. */
     @ExceptionHandler(AesCryptoService.DecryptException.class)
     ResponseEntity<Map<String, Object>> aesDecrypt(AesCryptoService.DecryptException e) {
