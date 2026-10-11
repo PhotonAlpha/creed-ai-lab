@@ -51,7 +51,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-config-server` | 8443 | `/config-server` | HTTPS, Basic auth, `{cipher}` |
 | `creed-gateway` | 8080 | — | HTTPS, **reactive** |
 | `creed-gateway-partner` | 8095 | — | HTTPS, **servlet** |
-| `creed-gateway-proxy` | 8088 / 8089 | — | HTTP, **reactive**, standalone; Env Matrix front door: built frontend from `static/`, **owns the Splunk broker** (moved from the Node BFF; secrets at startup, never in yml), `/api/**` → env-matrix; profile `tunnel` = proxy onto `ssh -R` ports; actuator on loopback 8089 |
+| `creed-gateway-proxy` | 8088 / 8089 | — | HTTP, **reactive**, standalone; Env Matrix front door: built frontend from `static/`, **owns the Splunk broker** (moved from the Node BFF; secrets at startup or `ENC(…)` in yml, never plain text), `/api/**` → env-matrix; profile `tunnel` = proxy onto `ssh -R` ports; actuator on loopback 8089 |
 | `creed-simple-metrics` | 8096 | `/simple` (+ `/camel/*`) | HTTPS, Camel; **pull-mode** metrics; httpd forwards `/simple/*` |
 | `creed-report` | 9100 | `/report` | HTTP, standalone (outside the mesh) |
 | `creed-jasper-report` | 9110 | `/jasper-report` | HTTP, standalone; **JasperReports jrxml** twin of creed-report's approval-status PDF (+ xlsx/csv/html) |

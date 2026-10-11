@@ -10,6 +10,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HexFormat;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -49,6 +51,20 @@ public class SplunkBroker {
     private final Clock clock;
     /** client ip → times of recent failed verifications. In-process: per instance, lost on restart. */
     private final Map<String, Deque<Long>> failures = new ConcurrentHashMap<>();
+    /**
+     * correlation id → what a revoke needs: the cookies the login handed out. Memory only, on purpose —
+     * persisting live Splunk sessions would put credentials in the audit database. A restart, the
+     * {@link #HELD_MAX} cap or {@link #HELD_TTL} make older sessions unrevocable (they still expire
+     * on Splunk's own timeout). Insertion-ordered: the oldest is evicted first.
+     */
+    private final LinkedHashMap<String, Held> held = new LinkedHashMap<>();
+
+    static final int HELD_MAX = 500;
+    static final java.time.Duration HELD_TTL = java.time.Duration.ofHours(24);
+
+    private record Held(String targetId, boolean viaTunnel, Map<String, String> cookies, String sessionCookie,
+                        String scriptCookieName, String scriptCookiePath, boolean secure, String fingerprint, Instant issuedAt) {
+    }
 
     public SplunkBroker(Totp totp, SplunkLoginClient loginClient, SplunkProperties splunk, SplunkSecrets secrets,
                         SplunkAuditStore store, BlockWindows block, Clock clock) {
@@ -84,7 +100,68 @@ public class SplunkBroker {
     }
 
     public List<SplunkAuditRow> audit(int limit) {
-        return store.list(Math.min(Math.max(limit, 1), 500));
+        List<SplunkAuditRow> rows = store.list(Math.min(Math.max(limit, 1), 500));
+        synchronized (held) {
+            evictExpired(clock.instant());
+            return rows.stream().map(r -> "SPLUNK_LOGIN".equals(r.eventType()) && "SUCCESS".equals(r.outcome())
+                    ? r.toBuilder().revocable(held.containsKey(r.correlationId())).build() : r).toList();
+        }
+    }
+
+    /**
+     * Ends a session this broker issued: Splunk Web's logout with the login's cookies, through the same
+     * route the login took, then forgets it. Needs no code — ending a session only takes access away —
+     * and is not subject to the block window. Audited as {@code SPLUNK_LOGOUT} under the login's
+     * correlation id.
+     *
+     * @throws BrokerException 404 when the session is not held (restart, too old, already revoked),
+     *                         502 when Splunk fails — the session is then kept, so a retry can work
+     */
+    public SplunkDtos.Revocation revoke(String correlationId, Client client) {
+        Held session;
+        synchronized (held) {
+            evictExpired(clock.instant());
+            // Removed up front: two concurrent revokes must not both reach Splunk.
+            session = held.remove(correlationId);
+        }
+        SplunkAuditRow.SplunkAuditRowBuilder row = row(correlationId, "SPLUNK_LOGOUT", client).splunkMode(loginClient.mode());
+        if (session == null) {
+            throw new BrokerException(404, "not_revocable", "this server no longer holds that session (restarted, older than "
+                    + HELD_TTL.toHours() + "h, or already revoked) — it ends on Splunk's own timeout");
+        }
+        SplunkProperties.Target target = splunk.targets().stream().filter(t -> t.id().equals(session.targetId())).findFirst()
+                .orElse(null);
+        row.cookieFingerprint(session.fingerprint());
+        if (target == null || (splunk.enabled() && target.logoutUrl() == null)) {
+            String why = target == null ? "target " + session.targetId() + " is no longer configured"
+                    : "target " + target.id() + ": login-url does not end in /account/login, so there is no logout URL";
+            store.save(fail(row, "no_logout_url", why));
+            throw new BrokerException(400, "no_logout_url", why);
+        }
+        String route = session.viaTunnel() ? " via tunnel " + target.tunnelAddress() : "";
+        long started = System.nanoTime();
+        SplunkLoginClient.LogoutResult result;
+        try {
+            result = loginClient.logout(target, session.cookies(), session.sessionCookie(), session.viaTunnel());
+        } catch (SplunkLoginClient.SplunkLoginException e) {
+            synchronized (held) {
+                held.putIfAbsent(correlationId, session);
+            }
+            store.save(fail(row.durationMs(elapsedMs(started)).httpStatus(e.httpStatus() == 0 ? null : e.httpStatus()),
+                    e.reason(), "[" + target.id() + route + "] " + e.getMessage()));
+            log.warn("Splunk logout failed ({}) [{}]: {}", e.reason(), correlationId, e.getMessage());
+            throw new BrokerException(502, "splunk_" + e.reason(), e.getMessage());
+        }
+        store.save(row.outcome("SUCCESS").durationMs(elapsedMs(started))
+                .httpStatus(result.httpStatus() == 0 ? null : result.httpStatus())
+                .detail("on " + target.id() + route + ", " + session.sessionCookie()
+                        + (result.cleared() ? " expired by Splunk" : " not expired in Splunk's answer"))
+                .build());
+        log.info("session revoked by {} target={}{} fingerprint={} cleared={} [{}]", client.ip(), target.id(), route,
+                session.fingerprint(), result.cleared(), correlationId);
+        return new SplunkDtos.Revocation(correlationId, target.id(), result.httpStatus() == 0 ? null : result.httpStatus(),
+                result.cleared(), clearScript(session.scriptCookieName(), session.scriptCookiePath(), session.secure()),
+                loginClient.mode(), clock.instant().toString());
     }
 
     /**
@@ -176,6 +253,11 @@ public class SplunkBroker {
         log.info("session issued to {} target={}{} fingerprint={} [{}]", client.ip(), target.id(), route, fingerprint, correlationId);
 
         boolean secure = isHttps(target.loginUrl());
+        synchronized (held) {
+            held.put(correlationId, new Held(target.id(), viaTunnel, result.cookies(), sessionCookie, scriptCookieName,
+                    scriptCookiePath, secure, fingerprint, now));
+            evictExpired(now);
+        }
         return new SplunkDtos.Session(target.id(), sessionCookie, scriptCookieName, result.cookieValue(),
                 script(scriptCookieName, result.cookieValue(), scriptCookiePath, secure), secure,
                 viaTunnel ? target.tunnelAddress().toString() : null, loginClient.mode(), correlationId, fingerprint,
@@ -192,6 +274,24 @@ public class SplunkBroker {
         String escaped = (name + "=" + value + "; path=" + path + (secure ? "; Secure" : "") + "; SameSite=Lax")
                 .replace("\\", "\\\\").replace("\"", "\\\"").replaceAll("[\r\n]", "");
         return "document.cookie = \"" + escaped + "\";";
+    }
+
+    /** The script's counterpart: the same cookie, emptied and expired. */
+    static String clearScript(String name, String path, boolean secure) {
+        String escaped = (name + "=; path=" + path + "; expires=Thu, 01 Jan 1970 00:00:00 GMT" + (secure ? "; Secure" : "")
+                + "; SameSite=Lax").replace("\\", "\\\\").replace("\"", "\\\"").replaceAll("[\r\n]", "");
+        return "document.cookie = \"" + escaped + "\";";
+    }
+
+    /** Caller holds the {@code held} lock. */
+    private void evictExpired(Instant now) {
+        Instant cutoff = now.minus(HELD_TTL);
+        Iterator<Held> it = held.values().iterator();
+        while (it.hasNext()) {
+            Held h = it.next();
+            if (held.size() > HELD_MAX || h.issuedAt().isBefore(cutoff)) it.remove();
+            else break; // insertion order: everything after is newer
+        }
     }
 
     /** True for an https login URL; anything unparsable or plain http is not. */

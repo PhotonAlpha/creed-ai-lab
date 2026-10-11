@@ -169,7 +169,7 @@ public class JdbcAuditStore implements SplunkAuditStore {
                             rs.getString("outcome"), rs.getString("reason"), rs.getString("detail"), rs.getString("client_ip"),
                             rs.getString("forwarded_for"), rs.getString("user_agent"), longOrNull(rs, "server_step"),
                             longOrNull(rs, "matched_step"), rs.getString("splunk_mode"), intOrNull(rs, "http_status"),
-                            rs.getString("cookie_fingerprint"), longOrNull(rs, "duration_ms"), createdAt(rs)));
+                            rs.getString("cookie_fingerprint"), longOrNull(rs, "duration_ms"), createdAt(rs), null));
                 }
             }
             return out;

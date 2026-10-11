@@ -87,7 +87,9 @@ creed:
     tls-insecure: ${SPLUNK_TLS_INSECURE:true}
     ca-file: ${SPLUNK_CA_FILE:}
     default-target: ${SPLUNK_DEFAULT_TARGET:}
-    # The login targets the page offers. Password: SPLUNK_TARGET_<ID>_PASSWORD (or _FILE, or the prompt).
+    # The login targets the page offers. Password: SPLUNK_TARGET_<ID>_PASSWORD (or _FILE), else
+    # `password: "ENC(...)"` (from `java -jar creed-gateway-proxy.jar encrypt`, decrypted with
+    # CREED_SECRETS_KEY / _FILE), else the prompt. A plain-text password fails startup.
     # Per target, optionally: session-cookie, script-cookie-name, script-cookie-path,
     # tunnel (host:port of a TCP forward to connect through), tunnel-default.
     # Several targets: copy the block, or put the list in an external file
@@ -112,7 +114,7 @@ creed:
     # No session is issued inside these windows (HH:mm-HH:mm[,…]; an end before the start crosses
     # midnight). Checked before the code, so a blocked request never spends it. Blank: never blocked.
     block:
-      windows: ${SPLUNK_BLOCK_WINDOWS:10:00-09:00}
+      windows: ${SPLUNK_BLOCK_WINDOWS:22:00-09:00}
       # Blank: the server's own time zone.
       zone: ${SPLUNK_BLOCK_ZONE:}
     audit:

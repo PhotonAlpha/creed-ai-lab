@@ -18,19 +18,24 @@ import org.springframework.util.StringUtils;
 import com.creed.gatewayproxy.config.SplunkProperties;
 
 /**
- * The broker's secrets, supplied when the process starts and never read from a configuration file:
+ * The broker's secrets, supplied when the process starts; a configuration file holds at most a
+ * target password encrypted as {@code ENC(…)}. First match wins:
  *
  * <ol>
- *   <li>{@code NAME} — an environment variable (or {@code -DNAME=…});</li>
  *   <li>{@code NAME_FILE} — a file holding it (Docker/Kubernetes secrets, a Vault agent sink), trimmed;</li>
+ *   <li>{@code NAME} — an environment variable (or {@code -DNAME=…}, which {@code ps} shows to everyone);</li>
+ *   <li>Splunk targets only: {@code creed.splunk.targets[].password}, decrypted with the master key
+ *       {@code CREED_SECRETS_KEY} (itself resolved by these same rules) — see SecretCipher;</li>
  *   <li>otherwise, when a terminal is attached, a prompt on it with echo off.</li>
  * </ol>
  *
  * {@code NAME} is {@code SPLUNK_TARGET_<ID>_PASSWORD} per target (only when the real call is on —
  * the mock needs none), {@code SPLUNK_DB_PASSWORD} for the pg/mysql audit store, and
  * {@code ENV_MATRIX_TOTP_SECRET}. A missing Splunk password leaves that target "not configured" (503
- * on login, the code unused); a missing TOTP secret gets a random one for this run. Values are never
- * logged.
+ * on login, the code unused); a missing TOTP secret gets a random one for this run. An {@code ENC(…)}
+ * password that cannot be decrypted — no key, wrong key — fails startup: the configuration said a
+ * password exists, so a silently unconfigured target would only surface at the first login. Values are
+ * never logged.
  */
 @Slf4j
 public class SplunkSecrets {
@@ -39,6 +44,8 @@ public class SplunkSecrets {
     private final String totpSecret;
     private final boolean totpGenerated;
     private final String dbPassword;
+    /** Created on the first ENC(…) password, so the master key is only asked for when one exists. */
+    private SecretCipher cipher;
 
     /** A prompt reading one line with echo off, or null when there is no one to ask. */
     public interface Prompt extends Function<String, String> {
@@ -48,7 +55,9 @@ public class SplunkSecrets {
         if (splunk.enabled()) {
             for (SplunkProperties.Target t : splunk.targets()) {
                 String who = t.username() != null ? t.username() + " @ " : "";
-                String value = resolve(env, t.passwordVariable(), prompt,
+                String value = lookup(env, t.passwordVariable());
+                if (value == null && t.password() != null) value = decrypt(env, prompt, t);
+                if (value == null) value = ask(prompt, t.passwordVariable(),
                         "Splunk password for target " + t.id() + " (" + who + t.loginUrl() + ")");
                 if (value != null) passwords.put(t.id(), value);
             }
@@ -84,7 +93,29 @@ public class SplunkSecrets {
         return dbPassword;
     }
 
+    private String decrypt(Environment env, Prompt prompt, SplunkProperties.Target t) {
+        if (cipher == null) {
+            String key = resolve(env, SecretCipher.KEY_VARIABLE, prompt, "Master key for ENC(...) passwords");
+            if (key == null) {
+                throw new IllegalStateException("creed.splunk.targets[" + t.id() + "].password is ENC(...) but "
+                        + SecretCipher.KEY_VARIABLE + " was not supplied (environment, _FILE or the startup prompt)");
+            }
+            cipher = new SecretCipher(key);
+        }
+        try {
+            return cipher.decrypt(t.password());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("creed.splunk.targets[" + t.id() + "].password: " + e.getMessage(), e);
+        }
+    }
+
     static String resolve(Environment env, String name, Prompt prompt, String question) {
+        String value = lookup(env, name);
+        return value != null ? value : ask(prompt, name, question);
+    }
+
+    /** {@code NAME_FILE}, then {@code NAME}; null when neither is set. */
+    static String lookup(Environment env, String name) {
         String file = env.getProperty(name + "_FILE");
         if (StringUtils.hasText(file)) {
             try {
@@ -95,7 +126,10 @@ public class SplunkSecrets {
             }
         }
         String value = env.getProperty(name);
-        if (StringUtils.hasText(value)) return value;
+        return StringUtils.hasText(value) ? value : null;
+    }
+
+    private static String ask(Prompt prompt, String name, String question) {
         String answer = prompt == null ? null : prompt.apply(question + " [" + name + "]: ");
         if (StringUtils.hasText(answer)) return answer;
         log.warn("{} not supplied (environment, {}_FILE or the startup prompt)", name, name);

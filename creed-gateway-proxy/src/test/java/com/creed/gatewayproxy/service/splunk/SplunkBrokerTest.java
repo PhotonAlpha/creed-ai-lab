@@ -53,6 +53,54 @@ class SplunkBrokerTest {
         return new SplunkDtos.SessionRequest(code, target, null, null, viaTunnel);
     }
 
+    private static SplunkAuditRow loginRow(List<SplunkAuditRow> rows, String correlationId) {
+        return rows.stream().filter(r -> r.correlationId().equals(correlationId) && "SPLUNK_LOGIN".equals(r.eventType()))
+                .findFirst().orElseThrow();
+    }
+
+    @Test
+    void revokeLogsOutOnceAuditsItAndOffersAClearScript() {
+        SplunkBroker broker = mockBroker(NOON, "https://splunk.example:8000/en-US/account/login");
+        SplunkDtos.Session session = broker.issue(req(code(broker), null, false), CLIENT);
+        assertThat(loginRow(broker.audit(50), session.correlationId()).revocable()).isTrue();
+
+        SplunkDtos.Revocation r = broker.revoke(session.correlationId(), CLIENT);
+        assertThat(r.cleared()).isTrue();
+        assertThat(r.clearScript()).isEqualTo(
+                "document.cookie = \"splunkd_8089=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; SameSite=Lax\";");
+        List<SplunkAuditRow> rows = broker.audit(50);
+        assertThat(rows.getFirst().eventType()).isEqualTo("SPLUNK_LOGOUT");
+        assertThat(rows.getFirst().outcome()).isEqualTo("SUCCESS");
+        assertThat(rows.getFirst().cookieFingerprint()).isEqualTo(session.cookieFingerprint());
+        assertThat(rows.getFirst().revocable()).isNull();
+        assertThat(loginRow(rows, session.correlationId()).revocable()).isFalse();
+
+        assertThatThrownBy(() -> broker.revoke(session.correlationId(), CLIENT))
+                .isInstanceOfSatisfying(BrokerException.class, e -> assertThat(e.status()).isEqualTo(404));
+    }
+
+    @Test
+    void failedLogoutKeepsTheSessionForARetry() {
+        SplunkProperties splunk = SplunkTestSupport.splunk(false, true, null, "",
+                List.of(SplunkTestSupport.target("UAT", "http://splunk.example:8000/en-US/account/login", null)));
+        int[] calls = {0};
+        SplunkLoginClient flaky = new SplunkLoginClient(splunk) {
+            @Override
+            public LogoutResult logout(SplunkProperties.Target t, java.util.Map<String, String> c, String s, boolean v) {
+                if (calls[0]++ == 0) throw new SplunkLoginException("io_error", 0, "connection refused", null);
+                return new LogoutResult(303, true);
+            }
+        };
+        SplunkBroker broker = broker(NOON, splunk, flaky, new MockEnvironment());
+        SplunkDtos.Session session = broker.issue(req(code(broker), null, false), CLIENT);
+        assertThatThrownBy(() -> broker.revoke(session.correlationId(), CLIENT))
+                .isInstanceOfSatisfying(BrokerException.class, e -> assertThat(e.status()).isEqualTo(502));
+        assertThat(loginRow(broker.audit(50), session.correlationId()).revocable()).isTrue();
+        assertThat(broker.revoke(session.correlationId(), CLIENT).clearScript()).doesNotContain("Secure");
+        assertThat(broker.audit(50)).filteredOn(r -> "SPLUNK_LOGOUT".equals(r.eventType()))
+                .extracting(SplunkAuditRow::outcome).containsExactly("SUCCESS", "FAILURE");
+    }
+
     @Test
     void httpsLoginUrlGetsASecureCookieHttpDoesNot() {
         SplunkBroker https = mockBroker(NOON, "https://splunk.uat:8000/en-US/account/login");

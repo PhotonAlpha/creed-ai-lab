@@ -46,7 +46,12 @@ class SplunkLoginClientTest {
         String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         String cookie = ex.getRequestHeaders().getFirst("Cookie");
         seen.add(new Seen(ex.getRequestMethod(), ex.getRequestHeaders().getFirst("Host"), cookie, body));
-        if ("GET".equals(ex.getRequestMethod())) {
+        if (ex.getRequestURI().getPath().endsWith("/account/logout")) {
+            boolean ours = cookie != null && cookie.contains("splunkd_8000=abc123");
+            if (ours) ex.getResponseHeaders().add("Set-Cookie", "splunkd_8000=; Path=/; Max-Age=0");
+            ex.getResponseHeaders().add("Location", "/en-US/account/login");
+            ex.sendResponseHeaders(ours ? 303 : 401, -1);
+        } else if ("GET".equals(ex.getRequestMethod())) {
             ex.getResponseHeaders().add("Set-Cookie", "cval=777; Path=/");
             ex.sendResponseHeaders(200, -1);
         } else if (body.contains("password=s3cr%26t") && body.contains("cval=777") && "cval=777".equals(cookie)) {
@@ -115,6 +120,37 @@ class SplunkLoginClientTest {
         assertThat(result.httpStatus()).isEqualTo(303);
         assertThat(seen).extracting(Seen::method).containsExactly("GET", "POST"); // the redirect was not followed
         assertThat(seen.get(1).body()).isEqualTo("username=admin&password=s3cr%26t&cval=777");
+    }
+
+    @Test
+    void logoutPresentsTheLoginCookiesAndSeesTheSessionCookieExpired() throws Exception {
+        int port = startHttp();
+        SplunkProperties.Target target = SplunkTestSupport.target("SIT", "http://127.0.0.1:" + port + "/en-US/account/login?return_to=x", null);
+        SplunkLoginClient client = client(true, null, target);
+        SplunkLoginClient.LoginResult login = client.login(target, "s3cr&t", "splunkd_8000", false);
+        assertThat(login.cookies()).containsEntry("cval", "777").containsEntry("splunkd_8000", "abc123");
+
+        SplunkLoginClient.LogoutResult out = client.logout(target, login.cookies(), "splunkd_8000", false);
+        assertThat(out.httpStatus()).isEqualTo(303);
+        assertThat(out.cleared()).isTrue();
+        assertThat(seen.getLast().method()).isEqualTo("GET");
+        assertThat(seen.getLast().cookie()).contains("cval=777", "splunkd_8000=abc123");
+
+        assertThatThrownBy(() -> client.logout(target, java.util.Map.of("splunkd_8000", "stale"), "splunkd_8000", false))
+                .isInstanceOfSatisfying(SplunkLoginClient.SplunkLoginException.class, e -> {
+                    assertThat(e.reason()).isEqualTo("logout_failed");
+                    assertThat(e.httpStatus()).isEqualTo(401);
+                });
+    }
+
+    @Test
+    void logoutUrlSitsBesideTheLoginAndExpiryIsRecognised() {
+        assertThat(SplunkTestSupport.target("A", "https://s:8000/en-US/account/login?x=1", null).logoutUrl())
+                .isEqualTo("https://s:8000/en-US/account/logout");
+        assertThat(SplunkTestSupport.target("A", "https://s:8000/sso/start", null).logoutUrl()).isNull();
+        assertThat(SplunkLoginClient.expires(List.of("splunkd_8000=; Path=/"), "splunkd_8000")).isTrue();
+        assertThat(SplunkLoginClient.expires(List.of("splunkd_8000=x; Expires=Thu, 01 Jan 1970 00:00:00 GMT"), "splunkd_8000")).isTrue();
+        assertThat(SplunkLoginClient.expires(List.of("splunkd_80001=; Path=/", "splunkd_8000=new"), "splunkd_8000")).isFalse();
     }
 
     @Test

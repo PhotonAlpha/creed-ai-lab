@@ -13,6 +13,18 @@ The Env Matrix front door, replacing the Node BFF. User docs are in `README.md`.
   - `Secure` only for an https login URL;
   - TOTP period 60 s;
   - passwords supplied at startup (env / `_FILE` / terminal prompt), never in yml.
+- **New by request (2026-10-11): revoke.** `POST /splunk/session/{id}/revoke` → Splunk Web
+  `/account/logout` with the login's cookies (held in memory by `SplunkBroker`, 24 h / 500 cap),
+  audited `SPLUNK_LOGOUT`; audit rows carry `revocable`; page has a Revoke column + `clearScript`.
+  Verified against a stub that tracks live sessions (`tmp/splunk-logout-stub.mjs`, e2e
+  `tmp/splunk-revoke-e2e.mjs`): live before, dead after, second revoke 404. **Not verified against a
+  real Splunk** — whether its logout ends the splunkd token is Splunk's behaviour, not tested here.
+  The Node mock/BFF has no revoke; the page hides the column there (no `revocable` field).
+- **New by request (2026-10-11):** `creed.splunk.targets[].password` accepts `ENC(…)` only
+  (`SecretCipher`, Spring Security Crypto `Encryptors.delux`), decrypted at startup with
+  `CREED_SECRETS_KEY` (`_FILE` / env / prompt); `java -jar … encrypt` makes the value. Env / `_FILE`
+  still override it. Plain text, a missing key or a wrong key all fail startup. Verified with the
+  packaged jar (stdin encrypt, decrypt at startup, wrong key, plain text); `ps` shows only the key path.
 - `/api/**` is proxied to the env-matrix backend (route `env-matrix-api`). The frontend is served
   from `classpath:/static/` (`StaticSiteConfig`: immutable `assets/`, `no-cache` otherwise, SPA
   fallback, `GET /` → `/index.html`).

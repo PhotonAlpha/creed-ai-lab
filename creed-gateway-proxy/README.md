@@ -36,13 +36,14 @@ instead: `CREED_PROXY_STATIC_LOCATIONS=file:/opt/env-matrix/static/`.
 Static files are served with the right cache rules. `assets/*` are Vite-fingerprinted and get a
 one-year `immutable` header. Everything else is `no-cache`, so a new `index.html` is always picked up.
 
-## Passwords are supplied at startup, never in a file
+## Passwords: encrypted in yml, or supplied at startup
 
-`application.yml` holds no password. Each secret is resolved in this order:
+`application.yml` never holds a plain-text password. Each secret is resolved in this order:
 
-1. the environment variable (or `-DNAME=…`);
-2. `NAME_FILE`, a file holding it (trimmed): Docker/Kubernetes secrets, a Vault agent sink;
-3. otherwise, **if a terminal is attached, a prompt with echo off**:
+1. `NAME_FILE`, a file holding it (trimmed): Docker/Kubernetes secrets, a Vault agent sink;
+2. the environment variable (or `-DNAME=…` — **`ps -ef` shows `-D` values to every user; don't**);
+3. Splunk targets only: `creed.splunk.targets[].password` as `ENC(…)` (below);
+4. otherwise, **if a terminal is attached, a prompt with echo off**:
 
 ```
 Splunk password for target default (svc-splunk @ https://splunk-uat:8000/…) [SPLUNK_TARGET_DEFAULT_PASSWORD]:
@@ -52,11 +53,48 @@ TOTP secret (Base32; Enter = a random one for this run) [ENV_MATRIX_TOTP_SECRET]
 | Secret | Asked for when | If missing |
 |---|---|---|
 | `SPLUNK_TARGET_<ID>_PASSWORD` | `SPLUNK_ENABLED=true` (mock mode needs none) | that target is "not configured": a 503 on login, and the code is not used |
+| `CREED_SECRETS_KEY` | a target has an `ENC(…)` password and no variable / `_FILE` overriding it | **startup fails** (also on a wrong key) |
 | `ENV_MATRIX_TOTP_SECRET` | always | a random secret for this run (fine while the page shows the code; useless to an authenticator app) |
 | `SPLUNK_DB_PASSWORD` | audit store `pg` / `mysql` | startup fails if the database refuses |
 
 Without a terminal (systemd, `nohup`), or with `CREED_SECRETS_PROMPT=false`, nothing is asked: use
 the variable or `_FILE`. Values are never logged.
+
+### Encrypted target passwords (`ENC(…)`)
+
+Spring Security Crypto `Encryptors.delux`: AES-256-GCM, key = PBKDF2(master key, per-value random
+salt), random IV. A wrong key or an edited value fails startup; a plain-text `password:` fails startup
+too (the value is not echoed).
+
+```bash
+# once: a random master key, readable by the service account only
+openssl rand -hex 32 > /etc/creed-gateway-proxy/master.key && chmod 600 /etc/creed-gateway-proxy/master.key
+
+# encrypt: prompts twice with echo off (or reads the first line of stdin without a terminal)
+CREED_SECRETS_KEY_FILE=/etc/creed-gateway-proxy/master.key java -jar creed-gateway-proxy.jar encrypt
+ENC(9b80ddd180201b06:65cf2537de5e…)
+```
+
+```yaml
+creed:
+  splunk:
+    targets:
+      - id: SIT
+        login-url: https://sit-splunk:8000/en-US/account/login
+        username: admin
+        password: "ENC(9b80ddd180201b06:65cf2537de5e…)"   # quote it
+```
+
+```bash
+nohup java -jar \
+  -DCREED_SECRETS_KEY_FILE=/etc/creed-gateway-proxy/master.key creed-gateway-proxy.jar >/dev/null 2>&1 &
+```
+
+The master key is still a secret: pass it as a **file path** (or env var / prompt), never as
+`-DCREED_SECRETS_KEY=…`, or `ps` shows the one key that opens every `ENC(…)`. The key needs at least
+16 characters; PBKDF2 here runs only 1024 iterations, so use a random key, not a memorable phrase.
+Encryption keeps the password out of the yml and the repo; anyone who can read both the yml and the
+key file can still decrypt it.
 
 ## Splunk broker
 
@@ -68,6 +106,19 @@ Same contract as the Node BFF had, so the page needs no change. Additions:
   `403 blocked` with `Retry-After`, **before** the code is checked, so the code is not used. The
   attempt is audited (`SPLUNK_LOGIN / blocked`). The page shows the window, disables the button,
   and unlocks by itself when the window ends.
+- **Revoke.** `POST /api/env-matrix/splunk/session/{correlationId}/revoke` (the page: a Revoke
+  button on each successful login in the audit trail, and under a freshly issued session) calls
+  Splunk Web's logout — `<login-url with /account/login → /account/logout>` — presenting every
+  cookie the login received, through the same route (tunnel or direct). Splunk ends the splunkd
+  session, so `splunkd_8000` and the copy the script set stop working everywhere. Audited as
+  `SPLUNK_LOGOUT` under the login's correlation id. The answer carries a `clearScript` that deletes
+  the leftover cookie in the browser the script was pasted into (the server cannot reach it).
+  - No code needed (ending a session only takes access away) and not subject to the block window.
+  - **The cookies to log out with are held in memory only** — persisting live sessions would put
+    credentials in the audit database. After a restart, after 24 h or beyond 500 sessions a login is
+    no longer revocable (404 `not_revocable`; it ends on Splunk's own timeout); the page greys its
+    button out. A failed logout (502) keeps the session so a retry can work.
+  - A login URL that does not end in `/account/login` (SSO, a proxy path) has no logout URL: 400.
 - **`Secure` follows the scheme.** The returned `document.cookie` script carries `Secure` only for
   an `https://` login URL. The script runs on Splunk Web's own page, and a browser drops a Secure
   cookie set from an http page. The session response also says `"secure": true|false`.

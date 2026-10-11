@@ -12,7 +12,11 @@ final class SplunkTestSupport {
     }
 
     static SplunkProperties.Target target(String id, String loginUrl, String tunnel) {
-        return new SplunkProperties.Target(id, id + " label", loginUrl, "admin", null, null, null, tunnel, false);
+        return target(id, loginUrl, tunnel, null);
+    }
+
+    static SplunkProperties.Target target(String id, String loginUrl, String tunnel, String password) {
+        return new SplunkProperties.Target(id, id + " label", loginUrl, "admin", null, null, null, tunnel, false, password);
     }
 
     static SplunkProperties splunk(boolean enabled, boolean tlsInsecure, String caFile, String blockWindows,

@@ -129,6 +129,17 @@ Standalone **Spring MVC + Thymeleaf** reporting/visualization app. Plain HTTP `9
   once avoids it entirely (Flying Saucer counts the pages itself) but only works for documents this
   module renders; this route merges any `byte[]`. `PdfMergeServiceTest` /
   `ApprovalStatusMergedPdfTest` pin all of it, the leftover included.
+- **Markdown review summary** — `markdown/ReviewSummaryParser` + `MarkdownSummaryController`
+  (`POST /api/markdown/verdict`, `/api/markdown/summary`, body = the Markdown). flexmark-java
+  (`flexmark` + `flexmark-ext-tables`, pinned in the module pom — not BOM-managed; not `flexmark-all`)
+  parses the document as GFM, so escaped pipes, emphasis and code fences behave. Table choice: the
+  first under a heading matching `manager summary` (top-level blocks only), else the first with a
+  `Verdict` row. `Verdict` splits `🟡 Approve with comments` into indicator + label by code points
+  (emoji are surrogate pairs, may carry U+FE0F; `:shortcode:` kept as written). **Two traps**:
+  flexmark's `TextCollectingVisitor` returned `notes](https://…)` for a link cell — collect `Text`
+  leaves and `unescape()` them instead; and a `String` request body without a charset decodes by the
+  converter's default (ISO-8859-1 in plain Spring / standalone MockMvc, UTF-8 only under Boot's
+  converter config) — the controller takes `byte[]` and defaults to UTF-8 itself.
 - **Environment Inspector** — `controller/EnvironmentInspectionController` (REST: `GET /api/environment`, `/api/environment/rendered`) + `controller/EnvironmentViewController` (Thymeleaf: `GET /environment`, `/environment/rendered`), backed by `service/EnvironmentInspectionService`. Models `EnvironmentSnapshot`, `PropertySourceView`, `PropertyEntry`, `RenderedEnvironment`. **For anything in this feature, use the [[env-inspector]] skill** — it has the full requirements/design (replays Spring Boot's config-loading pipeline standalone, renders effective properties to YAML/.properties).
 
 ### Previewing a PDF template

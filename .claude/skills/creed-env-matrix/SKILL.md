@@ -121,9 +121,15 @@ Same JSON contract, plus: **block window** (`SPLUNK_BLOCK_WINDOWS`, default `22:
 `blocked` + `Retry-After`, checked before the OTP; the page shows `info.block`, disables the button
 and re-reads `/totp` when `changesAtMillis` passes on the server clock), **`Secure` only for an
 https login URL** (the script runs on Splunk Web's page; browsers drop a Secure cookie set from
-http), **TOTP period 60 s**, and **no password in config**: `SPLUNK_TARGET_<ID>_PASSWORD` /
-`ENV_MATRIX_TOTP_SECRET` / `SPLUNK_DB_PASSWORD` from env, `_FILE`, or a no-echo terminal prompt at
-startup. Targets are yml (`creed.splunk.targets`), not `SPLUNK_TARGETS`. The Node copy below
+http), **TOTP period 60 s**, and **no plain-text password in config**: `SPLUNK_TARGET_<ID>_PASSWORD` /
+`ENV_MATRIX_TOTP_SECRET` / `SPLUNK_DB_PASSWORD` from `_FILE`, env, or a no-echo terminal prompt at
+startup; a target may instead carry `password: "ENC(…)"` (`SecretCipher` = Spring Security Crypto
+`Encryptors.delux`, made by `java -jar … encrypt`, decrypted with `CREED_SECRETS_KEY`) — plain text,
+no key or a wrong key fails startup. **`-DNAME=secret` is visible in `ps -ef`**: pass `-DNAME_FILE=path`.
+**Revoke** (Java only): `POST /session/{correlationId}/revoke` = Splunk Web `/account/logout` with
+*all* the login's cookies via the login's route; the cookies live **in memory only** (never in the
+audit DB), so a restart makes earlier logins unrevocable — the page reads that from `revocable` on
+audit rows and hides the column when the field is absent (Node). Targets are yml (`creed.splunk.targets`), not `SPLUNK_TARGETS`. The Node copy below
 (`server/splunk/*`) still runs the mock and `npm run bff`; it has the `Secure` fix and the 60 s
 default but **not** the block window. The rules below hold for both implementations.
 

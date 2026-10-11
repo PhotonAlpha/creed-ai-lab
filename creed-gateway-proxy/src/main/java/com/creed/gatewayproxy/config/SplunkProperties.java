@@ -13,11 +13,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.StringUtils;
 
 import com.creed.gatewayproxy.service.splunk.BlockWindows;
+import com.creed.gatewayproxy.service.splunk.SecretCipher;
 
 /**
- * The Splunk session broker (ported from the Node BFF's server/splunk/config.js). No password is a
- * property — each target's comes from {@code SPLUNK_TARGET_<ID>_PASSWORD} / {@code _FILE} or the
- * startup prompt (SplunkSecrets), so a configuration file never holds one.
+ * The Splunk session broker (ported from the Node BFF's server/splunk/config.js). A configuration
+ * file never holds a plain-text password: a target's is {@code ENC(…)} in {@code targets[].password},
+ * or comes from {@code SPLUNK_TARGET_<ID>_PASSWORD} / {@code _FILE} or the startup prompt (SplunkSecrets).
  *
  * @param enabled          the switch for the real call; false answers a fabricated {@code mock-…} cookie
  * @param sessionCookie    default for targets that set none: the cookie read off Splunk's login response
@@ -88,14 +89,18 @@ public record SplunkProperties(Boolean enabled, String sessionCookie, String scr
     }
 
     /**
-     * One Splunk instance. The password is not here — see SplunkSecrets.
+     * One Splunk instance.
      *
+     * @param password      optional, and only as {@code ENC(…)} (see SecretCipher; decrypted at startup
+     *                      with {@code CREED_SECRETS_KEY}) — a plain-text value fails startup.
+     *                      {@code SPLUNK_TARGET_<ID>_PASSWORD} / {@code _FILE} override it.
      * @param tunnel        {@code host:port} of a TCP forward the login may connect through (curl
      *                      {@code --connect-to}: the socket moves, the URL, Host header and SNI stay the target's)
      * @param tunnelDefault whether a login goes through the tunnel when the request does not say
      */
     public record Target(String id, String label, String loginUrl, String username, String sessionCookie,
-                         String scriptCookieName, String scriptCookiePath, String tunnel, Boolean tunnelDefault) {
+                         String scriptCookieName, String scriptCookiePath, String tunnel, Boolean tunnelDefault,
+                         String password) {
 
         private static final Pattern HOST_PORT = Pattern.compile("^(?:\\[([0-9a-fA-F:.]+)]|([A-Za-z0-9.-]+)):(\\d{1,5})$");
 
@@ -112,11 +117,34 @@ public record SplunkProperties(Boolean enabled, String sessionCookie, String scr
             tunnel = StringUtils.hasText(tunnel) ? tunnel.strip() : null;
             if (tunnel != null) parseTunnel(id, tunnel);
             tunnelDefault = tunnel != null && tunnelDefault != null && tunnelDefault;
+            password = StringUtils.hasText(password) ? password.strip() : null;
+            if (password != null && !SecretCipher.isEncrypted(password)) {
+                // Never echo the value: it is most likely the real password.
+                throw new IllegalArgumentException("creed.splunk.targets[" + id + "].password must be ENC(...) — "
+                        + "plain-text passwords are not accepted; encrypt it with `java -jar creed-gateway-proxy.jar encrypt`");
+            }
+        }
+
+        /** Records print every component; keep even the ciphertext out of logs and error messages. */
+        @Override
+        public String toString() {
+            return "Target[id=" + id + ", loginUrl=" + loginUrl + ", username=" + username + ", tunnel=" + tunnel
+                    + ", password=" + (password == null ? "none" : "ENC(***)") + "]";
         }
 
         /** The environment variable (or {@code _FILE}) holding this target's password. */
         public String passwordVariable() {
             return "SPLUNK_TARGET_" + id.toUpperCase(Locale.ROOT) + "_PASSWORD";
+        }
+
+        /**
+         * Splunk Web's logout beside the login: {@code …/account/login} → {@code …/account/logout}
+         * (query dropped). Null when the login URL does not end that way — such a target cannot revoke.
+         */
+        public String logoutUrl() {
+            if (loginUrl == null) return null;
+            String base = loginUrl.replaceFirst("[?#].*$", "");
+            return base.matches("(?i).*/account/login/?$") ? base.replaceFirst("(?i)/account/login/?$", "/account/logout") : null;
         }
 
         public HostPort tunnelAddress() {

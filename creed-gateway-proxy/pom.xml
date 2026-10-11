@@ -18,6 +18,12 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-gateway-server-webflux</artifactId>
         </dependency>
+        <!-- ENC(…) passwords in creed.splunk.targets (SecretCipher). The crypto jar alone: it carries
+             no auto-configuration, so no security filter chain appears in front of the routes. -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
         <!-- Splunk session broker audit (creed.splunk.audit.store=pg|mysql). Plain JDBC over a pool the
              store builds itself — deliberately no spring-jdbc, so no DataSource is auto-configured
              (and demanded) when the store is the default in-memory one. -->

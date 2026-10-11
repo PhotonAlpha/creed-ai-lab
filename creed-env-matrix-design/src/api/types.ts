@@ -340,7 +340,7 @@ export interface SplunkSession {
   issuedAt: string;
 }
 
-export type SplunkAuditEventType = 'OTP_VERIFY' | 'SPLUNK_LOGIN';
+export type SplunkAuditEventType = 'OTP_VERIFY' | 'SPLUNK_LOGIN' | 'SPLUNK_LOGOUT';
 
 export interface SplunkAuditRow {
   id: number;
@@ -359,6 +359,24 @@ export interface SplunkAuditRow {
   cookieFingerprint: string | null;
   durationMs: number | null;
   createdAt: string;
+  /**
+   * creed-gateway-proxy only, on successful SPLUNK_LOGIN rows: whether the server still holds the
+   * session, i.e. whether a revoke can reach Splunk. Absent from the Node BFF / mock.
+   */
+  revocable?: boolean;
+}
+
+/** `POST /splunk/session/{correlationId}/revoke`. */
+export interface SplunkRevocation {
+  correlationId: string;
+  target: string;
+  httpStatus: number | null;
+  /** Whether Splunk's logout answer expired the session cookie. */
+  cleared: boolean;
+  /** Deletes the script's cookie in the browser it was pasted into. */
+  clearScript: string;
+  mode: 'real' | 'mock';
+  revokedAt: string;
 }
 
 /* ---- AES encryption (/aes/*) ------------------------------------------------------------------ */

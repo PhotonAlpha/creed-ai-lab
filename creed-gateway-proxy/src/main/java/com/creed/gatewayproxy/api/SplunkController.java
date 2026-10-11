@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -35,6 +36,8 @@ import com.creed.gatewayproxy.service.splunk.audit.SplunkAuditRow;
  * GET  /api/env-matrix/splunk/totp/current  the current code (creed.totp.expose-current-code)
  * POST /api/env-matrix/splunk/session       {code, target?, sessionCookie?, scriptCookieName?, viaTunnel?}
  *                                           → 200 | 400 | 401 | 403 blocked | 429 | 502 Splunk | 503 unset
+ * POST /api/env-matrix/splunk/session/{correlationId}/revoke
+ *                                           Splunk Web logout for a session issued here → 200 | 400 | 404 | 502
  * GET  /api/env-matrix/splunk/audit?limit=  newest audit rows
  * </pre>
  *
@@ -63,13 +66,26 @@ public class SplunkController {
     public Mono<ResponseEntity<SplunkDtos.Session>> session(@RequestBody SplunkDtos.SessionRequest body, ServerHttpRequest request) {
         if (body.code() == null || !body.code().matches("^\\d{6,8}$")) return Mono.error(invalid("code", "must be 6-8 digits"));
         if (body.target() != null && body.target().length() > 64) return Mono.error(invalid("target", "must be a login target id"));
-        SplunkBroker.Client client = new SplunkBroker.Client(
-                request.getRemoteAddress() == null ? null : request.getRemoteAddress().getAddress().getHostAddress(),
-                request.getHeaders().getFirst("X-Forwarded-For"), request.getHeaders().getFirst(HttpHeaders.USER_AGENT));
+        SplunkBroker.Client client = client(request);
         // Off the event loop: the login and a JDBC audit store block.
         return Mono.fromCallable(() -> broker.issue(body, client))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(session -> ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(session));
+    }
+
+    @PostMapping("/session/{correlationId}/revoke")
+    public Mono<ResponseEntity<SplunkDtos.Revocation>> revoke(@PathVariable String correlationId, ServerHttpRequest request) {
+        if (!correlationId.matches("^[0-9a-f-]{36}$")) return Mono.error(invalid("correlationId", "must be a login's correlation id"));
+        SplunkBroker.Client client = client(request);
+        return Mono.fromCallable(() -> broker.revoke(correlationId, client))
+                .subscribeOn(Schedulers.boundedElastic())
+                .map(r -> ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(r));
+    }
+
+    private static SplunkBroker.Client client(ServerHttpRequest request) {
+        return new SplunkBroker.Client(
+                request.getRemoteAddress() == null ? null : request.getRemoteAddress().getAddress().getHostAddress(),
+                request.getHeaders().getFirst("X-Forwarded-For"), request.getHeaders().getFirst(HttpHeaders.USER_AGENT));
     }
 
     @GetMapping("/audit")

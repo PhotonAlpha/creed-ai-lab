@@ -7,6 +7,7 @@ import {
   Descriptions,
   Empty,
   Input,
+  Popconfirm,
   Progress,
   Select,
   Space,
@@ -18,11 +19,11 @@ import {
   theme,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { KeyOutlined, LoginOutlined, ReloadOutlined } from '@ant-design/icons';
+import { KeyOutlined, LoginOutlined, LogoutOutlined, ReloadOutlined } from '@ant-design/icons';
 import { splunkApi } from '../../api/splunk';
 import { ApiError } from '../../api/client';
 import { useI18n } from '../../locales';
-import type { SplunkAuditRow, SplunkSession, TotpCode, TotpInfo } from '../../api/types';
+import type { SplunkAuditRow, SplunkRevocation, SplunkSession, TotpCode, TotpInfo } from '../../api/types';
 
 const { Text, Paragraph } = Typography;
 
@@ -120,6 +121,8 @@ export function SplunkPage() {
 
   const [audit, setAudit] = useState<SplunkAuditRow[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [revocation, setRevocation] = useState<SplunkRevocation | null>(null);
 
   const loadAudit = useCallback(async () => {
     setAuditLoading(true);
@@ -245,6 +248,43 @@ export function SplunkPage() {
     }
   };
 
+  /** Logins whose revoke succeeded — read off the audit, so it survives a reload of the page. */
+  const revoked = new Set(
+    audit.filter((r) => r.eventType === 'SPLUNK_LOGOUT' && r.outcome === 'SUCCESS').map((r) => r.correlationId),
+  );
+  /** Whether this server answers revokes at all: only creed-gateway-proxy marks rows `revocable`. */
+  const canRevoke = audit.some((r) => r.revocable !== undefined);
+
+  const revoke = async (correlationId: string) => {
+    setRevoking(correlationId);
+    try {
+      const result = await splunkApi.revoke(correlationId);
+      setRevocation(result);
+      if (session?.correlationId === correlationId) setSession(null);
+      message.success(t(result.cleared ? 'splunk.revoke.done' : 'splunk.revoke.doneNotCleared'));
+    } catch (e) {
+      const error = e as ApiError;
+      message.error(error.body?.error ? `${error.body.error}: ${error.message}` : error.message);
+    } finally {
+      setRevoking(null);
+      void loadAudit();
+    }
+  };
+
+  const revokeButton = (correlationId: string, size: 'small' | 'middle' = 'small') => (
+    <Popconfirm
+      title={t('splunk.revoke.confirm')}
+      description={t('splunk.revoke.confirmHint')}
+      okText={t('splunk.revoke.action')}
+      okButtonProps={{ danger: true }}
+      onConfirm={() => revoke(correlationId)}
+    >
+      <Button size={size} danger icon={<LogoutOutlined />} loading={revoking === correlationId}>
+        {t('splunk.revoke.action')}
+      </Button>
+    </Popconfirm>
+  );
+
   const digits = info?.digits ?? 6;
   const expiring = remaining <= 5;
   const targetLabel = (id: string) => info?.targets.find((t) => t.id === id)?.label ?? id;
@@ -261,8 +301,12 @@ export function SplunkPage() {
       dataIndex: 'eventType',
       width: 130,
       render: (value: string) => (
-        <Tag color={value === 'OTP_VERIFY' ? 'blue' : 'purple'}>
-          {value === 'OTP_VERIFY' ? t('splunk.audit.otp') : t('splunk.audit.login')}
+        <Tag color={value === 'OTP_VERIFY' ? 'blue' : value === 'SPLUNK_LOGOUT' ? 'orange' : 'purple'}>
+          {value === 'OTP_VERIFY'
+            ? t('splunk.audit.otp')
+            : value === 'SPLUNK_LOGOUT'
+              ? t('splunk.audit.logout')
+              : t('splunk.audit.login')}
         </Tag>
       ),
     },
@@ -324,6 +368,26 @@ export function SplunkPage() {
         </Tooltip>
       ),
     },
+    ...(canRevoke
+      ? [
+          {
+            title: t('splunk.revoke.column'),
+            key: 'revoke',
+            width: 110,
+            fixed: 'right' as const,
+            render: (_: unknown, row: SplunkAuditRow) => {
+              if (row.eventType !== 'SPLUNK_LOGIN' || row.outcome !== 'SUCCESS') return null;
+              if (revoked.has(row.correlationId)) return <Tag>{t('splunk.revoke.revoked')}</Tag>;
+              if (row.revocable) return revokeButton(row.correlationId);
+              return (
+                <Tooltip title={t('splunk.revoke.unavailable')}>
+                  <Button size="small" disabled icon={<LogoutOutlined />}>{t('splunk.revoke.action')}</Button>
+                </Tooltip>
+              );
+            },
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -530,6 +594,7 @@ export function SplunkPage() {
                       {new Date(session.issuedAt).toLocaleString()}
                     </Descriptions.Item>
                   </Descriptions>
+                  {canRevoke && <div>{revokeButton(session.correlationId, 'middle')}</div>}
                 </>
               )}
             </Space>
@@ -546,6 +611,28 @@ export function SplunkPage() {
             </Button>
           }
         >
+          {revocation && (
+            <Alert
+              type={revocation.cleared ? 'success' : 'warning'}
+              showIcon
+              closable
+              onClose={() => setRevocation(null)}
+              style={{ marginBottom: token.margin }}
+              message={t(revocation.cleared ? 'splunk.revoke.done' : 'splunk.revoke.doneNotCleared')}
+              description={
+                <>
+                  <Text type="secondary">{t('splunk.revoke.clearHint')}</Text>
+                  <Paragraph
+                    copyable={{ text: revocation.clearScript }}
+                    code
+                    style={{ fontFamily: token.fontFamilyCode, wordBreak: 'break-all', margin: `${token.marginXS}px 0 0` }}
+                  >
+                    {revocation.clearScript}
+                  </Paragraph>
+                </>
+              }
+            />
+          )}
           <Table<SplunkAuditRow>
             rowKey="id"
             size="small"

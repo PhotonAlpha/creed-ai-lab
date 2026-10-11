@@ -361,3 +361,12 @@ every page, half-empty ones included, and carries its own centred page counter. 
   the Environment Inspector are developer-facing and have no country dimension; the
   `EnvironmentExcelExporter` inherits the country's date format through `ExcelExportRequest` but
   nothing else.
+- **Markdown review summary (`com.creed.report.markdown`, 2026-10-11).** `ReviewSummaryParser`
+  (flexmark-java 0.64.8 core + `flexmark-ext-tables`) reads the `| Item | Result |` table of a
+  review document — the one under a heading containing "Manager Summary", else the first table with
+  a `Verdict` row (`docs/preview.webp` is the sample). `POST /api/markdown/verdict` →
+  `{raw: "🟡 Approve with comments", label, indicator}`, `POST /api/markdown/summary` → every row;
+  body is the Markdown (UTF-8 unless the Content-Type names a charset), 400 when there is no table or
+  row. Cell text is collected from `Text` leaves, **not** flexmark's `TextCollectingVisitor`, which
+  returned a link's URL with its text in a table cell. No page links to it yet; tests in
+  `ReviewSummaryParserTest` (fixture `src/test/resources/markdown/pr-review.md`).

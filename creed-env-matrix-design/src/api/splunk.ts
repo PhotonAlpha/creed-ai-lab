@@ -1,5 +1,5 @@
 import { request, toQuery } from './client';
-import type { SplunkAuditRow, SplunkSession, SplunkSessionOptions, TotpCode, TotpInfo } from './types';
+import type { SplunkAuditRow, SplunkRevocation, SplunkSession, SplunkSessionOptions, TotpCode, TotpInfo } from './types';
 
 /**
  * Splunk session broker: a TOTP gates a server-side Splunk Web login, and the session cookie comes
@@ -20,5 +20,11 @@ export const splunkApi = {
   session: (code: string, target?: string, options: SplunkSessionOptions = {}) =>
     request<SplunkSession>('/splunk/session', { method: 'POST', body: JSON.stringify({ code, target, ...options }) }),
 
+  /**
+   * Splunk Web logout for a session this server issued (creed-gateway-proxy only). No code needed.
+   * 404: the server no longer holds it · 502: Splunk failed (the session is kept for a retry).
+   */
+  revoke: (correlationId: string) =>
+    request<SplunkRevocation>(`/splunk/session/${encodeURIComponent(correlationId)}/revoke`, { method: 'POST' }),
   audit: (limit = 50) => request<SplunkAuditRow[]>(`/splunk/audit${toQuery({ limit: String(limit) })}`),
 };

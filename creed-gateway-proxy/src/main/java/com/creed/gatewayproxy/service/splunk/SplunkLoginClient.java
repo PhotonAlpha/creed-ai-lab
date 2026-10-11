@@ -53,7 +53,16 @@ import com.creed.gatewayproxy.config.SplunkProperties;
  */
 public class SplunkLoginClient {
 
-    public record LoginResult(String cookieValue, int httpStatus) {
+    /**
+     * @param cookieValue the session cookie's value
+     * @param cookies     every cookie the login handed out (cval included) — what a later logout must
+     *                    present; credentials, never log them
+     */
+    public record LoginResult(String cookieValue, int httpStatus, Map<String, String> cookies) {
+    }
+
+    /** @param cleared whether Splunk's answer expired the session cookie (it normally does) */
+    public record LogoutResult(int httpStatus, boolean cleared) {
     }
 
     /** A login that failed on Splunk's side; {@code reason} goes into the audit trail. */
@@ -76,7 +85,7 @@ public class SplunkLoginClient {
         }
     }
 
-    private record Reply(int status, Map<String, String> cookies) {
+    private record Reply(int status, Map<String, String> cookies, List<String> setCookie) {
     }
 
     private final SplunkProperties config;
@@ -109,7 +118,8 @@ public class SplunkLoginClient {
         if (!config.enabled()) {
             byte[] random = new byte[32];
             new SecureRandom().nextBytes(random);
-            return new LoginResult("mock-" + HexFormat.of().formatHex(random), 0);
+            String value = "mock-" + HexFormat.of().formatHex(random);
+            return new LoginResult(value, 0, Map.of(sessionCookie, value));
         }
         // The broker rejects viaTunnel on a target without one; this is the last line, not the check.
         if (viaTunnel && target.tunnel() == null) throw new IllegalStateException("target " + target.id() + " has no tunnel");
@@ -125,9 +135,7 @@ public class SplunkLoginClient {
         if (cookies.containsKey("cval")) form.append("&cval=").append(enc(cookies.get("cval")));
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Content-Type", "application/x-www-form-urlencoded");
-        if (!cookies.isEmpty()) {
-            headers.put("Cookie", cookies.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.joining("; ")));
-        }
+        if (!cookies.isEmpty()) headers.put("Cookie", cookieHeader(cookies));
         Reply reply = call(url, form.toString(), headers, tunnel);
         String value = reply.cookies().get(sessionCookie);
         if (value == null || value.isEmpty()) {
@@ -135,7 +143,48 @@ public class SplunkLoginClient {
             throw new SplunkLoginException("no_session_cookie", reply.status(),
                     "Splunk answered " + reply.status() + " without a " + sessionCookie + " cookie", null);
         }
-        return new LoginResult(value, reply.status());
+        cookies.putAll(reply.cookies());
+        return new LoginResult(value, reply.status(), Map.copyOf(cookies));
+    }
+
+    /**
+     * Splunk Web logout — {@code GET <logout url>} presenting the cookies the login handed out, through
+     * the same tunnel the login used. Splunk Web ends the splunkd session behind the cookie and answers
+     * a redirect that expires it; a 4xx/5xx is a failure.
+     *
+     * @param sessionCookie the cookie the login read ({@code splunkd_8000}), checked for being expired
+     */
+    public LogoutResult logout(SplunkProperties.Target target, Map<String, String> cookies, String sessionCookie, boolean viaTunnel) {
+        if (!config.enabled()) return new LogoutResult(0, true);
+        String logoutUrl = target.logoutUrl();
+        if (logoutUrl == null) throw new IllegalStateException("target " + target.id() + " has no logout URL");
+        SplunkProperties.HostPort tunnel = viaTunnel ? target.tunnelAddress() : null;
+        Reply reply = call(URI.create(logoutUrl), null, Map.of("Cookie", cookieHeader(cookies)), tunnel);
+        if (reply.status() >= 400) {
+            throw new SplunkLoginException("logout_failed", reply.status(), "Splunk answered " + reply.status() + " to the logout", null);
+        }
+        return new LogoutResult(reply.status(), expires(reply.setCookie(), sessionCookie));
+    }
+
+    /** Whether a {@code Set-Cookie} for {@code name} empties or expires it. */
+    static boolean expires(List<String> setCookie, String name) {
+        for (String header : setCookie) {
+            String[] parts = header.split(";");
+            String pair = parts[0].strip();
+            if (!pair.startsWith(name + "=")) continue;
+            String value = pair.substring(name.length() + 1).replaceAll("^\"(.*)\"$", "$1");
+            if (value.isEmpty()) return true;
+            for (int i = 1; i < parts.length; i++) {
+                String attr = parts[i].strip().toLowerCase(java.util.Locale.ROOT);
+                if (attr.equals("max-age=0") || attr.startsWith("max-age=-")) return true;
+                if (attr.startsWith("expires=") && attr.contains("1970")) return true;
+            }
+        }
+        return false;
+    }
+
+    private static String cookieHeader(Map<String, String> cookies) {
+        return cookies.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.joining("; "));
     }
 
     /** GET when {@code body} is null, else POST. */
@@ -157,7 +206,8 @@ public class SplunkLoginClient {
                     : client.post().uri(uri).send(ByteBufFlux.fromString(Mono.just(body), StandardCharsets.UTF_8,
                     io.netty.buffer.ByteBufAllocator.DEFAULT));
             return request.responseSingle((res, content) -> {
-                Reply reply = new Reply(res.status().code(), cookiesOf(res.responseHeaders().getAll(HttpHeaderNames.SET_COOKIE)));
+                List<String> setCookie = res.responseHeaders().getAll(HttpHeaderNames.SET_COOKIE);
+                Reply reply = new Reply(res.status().code(), cookiesOf(setCookie), setCookie);
                 return content.asByteArray().then(Mono.just(reply)); // drain: only status and headers matter
             }).block(config.connectTimeout().plus(config.readTimeout()).plusSeconds(1));
         } catch (RuntimeException e) {

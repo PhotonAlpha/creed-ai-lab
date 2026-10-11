@@ -46,4 +46,15 @@ public final class SplunkDtos {
                           boolean secure, String tunnel, String mode, String correlationId, String cookieFingerprint,
                           String issuedAt) {
     }
+
+    /**
+     * {@code POST /splunk/session/{correlationId}/revoke} answer.
+     *
+     * @param cleared     whether Splunk's logout answer expired the session cookie
+     * @param clearScript a {@code document.cookie} line that deletes the script's cookie in the browser
+     *                    it was pasted into — the server cannot reach that browser
+     */
+    public record Revocation(String correlationId, String target, Integer httpStatus, boolean cleared, String clearScript,
+                             String mode, String revokedAt) {
+    }
 }
