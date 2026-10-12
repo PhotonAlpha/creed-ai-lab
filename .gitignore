@@ -15,3 +15,12 @@ creed-report/local-example.md
 .support/jenkins/.password.txt
 .support/sonarqube/.password.txt
 */.idea
+.agents
+AGENTS.md
+creed-backstage/.sqlite
+creed-backstage/dist-types
+creed-backstage/.yarn
+creed-backstage/node_modules
+creed-backstage/packages/app/node_modules
+creed-backstage/packages/backend/node_modules
+tmp
