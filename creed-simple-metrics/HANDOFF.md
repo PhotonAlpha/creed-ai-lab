@@ -26,6 +26,9 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
   (`fetch-catalog` / `fetch-order` / `fetch-payment`), and a `@LoadBalanced RestClient`
   (`RemoteClusterProcessor`, used by the `fulfillment` bulk fetches). Both resolve
   `https://<service-id>/...` against one shared `SimpleDiscoveryClient` registry.
+- **`cookieRelayRestClient` strips `JSESSIONID` from response `Set-Cookie`** (2026-10-13,
+  `JsessionIdStrippingInterceptor`, other cookies kept). `POST /camel/api/cookie-relay` therefore
+  forwards WSASID only. Unit-tested; not re-run against a live downstream.
 - **Cookie-based sticky routing for `payment-resource`** only: the `stickyId` cookie rides the
   outgoing request → `LoadBalancerRoutePlanner`'s three-arg `determineRoute` turns it into a
   `RequestDataContext` → an instance-list supplier that filters on `metadata.stickyId`.

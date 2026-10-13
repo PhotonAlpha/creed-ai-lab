@@ -70,6 +70,8 @@ public class CookieRelayRestClientConfiguration {
             ObservationRegistry observationRegistry) {
         return RestClient.builder()
                 .requestFactory(cookieRelayRequestFactory)
+                // The downstream's JSESSIONID never reaches the caller; WSASID and the rest do.
+                .requestInterceptor(new JsessionIdStrippingInterceptor())
                 .observationRegistry(observationRegistry);
     }
 

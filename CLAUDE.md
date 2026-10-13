@@ -48,7 +48,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | Module | Port(s) | Path | Notes |
 |---|---|---|---|
 | `creed-author-server` | 9000 | `/auth-server` | HTTP. **Issuer of record** |
-| `creed-config-server` | 8443 | `/config-server` | HTTPS, Basic auth, `{cipher}` |
+| `creed-config-management/creed-config-server` | 8443 | `/config-server` | HTTPS, Basic auth, `{cipher}`; native repo in six layers common → type → env-group → env → app → app-env (`config-repo/README.md`); `-pl creed-config-management/creed-config-server` |
 | `creed-gateway` | 8080 | — | HTTPS, **reactive** |
 | `creed-gateway-partner` | 8095 | — | HTTPS, **servlet** |
 | `creed-gateway-proxy` | 8088 / 8089 | — | HTTP, **reactive**, standalone; Env Matrix front door: built frontend from `static/`, **owns the Splunk broker** (moved from the Node BFF; secrets at startup or `ENC(…)` in yml, never plain text), `/api/**` → env-matrix; profile `tunnel` = proxy onto `ssh -R` ports; actuator on loopback 8089 |
