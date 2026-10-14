@@ -1,8 +1,9 @@
 # creed-simple-metrics 连接池与超时调优
 
 > 针对 `logs/creed-simple-metrics.log` 中大量 `ConnectionRequestTimeoutException` 的根因分析与配置公式。
-> 相关代码：`web/LoadBalancedRestClientConfiguration.java`、`lb/RestClientSuppliers.java`。
-> 本文只给方法与推荐值，**暂不改 `application.yml`**。
+> 相关代码：`lb/LoadBalancedRestClientConfiguration.java`、`lb/RestClientSuppliers.java`、
+> `lb/HttpPoolProperties.java`、`lb/ManagedHttpClientPool.java`、`config/CamelConfig.java`。
+> §1–§6 只给方法与推荐值，未改 `application.yml`；**§7 连接生命周期已落地**（2026-10-15）。
 
 ## 1. 根因（从日志读出的事实）
 
@@ -305,3 +306,100 @@ public class PoolLeasedOnlyTurboFilter extends TurboFilter {
   输出量与 I/O，砍不掉这部分 JVM 内计算。
 - **想彻底零日志开销**：别靠 DEBUG 看占用，改用 §5 的 per-route 指标，再把该 logger 调回 `INFO`，
   `formatStats` 的逐次计算也一并消失。**日志看事件流，指标看占用率，生产首选后者。**
+
+
+## 7. 连接生命周期：TTL / keep-alive / 空闲回收（已落地）
+
+> 2026-10-15 落地。三个池（`loadBalancedPool`、`healthCheckPool`、`camelHttpPool`）统一走
+> `HttpPoolProperties` 的五个生命周期参数。下面的源码结论都出自 httpclient5 **5.5.2**（本模块实际版本），
+> 不是凭印象。
+
+### 7.1 改之前的问题
+
+原来只配了 connect/socket timeout 和池大小，生命周期全用默认值：
+
+| 机制 | 配置位置 | 5.5.2 默认值 | 何时生效 |
+|---|---|---|---|
+| `timeToLive` | `ConnectionConfig` | `null`（**永不过期**） | lease 时按**创建时间**检查 |
+| `validateAfterInactivity` | `ConnectionConfig` | 2s（`resolveValidateAfterInactivity` 的兜底值） | lease 时空闲超过它就做 `isStale()` |
+| keep-alive 时长 | 响应头 `Keep-Alive: timeout=N`，无头时取 `RequestConfig.connectionKeepAlive` | **3 分钟** | 连接归还时算出过期时间 |
+| `closeExpired()` / `closeIdle(t)` | 需要主动调用 | **没人调** | 后台清理 |
+
+带来三个问题：
+
+1. **keep-alive 比服务端还长**。下游是 Tomcat，不发 `Keep-Alive` 头，客户端就按 3 分钟算；Tomcat 默认
+   空闲 **60s**（`DEFAULT_CONNECTION_TIMEOUT = 60000`，`keepAliveTimeout` 未配时等于它）就关连接。
+   `isStale()` 能发现正常 FIN，**发现不了 NAT/防火墙悄悄丢掉的连接**，那时首个请求就报
+   `NoHttpResponseException` 或 reset。
+2. **没有 TTL，连接一直绑在老实例上**。实例扩容或恢复后，已建立的连接不会重新分布。
+3. **没有后台清理**。死连接只在被借出时才会被发现；低峰期一直占着 fd 和池名额，指标里的 `available` 也不准。
+
+### 7.2 三个坑（读源码确认）
+
+- **`setConnectionManagerShared(true)` 时，`HttpClientBuilder.evictIdleConnections()` /
+  `evictExpiredConnections()` 不生效，也不报错**。`build()` 里只在 `if (!this.connManagerShared)` 分支创建
+  `IdleConnectionEvictor`。本模块所有 client 都是 shared（池归 Spring/Camel 管），所以回收线程只能自己建、
+  自己管生命周期。
+- **keep-alive 策略是 client 级设置，不是 pool 级**。同一个池上的每个 `HttpClientBuilder` 都要单独设，否则
+  那个 client 归还的连接仍按 3 分钟算。`clusterPool` 上除了自身的 request factory，还有 `artisanRestClient`
+  （`HttpServiceClientConfig`）和 `cookieRelayRequestFactory` 两个自建 client，都要接
+  `clusterPool.keepAliveStrategy()`。
+- **camel-http 的 `connectionTimeToLive` 组件参数不是这里的 TTL**。它只作用于 camel-http 自己创建的池，
+  而 `camelHttpConnectionManager` 是外部传进去的。TTL 要配在 `ConnectionConfig` 上。
+
+另外，`IdleConnectionEvictor` 的线程用 `catch (Exception ignore)` 吞掉异常，**出错就静默退出**。
+`closeExpired()`/`closeIdle()` 在池已关闭时直接 return，正常不会抛，所以可以接受；排查时先确认
+`jstack` 里还有 `idle-connection-evictor-*` 线程。
+
+### 7.3 怎么改的
+
+| 参数（`creed.partner.http.*` / `creed.partner.health-check.http.*` / `creed.camel.http.*`） | 值 | 落到哪里 |
+|---|---|---|
+| `time-to-live` | 5m | `ConnectionConfig.setTimeToLive` |
+| `validate-after-inactivity` | 2s | `ConnectionConfig.setValidateAfterInactivity`（显式写出默认值） |
+| `keep-alive` | 30s | `RestClientSuppliers.keepAliveStrategy(cap)`：服务端给的更短就用服务端的，否则用上限。**只用于 `clusterPool` / `healthCheckPool`**，见下文 camel 池说明 |
+| `max-idle-time` | 30s | evictor 的 `closeIdle` 阈值 |
+| `eviction-interval` | 5s | evictor 的扫描周期（每轮 `closeExpired()` + `closeIdle()`） |
+
+各值之间必须满足：
+
+```
+validate-after-inactivity (2s)
+  < max-idle-time (30s) ≈ keep-alive (30s)
+  < 路径上最短的空闲超时（Tomcat 60s；中间有 LB/NAT 时取它的）
+  < time-to-live (5m)
+```
+
+evictor 的归属：
+
+- `clusterPool` / `healthCheckPool`：`RestClientSuppliers.pool(...)` 创建并启动，
+  `ManagedHttpClientPool.close()` 先停 evictor 再关池。
+- `camelHttpPool`：单独的 `camelHttpPoolEvictor` bean（`initMethod="start"`, `destroyMethod="shutdown"`）。
+  池由 `HttpComponent.doStop()` 关闭，早于 Spring 销毁这个 bean；池关闭后清理调用是空操作，所以这个顺序没问题。
+- camel 池的 client **直接用 `DefaultConnectionKeepAliveStrategy.INSTANCE`**（即 HttpClient 默认策略，Tomcat
+  不发头时按 3 分钟算），`creed.camel.http` 下没有 `keep-alive` 项。空闲连接的上限由 evictor 的
+  `max-idle-time` 保证：空闲超过 30s 的连接最晚在下一轮扫描（5s）被关掉，最长约 35s，仍然小于 Tomcat 的 60s。
+  代价是这条保证完全依赖 evictor 线程存活；如果 evictor 退出了，camel 池会回到"3 分钟 keep-alive"的状态。
+  lease/response 两个超时仍是组件上的 `@Value`（`creed.camel.http.connection-request-timeout` /
+  `response-timeout`）。
+- camel-http 池原来散在 `@Value("${creed.camel.http.*}")` 里，现在通过 `Binder` 绑定成同一个
+  `HttpPoolProperties`，默认值和原来的 `@Value` 兜底值一致（50/20/5s/10s/3s/10s）。
+
+**仍然存在的竞态**：连接刚借出，服务端恰好关闭，这个窗口无法完全消除。这部分靠 `HttpClients.custom()` 默认的
+`DefaultHttpRequestRetryStrategy` 兜底，它只对**幂等请求**在 `NoHttpResponseException` 时重试；POST 不会自动重试。
+
+### 7.4 验证（2026-10-15，本机实测）
+
+- 启动后 `jstack` 里有 **3 个** `idle-connection-evictor-1` 线程（cluster / health-check / camel 三个池各一个）。
+- 调用 API-7（`POST /simple/camel/api/v1/orders/accounts`，它通过 `clusterPool` 打本机 `/mock/*`），然后轮询
+  `/simple/actuator/metrics/httpcomponents.httpclient.pool.total.connections?tag=httpclient:loadBalancedPool&tag=state:available`：
+
+  | 调用后 | 0s | 20s | 30s | 36s | 42s |
+  |---|---|---|---|---|---|
+  | available | 1 | 1 | 1 | **0** | 0 |
+
+  空闲连接在 30–36s 之间被关掉，即 30s 阈值加一个 5s 扫描周期。改之前要大约 3 分钟。
+- 单测：`RestClientSuppliersTest`（keep-alive 上限的两个方向、evictor 随池启停）和
+  `CamelConfigHttpPoolTest`（`creed.camel.http.*` 绑定和默认值、evictor 启停）。
+- 想看每条连接的关闭和重建：把 `org.apache.hc.client5.http.impl.io` 调到 DEBUG（同时注意 §6 的 TurboFilter
+  只放行 "endpoint leased" 那一行，看生命周期时要临时去掉）。

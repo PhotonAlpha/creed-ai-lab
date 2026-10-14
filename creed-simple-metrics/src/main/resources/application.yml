@@ -153,6 +153,21 @@ creed:
   # 一个变量同时驱动上面的 camel.servlet.mapping.enabled，别单独改其中一个。
   camel:
     enabled: ${CREED_CAMEL_ENABLED:true}
+    # camel-http pool (CamelConfig.camelHttpConnectionManager + camelHttpPoolEvictor); same
+    # HttpPoolProperties shape and lifecycle rules as creed.partner.http below. Unset keys take
+    # HttpPoolProperties' defaults. No keep-alive key: the component uses HttpClient's
+    # DefaultConnectionKeepAliveStrategy, so max-idle-time is what bounds idle connections here.
+    http:
+      max-total: 50
+      max-per-route: 20
+      connect-timeout: 5s
+      socket-timeout: 10s
+      connection-request-timeout: 3s
+      response-timeout: 10s
+      time-to-live: 5m
+      validate-after-inactivity: 2s
+      max-idle-time: 30s
+      eviction-interval: 5s
   audit:
     legacy-filter:
       enabled: true
@@ -270,6 +285,14 @@ creed:
       socket-timeout: 10s
       connection-request-timeout: 3s
       response-timeout: 10s
+      # Connection lifecycle — see HttpPoolProperties. Required order:
+      #   validate-after-inactivity < max-idle-time ≈ keep-alive < downstream idle close (Tomcat: 60s)
+      #   < time-to-live. Behind a NAT/LB, use ITS idle timeout if shorter.
+      time-to-live: 5m              # rebalance onto new/recovered instances; default would be forever
+      validate-after-inactivity: 2s # stale-check a connection idle longer than this before reuse
+      keep-alive: 30s               # cap; Tomcat sends no Keep-Alive header → HttpClient assumes 3m
+      max-idle-time: 30s            # evictor closes connections idle longer than this
+      eviction-interval: 5s         # evictor sweep period (closeExpired + closeIdle)
     # Health-check HTTP pool — smaller and tighter than the business pool.
     health-check:
       http:
@@ -279,6 +302,11 @@ creed:
         socket-timeout: 2s
         connection-request-timeout: 2s
         response-timeout: 2s
+        time-to-live: 5m
+        validate-after-inactivity: 2s
+        keep-alive: 30s
+        max-idle-time: 30s
+        eviction-interval: 5s
   rootPath: ".support/scripts/pki" # relative to the repo root — the process working dir must be the repo root (-Dspring-boot.run.workingDirectory="$PWD" / IDE working dir)
 
 

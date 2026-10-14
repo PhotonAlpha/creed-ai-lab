@@ -4,7 +4,7 @@
 servers.
 **Skill** `creed-simple-metrics` · shared: `creed-platform` · deep notes: `README.md`,
 `docs/camel-http-loadbalancer.md`, `docs/camel-observation-baggage-loss.md`,
-`docs/producertemplate-stream-cache-cleanup.md`
+`docs/producertemplate-stream-cache-cleanup.md`, `docs/connection-pool-tuning.md`
 
 ## Run
 
@@ -26,6 +26,15 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
   (`fetch-catalog` / `fetch-order` / `fetch-payment`), and a `@LoadBalanced RestClient`
   (`RemoteClusterProcessor`, used by the `fulfillment` bulk fetches). Both resolve
   `https://<service-id>/...` against one shared `SimpleDiscoveryClient` registry.
+- **Connection lifecycle on all three HttpClient pools** (2026-10-15): `loadBalancedPool`,
+  `healthCheckPool` and `camelHttpPool` now carry a TTL (5m) and an owned `IdleConnectionEvictor`
+  (`closeIdle` 30s, every 5s); the two RestClient pools also cap keep-alive at 30s (Tomcat sends no
+  `Keep-Alive` header, so HttpClient assumed 3m vs Tomcat's 60s close). The camel-http client keeps
+  `DefaultConnectionKeepAliveStrategy.INSTANCE` — its idle bound is the evictor alone. Five new `HttpPoolProperties` fields
+  (`time-to-live`, `validate-after-inactivity`, `keep-alive`, `max-idle-time`, `eviction-interval`) under
+  `creed.partner.http`, `creed.partner.health-check.http`, and the newly bound `creed.camel.http`
+  (was scattered `@Value`s, same defaults). Verified live: three evictor threads; an idle
+  `loadBalancedPool` connection closed between 30s and 36s. Write-up: `docs/connection-pool-tuning.md` §7.
 - **`POST /camel/api/reserve/http-component` vs `/reserve/rest-client`** (2026-10-14): one downstream
   POST (catalog `/api/catalog/reserve`) through CamelConfig#httpComponent and through
   `clusterRestClient`, same envelope `{client, downstream, status, elapsedMs, body}`, both mapping a
@@ -79,6 +88,13 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Landmines
 
+- **`HttpClientBuilder.evictIdleConnections()` is a silent no-op on a shared pool** — `build()` only starts
+  its evictor `if (!connManagerShared)`, and every client here is shared. Evictors are owned by
+  `ManagedHttpClientPool` / the `camelHttpPoolEvictor` bean instead.
+- **Keep-alive is per client, not per pool**: any new `HttpClients.custom()` on `clusterPool`'s manager
+  must call `.setKeepAliveStrategy(clusterPool.keepAliveStrategy())` (as `artisanRestClient` and
+  `cookieRelayRequestFactory` do), or its connections fall back to the 3-minute default. camel-http's
+  `connectionTimeToLive` option does nothing here (it only applies to a pool camel-http builds itself).
 - **A Camel servlet REST consumer never turns multipart parts into attachments** — it always gets
   `ServletRestHttpBinding`; `camel.component.servlet.attachment-multipart-binding` only switches plain
   `servlet:` endpoints. API-8 therefore has `multipartAttachmentProcessor` as its first step (platform-http,

@@ -51,6 +51,8 @@ public class CookieRelayRestClientConfiguration {
         CloseableHttpClient httpClient = HttpClients.custom()
                 .setConnectionManager(clusterHttpConnectionManager)
                 .setConnectionManagerShared(true)
+                // keep-alive lives on the client, not the pool — reuse the pool's cap
+                .setKeepAliveStrategy(clusterPool.keepAliveStrategy())
                 .setDefaultRequestConfig(requestConfig)
                 // The relay forwards the Cookie header BY HAND — that is the whole point of the demo.
                 .disableCookieManagement()

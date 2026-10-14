@@ -23,12 +23,20 @@ import static org.mockito.Mockito.mock;
 class LoadBalancedRestTemplateConfigurationTest {
 
     private static final Duration T = Duration.ofSeconds(5);
+    private static final HttpPoolProperties P = HttpPoolProperties.of(5, 5, T, T, T, T);
 
     private final LoadBalancedRestTemplateConfiguration config = new LoadBalancedRestTemplateConfiguration();
 
     private static ManagedHttpClientPool poolWith(ClientHttpRequestFactory factory) {
-        PoolingHttpClientConnectionManager cm = RestClientSuppliers.connectionManagerFrom(null, 5, 5, T, T);
-        return new ManagedHttpClientPool(cm, factory, "test");
+        PoolingHttpClientConnectionManager cm = RestClientSuppliers.connectionManagerFrom(null, P);
+        return poolOf(cm, factory, "test");
+    }
+
+    /** A pool around an existing manager; its evictor is built but never started (nothing to sweep). */
+    private static ManagedHttpClientPool poolOf(PoolingHttpClientConnectionManager cm,
+                                                ClientHttpRequestFactory factory, String name) {
+        return new ManagedHttpClientPool(cm, factory, RestClientSuppliers.keepAliveStrategy(T),
+                RestClientSuppliers.evictorFor(cm, P), name);
     }
 
     @Test

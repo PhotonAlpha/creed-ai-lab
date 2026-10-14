@@ -50,6 +50,23 @@ holds a permanent `aliveInstancesReplay.subscribe()` that keeps the `replay(1).r
 running regardless of traffic; `choose()` sees a flip only after the LB cache TTL (35s default). Design
 notes: `docs/camel-http-loadbalancer.md` 运行时开关 section.
 
+## HttpClient pool lifecycle (`HttpPoolProperties`, all three pools)
+
+`loadBalancedPool`, `healthCheckPool` (`creed.partner[.health-check].http.*`) and `camelHttpPool`
+(`creed.camel.http.*`, bound via `Binder` in `CamelConfig`) share one property shape: sizing, four timeouts,
+plus `time-to-live` / `validate-after-inactivity` / `keep-alive` / `max-idle-time` / `eviction-interval`.
+Required order: validate (2s) < max-idle ≈ keep-alive (30s) < downstream idle close (Tomcat 60s, or a
+shorter LB/NAT) < TTL (5m). Three traps, all from httpclient5 5.5.2 source:
+- `HttpClientBuilder.evictIdleConnections()` does nothing with `setConnectionManagerShared(true)` (every
+  client here), so `ManagedHttpClientPool` owns and stops its `IdleConnectionEvictor`, and Camel's pool
+  has a `camelHttpPoolEvictor` bean.
+- The keep-alive strategy lives on each client, not the pool — any bespoke `HttpClients.custom()` on
+  `clusterPool` must set `clusterPool.keepAliveStrategy()`. The camel-http client deliberately uses
+  `DefaultConnectionKeepAliveStrategy.INSTANCE` (3m for header-less Tomcat), so `creed.camel.http` has no
+  `keep-alive` key and its idle bound (≤ max-idle-time + one sweep) depends on the evictor staying alive.
+- camel-http's `connectionTimeToLive` only applies to a pool it builds itself; ours is handed in.
+Full rationale + live measurement: `docs/connection-pool-tuning.md` §7.
+
 ## Sticky routing for `payment-resource`
 
 Request carries `Cookie: stickyId=<value>` → `PaymentStickyProcessor` (first step of `fetch-payment`)

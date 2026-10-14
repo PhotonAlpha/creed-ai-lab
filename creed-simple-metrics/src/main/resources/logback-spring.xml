@@ -120,6 +120,16 @@
         <appender-ref ref="BUSINESS"/>
     </logger>-->
 
+    <!-- 连接关闭可见性:"http-outgoing-N close connection GRACEFUL|IMMEDIATE" 来自这个 logger,
+         不是 PoolingHttpClientConnectionManager —— 后者的 "Closing connections idle longer than"
+         被上面的 PoolLeasedOnlyTurboFilter 拦掉,而且只说明扫描跑了、不说明真关了连接。
+         IdleConnectionEvictor 的 closeIdle、TTL 到期、异常关闭都打同一行,按时间点区分;
+         每次请求还会多一行 "set socket timeout to ..."。排查完调回 INFO。 -->
+    <logger name="org.apache.hc.client5.http.impl.io.DefaultManagedHttpClientConnection" level="debug" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="BUSINESS"/>
+    </logger>
+
 <!--    <logger name="org.apache.hc.client5.http.wire" level="debug" additivity="false">-->
 <!--        <appender-ref ref="CONSOLE"/>-->
 <!--        <appender-ref ref="BUSINESS"/>-->

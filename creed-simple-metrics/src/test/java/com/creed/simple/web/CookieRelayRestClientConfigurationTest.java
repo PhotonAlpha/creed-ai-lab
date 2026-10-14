@@ -35,11 +35,11 @@ class CookieRelayRestClientConfigurationTest {
         when(bundles.getBundle("creed-partner-client"))
                 .thenThrow(new NoSuchSslBundleException("creed-partner-client", "missing"));
         return RestClientSuppliers.pool(
-                bundles, "creed-partner-client", new HttpPoolProperties(5, 5, T, T, T, T), "test");
+                bundles, "creed-partner-client", HttpPoolProperties.of(5, 5, T, T, T, T), "test");
     }
 
     private static PartnerProps props() {
-        HttpPoolProperties pool = new HttpPoolProperties(5, 5, T, T, T, T);
+        HttpPoolProperties pool = HttpPoolProperties.of(5, 5, T, T, T, T);
         return new PartnerProps("creed-partner-client", pool, new PartnerProps.HealthCheck(pool));
     }
 

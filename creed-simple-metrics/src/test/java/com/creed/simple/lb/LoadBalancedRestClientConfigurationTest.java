@@ -30,6 +30,7 @@ import static org.mockito.Mockito.when;
 class LoadBalancedRestClientConfigurationTest {
 
     private static final Duration T = Duration.ofSeconds(5);
+    private static final HttpPoolProperties P = HttpPoolProperties.of(5, 5, T, T, T, T);
 
     private final LoadBalancedRestClientConfiguration config = new LoadBalancedRestClientConfiguration();
 
@@ -37,9 +38,16 @@ class LoadBalancedRestClientConfigurationTest {
     private SslBundles sslBundles;
 
     private static PartnerProps propsWithBundle(String bundleName) {
-        HttpPoolProperties business = new HttpPoolProperties(40, 10, T, T, T, T);
-        HttpPoolProperties health = new HttpPoolProperties(10, 5, T, T, T, T);
+        HttpPoolProperties business = HttpPoolProperties.of(40, 10, T, T, T, T);
+        HttpPoolProperties health = HttpPoolProperties.of(10, 5, T, T, T, T);
         return new PartnerProps(bundleName, business, new PartnerProps.HealthCheck(health));
+    }
+
+    /** A pool around an existing manager; its evictor is built but never started (nothing to sweep). */
+    private static ManagedHttpClientPool poolOf(PoolingHttpClientConnectionManager cm,
+                                                ClientHttpRequestFactory factory, String name) {
+        return new ManagedHttpClientPool(cm, factory, RestClientSuppliers.keepAliveStrategy(T),
+                RestClientSuppliers.evictorFor(cm, P), name);
     }
 
     @Test
@@ -84,9 +92,9 @@ class LoadBalancedRestClientConfigurationTest {
     @Test
     void poolBindsItsMetersToARegistry() {
         PoolingHttpClientConnectionManager cm =
-                RestClientSuppliers.connectionManagerFrom(null, 5, 5, T, T);
-        ManagedHttpClientPool pool = new ManagedHttpClientPool(cm,
-                RestClientSuppliers.requestFactoryFrom(cm, T, T), "testPool");
+                RestClientSuppliers.connectionManagerFrom(null, P);
+        ManagedHttpClientPool pool = poolOf(cm,
+                RestClientSuppliers.requestFactoryFrom(cm, RestClientSuppliers.keepAliveStrategy(T), T, T), "testPool");
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
 
         pool.bindTo(registry);
@@ -98,10 +106,10 @@ class LoadBalancedRestClientConfigurationTest {
     @Test
     void restClientsAreAssembledFromThePools() {
         PoolingHttpClientConnectionManager cm =
-                RestClientSuppliers.connectionManagerFrom(null, 5, 5, T, T);
-        ClientHttpRequestFactory factory = RestClientSuppliers.requestFactoryFrom(cm, T, T);
-        ManagedHttpClientPool clusterPool = new ManagedHttpClientPool(cm, factory, "loadBalancedPool");
-        ManagedHttpClientPool healthCheckPool = new ManagedHttpClientPool(cm, factory, "healthCheckPool");
+                RestClientSuppliers.connectionManagerFrom(null, P);
+        ClientHttpRequestFactory factory = RestClientSuppliers.requestFactoryFrom(cm, RestClientSuppliers.keepAliveStrategy(T), T, T);
+        ManagedHttpClientPool clusterPool = poolOf(cm, factory, "loadBalancedPool");
+        ManagedHttpClientPool healthCheckPool = poolOf(cm, factory, "healthCheckPool");
 
         RestClient.Builder builder = config.clusterRestClientBuilder(clusterPool, ObservationRegistry.NOOP);
         RestClient clusterClient = config.clusterRestClient(builder, new LoadBalancerAuditInterceptor());

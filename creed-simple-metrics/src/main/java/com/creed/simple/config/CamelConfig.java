@@ -1,5 +1,6 @@
 package com.creed.simple.config;
 
+import com.creed.simple.lb.HttpPoolProperties;
 import com.creed.simple.lb.LoadBalancerRoutePlanner;
 import com.creed.simple.lb.RestClientSuppliers;
 import io.micrometer.context.ContextExecutorService;
@@ -12,11 +13,14 @@ import org.apache.camel.CamelContext;
 import org.apache.camel.ProducerTemplate;
 import org.apache.camel.component.http.HttpComponent;
 import org.apache.hc.client5.http.impl.ChainElement;
+import org.apache.hc.client5.http.impl.DefaultConnectionKeepAliveStrategy;
+import org.apache.hc.client5.http.impl.IdleConnectionEvictor;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.ssl.NoSuchSslBundleException;
 import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
@@ -24,6 +28,7 @@ import org.springframework.cloud.client.discovery.DiscoveryClient;
 import org.springframework.cloud.client.loadbalancer.LoadBalancerClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.zalando.logbook.Logbook;
 import org.zalando.logbook.httpclient5.LogbookHttpExecHandler;
 
@@ -47,6 +52,12 @@ import java.util.concurrent.ExecutorService;
  * missing. The pool bean declares {@code destroyMethod=""}: {@code HttpComponent.doStop()} closes the
  * pool it was handed, so Camel owns the shutdown (endpoints mark it {@code connectionManagerShared} and
  * never close it themselves).
+ *
+ * <p>Pool sizing, connect/socket timeouts, TTL and idle eviction bind from {@code creed.camel.http.*} into
+ * the same {@link HttpPoolProperties} the RestClient pools use; the lease/response timeouts are plain
+ * {@code @Value}s on the component, and keep-alive is HttpClient's default strategy. The
+ * component's own {@code connectionTimeToLive} option is NOT that TTL: camel-http only applies it to a
+ * pool it builds itself, and this one is handed in.
  *
  * <h2>This is the Camel half of an either/or</h2>
  * Active only when Camel is on the classpath <em>and</em> {@code creed.camel.enabled} is not
@@ -95,16 +106,20 @@ public class CamelConfig {
     PoolingHttpClientConnectionManager camelHttpConnectionManager(
             SslBundles sslBundles,
             @Value("${creed.partner.client-bundle:creed-partner-server}") String bundleName,
-            @Value("${creed.camel.http.max-total:50}") int maxTotal,
-            @Value("${creed.camel.http.max-per-route:20}") int maxPerRoute,
-            @Value("${creed.camel.http.connect-timeout:5s}") Duration connectTimeout,
-            @Value("${creed.camel.http.socket-timeout:10s}") Duration socketTimeout) {
+            Environment environment) {
         return RestClientSuppliers.connectionManagerFrom(
-                resolveClientBundleOrNull(sslBundles, bundleName),
-                maxTotal,
-                maxPerRoute,
-                connectTimeout,
-                socketTimeout);
+                resolveClientBundleOrNull(sslBundles, bundleName), camelHttpProps(environment));
+    }
+
+    /**
+     * Idle/expired sweep for the camel-http pool. Camel closes the pool on context stop, before Spring
+     * destroys this bean; the sweep is a no-op on a closed pool, so that order is harmless.
+     */
+    @Bean(initMethod = "start", destroyMethod = "shutdown")
+    IdleConnectionEvictor camelHttpPoolEvictor(
+            @Qualifier("camelHttpConnectionManager") PoolingHttpClientConnectionManager camelHttpConnectionManager,
+            Environment environment) {
+        return RestClientSuppliers.evictorFor(camelHttpConnectionManager, camelHttpProps(environment));
     }
 
     @Bean
@@ -132,6 +147,10 @@ public class CamelConfig {
         // HttpEndpoint applies the configurer after its own builder setup, so the planner is not overridden
         component.setHttpClientConfigurer(builder -> builder
                 .setRoutePlanner(routePlanner)
+                // HttpClient's stock strategy: header-less Tomcat responses get RequestConfig's 3-minute
+                // keep-alive, so idle connections are bounded by camelHttpPoolEvictor's max-idle-time
+                // (closeIdle), not by keep-alive
+                .setKeepAliveStrategy(DefaultConnectionKeepAliveStrategy.INSTANCE)
                 // Zalando Logbook: the FULL request/response audit (headers/cookies/bodies with
                 // obfuscation, `logbook.*` config). First per the Logbook docs, so it sees the
                 // message before other interceptors touch it.
@@ -147,6 +166,11 @@ public class CamelConfig {
         component.setConnectionRequestTimeout(connectionRequestTimeout.toMillis());
         component.setResponseTimeout(responseTimeout.toMillis());
         return component;
+    }
+
+    /** {@code creed.camel.http.*}, with {@link HttpPoolProperties}' defaults for anything unset. */
+    private static HttpPoolProperties camelHttpProps(Environment environment) {
+        return Binder.get(environment).bindOrCreate("creed.camel.http", HttpPoolProperties.class);
     }
 
     /**

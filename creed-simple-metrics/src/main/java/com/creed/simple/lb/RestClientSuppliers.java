@@ -1,14 +1,21 @@
 package com.creed.simple.lb;
 
 import lombok.experimental.UtilityClass;
+import org.apache.hc.client5.http.ConnectionKeepAliveStrategy;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.DefaultConnectionKeepAliveStrategy;
+import org.apache.hc.client5.http.impl.IdleConnectionEvictor;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
-import org.apache.hc.client5.http.ssl.*;
+import org.apache.hc.client5.http.ssl.ClientTlsStrategyBuilder;
+import org.apache.hc.client5.http.ssl.HostnameVerificationPolicy;
+import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
+import org.apache.hc.client5.http.ssl.TlsSocketStrategy;
 import org.apache.hc.core5.ssl.SSLContexts;
+import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,21 +39,23 @@ public final class RestClientSuppliers {
     private static final Logger log = LoggerFactory.getLogger(RestClientSuppliers.class);
 
     /**
-     * Builds a complete {@link ManagedHttpClientPool} (pool + buffering request factory + pool metrics)
-     * from a {@link HttpPoolProperties} block and the shared mTLS bundle name. This is the single-call
-     * template that collapses the former connection-manager / request-factory / meter-binder bean trio
-     * into one self-managing bean.
+     * Builds a complete {@link ManagedHttpClientPool} (pool + buffering request factory + idle evictor +
+     * pool metrics) from a {@link HttpPoolProperties} block and the shared mTLS bundle name. This is the
+     * single-call template that collapses the former connection-manager / request-factory / meter-binder
+     * bean trio into one self-managing bean. The evictor is started here and stopped by
+     * {@link ManagedHttpClientPool#close()}.
      */
     public static ManagedHttpClientPool pool(
             SslBundles sslBundles, String bundleName, HttpPoolProperties props, String metricsName) {
-        PoolingHttpClientConnectionManager connectionManager = connectionManagerFrom(
-                resolveClientBundleOrNull(sslBundles, bundleName),
-                props.maxTotal(), props.maxPerRoute(),
-                props.connectTimeout(), props.socketTimeout());
+        PoolingHttpClientConnectionManager connectionManager =
+                connectionManagerFrom(resolveClientBundleOrNull(sslBundles, bundleName), props);
+        ConnectionKeepAliveStrategy keepAliveStrategy = keepAliveStrategy(props.keepAlive());
         var requestFactory = new BufferingClientHttpRequestFactory(
-                requestFactoryFrom(connectionManager,
+                requestFactoryFrom(connectionManager, keepAliveStrategy,
                         props.connectionRequestTimeout(), props.responseTimeout()));
-        return new ManagedHttpClientPool(connectionManager, requestFactory, metricsName);
+        IdleConnectionEvictor evictor = evictorFor(connectionManager, props);
+        evictor.start();
+        return new ManagedHttpClientPool(connectionManager, requestFactory, keepAliveStrategy, evictor, metricsName);
     }
 
     /**
@@ -74,15 +83,19 @@ public final class RestClientSuppliers {
      * Creed-CA-signed resource servers will then fail the handshake at runtime.
      */
     public static PoolingHttpClientConnectionManager connectionManagerFrom(
-            SslBundle bundle, int maxTotal, int maxPerRoute, Duration connectTimeout, Duration socketTimeout) {
+            SslBundle bundle, HttpPoolProperties props) {
         ConnectionConfig connectionConfig = ConnectionConfig.custom()
-                .setConnectTimeout(Timeout.ofMilliseconds(connectTimeout.toMillis()))
-                .setSocketTimeout(Timeout.ofMilliseconds(socketTimeout.toMillis()))
+                .setConnectTimeout(Timeout.ofMilliseconds(props.connectTimeout().toMillis()))
+                .setSocketTimeout(Timeout.ofMilliseconds(props.socketTimeout().toMillis()))
+                // Default is no TTL: a connection would stay pinned to its first instance forever.
+                .setTimeToLive(TimeValue.ofMilliseconds(props.timeToLive().toMillis()))
+                .setValidateAfterInactivity(TimeValue.ofMilliseconds(props.validateAfterInactivity().toMillis()))
                 .build();
         PoolingHttpClientConnectionManagerBuilder builder = PoolingHttpClientConnectionManagerBuilder.create()
-                .setMaxConnTotal(maxTotal)
-                .setMaxConnPerRoute(maxPerRoute)
+                .setMaxConnTotal(props.maxTotal())
+                .setMaxConnPerRoute(props.maxPerRoute())
                 .setDefaultConnectionConfig(connectionConfig);
+
         if (bundle != null) {
             //解决无法创建自定义SSL Context的问题
             SslStoreBundle stores = bundle.getStores();
@@ -110,8 +123,38 @@ public final class RestClientSuppliers {
         return builder.build();
     }
 
+    /**
+     * Caps how long a returned connection counts as reusable. A server-sent {@code Keep-Alive: timeout=N}
+     * is still honoured when it is shorter; without the header (every Tomcat downstream) HttpClient would
+     * fall back to {@code RequestConfig}'s 3-minute default, well past Tomcat's 60 s idle close.
+     * Every {@code HttpClientBuilder} riding a pool needs this — the strategy lives on the client, not the
+     * pool.
+     */
+    public static ConnectionKeepAliveStrategy keepAliveStrategy(Duration max) {
+        TimeValue cap = TimeValue.ofMilliseconds(max.toMillis());
+        return (response, context) -> {
+            TimeValue offered = DefaultConnectionKeepAliveStrategy.INSTANCE.getKeepAliveDuration(response, context);
+            return TimeValue.isNonNegative(offered) && offered.compareTo(cap) < 0 ? offered : cap;
+        };
+    }
+
+    /**
+     * Background {@code closeExpired()} + {@code closeIdle(maxIdleTime)} sweep for one pool, NOT started.
+     * Must be owned explicitly: {@code HttpClientBuilder.evictIdleConnections()} is a silent no-op with
+     * {@code setConnectionManagerShared(true)} (the builder only starts an evictor for a pool it owns),
+     * and every client here shares a Spring/Camel-owned pool. The evictor thread dies silently on any
+     * exception ({@code catch (Exception ignore)} in httpclient5) — harmless for these two calls, which
+     * are no-ops on a closed pool.
+     */
+    public static IdleConnectionEvictor evictorFor(
+            PoolingHttpClientConnectionManager connectionManager, HttpPoolProperties props) {
+        return new IdleConnectionEvictor(connectionManager,
+                TimeValue.ofMilliseconds(props.evictionInterval().toMillis()),
+                TimeValue.ofMilliseconds(props.maxIdleTime().toMillis()));
+    }
+
     public static HttpComponentsClientHttpRequestFactory requestFactoryFrom(
-            PoolingHttpClientConnectionManager connectionManager,
+            PoolingHttpClientConnectionManager connectionManager, ConnectionKeepAliveStrategy keepAliveStrategy,
             Duration connectionRequestTimeout, Duration responseTimeout) {
         RequestConfig requestConfig = RequestConfig.custom()
                 .setConnectionRequestTimeout(Timeout.ofMilliseconds(connectionRequestTimeout.toMillis()))
@@ -122,6 +165,7 @@ public final class RestClientSuppliers {
                 // The pool is a Spring-managed bean (destroyMethod="close"); mark it shared so closing
                 // the client does not also close the bean (Spring owns its lifecycle).
                 .setConnectionManagerShared(true)
+                .setKeepAliveStrategy(keepAliveStrategy)
                 .setDefaultRequestConfig(requestConfig)
                 .build();
         return new HttpComponentsClientHttpRequestFactory(httpClient);

@@ -43,6 +43,8 @@ public class HttpServiceClientConfig {
                 .setConnectionManager(clusterPool.connectionManager())
                 // Spring owns the pool's lifecycle (ManagedHttpClientPool); closing this client must not close it
                 .setConnectionManagerShared(true)
+                // keep-alive lives on the client, not the pool — reuse the pool's cap
+                .setKeepAliveStrategy(clusterPool.keepAliveStrategy())
                 .addExecInterceptorFirst("logbook", new LogbookHttpExecHandler(logbook))
                 .build();
         return RestClient.builder()
