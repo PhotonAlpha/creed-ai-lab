@@ -52,12 +52,12 @@
         <module>creed-gateway</module>
         <module>creed-resource</module>
         <module>creed-report</module>
-        <module>creed-config-server</module>
         <module>creed-gateway-partner</module>
         <module>creed-common-metrics</module>
         <module>creed-simple-metrics</module>
         <module>creed-jasper-report</module>
         <module>creed-gateway-proxy</module>
+        <module>creed-config-management</module>
     </modules>
 
     <dependencyManagement>

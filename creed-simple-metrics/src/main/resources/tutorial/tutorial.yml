@@ -1,0 +1,67 @@
+# =============================================================================
+#  Camel tutorial (com.creed.simple.tutorial, camel/tutorial/*.xml) - its own settings
+# =============================================================================
+#  Imported by application.yml (spring.config.import). An imported file outranks the one importing
+#  it, so this file only ADDS keys the rest of the module does not set - never override a shared one
+#  here. Guide: docs/camel-tutorial/README.md.
+# =============================================================================
+
+creed:
+  tutorial:
+    remote:
+      # The mock "external systems" API-3 (camel-http via ProducerTemplate) and API-7 (@HttpExchange)
+      # call: Spring MVC controllers in this same application (tutorial.mock). HTTPS, because that is
+      # the only listener; both clients present the module's mTLS client bundle.
+      base-url: ${CREED_TUTORIAL_REMOTE_BASE_URL:https://localhost:${server.port}${server.servlet.context-path:}}
+
+    # ==== OpenAPI groups ========================================================
+    # One hand-written specification (springdoc cannot see Camel REST DSL routes); a group is a
+    # filtered view of it, served as /openapi/<name>.yaml and listed in the Swagger UI dropdown.
+    # The groups are declared by x-groups INSIDE tutorial/openapi.yaml, next to the tags they select.
+    # A non-empty list here overrides them entirely - only for a deployment that must publish a
+    # different selection. A tag that does not exist in the spec fails startup either way.
+    openapi:
+      spec: classpath:tutorial/openapi.yaml
+      # groups:
+      #   - name: business-only
+      #     display-name: Business APIs
+      #     tags: [API-1 basic, API-2 dispatch]
+
+server:
+  tomcat:
+    # API-8 sends the file as Base64 in a TEXT form field, and Tomcat counts text fields of a multipart
+    # request against maxPostSize (2MB by default), not against max-file-size below. Keep it in line
+    # with spring.servlet.multipart.max-request-size.
+    max-http-form-post-size: 10MB
+
+spring:
+  freemarker:
+    # Boot's FreeMarker auto-configuration comes along with camel-freemarker and looks for
+    # classpath:/templates/; the tutorial's templates are loaded by Camel from tutorial/templates/.
+    check-template-location: false
+  servlet:
+    multipart:
+      # Read by Tomcat when Base64FileMultipartFilter calls request.getParts() for API-8, and copied
+      # onto the Camel servlet's registration by camel-servlet-starter (that is what makes the Camel
+      # servlet accept multipart at all). The "file" field is Base64 text, about 4/3 of the file size.
+      max-file-size: 5MB
+      max-request-size: 10MB
+
+springdoc:
+  api-docs:
+    # Must stay enabled: SwaggerUiConfigProperties is @ConditionalOnBean(SpringDocConfiguration), and
+    # that configuration is guarded by this flag - switching it off takes Swagger UI down with it.
+    enabled: true
+  # springdoc's scanner only understands @RestController; it cannot see the Camel REST DSL, so left
+  # alone it would publish the module's MVC controllers as if they were the API. Pointing it at a
+  # package with no controller keeps /v3/api-docs empty: the real document is tutorial/openapi.yaml.
+  packages-to-scan: com.creed.simple.tutorial.no-such-package
+  swagger-ui:
+    path: /swagger-ui.html
+    # The dropdown is filled by SwaggerUiGroupConfig from the groups; display options come from
+    # x-swagger-ui inside the spec. Anything set here still wins.
+    disable-swagger-default-url: true
+
+logging:
+  level:
+    com.creed.simple.tutorial: INFO

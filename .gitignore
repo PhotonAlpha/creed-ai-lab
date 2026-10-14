@@ -17,3 +17,5 @@ creed-report/local-example.md
 */.idea
 .agents
 AGENTS.md
+creed-simple-metrics/docs/camel-tutorial/decks
+creed-simple-metrics/docs/camel-tutorial/generators

@@ -1,0 +1,1353 @@
+openapi: 3.0.3
+
+# =============================================================================
+#  Camel tutorial APIs (migrated from camel-session-0to1) - OpenAPI specification
+# =============================================================================
+#  Verified against src/main/resources/camel/tutorial/rest-api.xml plus the
+#  processors that assemble the replies. Every example below is one of the cases
+#  in docs/camel-tutorial/http/tutorial-api.http, so this file and
+#  docs/camel-tutorial/scripts/test-apis.sh describe the same calls.
+#
+#  Paths are relative to the servlet context /simple: the business APIs are Camel
+#  REST DSL routes behind the Camel servlet (/camel/*), the mock "external
+#  systems" are Spring MVC controllers (/mock/*). Route ids per endpoint are in
+#  docs/camel-tutorial/README.md.
+# =============================================================================
+
+info:
+  title: Camel tutorial API
+  version: 1.0.0-SNAPSHOT
+  description: |
+    Apache Camel teaching project. Eight business APIs (API-7 has three
+    endpoints, one per method of its HTTP interface), each demonstrating one
+    group of EIP tags, plus the mock "external systems" that API-3 and API-7
+    call over real HTTP.
+
+    Two semantics run through the whole project:
+
+    * `<filter>` does not terminate a route. When it blocks, only the steps
+      inside it are skipped; the reply is still assembled and the status is
+      still 200. API-2c and API-6 (REJECTED) both rely on this.
+    * The body is rewritten repeatedly, exchange properties are not. API-6
+      backs the original order up in a property before the fan-out.
+
+servers:
+  # Relative, so "Try it out" calls whichever host served this page (8096 directly, or httpd).
+  - url: /simple
+    description: this server
+
+# =============================================================================
+#  x-groups - the entries of the Swagger UI "Select a definition" dropdown
+# =============================================================================
+#  Not part of the OpenAPI standard: the dropdown is a Swagger UI feature fed by
+#  springdoc's swagger-config, and the specification has no notion of a list of
+#  definitions. "x-" extensions are legal at the root though, so the groups can
+#  live here, right next to the tags they select - other tooling ignores them.
+#
+#  A group states its criteria and they are ANDed, an omitted one being no
+#  constraint at all:
+#
+#    tags            keep an operation carrying one of these tags
+#    paths           keep a path matching one of these Ant patterns
+#    methods         keep an operation using one of these HTTP methods
+#    excludeInternal drop operations marked "x-internal: true" below
+#
+#  Operations that do not match are removed, paths left without any operation are
+#  dropped, and schemas nobody references any more are collected. A group with no
+#  criteria at all is the whole document.
+#
+#  Each entry becomes /openapi/<name>.yaml plus one dropdown item. Editing this
+#  list is all it takes to add a group - no code. A tag that does not exist fails
+#  startup; a group that ends up selecting nothing only logs a warning, since a
+#  deliberately empty selection is possible.
+#
+#  creed.tutorial.openapi.groups in application.yml overrides this list when it is set, for
+#  environments that want to publish something different.
+# =============================================================================
+x-groups:
+  - name: all
+    displayName: All endpoints
+    # no criteria = the whole document
+
+  - name: business
+    displayName: Business APIs (API-1 ~ API-8)
+    tags:
+      - API-1 basic
+      - API-2 dispatch
+      - API-3 quote
+      - API-4 check
+      - API-5 split
+      - API-6 fulfil
+      - API-7 accounts
+      - API-8 upload
+
+  - name: mock
+    displayName: Mock external systems
+    tags:
+      - mock externals
+
+  # The two ways this project calls out: ProducerTemplate (API-3) and the custom
+  # httpexchange: component (API-7), together with the systems they call.
+  - name: remote-calls
+    displayName: Remote call demos (API-3, API-7 + mocks)
+    tags:
+      - API-3 quote
+      - API-7 accounts
+      - mock externals
+
+  # Selected by exclusion rather than by listing: everything except the endpoints
+  # marked x-internal, which here are the fake "external systems". Survives
+  # adding an API - a new endpoint is public unless it says otherwise.
+  - name: public
+    displayName: Public API (nothing internal)
+    excludeInternal: true
+
+  # The order endpoints of "business" (API-1 ~ API-7), selected by URL instead of
+  # by tag - the dimensions are interchangeable when tags and paths line up, and
+  # paths win when they do not: API-8 lives under /camel/api/v1/files and is left out. methods is redundant here (this project is POST-only) and
+  # is listed to show the syntax.
+  - name: orders
+    displayName: Everything under /camel/api/v1/orders
+    paths:
+      - /camel/api/v1/orders/**
+    methods: [post]
+
+# =============================================================================
+#  x-swagger-ui - display options that belong to this document
+# =============================================================================
+#  Swagger UI reads these from springdoc's swagger-config, not from the spec, so
+#  this block is again an extension this application applies itself. Keys are the
+#  Swagger UI option names in camelCase.
+#
+#  springdoc.swagger-ui.* in application.yml wins over anything set here: only
+#  options left unset there are filled from this block. So the document carries
+#  what is true about the document, and a deployment can still override it.
+# =============================================================================
+x-swagger-ui:
+  # The "Filter by tag" box above the operations - useful because every endpoint
+  # here is tagged by API.
+  filter: true
+  # Start collapsed: 26 operations expanded at once is unreadable.
+  docExpansion: none
+  displayRequestDuration: true
+
+tags:
+  - name: API-1 basic
+    description: "`<route>` `<from>` `<to>` `<process>` `<log>` - route api1-basic-order"
+  - name: API-2 dispatch
+    description: "`<choice>` `<when>` `<otherwise>` `<simple>` `<jsonpath>` `<filter>` - route api2-dispatch-order"
+  - name: API-3 quote
+    description: "`ProducerTemplate` + `freemarker:` two-way message translation - route api3-quote-order"
+  - name: API-4 check
+    description: "`<multicast>` + `aggregationStrategy` - route api4-parallel-check"
+  - name: API-5 split
+    description: "`<split>` `<wireTap>` `<toD>` - route api5-split-items"
+  - name: API-6 fulfil
+    description: "all of the above combined - route api6-complex-fulfilment"
+  - name: API-7 accounts
+    description: "custom `httpexchange:` component over a Spring `@HttpExchange` interface - route api7-account-lookup"
+  - name: API-8 upload
+    description: "`multipart/form-data` upload whose file field is Base64, decoded by a servlet filter - route api8-file-upload"
+  - name: mock externals
+    description: Plain Spring MVC controllers acting as third-party systems; not Camel routes.
+
+paths:
+
+  # ===========================================================================
+  #  API-1  the basic chain
+  # ===========================================================================
+  /camel/api/v1/orders/basic:
+    post:
+      tags: [API-1 basic]
+      summary: Validate and enrich an order
+      description: |
+        `direct:api1-basic` validates the payload, then calls `direct:api1-enrich`,
+        which assembles the reply.
+
+        No `onException` is configured, so a missing `orderId` makes
+        `OrderValidateProcessor` throw and the failure bubbles up as 500. That
+        negative case is kept deliberately, to show what a failed exchange logs.
+      operationId: basicOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BasicOrderRequest'
+            examples:
+              positive:
+                summary: valid order
+                value:
+                  orderId: A-1001
+                  amount: 666
+                  channel: WEB
+              missingOrderId:
+                summary: negative - no orderId, validation throws
+                value:
+                  amount: 100
+      responses:
+        '200':
+          description: Order enriched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicOrderResponse'
+              example:
+                code: OK
+                orderId: A-1001
+                amount: 666
+                channel: WEB
+                handledBy: route:api1-basic-order
+                exchangeId: 1F0A2C3D4E5F6A7-0000000000000001
+                processedAt: "2026-09-15 10:21:33"
+        '500':
+          description: |
+            Validation failed. The exception is not caught anywhere, so Camel's REST
+            layer answers with an empty `text/plain` body - there is no JSON error
+            envelope to parse. The reason for the failure is only in the logs.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ""
+
+  # ===========================================================================
+  #  API-2  branching and filtering
+  # ===========================================================================
+  /camel/api/v1/orders/dispatch:
+    post:
+      tags: [API-2 dispatch]
+      summary: Pick a lane, then optionally place the order
+      description: |
+        `<choice>` picks the lane:
+
+        | condition | language | lane |
+        |---|---|---|
+        | `amount > 10000` | simple | `VIP` |
+        | `channel == 'APP'` | jsonpath | `APP_FAST` |
+        | otherwise | - | `STANDARD` |
+
+        A `<filter>` then places the order only when `amount >= 100`. The
+        closing processor sits **outside** the filter, so a blocked order still
+        returns 200 with the same field set, just `placed: false`.
+      operationId: dispatchOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DispatchRequest'
+            examples:
+              vipLane:
+                summary: amount > 10000 - simple predicate, VIP lane
+                value:
+                  orderId: B-2001
+                  amount: 20000
+                  channel: WEB
+              appLane:
+                summary: channel APP - jsonpath predicate, fast lane
+                value:
+                  orderId: B-2002
+                  amount: 500
+                  channel: APP
+              filteredOut:
+                summary: amount < 100 - otherwise branch, filter blocks placement
+                value:
+                  orderId: B-2003
+                  amount: 50
+                  channel: WEB
+      responses:
+        '200':
+          description: Lane selected; still 200 when the filter blocked placement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DispatchResponse'
+              examples:
+                vipLane:
+                  value:
+                    code: OK
+                    orderId: B-2001
+                    amount: 20000
+                    channel: WEB
+                    lane: VIP
+                    placed: true
+                    hint: choice selected the VIP lane, filter passed and the order was placed
+                filteredOut:
+                  value:
+                    code: OK
+                    orderId: B-2003
+                    amount: 50
+                    channel: WEB
+                    lane: STANDARD
+                    placed: false
+                    hint: >-
+                      choice selected the STANDARD lane, but filter did not pass
+                      (amount < 100); only the placement was skipped, the route
+                      still assembled this reply
+
+  # ===========================================================================
+  #  API-3  remote call through a ProducerTemplate
+  # ===========================================================================
+  /camel/api/v1/orders/quote:
+    post:
+      tags: [API-3 quote]
+      summary: Quote an order against the external FX service
+      description: |
+        Four ProducerTemplate calls chained by `RemoteCallService`:
+
+        1. `freemarker:tutorial/templates/request.ftl` renders the internal order into the
+           external envelope (`header`/`payload`, `ccy`/`amt` abbreviations);
+        2. `http://` posts it to `/mock/remote/fx-rate`;
+        3. `freemarker:tutorial/templates/response.ftl` flattens the reply back;
+        4. `direct:api3-calc-fee` computes the fee locally.
+
+        The external dialect exists only in those two templates - changing the
+        remote format needs no Java change. `msgId` is generated before the call
+        and comes back untouched, which proves the round trip.
+
+        Mock rates: `USD` 7.24, `EUR` 7.85, `JPY` 0.048, anything else 1.0.
+      operationId: quoteOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuoteRequest'
+            examples:
+              usd:
+                value:
+                  orderId: C-3001
+                  amount: 2000
+                  currency: USD
+              eur:
+                summary: another currency, another remote rate
+                value:
+                  orderId: C-3002
+                  amount: 800
+                  currency: EUR
+      responses:
+        '200':
+          description: Remote rate plus locally computed fee
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteResponse'
+              example:
+                code: OK
+                orderId: C-3001
+                currency: USD
+                rate: 7.24
+                amountInCNY: 14480.0
+                fee: 10.0
+                feeRule: VIP-0.5%
+                remoteProvider: mock-fx-service
+                remoteCode: "0000"
+                msgId: 0c3f7f1e-2b44-4a7e-9d51-6a2c9f0b71ac
+
+  # ===========================================================================
+  #  API-4  parallel fan-out and aggregation
+  # ===========================================================================
+  /camel/api/v1/orders/check:
+    post:
+      tags: [API-4 check]
+      summary: Run three risk checks in parallel and aggregate the scores
+      description: |
+        `<multicast parallelProcessing="true" aggregationStrategy="scoreAggregationStrategy">`
+        fans the order out to `RISK`, `CREDIT` and `INVENTORY`. Each branch
+        scores it on its own thread; the strategy sums the scores.
+
+        Scoring, from `ScoreProcessor`:
+
+        | check | score |
+        |---|---|
+        | RISK | 90, or 30 when `amount > 50000` |
+        | CREDIT | 85, or 40 when `amount > 60000` |
+        | INVENTORY | 95 always |
+
+        So `amount <= 50000` totals 270 and `amount > 60000` totals 165. These
+        two numbers straddle the `PASS_LINE = 240` that API-6 decides on.
+      operationId: checkOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckRequest'
+            examples:
+              smallAmount:
+                summary: total 270
+                value:
+                  orderId: D-4001
+                  amount: 3000
+              largeAmount:
+                summary: RISK and CREDIT both drop, total 165
+                value:
+                  orderId: D-4002
+                  amount: 90000
+      responses:
+        '200':
+          description: Three branch results and their total
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckResponse'
+              example:
+                checks:
+                  - check: RISK
+                    score: 90
+                    costMs: 200
+                  - check: CREDIT
+                    score: 85
+                    costMs: 350
+                  - check: INVENTORY
+                    score: 95
+                    costMs: 120
+                totalScore: 270
+
+  # ===========================================================================
+  #  API-5  split, tap and dynamic routing
+  # ===========================================================================
+  /camel/api/v1/orders/split:
+    post:
+      tags: [API-5 split]
+      summary: Split an order into item lines and route each to a warehouse
+      description: |
+        `<wireTap uri="direct:audit-log">` branches off an audit copy on its own
+        thread (its `[AUDIT]` log usually lands after the response), then
+        `<split>` walks `items` and `<toD uri="direct:item-${...}">` dispatches
+        each line by type.
+
+        `ItemNormalizeProcessor` collapses unknown types to `OTHER`, so `toD`
+        can only ever resolve to one of three existing routes.
+
+        | type | route | warehouse |
+        |---|---|---|
+        | BOOK | item-BOOK | WH-BOOK-SH |
+        | FOOD | item-FOOD | WH-COLD-HZ |
+        | anything else | item-OTHER | WH-GENERAL-BJ |
+
+        This endpoint declares no `outType`: the reply is a JSON array, not an
+        object.
+      operationId: splitOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SplitRequest'
+            example:
+              orderId: E-5001
+              items:
+                - { sku: BK-01, type: BOOK, qty: 2 }
+                - { sku: FD-09, type: FOOD, qty: 1 }
+                - { sku: XX-77, type: TOY,  qty: 5 }
+      responses:
+        '200':
+          description: One entry per item line, in input order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AllocatedItem'
+              example:
+                - { sku: BK-01, qty: 2, channel: BOOK,  warehouse: WH-BOOK-SH,    status: ALLOCATED }
+                - { sku: FD-09, qty: 1, channel: FOOD,  warehouse: WH-COLD-HZ,    status: ALLOCATED }
+                - { sku: XX-77, qty: 5, channel: OTHER, warehouse: WH-GENERAL-BJ, status: ALLOCATED }
+
+  # ===========================================================================
+  #  API-6  the combined orchestration
+  # ===========================================================================
+  /camel/api/v1/orders/fulfil:
+    post:
+      tags: [API-6 fulfil]
+      summary: Grade, risk-check and fulfil an order end to end
+      description: |
+        The whole toolbox in one route, reusing API-4's three risk sub-routes and
+        API-5's `item-*` and `audit-log` routes:
+
+        1. `<choice>` grades the order (`VIP` when `amount > 10000` or
+           `channel == 'APP'`, else `STANDARD`);
+        2. `<setProperty name="originalOrder">` backs the payload up, because the
+           multicast is about to overwrite the body;
+        3. `<multicast>` runs the three risk checks and aggregates them;
+        4. `RiskDecisionProcessor` compares the total against `PASS_LINE = 240`;
+        5. `<setBody>` restores the original order, then a `<filter>` splits and
+           allocates the items only when the decision is `APPROVED`;
+        6. `ComplexResponseProcessor`, **outside** the filter, assembles the reply.
+
+        Because step 6 sits outside the filter, a rejected order still returns
+        200 with exactly the same fields - `fulfilment` is simply empty and
+        `checks` still holds all three results.
+      operationId: fulfilOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FulfilRequest'
+            examples:
+              approved:
+                summary: VIP by channel, total 270, fulfilled
+                value:
+                  orderId: F-6001
+                  amount: 20000
+                  channel: APP
+                  items:
+                    - { sku: BK-01, type: BOOK, qty: 2 }
+                    - { sku: FD-09, type: FOOD, qty: 1 }
+                    - { sku: XX-77, type: TOY,  qty: 5 }
+              rejected:
+                summary: total 165 < 240, filter skips fulfilment
+                value:
+                  orderId: F-6002
+                  amount: 90000
+                  channel: WEB
+                  items:
+                    - { sku: BK-02, type: BOOK, qty: 1 }
+              standard:
+                summary: low amount, non-APP channel - otherwise branch, still approved
+                value:
+                  orderId: F-6003
+                  amount: 300
+                  channel: WEB
+                  items:
+                    - { sku: FD-01, type: FOOD, qty: 3 }
+      responses:
+        '200':
+          description: Always 200; the decision is carried in the body, not the status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FulfilResponse'
+              examples:
+                approved:
+                  value:
+                    code: OK
+                    orderId: F-6001
+                    orderLevel: VIP
+                    decision: APPROVED
+                    totalScore: 270
+                    checks:
+                      - { check: RISK,      score: 90, costMs: 200 }
+                      - { check: CREDIT,    score: 85, costMs: 350 }
+                      - { check: INVENTORY, score: 95, costMs: 120 }
+                    fulfilment:
+                      - { sku: BK-01, qty: 2, channel: BOOK,  warehouse: WH-BOOK-SH,    status: ALLOCATED }
+                      - { sku: FD-09, qty: 1, channel: FOOD,  warehouse: WH-COLD-HZ,    status: ALLOCATED }
+                      - { sku: XX-77, qty: 5, channel: OTHER, warehouse: WH-GENERAL-BJ, status: ALLOCATED }
+                    message: risk checks passed, order split and allocated
+                    exchangeId: 1F0A2C3D4E5F6A7-0000000000000009
+                    finishedAt: "2026-09-15 10:21:34.517"
+                rejected:
+                  value:
+                    code: REJECTED
+                    orderId: F-6002
+                    orderLevel: VIP
+                    decision: REJECTED
+                    totalScore: 165
+                    checks:
+                      - { check: RISK,      score: 30, costMs: 200 }
+                      - { check: CREDIT,    score: 40, costMs: 350 }
+                      - { check: INVENTORY, score: 95, costMs: 120 }
+                    fulfilment: []
+                    message: >-
+                      risk checks failed, fulfilment skipped (filter did not pass,
+                      but the route still completed normally)
+                    exchangeId: 1F0A2C3D4E5F6A7-000000000000000B
+                    finishedAt: "2026-09-15 10:21:35.204"
+
+  # ===========================================================================
+  #  API-7  custom component over a Spring HTTP interface
+  # ===========================================================================
+  /camel/api/v1/orders/accounts:
+    post:
+      tags: [API-7 accounts]
+      summary: "Look up the caller's accounts through the httpexchange: component"
+      description: |
+        The declarative counterpart of API-3. Instead of a ProducerTemplate and a
+        raw `http://` call, the route sends to:
+
+        ```
+        httpexchange:artisanClient/listUser
+            ?requestTemplate=tutorial/templates/artisan-request.ftl
+            &responseTemplate=tutorial/templates/artisan-response.ftl
+            &unmarshalTo=java.util.Map
+        ```
+
+        The component renders the request template and passes the text verbatim
+        to `listUser(@RequestBody String userJson, ...)`, invokes the Spring
+        HTTP interface proxy, then renders the reply through the response
+        template and parses it back so the REST layer can serialise it.
+
+        No method of `ArtisanClient` declares a header: `X-Client-Id` is set on
+        the interface, `X-Trace-Id` / `X-Channel` are added by `ArtisanHeaders`,
+        and Logbook prints every request and response.
+
+        The mock service returns three accounts derived from `amount`:
+        `PRIMARY` = amount, `SAVINGS` = amount x 0.3, `CREDIT` = amount x 1.5 -
+        so `amount: 2000` totals 5600.
+      operationId: lookupAccounts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountLookupRequest'
+            example:
+              orderId: G-7001
+              userName: ethan
+              channel: APP
+              amount: 2000
+      responses:
+        '200':
+          description: Accounts aggregated by artisan-response.ftl
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountLookupResponse'
+              example:
+                code: OK
+                orderId: G-7001
+                accountCount: 3
+                totalAmount: 5600
+                accounts:
+                  - { id: G-7001-PRIMARY, owner: ethan, channel: APP, amount: 2000 }
+                  - { id: G-7001-SAVINGS, owner: ethan, channel: APP, amount: 600 }
+                  - { id: G-7001-CREDIT,  owner: ethan, channel: APP, amount: 3000 }
+
+  /camel/api/v1/orders/accounts/create:
+    post:
+      tags: [API-7 accounts]
+      summary: "Open an account through httpexchange:artisanClient/createUser"
+      description: |
+        Same request template as `/accounts` (`artisan-request.ftl`), rendered
+        into a JSON string and passed verbatim to
+        `createUser(@RequestBody String userJson)`; the reply goes through
+        `artisan-account-response.ftl`. The account id is `ACC-` + `orderId`.
+      operationId: createAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountLookupRequest'
+            example:
+              orderId: G-7002
+              userName: ethan
+              channel: WEB
+              amount: 500
+      responses:
+        '200':
+          description: The opened account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+              example:
+                code: OK
+                orderId: G-7002
+                account: { id: ACC-G-7002, owner: ethan, channel: WEB, amount: 500 }
+
+  /camel/api/v1/orders/accounts/detail:
+    post:
+      tags: [API-7 accounts]
+      summary: "Look one account up through httpexchange:artisanClient/getUser"
+      description: |
+        `artisan-detail-request.ftl` renders `{"userId": accountId}` for
+        `getUser(@RequestBody String queryJson)`. Only accounts opened through
+        `/accounts/create` since startup exist; an unknown id makes the remote
+        side answer 404, which fails the exchange with 500.
+      operationId: getAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountDetailRequest'
+            example:
+              orderId: G-7003
+              accountId: ACC-G-7002
+      responses:
+        '200':
+          description: The account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+              example:
+                code: OK
+                orderId: G-7003
+                account: { id: ACC-G-7002, owner: ethan, channel: WEB, amount: 500 }
+
+  # ===========================================================================
+  #  API-8  file upload
+  # ===========================================================================
+  /camel/api/v1/files/upload:
+    post:
+      tags: [API-8 upload]
+      summary: Upload a file sent as Base64 in a multipart/form-data field
+      description: |
+        A `multipart/form-data` request whose `file` field is a **text** field
+        holding the file bytes encoded as Base64 - plain, or as a data URL
+        (`data:image/png;base64,...`).
+
+        `Base64FileMultipartFilter`, a servlet filter mounted on `/camel/api/v1/files/*`,
+        decodes it before Camel sees the request and swaps the text part for a
+        binary file part named `file`, with `fileName` / `contentType` (or the
+        data URL prefix) as its filename and media type. the Camel servlet then turns
+        that part into a Camel attachment, which `fileUploadProcessor` reads as
+        bytes. Every other field reaches the route as a header.
+
+        A `file` part that already is a binary upload passes through unchanged.
+        Invalid Base64 is rejected by the filter with 400, an upload above the
+        size limits with 413, a missing `file` field fails in the route with 500.
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FileUploadRequest'
+            example:
+              orderId: H-8001
+              fileName: hello.txt
+              contentType: text/plain
+              file: aGVsbG8gY2FtZWwgdXBsb2FkCg==
+      responses:
+        '200':
+          description: The decoded file as the route received it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadResponse'
+              example:
+                code: OK
+                orderId: H-8001
+                fileName: hello.txt
+                contentType: text/plain
+                size: 19
+                sha256: fb99054056791a252f4ddbb7765d6ad8c1b68d2a11f82f3c0fae510c83e6a86a
+                preview: "hello camel upload\n"
+                exchangeId: 60BAFF8E8AB5FD3-0000000000000000
+                processedAt: "2026-10-13 00:04:40"
+        '400':
+          description: The file field is not valid Base64 (answered by the filter)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadError'
+              example:
+                code: BAD_REQUEST
+                message: field 'file' must be the file content encoded as Base64
+        '413':
+          description: Above server.tomcat.max-http-form-post-size or spring.servlet.multipart limits
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadError'
+              example:
+                code: PAYLOAD_TOO_LARGE
+                message: the upload exceeds the configured size limits
+
+  # ===========================================================================
+  #  The two "external systems"
+  # ===========================================================================
+  /mock/remote/fx-rate:
+    post:
+      tags: [mock externals]
+      # Stands in for a third-party system: it exists so the demo runs offline, and is
+      # not part of what this application offers. Groups with excludeInternal drop it.
+      x-internal: true
+      summary: "External FX service (mock) - the system API-3 calls"
+      description: |
+        A plain Spring MVC controller, not a Camel route. It exists so API-3 can
+        demonstrate a real HTTP round trip offline.
+
+        It speaks a **different dialect on purpose** - a `header`/`payload`
+        envelope with abbreviated fields (`ccy`, `amt`, `fxRate`) - otherwise
+        `request.ftl` and `response.ftl` would have nothing to translate.
+
+        Changing this format means changing both templates and the direct-call
+        case in `docs/camel-tutorial/http/tutorial-api.http`.
+      operationId: mockFxRate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FxEnvelopeRequest'
+            example:
+              header:
+                msgId: manual-test-001
+                source: http-client
+                version: "1.0"
+              payload:
+                ccy: JPY
+                amt: 100
+                ref: MANUAL
+      responses:
+        '200':
+          description: Envelope reply; msgId is echoed back from the request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxEnvelopeResponse'
+              example:
+                header:
+                  msgId: manual-test-001
+                  code: "0000"
+                payload:
+                  ccy: JPY
+                  fxRate: 0.048
+                  provider: mock-fx-service
+
+  /mock/artisan/list:
+    post:
+      tags: [mock externals]
+      # Stands in for a third-party system: it exists so the demo runs offline, and is
+      # not part of what this application offers. Groups with excludeInternal drop it.
+      x-internal: true
+      summary: "External artisan service (mock) - the system API-7 calls"
+      description: |
+        The target of `ArtisanClient#listUser`. Its payload has the
+        `MyAccountDetailsVO` shape, which is what `artisan-request.ftl` renders
+        (the client sends it as a JSON string).
+
+        The mock logs the headers it receives. `X-Client-Id` is declared on the
+        interface; `X-Trace-Id` and `X-Channel` are added to every call by
+        `ArtisanHeaders`, an interceptor on the RestClient behind the proxy.
+      operationId: mockArtisanList
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string }
+          example: ALL
+        - name: channel
+          in: query
+          required: false
+          schema: { type: string }
+          example: APP
+        - $ref: '#/components/parameters/XClientId'
+        - $ref: '#/components/parameters/XTraceId'
+        - $ref: '#/components/parameters/XChannel'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MyAccountDetailsVO'
+            example:
+              userId: MANUAL-1
+              userName: tester
+              channel: APP
+              amount: 100
+      responses:
+        '200':
+          description: Three derived accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MyAccountDetailsVO'
+              example:
+                - { userId: MANUAL-1-PRIMARY, userName: tester, channel: APP, amount: 100 }
+                - { userId: MANUAL-1-SAVINGS, userName: tester, channel: APP, amount: 30 }
+                - { userId: MANUAL-1-CREDIT,  userName: tester, channel: APP, amount: 150 }
+
+
+  /mock/artisan/create:
+    post:
+      tags: [mock externals]
+      x-internal: true
+      summary: "External artisan service (mock) - open an account"
+      description: |
+        The target of `ArtisanClient#createUser`. The new account id is
+        `ACC-` + the `userId` sent; accounts are kept in memory for `/detail`.
+      operationId: mockArtisanCreate
+      parameters:
+        - $ref: '#/components/parameters/XClientId'
+        - $ref: '#/components/parameters/XTraceId'
+        - $ref: '#/components/parameters/XChannel'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MyAccountDetailsVO'
+            example:
+              userId: G-7002
+              userName: ethan
+              channel: WEB
+              amount: 500
+      responses:
+        '200':
+          description: The opened account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyAccountDetailsVO'
+              example: { userId: ACC-G-7002, userName: ethan, channel: WEB, amount: 500 }
+
+  /mock/artisan/detail:
+    post:
+      tags: [mock externals]
+      x-internal: true
+      summary: "External artisan service (mock) - one account by id"
+      description: The target of `ArtisanClient#getUser`. Only `userId` is read from the body.
+      operationId: mockArtisanDetail
+      parameters:
+        - $ref: '#/components/parameters/XClientId'
+        - $ref: '#/components/parameters/XTraceId'
+        - $ref: '#/components/parameters/XChannel'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MyAccountDetailsVO'
+            example: { userId: ACC-G-7002 }
+      responses:
+        '200':
+          description: The account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyAccountDetailsVO'
+              example: { userId: ACC-G-7002, userName: ethan, channel: WEB, amount: 500 }
+        '404':
+          description: No account with that id was opened since startup
+components:
+
+  # Headers every ArtisanClient call carries without any method declaring them:
+  # X-Client-Id from @HttpExchange(headers = ...) on the interface, the other two
+  # from ArtisanHeaders (an interceptor on the RestClient behind the proxy).
+  parameters:
+    XClientId:
+      name: X-Client-Id
+      in: header
+      required: false
+      schema: { type: string }
+      example: camel-session-0to1
+    XTraceId:
+      name: X-Trace-Id
+      in: header
+      required: false
+      description: The Camel exchangeId of the calling route.
+      schema: { type: string }
+      example: manual-001
+    XChannel:
+      name: X-Channel
+      in: header
+      required: false
+      description: The order's channel, WEB when absent.
+      schema: { type: string }
+      example: APP
+
+  schemas:
+
+    # ---------------------------------------------------------------- API-1
+    BasicOrderRequest:
+      type: object
+      required: [orderId]
+      properties:
+        orderId:
+          type: string
+          description: Required; OrderValidateProcessor throws when it is missing or blank.
+          example: A-1001
+        amount:
+          type: number
+          format: double
+          example: 666
+        channel:
+          type: string
+          description: Defaults to UNKNOWN in the reply when absent.
+          example: WEB
+
+    BasicOrderResponse:
+      type: object
+      properties:
+        code: { type: string, example: OK }
+        orderId: { type: string, example: A-1001 }
+        amount: { type: number, format: double, example: 666 }
+        channel: { type: string, example: WEB }
+        handledBy:
+          type: string
+          description: The route that produced this reply.
+          example: route:api1-basic-order
+        exchangeId:
+          type: string
+          description: Camel exchange id, also the correlation key in the logs.
+        processedAt:
+          type: string
+          example: "2026-09-15 10:21:33"
+
+    # ---------------------------------------------------------------- API-2
+    DispatchRequest:
+      type: object
+      required: [orderId]
+      properties:
+        orderId: { type: string, example: B-2001 }
+        amount:
+          type: number
+          format: double
+          description: "> 10000 selects the VIP lane; < 100 makes the filter skip placement."
+          example: 20000
+        channel:
+          type: string
+          description: "APP selects the fast lane via a jsonpath predicate."
+          example: WEB
+
+    DispatchResponse:
+      type: object
+      properties:
+        code: { type: string, example: OK }
+        orderId: { type: string, example: B-2001 }
+        amount: { type: number, format: double, example: 20000 }
+        channel: { type: string, example: WEB }
+        lane:
+          type: string
+          enum: [VIP, APP_FAST, STANDARD]
+        placed:
+          type: boolean
+          description: False when the filter blocked placement; the call still returns 200.
+        hint:
+          type: string
+          description: Explains which branch ran and why placement was or was not performed.
+
+    # ---------------------------------------------------------------- API-3
+    QuoteRequest:
+      type: object
+      required: [orderId, amount, currency]
+      properties:
+        orderId: { type: string, example: C-3001 }
+        amount: { type: number, format: double, example: 2000 }
+        currency:
+          type: string
+          description: "Mock rates: USD 7.24, EUR 7.85, JPY 0.048, otherwise 1.0."
+          example: USD
+
+    QuoteResponse:
+      type: object
+      properties:
+        code: { type: string, example: OK }
+        orderId: { type: string, example: C-3001 }
+        currency:
+          type: string
+          description: From the remote payload.ccy, flattened by response.ftl.
+          example: USD
+        rate: { type: number, format: double, example: 7.24 }
+        amountInCNY:
+          type: number
+          format: double
+          description: amount x rate, rounded to two decimals.
+          example: 14480.0
+        fee:
+          type: number
+          format: double
+          description: "Computed locally by direct:api3-calc-fee: 0.5% from 1000 up, 1.5% below."
+          example: 10.0
+        feeRule:
+          type: string
+          enum: ["VIP-0.5%", "STD-1.5%"]
+        remoteProvider: { type: string, example: mock-fx-service }
+        remoteCode:
+          type: string
+          description: The external header.code; "0000" means success.
+          example: "0000"
+        msgId:
+          type: string
+          description: Generated before the call and echoed back unchanged by the remote system.
+
+    # ---------------------------------------------------------------- API-4
+    CheckRequest:
+      type: object
+      required: [orderId, amount]
+      properties:
+        orderId: { type: string, example: D-4001 }
+        amount:
+          type: number
+          format: double
+          description: Drives the RISK and CREDIT scores.
+          example: 3000
+
+    CheckResponse:
+      type: object
+      properties:
+        checks:
+          type: array
+          description: One entry per branch; order of arrival may vary, the branches run in parallel.
+          items:
+            $ref: '#/components/schemas/CheckResult'
+        totalScore:
+          type: integer
+          description: Sum of the three scores; 270 when amount <= 50000, 165 when amount > 60000.
+          example: 270
+
+    CheckResult:
+      type: object
+      properties:
+        check:
+          type: string
+          enum: [RISK, CREDIT, INVENTORY]
+        score: { type: integer, example: 90 }
+        costMs:
+          type: integer
+          description: Simulated latency of that branch.
+          example: 200
+
+    # ---------------------------------------------------------------- API-5
+    SplitRequest:
+      type: object
+      required: [orderId, items]
+      properties:
+        orderId: { type: string, example: E-5001 }
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+
+    OrderItem:
+      type: object
+      properties:
+        sku: { type: string, example: BK-01 }
+        type:
+          type: string
+          description: BOOK and FOOD have their own routes; every other value is normalised to OTHER.
+          example: BOOK
+        qty: { type: integer, default: 1, example: 2 }
+
+    AllocatedItem:
+      type: object
+      properties:
+        sku: { type: string, example: BK-01 }
+        qty: { type: integer, example: 2 }
+        channel:
+          type: string
+          enum: [BOOK, FOOD, OTHER]
+          description: The normalised type, i.e. which item-* route handled this line.
+        warehouse:
+          type: string
+          enum: [WH-BOOK-SH, WH-COLD-HZ, WH-GENERAL-BJ]
+        status: { type: string, example: ALLOCATED }
+
+    # ---------------------------------------------------------------- API-6
+    FulfilRequest:
+      type: object
+      required: [orderId, amount, items]
+      properties:
+        orderId: { type: string, example: F-6001 }
+        amount:
+          type: number
+          format: double
+          description: Sets the grade together with channel, and drives the risk scores.
+          example: 20000
+        channel: { type: string, example: APP }
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+
+    FulfilResponse:
+      type: object
+      description: |
+        Identical field set on both paths. A rejection differs only in the values:
+        `code`/`decision` become REJECTED and `fulfilment` is empty.
+      properties:
+        code:
+          type: string
+          enum: [OK, REJECTED]
+        orderId:
+          type: string
+          description: Read back from the originalOrder property, not from the current body.
+          example: F-6001
+        orderLevel:
+          type: string
+          enum: [VIP, STANDARD]
+        decision:
+          type: string
+          enum: [APPROVED, REJECTED]
+          description: APPROVED when totalScore >= 240.
+        totalScore: { type: integer, example: 270 }
+        checks:
+          type: array
+          description: Always three entries - the risk checks run even when the order is rejected.
+          items:
+            $ref: '#/components/schemas/CheckResult'
+        fulfilment:
+          type: array
+          description: Empty when the filter skipped fulfilment.
+          items:
+            $ref: '#/components/schemas/AllocatedItem'
+        message: { type: string }
+        exchangeId: { type: string }
+        finishedAt:
+          type: string
+          example: "2026-09-15 10:21:34.517"
+
+    # ---------------------------------------------------------------- API-7
+    AccountLookupRequest:
+      type: object
+      required: [orderId, userName]
+      properties:
+        orderId:
+          type: string
+          description: Passed to the response template through an Exchange header.
+          example: G-7001
+        userName: { type: string, example: ethan }
+        channel: { type: string, example: APP }
+        amount:
+          type: number
+          format: double
+          description: The base the three mock account balances are derived from.
+          example: 2000
+
+    AccountLookupResponse:
+      type: object
+      properties:
+        code: { type: string, example: OK }
+        orderId: { type: string, example: G-7001 }
+        accountCount: { type: integer, example: 3 }
+        totalAmount:
+          type: number
+          format: double
+          description: Summed in the template; amount x 2.8 for the mock service.
+          example: 5600
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+
+    AccountDetailRequest:
+      type: object
+      required: [accountId]
+      properties:
+        orderId:
+          type: string
+          description: Echoed back through an Exchange header.
+          example: G-7003
+        accountId:
+          type: string
+          description: An id returned by /accounts/create.
+          example: ACC-G-7002
+
+    AccountResponse:
+      type: object
+      properties:
+        code: { type: string, example: OK }
+        orderId: { type: string, example: G-7002 }
+        account:
+          $ref: '#/components/schemas/Account'
+
+    Account:
+      type: object
+      properties:
+        id: { type: string, example: G-7001-PRIMARY }
+        owner: { type: string, example: ethan }
+        channel: { type: string, example: APP }
+        amount: { type: number, format: double, example: 2000 }
+
+    # ---------------------------------------------------------------- API-8
+    FileUploadRequest:
+      type: object
+      required: [file]
+      description: Any further field reaches the route as an Exchange header.
+      properties:
+        file:
+          type: string
+          format: byte
+          description: |
+            The file bytes encoded as Base64, sent as a TEXT field. A data URL
+            (`data:<type>;base64,<data>`) is accepted too; line breaks are tolerated.
+          example: aGVsbG8gY2FtZWwgdXBsb2FkCg==
+        fileName:
+          type: string
+          description: Filename of the decoded part; defaults to upload.bin.
+          example: hello.txt
+        contentType:
+          type: string
+          description: Media type of the decoded part; defaults to the data URL type, then application/octet-stream.
+          example: text/plain
+        orderId: { type: string, example: H-8001 }
+
+    FileUploadResponse:
+      type: object
+      properties:
+        code: { type: string, example: OK }
+        orderId:
+          type: string
+          description: Echoed from the orderId form field; null when absent.
+          example: H-8001
+        fileName: { type: string, example: hello.txt }
+        contentType: { type: string, example: text/plain }
+        size:
+          type: integer
+          description: Length of the decoded bytes.
+          example: 19
+        sha256:
+          type: string
+          description: Hex SHA-256 of the decoded bytes.
+        preview:
+          type: string
+          description: First 64 characters; present for text/* files only.
+        exchangeId: { type: string }
+        processedAt:
+          type: string
+          example: "2026-10-13 00:04:40"
+
+    FileUploadError:
+      type: object
+      properties:
+        code:
+          type: string
+          enum: [BAD_REQUEST, PAYLOAD_TOO_LARGE]
+        message: { type: string }
+
+    # ------------------------------------------------------- mock externals
+    FxEnvelopeRequest:
+      type: object
+      description: The external dialect, produced by request.ftl.
+      properties:
+        header:
+          type: object
+          properties:
+            msgId: { type: string }
+            source: { type: string }
+            version: { type: string, example: "1.0" }
+        payload:
+          type: object
+          properties:
+            ccy: { type: string, example: JPY }
+            amt: { type: number, format: double, example: 100 }
+            ref: { type: string, example: MANUAL }
+
+    FxEnvelopeResponse:
+      type: object
+      description: The external dialect, flattened by response.ftl.
+      properties:
+        header:
+          type: object
+          properties:
+            msgId:
+              type: string
+              description: Echoed from the request; "unknown" when it was absent.
+            code: { type: string, example: "0000" }
+        payload:
+          type: object
+          properties:
+            ccy: { type: string, example: JPY }
+            fxRate: { type: number, format: double, example: 0.048 }
+            provider: { type: string, example: mock-fx-service }
+
+    MyAccountDetailsVO:
+      type: object
+      description: Payload of the artisan service, inbound and outbound alike.
+      properties:
+        userId: { type: string, example: MANUAL-1 }
+        userName: { type: string, example: tester }
+        channel: { type: string, example: APP }
+        amount: { type: number, format: double, example: 100 }
+

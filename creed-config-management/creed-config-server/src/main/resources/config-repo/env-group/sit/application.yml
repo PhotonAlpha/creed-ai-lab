@@ -1,0 +1,18 @@
+# Layer 3/6 — env-group `sit`: system integration test — verbose, short timeouts, fake partners.
+creed:
+  config:
+    layer: env-group
+    layers:
+      env-group: sit
+  env:
+    group: sit
+
+logging:
+  level:
+    com.creed: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,env,configprops,metrics,prometheus

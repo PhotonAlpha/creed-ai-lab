@@ -1,0 +1,22 @@
+# Layer 2/6 — type `ms`: every resource microservice (creed-resource-*, creed-author-server).
+creed:
+  config:
+    layer: type
+    layers:
+      type: ms
+  http:
+    connect-timeout: 3s
+    read-timeout: 10s
+
+server:
+  tomcat:
+    threads:
+      max: 200
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Resolved on the client, after every layer is merged: the env layer supplies the value.
+          issuer-uri: ${creed.env.auth-issuer}

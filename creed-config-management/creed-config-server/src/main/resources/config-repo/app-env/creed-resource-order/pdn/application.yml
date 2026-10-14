@@ -1,0 +1,10 @@
+# Layer 6/6 — app-env `creed-resource-order` in `pdn`: only what differs for this module in this
+# environment. Highest precedence.
+creed:
+  config:
+    layer: app-env
+    layers:
+      app-env: creed-resource-order@pdn
+  http:
+    # PDN order traffic is latency-critical; fail fast and let the caller retry.
+    read-timeout: 5s

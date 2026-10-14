@@ -153,6 +153,63 @@ Accept: application/json
   "quantity": 1
 }
 
+### ===================================================================================== reserve x2
+### Same downstream POST (catalog-resource /api/catalog/reserve), two clients, identical envelope
+# {client, downstream, status, elapsedMs, body} — run each pair back to back and compare.
+# Log difference to look for: the HttpComponent call logs "[LB-ROUTE] catalog-resource -> ..."
+# (LoadBalancerRoutePlanner, at connect time); the RestClient call logs "LB resolved -> instance=..."
+# (LoadBalancerAuditInterceptor, after Spring Cloud's LoadBalancerInterceptor). Each success
+# decrements the instance's stock.
+
+### reserve via "https" HttpComponent (CamelConfig#httpComponent) — <to uri="https://catalog-resource/...">
+POST {{lb}}/camel/api/reserve/http-component
+Content-Type: application/json
+Accept: application/json
+
+{
+  "sku": "CAT-1",
+  "quantity": 1
+}
+
+### reserve via RestClient (clusterRestClient, @LoadBalanced) — the same call written in Java
+POST {{lb}}/camel/api/reserve/rest-client
+Content-Type: application/json
+Accept: application/json
+
+{
+  "sku": "CAT-1",
+  "quantity": 1
+}
+
+### reserve via HttpComponent — insufficient stock: catalog's 409 passed through (HttpOperationFailedException)
+POST {{lb}}/camel/api/reserve/http-component
+Content-Type: application/json
+Accept: application/json
+
+{
+  "sku": "CAT-1",
+  "quantity": 100000
+}
+
+### reserve via RestClient — insufficient stock: the same 409 (RestClientResponseException)
+POST {{lb}}/camel/api/reserve/rest-client
+Content-Type: application/json
+Accept: application/json
+
+{
+  "sku": "CAT-1",
+  "quantity": 100000
+}
+
+### reserve — missing sku: 400 from this gateway, no downstream call (either endpoint)
+POST {{lb}}/camel/api/reserve/rest-client
+Content-Type: application/json
+Accept: application/json
+
+{
+  "quantity": 1
+}
+
 ### LB health-check toggle — current state + LB child contexts created so far (lazy: a service
 # never called yet won't be listed; it picks up the current flag when first used)
 GET {{lb}}/admin/lb/health-check

@@ -1,0 +1,9 @@
+# Layer 6/6 — app-env `creed-gateway` in `uat2`: only what differs for this module in this environment.
+creed:
+  config:
+    layer: app-env
+    layers:
+      app-env: creed-gateway@uat2
+  gateway:
+    # UAT2 fronts the partner sandbox, which answers slowly.
+    downstream-response-timeout: 45s

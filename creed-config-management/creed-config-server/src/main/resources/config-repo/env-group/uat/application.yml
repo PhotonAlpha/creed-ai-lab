@@ -1,0 +1,18 @@
+# Layer 3/6 — env-group `uat`: user acceptance test — business users test here; prod-like logging.
+creed:
+  config:
+    layer: env-group
+    layers:
+      env-group: uat
+  env:
+    group: uat
+
+logging:
+  level:
+    com.creed: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus

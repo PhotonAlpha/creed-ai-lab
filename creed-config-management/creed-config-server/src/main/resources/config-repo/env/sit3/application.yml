@@ -1,0 +1,9 @@
+# Layer 4/6 — env `sit3` (group `sit`): what makes this one environment different from its group.
+creed:
+  config:
+    layer: env
+    layers:
+      env: sit3
+  env:
+    name: sit3
+    auth-issuer: https://auth-sit3.creed.internal/auth-server

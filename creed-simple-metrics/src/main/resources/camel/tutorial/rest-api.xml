@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+   rest-api.xml  -  REST endpoint declarations (REST DSL)
+  ============================================================================
+   The HTTP entry points of all eight APIs. Nothing but protocol adaptation happens here:
+   the request becomes an Exchange and is handed to a direct route with <to>.
+
+   Imported by camel-context.xml via <import resource="classpath:camel/tutorial/rest-api.xml"/>,
+   then wired into the context by <restContextRef ref="tutorialRestContext"/>.
+  ============================================================================
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://camel.apache.org/schema/spring
+           http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <restContext id="tutorialRestContext" xmlns="http://camel.apache.org/schema/spring">
+
+        <!--
+          ====================================================================
+          <rest> declares a group of REST endpoints; path is their common prefix.
+                 It carries no business logic of its own - its whole job is to turn an
+                 HTTP request into an Exchange and deliver it to a route.
+          <post> declares a POST verb.
+                 path      the sub-path appended after <rest path>
+                 type      the type the request body is deserialised into
+                 outType   the type of the response body (used for docs and validation)
+                 It must contain exactly one <to>.
+          <to>   sends the message to an Endpoint. Inside the REST DSL that means
+                 "hand it over to this route". Everything here goes to a direct: endpoint,
+                 which is a synchronous in-memory endpoint - calling it is equivalent to a
+                 method call, and it is the first choice for carving out a sub-flow.
+          ====================================================================
+        -->
+        <rest path="/api/v1/orders">
+
+            <!-- API-1 the basic chain -->
+            <post path="/basic" type="java.util.Map" outType="java.util.Map">
+                <to uri="direct:api1-basic"/>
+            </post>
+
+            <!-- API-2 branching and filtering -->
+            <post path="/dispatch" type="java.util.Map" outType="java.util.Map">
+                <to uri="direct:api2-dispatch"/>
+            </post>
+
+            <!-- API-3 remote call through a ProducerTemplate -->
+            <post path="/quote" type="java.util.Map" outType="java.util.Map">
+                <to uri="direct:api3-quote"/>
+            </post>
+
+            <!-- API-4 parallel fan-out and result aggregation -->
+            <post path="/check" type="java.util.Map" outType="java.util.Map">
+                <to uri="direct:api4-check"/>
+            </post>
+
+            <!-- API-5 split, tap and dynamic routing -->
+            <post path="/split" type="java.util.Map">
+                <to uri="direct:api5-split"/>
+            </post>
+
+            <!-- API-6 the combined orchestration -->
+            <post path="/fulfil" type="java.util.Map" outType="java.util.Map">
+                <to uri="direct:api6-fulfil"/>
+            </post>
+
+            <!-- API-7 remote call through a Spring @HttpExchange interface -->
+            <post path="/accounts" type="java.util.Map" outType="java.util.Map">
+                <to uri="direct:api7-accounts"/>
+            </post>
+            <post path="/accounts/create" type="java.util.Map" outType="java.util.Map">
+                <to uri="direct:api7-account-create"/>
+            </post>
+            <post path="/accounts/detail" type="java.util.Map" outType="java.util.Map">
+                <to uri="direct:api7-account-detail"/>
+            </post>
+        </rest>
+
+        <!--
+          API-8 file upload. A second <rest> because the prefix differs.
+          consumes      documents the accepted media type
+          bindingMode   "off" overrides the global json binding for this verb only:
+                        the body is the uploaded file, not JSON, so it must not be parsed.
+          The "file" field arrives as Base64 text; Base64FileMultipartFilter has already
+          turned it into a binary file part by the time Camel sees the request.
+        -->
+        <rest path="/api/v1/files">
+            <post path="/upload" consumes="multipart/form-data" produces="application/json" bindingMode="off">
+                <to uri="direct:api8-upload"/>
+            </post>
+        </rest>
+
+    </restContext>
+</beans>

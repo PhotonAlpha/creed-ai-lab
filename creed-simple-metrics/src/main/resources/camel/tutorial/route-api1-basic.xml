@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+   route-api1-basic.xml  -  API-1, the basic chain
+  ============================================================================
+   Tags covered: <route> <from> <to> <process> <log>
+
+   Imported by camel-context.xml via <import resource="classpath:camel/tutorial/route-api1-basic.xml"/>,
+   then wired into the context by <routeContextRef ref="tutorialApi1RouteContext"/>.
+  ============================================================================
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://camel.apache.org/schema/spring
+           http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <routeContext id="tutorialApi1RouteContext" xmlns="http://camel.apache.org/schema/spring">
+
+        <!--
+          ####################################################################
+          API-1  POST /api/v1/orders/basic
+          Tags: <rest> <post> <to> <route> <from> <process> <log>
+          ####################################################################
+          <route>   one complete message pipeline; it must begin with a single <from>.
+                    The id shows up in the log, in JMX and in the MDC, so always set it.
+          <from>    the route's ONLY entry point (the consumer). It decides where messages
+                    come from. A route may have exactly one from; if you need several
+                    entry points, write several routes.
+          <process> inserts a block of custom Java (org.apache.camel.Processor).
+                    ref points at a bean name in the Spring container.
+                    It can read and write the entire Exchange, which is what makes it right
+                    for validation, instrumentation and non-trivial rewriting.
+          <to>      sends the message to the next Endpoint (a producer); InOut by default,
+                    so it waits for the reply.
+          <log>     a route-level log statement; the message may contain Simple expressions.
+                    More declarative than logging inside a Processor, and it needs no code.
+        -->
+        <route id="api1-basic-order">
+            <from uri="direct:api1-basic"/>
+            <log message="[API-1] >>> entering route api1-basic-order, raw payload = ${body}"/>
+
+            <!-- Step 1: validate (the Processor throws to signal a validation failure) -->
+            <process ref="orderValidateProcessor"/>
+            <log message="[API-1] validation passed, header.orderId=${header.orderId}"/>
+
+            <!-- Step 2: <to> hands over to another route, showing route-to-route composition -->
+            <to uri="direct:api1-enrich"/>
+
+            <log message="[API-1] &lt;&lt;&lt; route finished, reply = ${body}"/>
+        </route>
+
+        <!-- The sub-route invoked by the <to> above: a route is a reusable unit of work -->
+        <route id="api1-enrich-order">
+            <from uri="direct:api1-enrich"/>
+            <log message="[API-1] --- sub-route api1-enrich-order starts enriching"/>
+            <process ref="orderEnrichProcessor"/>
+            <log message="[API-1] --- sub-route finished enriching"/>
+        </route>
+
+    </routeContext>
+</beans>

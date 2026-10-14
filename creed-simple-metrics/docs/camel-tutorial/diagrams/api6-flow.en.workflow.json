@@ -1,0 +1,309 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Camel API-6 Order Fulfilment Orchestration",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": {
+          "label": "HTTP ingress"
+        },
+        "backend": {
+          "label": "Processor / step"
+        },
+        "database": {
+          "label": "Aggregated state"
+        },
+        "cloud": {
+          "label": "Parallel sub-routes"
+        },
+        "security": {
+          "label": "Guard / decision"
+        },
+        "messagebus": {
+          "label": "EIP fan-out"
+        },
+        "external": {
+          "label": "Async tap"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "checks",
+      "label": "Parallel risk checks"
+    },
+    {
+      "id": "main",
+      "label": "Main route api6-complex-fulfilment"
+    },
+    {
+      "id": "fulfil",
+      "label": "Guard and fulfilment",
+      "variant": "exception"
+    },
+    {
+      "id": "aside",
+      "label": "Async tap"
+    }
+  ],
+  "phases": [
+    {
+      "id": "intake",
+      "label": "Ingress and grading",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "assess",
+      "label": "Parallel risk assessment",
+      "fromCol": 3,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "deliver",
+      "label": "Decision and fulfilment",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "restIn",
+    "validate",
+    "level",
+    "scatter",
+    "scoring",
+    "agg",
+    "decide",
+    "guard",
+    "split",
+    "respOut"
+  ],
+  "nodes": [
+    {
+      "id": "restIn",
+      "lane": "main",
+      "col": 0,
+      "type": "frontend",
+      "label": "REST Ingress",
+      "sublabel": "POST /orders/fulfil",
+      "tag": "servlet",
+      "width": 134
+    },
+    {
+      "id": "validate",
+      "lane": "main",
+      "col": 1,
+      "type": "backend",
+      "label": "Validate + Backup",
+      "sublabel": "<process> <setProperty>",
+      "width": 134
+    },
+    {
+      "id": "level",
+      "lane": "main",
+      "col": 2,
+      "type": "security",
+      "label": "Order Grading",
+      "sublabel": "<choice> orderLevel",
+      "tag": "3-way branch",
+      "width": 134
+    },
+    {
+      "id": "scatter",
+      "lane": "main",
+      "col": 3,
+      "type": "messagebus",
+      "label": "Fan-out Checks",
+      "sublabel": "<multicast> parallel",
+      "width": 134
+    },
+    {
+      "id": "decide",
+      "lane": "main",
+      "col": 4,
+      "type": "backend",
+      "label": "Risk Decision",
+      "sublabel": "<process> decision",
+      "width": 134
+    },
+    {
+      "id": "respOut",
+      "lane": "main",
+      "col": 5,
+      "type": "backend",
+      "label": "Final Assembly",
+      "sublabel": "<process> JSON reply",
+      "width": 134
+    },
+    {
+      "id": "scoring",
+      "lane": "checks",
+      "col": 3,
+      "type": "cloud",
+      "label": "Parallel Scoring",
+      "sublabel": "RISK · CREDIT · INV",
+      "width": 134
+    },
+    {
+      "id": "agg",
+      "lane": "checks",
+      "col": 4,
+      "type": "database",
+      "label": "Aggregate Scores",
+      "sublabel": "aggregationStrategy",
+      "width": 134
+    },
+    {
+      "id": "guard",
+      "lane": "fulfil",
+      "col": 4,
+      "type": "security",
+      "label": "Fulfilment Guard",
+      "sublabel": "<filter> 2-way",
+      "tag": "route continues",
+      "width": 134
+    },
+    {
+      "id": "split",
+      "lane": "fulfil",
+      "col": 5,
+      "type": "messagebus",
+      "label": "Split + toD",
+      "sublabel": "<split> + <toD>",
+      "width": 134
+    },
+    {
+      "id": "audit",
+      "lane": "aside",
+      "col": 5,
+      "type": "external",
+      "label": "Audit Sink",
+      "sublabel": "<wireTap> async",
+      "width": 134
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-in",
+      "from": "restIn",
+      "to": "validate",
+      "label": "direct:api6-fulfil",
+      "variant": "default"
+    },
+    {
+      "id": "e-level",
+      "from": "validate",
+      "to": "level",
+      "variant": "default"
+    },
+    {
+      "id": "e-grade-vip",
+      "from": "level",
+      "to": "scatter",
+      "label": "> 10000 : VIP",
+      "variant": "emphasis",
+      "role": "branch"
+    },
+    {
+      "id": "e-grade-app",
+      "from": "level",
+      "to": "scatter",
+      "label": "APP : APP_FAST",
+      "variant": "default",
+      "role": "branch"
+    },
+    {
+      "id": "e-grade-std",
+      "from": "level",
+      "to": "scatter",
+      "label": "else : STANDARD",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "e-fanout",
+      "from": "scatter",
+      "to": "scoring",
+      "label": "copy to 3 branches",
+      "variant": "emphasis",
+      "role": "branch"
+    },
+    {
+      "id": "e-agg",
+      "from": "scoring",
+      "to": "agg",
+      "variant": "default"
+    },
+    {
+      "id": "e-back",
+      "from": "agg",
+      "to": "decide",
+      "label": "total score",
+      "variant": "emphasis",
+      "role": "return"
+    },
+    {
+      "id": "e-guard",
+      "from": "decide",
+      "to": "guard",
+      "label": "decision",
+      "variant": "security"
+    },
+    {
+      "id": "e-pass",
+      "from": "guard",
+      "to": "split",
+      "label": "APPROVED : fulfil",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-reject",
+      "from": "guard",
+      "to": "respOut",
+      "label": "REJECTED : skip",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-tap",
+      "from": "guard",
+      "to": "audit",
+      "label": "async copy",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-done",
+      "from": "split",
+      "to": "respOut",
+      "label": "result",
+      "variant": "emphasis",
+      "role": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Two branch points",
+      "items": [
+        "Order Grading is a 3-way <choice>: the branches set different orderLevel values and then rejoin",
+        "Fulfilment Guard is a 1-way <filter>: APPROVED runs the split, REJECTED goes straight to the reply"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Two semantics people get wrong",
+      "items": [
+        "<filter> only skips its own body when unmatched; the route keeps running and still replies 200",
+        "<wireTap> returns the moment the copy is sent; the main flow neither waits nor sees its errors"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+# Layer 6/6 — app-env `creed-simple-metrics` in `sit1`: only what differs for this module in this environment.
+creed:
+  config:
+    layer: app-env
+    layers:
+      app-env: creed-simple-metrics@sit1
+  aggregator:
+    # SIT1 is where integration breaks should surface, not be papered over.
+    fail-on-partial: true

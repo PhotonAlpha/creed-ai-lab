@@ -5,10 +5,17 @@ description: The creed-config-server module — Spring Cloud Config Server (nati
 
 # creed-config-server
 
-Spring Cloud **Config Server** serving the mesh's externalized config. HTTPS `8443`, context-path `/config-server`. Active profiles `native,ssl` (see [[creed-platform]] for the HTTPS/SSL-bundle pattern). Tests use `@ActiveProfiles({"native","test"})` to skip `ssl` and set `creed.https.enabled=false` so the context loads without certs on disk.
+Spring Cloud **Config Server** serving the mesh's externalized config. HTTPS `8443`, context-path `/config-server`. Module path `creed-config-management/creed-config-server` (aggregator pom). Active profiles `native,ssl` (see [[creed-platform]] for the HTTPS/SSL-bundle pattern). Tests use `@ActiveProfiles({"native","test"})` to skip `ssl` and set `creed.https.enabled=false` so the context loads without certs on disk.
 
 ## What it serves
-- **native repo**: `classpath:/config-repo/` (`spring.cloud.config.server.native.search-locations`). Files: `application.yml` (shared defaults, e.g. `creed.greeting`), `creed-author-server.yml`, `creed-gateway.yml`, `creed-resource-catalog.yml`, `creed-resource-order.yml`. Add `{app}.yml` / `{app}-{profile}.yml` to override per app/profile.
+- **native repo, six layers** (`config-repo/README.md` is the operator doc):
+  `common → type → env-group → env → app → app-env`, later wins. `search-locations` lists one template
+  per layer — `${creed.config-repo.root}/type/{profile}/` etc., root `${CREED_CONFIG_REPO_ROOT:classpath:/config-repo}`.
+  `NativeEnvironmentRepository.getLocations` expands each template once per comma-separated profile (and
+  app), keeps the directories that exist, layer-major — so the request profile `<type>,<env-group>,<env>`
+  (`ms,sit,sit1`) picks one directory per layer and the location order *is* the precedence. Only
+  `application.yml` per directory (Boot ranks by file name before location — measured). The catalogue of
+  types/groups/envs lives in `ConfigRepositoryLayoutTest`. `add-label-locations: false`.
 - Clients fetch via `spring.config.import=configserver:https://localhost:8443/config-server` in their **`cloud` profile** only (the resource/gateway modules ship a `truststore.p12` on the classpath to trust the config server's self-signed CA).
 
 ## Security & encryption

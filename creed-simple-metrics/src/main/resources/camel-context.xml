@@ -20,6 +20,21 @@
                            http://camel.apache.org/schema/spring
                            http://camel.apache.org/schema/spring/camel-spring.xsd">
 
+    <!-- ===== Camel tutorial (migrated from camel-session-0to1) =====
+         Eight teaching APIs under /camel/api/v1/*, one <routeContext>/<restContext> fragment per API in
+         camel/tutorial/. Each file is an ordinary Spring bean, imported here and wired into the context
+         below by ref. Guide: docs/camel-tutorial/README.md. -->
+    <import resource="classpath:camel/tutorial/rest-api.xml"/>
+    <import resource="classpath:camel/tutorial/route-api1-basic.xml"/>
+    <import resource="classpath:camel/tutorial/route-api2-dispatch.xml"/>
+    <import resource="classpath:camel/tutorial/route-api3-quote.xml"/>
+    <import resource="classpath:camel/tutorial/route-api4-multicast.xml"/>
+    <import resource="classpath:camel/tutorial/route-api5-split.xml"/>
+    <import resource="classpath:camel/tutorial/route-shared.xml"/>
+    <import resource="classpath:camel/tutorial/route-api6-complex.xml"/>
+    <import resource="classpath:camel/tutorial/route-api7-httpexchange.xml"/>
+    <import resource="classpath:camel/tutorial/route-api8-upload.xml"/>
+
     <camelContext xmlns="http://camel.apache.org/schema/spring">
         <streamCaching id="cacheConfig" bufferSize="1024" spoolEnabled="true" spoolThreshold="131072" />
         <!-- ===== thread pools =====
@@ -27,6 +42,18 @@
              CamelThreadPoolConfiguration (aggregatePoolA / notificationPoolB) instead of inline
              <threadPool> elements, so they emit executor_* metrics. The executorService="<id>" refs
              below resolve to those beans from the registry. -->
+
+        <!-- ===== Camel tutorial fragments (the schema wants these refs BEFORE <restConfiguration>) ===== -->
+        <routeContextRef ref="tutorialApi1RouteContext"/>
+        <routeContextRef ref="tutorialApi2RouteContext"/>
+        <routeContextRef ref="tutorialApi3RouteContext"/>
+        <routeContextRef ref="tutorialApi4RouteContext"/>
+        <routeContextRef ref="tutorialApi5RouteContext"/>
+        <routeContextRef ref="tutorialSharedRouteContext"/>
+        <routeContextRef ref="tutorialApi6RouteContext"/>
+        <routeContextRef ref="tutorialApi7RouteContext"/>
+        <routeContextRef ref="tutorialApi8RouteContext"/>
+        <restContextRef ref="tutorialRestContext"/>
 
         <!-- ===== REST transport + JSON binding ===== -->
         <restConfiguration component="servlet" bindingMode="json" inlineRoutes="false"/>
@@ -72,6 +99,14 @@
                  Body: {"sku":"CAT-1","quantity":2,"customer":"Ethan","method":"CARD","currency":"SGD"} -->
             <post path="/checkout" consumes="application/json" produces="application/json">
                 <to uri="direct:checkout"/>
+            </post>
+            <!-- One downstream POST (catalog /reserve), two clients, same envelope — compare them call
+                 for call. Body: {"sku":"CAT-1","quantity":1}. See ReserveComparisonProcessor. -->
+            <post path="/reserve/http-component" consumes="application/json" produces="application/json">
+                <to uri="direct:reserveViaHttpComponent"/>
+            </post>
+            <post path="/reserve/rest-client" consumes="application/json" produces="application/json">
+                <to uri="direct:reserveViaRestClient"/>
             </post>
         </rest>
 
@@ -235,6 +270,43 @@
                 <doCatch>
                     <exception>java.lang.Exception</exception>
                     <to uri="bean:checkoutProcessor?method=failure"/>
+                </doCatch>
+            </doTry>
+        </route>
+
+        <!-- ============================================================================
+             reserve, two ways (POST /api/reserve/http-component vs /api/reserve/rest-client).
+             1. "https" HttpComponent: a plain endpoint URI naming the service id; CamelConfig's
+                component resolves it at connect time (LoadBalancerRoutePlanner). Same per-hop rules as
+                the checkout chain: CamelHttp* control headers removed, method + Content-Type set
+                explicitly (read off the exchange even with skipRequestHeaders=true).
+             2. clusterRestClient: the call is Java (reserveComparison.viaRestClient); the @LoadBalanced
+                client resolves the service id before sending.
+             Both doCatch into the same failure mapping: downstream 4xx passed through, 5xx -> 502.
+             ============================================================================ -->
+        <route id="reserveViaHttpComponent">
+            <from uri="direct:reserveViaHttpComponent"/>
+            <doTry>
+                <to uri="bean:reserveComparison?method=prepareHttpComponent"/>
+                <removeHeaders pattern="CamelHttp*"/>
+                <setHeader name="CamelHttpMethod"><constant>POST</constant></setHeader>
+                <setHeader name="Content-Type"><constant>application/json</constant></setHeader>
+                <to uri="https://catalog-resource/api/catalog/reserve?skipRequestHeaders=true&amp;skipResponseHeaders=true"/>
+                <to uri="bean:reserveComparison?method=finishHttpComponent"/>
+                <doCatch>
+                    <exception>java.lang.Exception</exception>
+                    <to uri="bean:reserveComparison?method=failure"/>
+                </doCatch>
+            </doTry>
+        </route>
+
+        <route id="reserveViaRestClient">
+            <from uri="direct:reserveViaRestClient"/>
+            <doTry>
+                <to uri="bean:reserveComparison?method=viaRestClient"/>
+                <doCatch>
+                    <exception>java.lang.Exception</exception>
+                    <to uri="bean:reserveComparison?method=failure"/>
                 </doCatch>
             </doTry>
         </route>

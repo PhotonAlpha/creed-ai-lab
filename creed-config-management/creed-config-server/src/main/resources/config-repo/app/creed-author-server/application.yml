@@ -1,0 +1,17 @@
+# Layer 5/6 — app `creed-author-server`: this module's defaults in every environment.
+# (Was config-repo/creed-author-server.yml before the layered layout.)
+#
+# Served to creed-author-server via spring.config.import=configserver:...
+# Overrides values from the auth-server's own application.yml. Restart the
+# auth-server (or POST /actuator/refresh with spring-cloud-starter-bus) after
+# editing this file.
+creed:
+  config:
+    layer: app
+    layers:
+      app: creed-author-server
+  metrics:
+    jvm-memory:
+      initial-delay-ms: 5000
+      interval-ms: 60000
+  greeting: "creed-author-server says hi via config-server"

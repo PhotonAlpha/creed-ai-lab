@@ -1,0 +1,9 @@
+# Layer 4/6 — env `pdn` (group `pdn`): what makes this one environment different from its group.
+creed:
+  config:
+    layer: env
+    layers:
+      env: pdn
+  env:
+    name: pdn
+    auth-issuer: https://auth-pdn.creed.internal/auth-server

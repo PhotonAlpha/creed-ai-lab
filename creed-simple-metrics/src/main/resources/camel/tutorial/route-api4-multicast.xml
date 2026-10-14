@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+   route-api4-multicast.xml  -  API-4, parallel fan-out and result aggregation
+  ============================================================================
+   Tags covered: <multicast> plus aggregationStrategy
+
+   Imported by camel-context.xml via <import resource="classpath:camel/tutorial/route-api4-multicast.xml"/>,
+   then wired into the context by <routeContextRef ref="tutorialApi4RouteContext"/>.
+  ============================================================================
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://camel.apache.org/schema/spring
+           http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <routeContext id="tutorialApi4RouteContext" xmlns="http://camel.apache.org/schema/spring">
+
+        <!--
+          ####################################################################
+          API-4  POST /api/v1/orders/check
+          Tags: <multicast> plus aggregationStrategy
+          ####################################################################
+          <multicast> hands THE SAME message to several targets (the scatter half of
+                      scatter-gather).
+                      parallelProcessing="true"  runs the branches concurrently (false by default);
+                                                 either way the caller waits for all of them.
+                      timeout / streaming / onPrepare and friends are available when needed.
+
+          aggregationStrategy is an ATTRIBUTE of <multicast> in the Camel 4 XML DSL. Its value is
+                      the name of an AggregationStrategy bean in the Spring container. (The nested
+                      <aggregationStrategy> element seen in older material no longer exists in the
+                      4.x schema; in the Java DSL it is still the .aggregationStrategy(...) method.)
+                      It answers the question: how do several branch replies become one message?
+          WARNING: with no aggregationStrategy, a multicast DISCARDS EVERY BRANCH REPLY and keeps
+                   the message as it was before the multicast. This is the most common newcomer trap.
+
+          multicast vs split:
+             multicast = one message goes to several different targets (target varies, message does not)
+             split     = one message becomes several children run through the same logic
+                         (message varies, target does not)
+        -->
+        <route id="api4-parallel-check">
+            <from uri="direct:api4-check"/>
+            <log message="[API-4] >>> entering route, payload = ${body}"/>
+
+            <multicast aggregationStrategy="scoreAggregationStrategy"
+                       parallelProcessing="true" executorService="tutorialTaskPool">
+                <to uri="direct:api4-risk"/>
+                <to uri="direct:api4-credit"/>
+                <to uri="direct:api4-inventory"/>
+            </multicast>
+
+            <log message="[API-4] &lt;&lt;&lt; three branches done, aggregated result = ${body}"/>
+        </route>
+
+        <route id="api4-risk">
+            <from uri="direct:api4-risk"/>
+            <setHeader name="checkName"><constant>RISK</constant></setHeader>
+            <process ref="scoreProcessor"/>
+        </route>
+        <route id="api4-credit">
+            <from uri="direct:api4-credit"/>
+            <setHeader name="checkName"><constant>CREDIT</constant></setHeader>
+            <process ref="scoreProcessor"/>
+        </route>
+        <route id="api4-inventory">
+            <from uri="direct:api4-inventory"/>
+            <setHeader name="checkName"><constant>INVENTORY</constant></setHeader>
+            <process ref="scoreProcessor"/>
+        </route>
+
+    </routeContext>
+</beans>

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+   route-api6-complex.xml  -  API-6, the combined orchestration (order fulfilment)
+  ============================================================================
+   Combines the tags of the first five APIs into one realistic business chain.
+
+   Imported by camel-context.xml via <import resource="classpath:camel/tutorial/route-api6-complex.xml"/>,
+   then wired into the context by <routeContextRef ref="tutorialApi6RouteContext"/>.
+   It reuses the risk sub-routes from route-api4-multicast.xml and the item / audit routes
+   from route-shared.xml.
+  ============================================================================
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://camel.apache.org/schema/spring
+           http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <routeContext id="tutorialApi6RouteContext" xmlns="http://camel.apache.org/schema/spring">
+
+        <!--
+          ####################################################################
+          API-6  POST /api/v1/orders/fulfil   -  capstone: order fulfilment
+          Tags: everything above, combined
+          ####################################################################
+          The story:
+            1. <process>  validate the order
+            2. <setProperty> back up the original payload
+                          (a Property is data that rides along without following the body)
+            3. <choice>/<when>/<simple>/<jsonpath>  grade the order VIP / APP_FAST / STANDARD
+            4. <multicast> plus aggregationStrategy  three risk checks in parallel, scores merged
+            5. <process>  total score becomes decision (APPROVED / REJECTED)
+            6. <filter>   the guard: only APPROVED goes on to fulfilment
+                 6.1 <wireTap> tap for auditing
+                 6.2 <setBody> restore the original payload
+                 6.3 <split> break out the line items and <toD> pick a warehouse per category
+            7. <process>  single assembly point, so even a request the filter stopped receives a
+                          reply with the very same shape
+        -->
+        <route id="api6-complex-fulfilment">
+            <from uri="direct:api6-fulfil"/>
+            <log message="[API-6] >>> ===== fulfilment orchestration start ===== payload = ${body}"/>
+
+            <!-- 1. validate -->
+            <process ref="orderValidateProcessor"/>
+
+            <!-- 2. back up the original payload: the body is rewritten repeatedly below,
+                    a Property is not affected -->
+            <setProperty name="originalOrder">
+                <simple>${body}</simple>
+            </setProperty>
+            <log message="[API-6] original payload stored in Property originalOrder"/>
+
+            <!-- 3. grade the order -->
+            <choice>
+                <when>
+                    <simple>${body[amount]} &gt; 10000</simple>
+                    <setHeader name="orderLevel"><constant>VIP</constant></setHeader>
+                    <log message="[API-6] graded -> VIP (simple matched)"/>
+                </when>
+                <when>
+                    <jsonpath>$[?(@.channel == 'APP')]</jsonpath>
+                    <setHeader name="orderLevel"><constant>APP_FAST</constant></setHeader>
+                    <log message="[API-6] graded -> APP_FAST (jsonpath matched)"/>
+                </when>
+                <otherwise>
+                    <setHeader name="orderLevel"><constant>STANDARD</constant></setHeader>
+                    <log message="[API-6] graded -> STANDARD (otherwise)"/>
+                </otherwise>
+            </choice>
+
+            <!-- 4. three risk checks in parallel -->
+            <log message="[API-6] entering multicast for parallel risk checks..."/>
+            <multicast aggregationStrategy="scoreAggregationStrategy"
+                       parallelProcessing="true" executorService="tutorialTaskPool">
+                <to uri="direct:api4-risk"/>
+                <to uri="direct:api4-credit"/>
+                <to uri="direct:api4-inventory"/>
+            </multicast>
+            <log message="[API-6] multicast aggregation done = ${body}"/>
+
+            <!-- 5. decision -->
+            <process ref="riskDecisionProcessor"/>
+
+            <!-- 6. guard: fulfil only what passed -->
+            <filter>
+                <simple>${header.decision} == 'APPROVED'</simple>
+                <log message="[API-6] filter passed -> fulfilment starts"/>
+
+                <wireTap uri="direct:audit-log" executorService="tutorialTaskPool"/>
+
+                <!-- restore the original payload, otherwise there is no items array to split -->
+                <setBody><simple>${exchangeProperty.originalOrder}</simple></setBody>
+<!--                split can support sync and async -->
+                <split aggregationStrategy="itemCollectAggregationStrategy">
+                    <jsonpath>$.items</jsonpath>
+                    <process ref="itemNormalizeProcessor"/>
+                    <toD uri="direct:item-${header.itemChannel}"/>
+                </split>
+
+                <setProperty name="fulfilResult"><simple>${body}</simple></setProperty>
+                <log message="[API-6] fulfilment split complete = ${body}"/>
+            </filter>
+
+            <!-- 7. assembly: this still runs when the filter did not pass -->
+            <process ref="complexResponseProcessor"/>
+            <log message="[API-6] &lt;&lt;&lt; ===== fulfilment orchestration end ===== reply = ${body}"/>
+        </route>
+
+    </routeContext>
+</beans>

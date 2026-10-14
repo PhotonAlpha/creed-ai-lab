@@ -1,0 +1,24 @@
+# Layer 1/6 — common: every module, every environment. Lowest precedence; anything here can be
+# overridden by type → env-group → env → app → app-env (see config-repo/README.md).
+#
+# Also what a request without a type/env profile gets (e.g. the existing `cloud` clients, or
+# `GET /application/default`), so keep it safe to apply anywhere.
+creed:
+  greeting: "hello from creed-config-server"
+  config:
+    # Each layer overwrites `layer` and adds its own key under `layers`, so a client can print
+    # creed.config.* to see which files were stacked and which one won.
+    layer: common
+    layers:
+      common: all
+  env:
+    # Defaults for a request that names no environment (local runs); the env layer replaces them.
+    name: local
+    group: local
+    auth-issuer: http://127.0.0.1:9000/auth-server
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true

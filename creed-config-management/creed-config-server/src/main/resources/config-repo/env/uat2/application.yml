@@ -1,0 +1,9 @@
+# Layer 4/6 — env `uat2` (group `uat`): what makes this one environment different from its group.
+creed:
+  config:
+    layer: env
+    layers:
+      env: uat2
+  env:
+    name: uat2
+    auth-issuer: https://auth-uat2.creed.internal/auth-server

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+   route-api5-split.xml  -  API-5, split, tap and dynamic routing
+  ============================================================================
+   Tags covered: <split> <wireTap> <toD>
+
+   Imported by camel-context.xml via <import resource="classpath:camel/tutorial/route-api5-split.xml"/>,
+   then wired into the context by <routeContextRef ref="tutorialApi5RouteContext"/>.
+   The endpoints it targets (item-BOOK / item-FOOD / item-OTHER and audit-log) live in
+   camel/route-shared.xml, because API-6 reuses the same set.
+  ============================================================================
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://camel.apache.org/schema/spring
+           http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <routeContext id="tutorialApi5RouteContext" xmlns="http://camel.apache.org/schema/spring">
+
+        <!--
+          ####################################################################
+          API-5  POST /api/v1/orders/split
+          Tags: <split> <wireTap> <toD>
+          ####################################################################
+          <split>   breaks one message into N children by an expression and runs each of them
+                    through the steps inside the split. Here <jsonpath>$.items</jsonpath> picks
+                    the array. Children automatically carry the headers CamelSplitIndex,
+                    CamelSplitSize and CamelSplitComplete. As with multicast, an
+                    aggregationStrategy is required to collect the child results, otherwise the
+                    output is still the original message.
+
+          <wireTap> a tap (fire and forget). It sends a COPY of the Exchange to another endpoint
+                    asynchronously; the main flow does not wait for it and does not care about its
+                    result or its exceptions. Typical uses: auditing, instrumentation, traffic
+                    mirroring. Compared with <to>: <to> is synchronous and affects the main flow,
+                    <wireTap> is asynchronous and fully isolated.
+
+          <toD>     dynamic to. The URI is evaluated AT RUNTIME to decide the target endpoint.
+                    A <to> URI is fixed when the route starts; a <toD> can differ per message.
+                    The cost: the resolved endpoint must really exist, and there is endpoint cache
+                    overhead (tunable through cacheSize).
+        -->
+        <route id="api5-split-items">
+            <from uri="direct:api5-split"/>
+            <log message="[API-5] >>> entering route, payload = ${body}"/>
+
+            <!-- (1) Tap for auditing: the main flow carries on at once while the audit runs on another thread -->
+            <wireTap uri="direct:audit-log" executorService="tutorialTaskPool"/>
+            <log message="[API-5] wireTap dispatched (no waiting), main flow continues"/>
+
+            <!-- (2) Split the order, route dynamically, collect the child results -->
+            <split aggregationStrategy="itemCollectAggregationStrategy">
+                <jsonpath>$.items</jsonpath>
+                <process ref="itemNormalizeProcessor"/>
+                <toD uri="direct:item-${header.itemChannel}"/>
+            </split>
+
+            <log message="[API-5] &lt;&lt;&lt; split complete, aggregated result = ${body}"/>
+        </route>
+
+    </routeContext>
+</beans>

@@ -1,0 +1,8 @@
+# Layer 5/6 — app `creed-gateway-proxy` (type proxy-gateway): this module's defaults in every environment.
+creed:
+  config:
+    layer: app
+    layers:
+      app: creed-gateway-proxy
+  proxy:
+    static-locations: classpath:/static/

@@ -57,6 +57,19 @@ LoadBalancer 轮询健康实例。
    `<choice>` 走 `FailureResponseProcessor` 返回失败响应体并设置对应 HTTP 状态码。
    下游 bulk 端点支持 `?fail=true` 故障注入，可用请求体 `{"failOrder":true}` 触发该分支。
 
+**同一个下游 POST、两种客户端对比**：`POST /camel/api/reserve/http-component` 走 Camel
+`<to uri="https://catalog-resource/...">`（`CamelConfig#httpComponent`，`LoadBalancerRoutePlanner` 建连时解析实例），
+`POST /camel/api/reserve/rest-client` 走 `@LoadBalanced` 的 `clusterRestClient`（发出前由
+`LoadBalancerInterceptor` 解析）。两者调用 catalog `/api/catalog/reserve`、返回同一个信封
+`{client, downstream, status, elapsedMs, body}`，下游 4xx 原样透传、5xx 映射为 502（`ReserveComparisonProcessor`）。
+
+**Camel 教程（8 个教学 API，迁自 camel-session-0to1）**：`/camel/api/v1/orders/*` 与 `/camel/api/v1/files/upload`，
+从 `<route>/<process>` 一路讲到 multicast / split / wireTap 综合编排、自定义组件 `httpexchange:`（Spring
+`@HttpExchange`）、Base64 文件上传；附手写 OpenAPI（6 个分组，`/simple/swagger-ui.html`）、中英 PPT 手册、
+交互流程图与回归脚本。代码在 `com.creed.simple.tutorial`，路由在 `camel/tutorial/`，配置在
+`tutorial/tutorial.yml`，与模块原有路由互不交叉。入口文档
+**[docs/camel-tutorial/README.md](docs/camel-tutorial/README.md)**（含迁移时的改动与原因）。
+
 **本节点可注册到 Apache HTTP Server 的 mod_cluster**（`creed.mod-cluster.*`，默认关）：用的是上游官方的
 `mod_cluster-container-tomcat-10.1` 监听器——JWS 6.x 放在 `$JWS_HOME/tomcat/lib` 里、用 `server.xml` 的
 `<Listener className="org.jboss.modcluster.container.tomcat.ModClusterListener" .../>` 挂的同一个库；

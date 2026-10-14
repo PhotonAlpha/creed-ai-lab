@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+   route-api2-dispatch.xml  -  API-2, branching and filtering
+  ============================================================================
+   Tags covered: <choice> <when> <otherwise> <simple> <jsonpath> <filter>
+
+   Imported by camel-context.xml via <import resource="classpath:camel/tutorial/route-api2-dispatch.xml"/>,
+   then wired into the context by <routeContextRef ref="tutorialApi2RouteContext"/>.
+  ============================================================================
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://camel.apache.org/schema/spring
+           http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <routeContext id="tutorialApi2RouteContext" xmlns="http://camel.apache.org/schema/spring">
+
+        <!--
+          ####################################################################
+          API-2  POST /api/v1/orders/dispatch
+          Tags: <choice> <when> <otherwise> <simple> <jsonpath> <filter>
+          ####################################################################
+          <choice>  a Content Based Router.
+                    It evaluates each <when> top to bottom and STOPS AT THE FIRST MATCH;
+                    <otherwise> runs only when none of them matched.
+          <when>    one branch; its first child element must be a predicate.
+          <simple>  Camel's built-in expression language. ${body[amount]} reads a Map key,
+                    ${header.xxx} reads a header, ${exchangeProperty.xxx} reads a property.
+                    Simple syntax, no extra dependency; it covers the vast majority of tests.
+          <jsonpath> reads or tests values directly against the JSON structure, which suits
+                    deeply nested fields that would be clumsy to express with simple.
+                    As a predicate: a filter expression returning a non-empty result is true.
+
+          ================== <filter> vs <choice>/<when> ==================
+          | dimension     | <filter>                       | <choice> + <when>              |
+          |===============|================================|================================|
+          | branches      | exactly one (true / false)     | any number of when + one otherwise |
+          | when no match | skips every step INSIDE it     | runs otherwise; skipped if absent  |
+          | meaning       | "should this part run?" a guard| "which part runs?" a multi-way pick|
+          | strategy      | a single predicate             | top to bottom, first match wins    |
+          | usual mistake | assuming it ends the route (it does not!) | assuming several whens all run (they do not) |
+          What they share: neither TERMINATES the route. The nodes after them still run.
+                           To actually stop, use <stop/>.
+        -->
+        <route id="api2-dispatch-order">
+            <from uri="direct:api2-dispatch"/>
+            <log message="[API-2] >>> entering route, payload = ${body}"/>
+
+            <!-- (1) Multi-way pick: decide which lane the order takes -->
+            <choice>
+                <when>
+                    <!-- simple: compare the amount directly -->
+                    <simple>${body[amount]} &gt; 10000</simple>
+                    <setHeader name="lane"><constant>VIP</constant></setHeader>
+                    <log message="[API-2] choice -> matched when#1 (amount ${body[amount]} > 10000), taking the VIP lane"/>
+                </when>
+                <when>
+                    <!-- jsonpath: a filter test against the JSON structure; non-empty means true -->
+                    <jsonpath>$[?(@.channel == 'APP')]</jsonpath>
+                    <setHeader name="lane"><constant>APP_FAST</constant></setHeader>
+                    <log message="[API-2] choice -> matched when#2 (jsonpath channel==APP), taking the APP fast lane"/>
+                </when>
+                <otherwise>
+                    <setHeader name="lane"><constant>STANDARD</constant></setHeader>
+                    <log message="[API-2] choice -> nothing matched, falling through to otherwise (standard lane)"/>
+                </otherwise>
+            </choice>
+
+            <!-- (2) Guard: place the order only when amount >= 100. A miss JUST SKIPS THIS BLOCK. -->
+            <filter>
+                <simple>${body[amount]} &gt;= 100</simple>
+                <log message="[API-2] filter -> passed (amount=${body[amount]} >= 100), placing the order"/>
+                <setHeader name="placed"><constant>true</constant></setHeader>
+                <to uri="direct:api2-place-order"/>
+            </filter>
+
+            <!-- (3) Assembly: runs whether or not the filter passed. That is the difference from <stop/>. -->
+            <log message="[API-2] still running after the filter -> lane=${header.lane}, placed=${header.placed}"/>
+            <process ref="dispatchResponseProcessor"/>
+            <log message="[API-2] &lt;&lt;&lt; route finished, reply = ${body}"/>
+        </route>
+
+        <route id="api2-place-order">
+            <from uri="direct:api2-place-order"/>
+            <log message="[API-2] --- sub-route: order accepted, lane=${header.lane}"/>
+        </route>
+
+    </routeContext>
+</beans>

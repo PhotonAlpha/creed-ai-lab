@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+   route-api3-quote.xml  -  API-3, remote calls through a ProducerTemplate
+  ============================================================================
+   Tags covered: <rest> <post> <to> <from> plus ProducerTemplate
+
+   Imported by camel-context.xml via <import resource="classpath:camel/tutorial/route-api3-quote.xml"/>,
+   then wired into the context by <routeContextRef ref="tutorialApi3RouteContext"/>.
+  ============================================================================
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://camel.apache.org/schema/spring
+           http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <routeContext id="tutorialApi3RouteContext" xmlns="http://camel.apache.org/schema/spring">
+
+        <!--
+          ####################################################################
+          API-3  POST /api/v1/orders/quote
+          Tags: <rest> <post> <to> <from> plus ProducerTemplate
+          ####################################################################
+          The point of this example is not a tag but the ProducerTemplate:
+            . inside a route you send messages with <to>            - "from within the pipeline";
+            . in Java code you send them with a ProducerTemplate    - "from outside the pipeline".
+          Both end up going through the same Component/Endpoint machinery.
+          RemoteCallService demonstrates two kinds of target:
+            1) http://...            a real HTTP call to an external system
+            2) direct:api3-calc-fee  a callback into a local Camel route
+          <to uri="bean:xxx?method=yyy"/> is the standard way to call a Spring bean from a route.
+        -->
+        <route id="api3-quote-order">
+            <from uri="direct:api3-quote"/>
+            <log message="[API-3] >>> entering route, payload = ${body}"/>
+            <to uri="bean:remoteCallService?method=handle"/>
+            <log message="[API-3] &lt;&lt;&lt; route finished, reply = ${body}"/>
+        </route>
+
+        <!-- Target of ProducerTemplate.requestBody("direct:api3-calc-fee", ...) -->
+        <route id="api3-calc-fee">
+            <from uri="direct:api3-calc-fee"/>
+            <log message="[API-3] --- sub-route calc-fee invoked by the ProducerTemplate"/>
+            <to uri="bean:remoteCallService?method=calcFee"/>
+            <log message="[API-3] --- sub-route calc-fee returned ${body}"/>
+        </route>
+
+    </routeContext>
+</beans>

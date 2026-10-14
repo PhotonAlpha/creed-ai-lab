@@ -1,0 +1,609 @@
+###
+### =========================================================================
+###  Camel 教程 · REST API 全量请求集（迁自 camel-session-0to1）
+### =========================================================================
+###  用法：
+###    1. 先在仓库根目录启动：mvn -pl creed-simple-metrics spring-boot:run -Dspring-boot.run.workingDirectory="$PWD"
+###    2. 在 IntelliJ IDEA 中打开本文件，点击每个请求左侧的 ▶ 单独执行，
+###       或点击文件顶部的 ▶▶ 依次执行全部请求。
+###    3. 执行后对照应用控制台的中文日志观察每一步 EIP 的轨迹。
+###
+###  环境变量在同目录的 http-client.env.json 中定义（local / httpd）。
+###  未选择环境时默认走 {{host}} = https://localhost:8096/simple（自签证书，env 里已关校验）。
+### =========================================================================
+
+@host = https://localhost:8096/simple
+@base = {{host}}/camel/api/v1/orders
+@json = application/json
+
+### basic positive
+### =========================================================================
+### API-1  基础链路
+### 标签：<rest> <post> <to> <route> <from> <process> <log>
+### 路由：api1-basic-order -> direct:api1-enrich -> api1-enrich-order
+### 预期：200，code=OK，handledBy=route:api1-basic-order
+### =========================================================================
+POST {{base}}/basic
+Content-Type: {{json}}
+
+{
+  "orderId": "A-1001",
+  "amount": 666,
+  "channel": "WEB"
+}
+
+> {%
+    client.test("API-1 返回 OK", function () {
+        client.assert(response.status === 200, "期望 200，实际 " + response.status);
+        client.assert(response.body.code === "OK");
+        client.assert(response.body.handledBy === "route:api1-basic-order");
+    });
+%}
+
+### basic negative
+### -------------------------------------------------------------------------
+### API-1  反例：缺少 orderId，OrderValidateProcessor 抛异常
+### 预期：500（未配置 onException，异常直接冒泡，可用来观察失败态日志）
+### -------------------------------------------------------------------------
+POST {{base}}/basic
+Content-Type: {{json}}
+
+{
+  "amount": 100
+}
+
+### dispatch amount > 10000
+### =========================================================================
+### API-2a  <choice> 命中 when#1（simple: amount > 10000）+ <filter> 放行
+### 标签：<choice> <when> <otherwise> <simple> <jsonpath> <filter>
+### 预期：lane=VIP，placed=true
+### =========================================================================
+POST {{base}}/dispatch
+Content-Type: {{json}}
+
+{
+  "orderId": "B-2001",
+  "amount": 20000,
+  "channel": "WEB"
+}
+
+> {%
+    client.test("命中 VIP 通道且已下单", function () {
+        client.assert(response.body.lane === "VIP");
+        client.assert(response.body.placed === true);
+    });
+%}
+
+### dispatch when APP
+### -------------------------------------------------------------------------
+### API-2b  <choice> 命中 when#2（jsonpath: $[?(@.channel == 'APP')]）
+### 预期：lane=APP_FAST，placed=true
+### -------------------------------------------------------------------------
+POST {{base}}/dispatch
+Content-Type: {{json}}
+
+{
+  "orderId": "B-2002",
+  "amount": 500,
+  "channel": "APP"
+}
+
+> {%
+    client.test("命中 APP 快线", function () {
+        client.assert(response.body.lane === "APP_FAST");
+    });
+%}
+
+### dispatch otherwise
+### -------------------------------------------------------------------------
+### API-2c  <choice> 走 <otherwise>，且 <filter> 未放行（amount < 100）
+### 关键：filter 拦截【不会终止路由】，收口 Processor 照常执行，依然返回 200
+### 预期：lane=STANDARD，placed=false，HTTP 仍是 200
+### -------------------------------------------------------------------------
+POST {{base}}/dispatch
+Content-Type: {{json}}
+
+{
+  "orderId": "B-2003",
+  "amount": 50,
+  "channel": "WEB"
+}
+
+> {%
+    client.test("filter 拦截但路由正常收口", function () {
+        client.assert(response.status === 200, "filter 不应终止路由");
+        client.assert(response.body.lane === "STANDARD");
+        client.assert(response.body.placed === false);
+    });
+%}
+
+### quote ProducerTemplate
+### =========================================================================
+### API-3  ProducerTemplate + Freemarker 双向报文转换
+### 标签：<rest> <post> <to uri="bean:..."> <from>
+### 链路：内部订单 --request.ftl--> 外部系统报文 --HTTP--> 外部系统应答
+###       --response.ftl--> 业务报文
+### 预期：rate=7.24（USD），fee 由 direct:api3-calc-fee 算出，remoteCode=0000
+### 观察：控制台会完整打印两次模板渲染的结果
+### =========================================================================
+POST {{base}}/quote
+Content-Type: {{json}}
+
+{
+  "orderId": "C-3001",
+  "amount": 2000,
+  "currency": "USD"
+}
+
+> {%
+    client.test("拿到远程汇率与本地计费", function () {
+        client.assert(response.body.rate === 7.24);
+        client.assert(response.body.remoteProvider === "mock-fx-service");
+        client.assert(response.body.fee !== undefined);
+    });
+    client.test("response.ftl 已把外部报文拍平成业务格式", function () {
+        client.assert(response.body.currency === "USD");
+        client.assert(response.body.remoteCode === "0000", "remoteCode 来自外部 header.code");
+        client.assert(response.body.msgId !== undefined, "msgId 由 request.ftl 带出去再原样回来");
+    });
+%}
+
+### quote mock
+### -------------------------------------------------------------------------
+### API-3  换一种货币，观察远程 mock 服务返回不同汇率
+### -------------------------------------------------------------------------
+POST {{base}}/quote
+Content-Type: {{json}}
+
+{
+  "orderId": "C-3002",
+  "amount": 800,
+  "currency": "EUR"
+}
+
+### mock/remote/fx-rate
+### -------------------------------------------------------------------------
+### API-3  直接打被 ProducerTemplate 调用的"外部系统"（普通 Spring MVC Controller）
+### 它不属于 Camel 路由，用来证明 API-3 走的是真实 HTTP。
+### 注意这里的报文是【外部系统的方言】(header/payload 信封 + 缩写字段)，
+### 正是 request.ftl / response.ftl 要翻译的那一套格式。
+### -------------------------------------------------------------------------
+POST {{host}}/mock/remote/fx-rate
+Content-Type: {{json}}
+
+{
+  "header": {
+    "msgId": "manual-test-001",
+    "source": "http-client",
+    "version": "1.0"
+  },
+  "payload": {
+    "ccy": "JPY",
+    "amt": 100,
+    "ref": "MANUAL"
+  }
+}
+
+> {%
+    client.test("外部系统用信封格式应答", function () {
+        client.assert(response.body.header.code === "0000");
+        client.assert(response.body.payload.fxRate === 0.048);
+    });
+%}
+
+### check multicast
+### =========================================================================
+### API-4  <multicast> 三路并行 + aggregationStrategy 聚合
+### 标签：<multicast aggregationStrategy="..." parallelProcessing="true">
+### 预期：checks 三条，totalScore=270（amount<=50000）
+### 观察：控制台三个 "#N - Multicast" 线程交错打分
+### =========================================================================
+POST {{base}}/check
+Content-Type: {{json}}
+
+{
+  "orderId": "D-4001",
+  "amount": 3000
+}
+
+> {%
+    client.test("三路结果被聚合", function () {
+        client.assert(response.body.checks.length === 3);
+        client.assert(response.body.totalScore === 270);
+    });
+%}
+
+### check multicast2
+### -------------------------------------------------------------------------
+### API-4  大额订单：RISK 与 CREDIT 降分，总分掉到 165
+### -------------------------------------------------------------------------
+POST {{base}}/check
+Content-Type: {{json}}
+
+{
+  "orderId": "D-4002",
+  "amount": 90000
+}
+
+> {%
+    client.test("大额订单总分下降", function () {
+        client.assert(response.body.totalScore === 165);
+    });
+%}
+
+### split
+### =========================================================================
+### API-5  <wireTap> 旁路 + <split> 拆单 + <toD> 动态路由
+### 标签：<split> <wireTap> <toD>
+### 预期：三个 SKU 分别进 WH-BOOK-SH / WH-COLD-HZ / WH-GENERAL-BJ
+### 观察：TOY 是未知类型，被 ItemNormalizeProcessor 收敛成 OTHER；
+###      [AUDIT] 日志出现在独立的 WireTap 线程，且晚于主流程返回
+### =========================================================================
+POST {{base}}/split
+Content-Type: {{json}}
+
+{
+  "orderId": "E-5001",
+  "items": [
+    { "sku": "BK-01", "type": "BOOK", "qty": 2 },
+    { "sku": "FD-09", "type": "FOOD", "qty": 1 },
+    { "sku": "XX-77", "type": "TOY",  "qty": 5 }
+  ]
+}
+
+> {%
+    client.test("三个 SKU 各自分仓", function () {
+        client.assert(response.body.length === 3);
+        client.assert(response.body[0].warehouse === "WH-BOOK-SH");
+        client.assert(response.body[1].warehouse === "WH-COLD-HZ");
+        client.assert(response.body[2].warehouse === "WH-GENERAL-BJ");
+        client.assert(response.body[2].channel === "OTHER", "未知类型应收敛为 OTHER");
+    });
+%}
+
+### fulfil APPROVED
+### =========================================================================
+### API-6  综合编排 —— 成功路径
+### 标签：以上全部组合
+### 输入：amount=20000（VIP 定级）、channel=APP、3 个商品行
+### 预期：decision=APPROVED，totalScore=270，fulfilment 三条
+### =========================================================================
+POST {{base}}/fulfil
+Content-Type: {{json}}
+
+{
+  "orderId": "F-6001",
+  "amount": 20000,
+  "channel": "APP",
+  "items": [
+    { "sku": "BK-01", "type": "BOOK", "qty": 2 },
+    { "sku": "FD-09", "type": "FOOD", "qty": 1 },
+    { "sku": "XX-77", "type": "TOY",  "qty": 5 }
+  ]
+}
+
+> {%
+    client.test("风控通过并完成履约", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.code === "OK");
+        client.assert(response.body.decision === "APPROVED");
+        client.assert(response.body.orderLevel === "VIP");
+        client.assert(response.body.totalScore === 270);
+        client.assert(response.body.fulfilment.length === 3);
+    });
+%}
+
+### fulfil REJECTED
+### -------------------------------------------------------------------------
+### API-6  综合编排 —— 风控拒绝路径
+### 关键：<filter> 拦截履约，但路由不终止，收口 Processor 照常执行
+### 预期：HTTP 仍是 200，code=REJECTED，fulfilment 为空数组，
+###      字段结构与成功路径【完全一致】
+### -------------------------------------------------------------------------
+POST {{base}}/fulfil
+Content-Type: {{json}}
+
+{
+  "orderId": "F-6002",
+  "amount": 90000,
+  "channel": "WEB",
+  "items": [
+    { "sku": "BK-02", "type": "BOOK", "qty": 1 }
+  ]
+}
+
+> {%
+    client.test("被拦截但响应结构一致", function () {
+        client.assert(response.status === 200, "filter 不应终止路由");
+        client.assert(response.body.code === "REJECTED");
+        client.assert(response.body.decision === "REJECTED");
+        client.assert(response.body.fulfilment.length === 0);
+        client.assert(response.body.checks.length === 3, "风控仍然跑完了三路");
+    });
+%}
+
+### fulfil STANDARD
+### -------------------------------------------------------------------------
+### API-6  边界：STANDARD 定级（金额不高、渠道不是 APP）
+### 预期：orderLevel=STANDARD，decision=APPROVED
+### -------------------------------------------------------------------------
+POST {{base}}/fulfil
+Content-Type: {{json}}
+
+{
+  "orderId": "F-6003",
+  "amount": 300,
+  "channel": "WEB",
+  "items": [
+    { "sku": "FD-01", "type": "FOOD", "qty": 3 }
+  ]
+}
+
+> {%
+    client.test("走 otherwise 且放行", function () {
+        client.assert(response.body.orderLevel === "STANDARD");
+        client.assert(response.body.decision === "APPROVED");
+    });
+%}
+
+
+### =========================================================================
+### API-7  自定义 Camel 组件 httpexchange: 调用 Spring @HttpExchange 接口
+### 组件：component/httpexchange/  （scheme 注册在 META-INF/services 下）
+### 接口：client/ArtisanClient —— URL/动词/出入参都由编译器检查
+### 链路：内部订单 --artisan-request.ftl--> MyAccountDetailsVO
+###       --@HttpExchange 代理--> List<MyAccountDetailsVO>
+###       --artisan-response.ftl--> 业务报文
+### 预期：accountCount=3，totalAmount=5600（2000 + 600 + 3000）
+### 观察：控制台可见两次模板渲染，以及 mock 侧收到的 header / query param
+### =========================================================================
+POST {{base}}/accounts
+Content-Type: {{json}}
+
+{
+  "orderId": "G-7001",
+  "userName": "ethan",
+  "channel": "APP",
+  "amount": 2000
+}
+
+> {%
+    client.test("三个账户被聚合成业务报文", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.code === "OK");
+        client.assert(response.body.accountCount === 3);
+        client.assert(response.body.totalAmount === 5600);
+        client.assert(response.body.accounts[0].id === "G-7001-PRIMARY");
+        client.assert(response.body.accounts[0].owner === "ethan", "userName 经 header 传到模板");
+    });
+%}
+
+
+### -------------------------------------------------------------------------
+### API-7b  createUser：同一个接口的第二个 POST 方法
+### @RequestBody 是 String：artisan-request.ftl 渲染出的 JSON 原样发出
+### 请求头 X-Client-Id / X-Trace-Id / X-Channel 没有任何方法声明，由接口注解 + ArtisanHeaders 统一加
+### 控制台：Logbook 打印 Outgoing Request / Incoming Response（含头与 body）
+### -------------------------------------------------------------------------
+POST {{base}}/accounts/create
+Content-Type: {{json}}
+
+{
+  "orderId": "G-7002",
+  "userName": "ethan",
+  "channel": "WEB",
+  "amount": 500
+}
+
+> {%
+    client.test("开户返回 ACC- 前缀的 id", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.account.id === "ACC-G-7002");
+        client.assert(response.body.account.amount === 500);
+    });
+%}
+
+
+### -------------------------------------------------------------------------
+### API-7c  getUser：查回 7b 开的账户（先执行 7b；mock 账户存内存，重启即清空）
+### -------------------------------------------------------------------------
+POST {{base}}/accounts/detail
+Content-Type: {{json}}
+
+{
+  "orderId": "G-7003",
+  "accountId": "ACC-G-7002"
+}
+
+> {%
+    client.test("查到刚开的账户", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.orderId === "G-7003");
+        client.assert(response.body.account.owner === "ethan");
+    });
+%}
+
+
+### -------------------------------------------------------------------------
+### API-7c  反例：不存在的账户，远端 404 -> 500
+### -------------------------------------------------------------------------
+POST {{base}}/accounts/detail
+Content-Type: {{json}}
+
+{ "orderId": "G-7004", "accountId": "nope" }
+
+
+### -------------------------------------------------------------------------
+### API-7  直接打 @HttpExchange 指向的"外部系统"
+### 报文就是 MyAccountDetailsVO 本身（组件由 artisan-request.ftl 渲染出来的形状）
+### -------------------------------------------------------------------------
+POST {{host}}/mock/artisan/list?scope=ALL&channel=APP
+Content-Type: {{json}}
+X-Client-Id: manual
+X-Trace-Id: manual-001
+X-Channel: APP
+
+{
+  "userId": "MANUAL-1",
+  "userName": "tester",
+  "channel": "APP",
+  "amount": 100
+}
+
+> {%
+    client.test("外部系统直接返回账户列表", function () {
+        client.assert(response.body.length === 3);
+        client.assert(response.body[0].userId === "MANUAL-1-PRIMARY");
+    });
+%}
+
+
+### =========================================================================
+### API-8a  文件上传：multipart/form-data，file 字段是文件内容的 Base64 文本
+### 可选字段：fileName（默认 upload.bin）、contentType（默认 application/octet-stream）
+### Base64FileMultipartFilter 在 Camel 之前把 file 解码成真正的二进制文件 part，
+### platform-http 再把它变成名为 file 的 attachment，fileUploadProcessor 从 attachment 取字节
+### 预期：size=19，sha256 与 `shasum -a 256` 一致，preview 是原文
+### =========================================================================
+POST {{host}}/camel/api/v1/files/upload
+Content-Type: multipart/form-data; boundary=CamelBoundary
+
+--CamelBoundary
+Content-Disposition: form-data; name="orderId"
+
+H-8001
+--CamelBoundary
+Content-Disposition: form-data; name="fileName"
+
+hello.txt
+--CamelBoundary
+Content-Disposition: form-data; name="contentType"
+
+text/plain
+--CamelBoundary
+Content-Disposition: form-data; name="file"
+
+aGVsbG8gY2FtZWwgdXBsb2FkCg==
+--CamelBoundary--
+
+> {%
+    client.test("Base64 文本被解码成二进制文件", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.orderId === "H-8001", "普通表单字段以 header 进入路由");
+        client.assert(response.body.fileName === "hello.txt");
+        client.assert(response.body.size === 19);
+        client.assert(response.body.preview === "hello camel upload\n");
+    });
+%}
+
+
+### -------------------------------------------------------------------------
+### API-8b  file 是 Base64 data URL（浏览器 FileReader.readAsDataURL 的产物）
+### 不传 contentType 时取 data: 前缀里的类型
+### -------------------------------------------------------------------------
+POST {{host}}/camel/api/v1/files/upload
+Content-Type: multipart/form-data; boundary=CamelBoundary
+
+--CamelBoundary
+Content-Disposition: form-data; name="fileName"
+
+hello.txt
+--CamelBoundary
+Content-Disposition: form-data; name="file"
+
+data:text/plain;base64,aGVsbG8gY2FtZWwgdXBsb2FkCg==
+--CamelBoundary--
+
+> {%
+    client.test("data URL 的类型被识别", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.contentType === "text/plain");
+        client.assert(response.body.size === 19);
+    });
+%}
+
+
+### -------------------------------------------------------------------------
+### API-8  反例：file 不是合法 Base64，filter 直接返回 400，请求到不了 Camel
+### -------------------------------------------------------------------------
+POST {{host}}/camel/api/v1/files/upload
+Content-Type: multipart/form-data; boundary=CamelBoundary
+
+--CamelBoundary
+Content-Disposition: form-data; name="file"
+
+not*base64!
+--CamelBoundary--
+
+> {%
+    client.test("非法 Base64 -> 400", function () {
+        client.assert(response.status === 400);
+        client.assert(response.body.code === "BAD_REQUEST");
+    });
+%}
+
+
+### =========================================================================
+### API 文档分组
+### =========================================================================
+### spec 是手写的 src/main/resources/openapi.yaml（springdoc 扫不到 Camel REST DSL
+### 路由，所以 /v3/api-docs 是空的）。分组在 application.yml 的 demo.openapi.groups
+### 下定义，一个分组 = 一组 tag，服务端按 tag 过滤出一份自洽的文档。
+### UI：https://localhost:8096/simple/swagger-ui.html （右上角 "Select a definition" 切分组）
+### =========================================================================
+
+### openapi groups
+GET {{host}}/openapi
+
+> {%
+    client.test("四个分组都在", function () {
+        client.assert(response.body.length === 6);
+        client.assert(response.body[0].name === "all");
+    });
+%}
+
+### openapi group business
+### -------------------------------------------------------------------------
+### 七个业务 API，不含 mock 外部系统
+### -------------------------------------------------------------------------
+GET {{host}}/openapi/business.yaml
+
+### openapi group mock
+### -------------------------------------------------------------------------
+### 只剩两个 mock 外部系统；schema 也跟着裁到 3 个（没人再引用的都被回收了）
+### -------------------------------------------------------------------------
+GET {{host}}/openapi/mock.yaml
+
+### openapi group public
+### -------------------------------------------------------------------------
+### excludeInternal：摘掉所有打了 x-internal: true 的端点（两个 mock 外部系统），
+### 剩下七个业务 API。新增 API 时不用改分组定义，默认就是 public
+### -------------------------------------------------------------------------
+GET {{host}}/openapi/public.yaml
+
+### openapi group orders
+### -------------------------------------------------------------------------
+### 按 path + method 选，不看 tag。结果与 business 相同，是同一件事的另一种表达
+### -------------------------------------------------------------------------
+GET {{host}}/openapi/orders.yaml
+
+### openapi group remote-calls
+### -------------------------------------------------------------------------
+### API-3（ProducerTemplate）与 API-7（httpexchange: 组件）+ 它们调用的外部系统，
+### 一个分组里对照两种远程调用方式
+### -------------------------------------------------------------------------
+GET {{host}}/openapi/remote-calls.yaml
+
+### openapi group unknown
+### -------------------------------------------------------------------------
+### 不存在的分组 -> 404
+### -------------------------------------------------------------------------
+GET {{host}}/openapi/nope.yaml
+
+> {%
+    client.test("未知分组返回 404", function () {
+        client.assert(response.status === 404);
+    });
+%}
+
+

@@ -1,0 +1,14 @@
+# Layer 2/6 — type `aggregator-ms`: services that fan out to several MS and merge the answers
+# (creed-simple-metrics).
+creed:
+  config:
+    layer: type
+    layers:
+      type: aggregator-ms
+  http:
+    connect-timeout: 3s
+    # Longer than an MS: one aggregate request waits for its slowest downstream.
+    read-timeout: 20s
+  aggregator:
+    parallel-calls: true
+    fail-on-partial: false

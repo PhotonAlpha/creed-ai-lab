@@ -1,0 +1,9 @@
+# Layer 5/6 — app `creed-simple-metrics` (type aggregator-ms): this module's defaults in every environment.
+creed:
+  config:
+    layer: app
+    layers:
+      app: creed-simple-metrics
+  http:
+    # Its fulfillment pipeline makes two sequential fan-outs.
+    read-timeout: 25s

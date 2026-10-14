@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+   route-shared.xml  -  reusable common sub-routes
+  ============================================================================
+   The three candidate targets of <toD> plus the target of <wireTap>.
+   API-5 and API-6 both use this set, which is exactly why it lives in its own file.
+
+   Imported by camel-context.xml via <import resource="classpath:camel/tutorial/route-shared.xml"/>,
+   then wired into the context by <routeContextRef ref="tutorialSharedRouteContext"/>.
+  ============================================================================
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://camel.apache.org/schema/spring
+           http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <routeContext id="tutorialSharedRouteContext" xmlns="http://camel.apache.org/schema/spring">
+
+        <!-- The three candidate targets of <toD>. ItemNormalizeProcessor guarantees the
+             header only ever resolves to one of these three. -->
+        <route id="item-BOOK">
+            <from uri="direct:item-BOOK"/>
+            <process ref="itemHandleProcessor"/>
+        </route>
+        <route id="item-FOOD">
+            <from uri="direct:item-FOOD"/>
+            <process ref="itemHandleProcessor"/>
+        </route>
+        <route id="item-OTHER">
+            <from uri="direct:item-OTHER"/>
+            <process ref="itemHandleProcessor"/>
+        </route>
+
+        <!-- Target of <wireTap>. Note it runs on its own thread, so the thread name in the
+             log differs from the main flow. -->
+        <route id="audit-log">
+            <from uri="direct:audit-log"/>
+            <log message="[AUDIT] tap route received a copy"/>
+            <process ref="auditProcessor"/>
+        </route>
+
+    </routeContext>
+</beans>

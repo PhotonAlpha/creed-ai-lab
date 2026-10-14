@@ -1,0 +1,9 @@
+# Layer 4/6 — env `nft` (group `nft`): what makes this one environment different from its group.
+creed:
+  config:
+    layer: env
+    layers:
+      env: nft
+  env:
+    name: nft
+    auth-issuer: https://auth-nft.creed.internal/auth-server

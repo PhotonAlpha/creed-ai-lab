@@ -1,0 +1,3 @@
+# Registers the "httpexchange:" scheme with Camel. This is the standard discovery
+# mechanism for a Camel component - no Spring bean definition needed.
+class=com.creed.simple.tutorial.component.httpexchange.HttpExchangeComponent

@@ -1,0 +1,24 @@
+# Layer 3/6 — env-group `nft`: non-functional test (performance) — prod-sized pools, quiet logs.
+creed:
+  config:
+    layer: env-group
+    layers:
+      env-group: nft
+  env:
+    group: nft
+
+logging:
+  level:
+    com.creed: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+server:
+  tomcat:
+    threads:
+      # Load tests run at production size.
+      max: 400

@@ -20,7 +20,10 @@ spring:
       metrics: "actuator"
     active: local
   config:
-    import: "optional:configserver:"
+    import:
+      - "optional:configserver:"
+      # The Camel tutorial's own settings (multipart, springdoc, mock base URL) - kept apart, see the file.
+      - "classpath:tutorial/tutorial.yml"
   application:
     name: creed-simple-metrics
   main:
@@ -277,3 +280,13 @@ creed:
         connection-request-timeout: 2s
         response-timeout: 2s
   rootPath: ".support/scripts/pki" # relative to the repo root — the process working dir must be the repo root (-Dspring-boot.run.workingDirectory="$PWD" / IDE working dir)
+
+
+
+otel:
+  logs:
+    exporter: none
+  metrics:
+    exporter: none
+  traces:
+    exporter: none

@@ -26,6 +26,22 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
   (`fetch-catalog` / `fetch-order` / `fetch-payment`), and a `@LoadBalanced RestClient`
   (`RemoteClusterProcessor`, used by the `fulfillment` bulk fetches). Both resolve
   `https://<service-id>/...` against one shared `SimpleDiscoveryClient` registry.
+- **`POST /camel/api/reserve/http-component` vs `/reserve/rest-client`** (2026-10-14): one downstream
+  POST (catalog `/api/catalog/reserve`) through CamelConfig#httpComponent and through
+  `clusterRestClient`, same envelope `{client, downstream, status, elapsedMs, body}`, both mapping a
+  downstream 4xx through and 5xx to 502 (`ReserveComparisonProcessor`). Verified live against two
+  catalog instances (200 / 409 / 400 / 404 identical; logs show `[LB-ROUTE]` vs `LB resolved ->`) and
+  by `ReserveComparisonProcessorTest`. Requests in `.support/http-client/creed-simple-metrics.http`.
+- **Camel tutorial migrated in** (2026-10-14, from `mvn_space/camel-session-0to1`, Boot 4 → this
+  module's Boot 3.5). Eight teaching APIs at `/camel/api/v1/*` + mocks at `/mock/*` + Swagger UI with
+  six OpenAPI groups; `com.creed.simple.tutorial`, `camel/tutorial/*.xml` (wired by ref in
+  `camel-context.xml`), `tutorial/tutorial.yml` (via `spring.config.import`), docs/decks/diagrams/http/
+  script under `docs/camel-tutorial/` (its README lists every migration change and why).
+  - Verified: the 14-case regression; the original jar run side by side, 15 JSON cases + upload +
+    invalid Base64 compared field by field (equal except volatile ids/timestamps); trace id carried
+    onto `tutorial-pool-*`; 14 unit tests (`com.creed.simple.tutorial`).
+  - New deps: camel-jsonpath, camel-freemarker, springdoc 2.8.17 (pinned here). New global effects:
+    `server.tomcat.max-http-form-post-size: 10MB` and multipart limits (needed by API-8).
 - **`cookieRelayRestClient` strips `JSESSIONID` from response `Set-Cookie`** (2026-10-13,
   `JsessionIdStrippingInterceptor`, other cookies kept). `POST /camel/api/cookie-relay` therefore
   forwards WSASID only. Unit-tested; not re-run against a live downstream.
@@ -62,6 +78,15 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
   it directly, unlike every other module (which pushes via OTLP).
 
 ## Landmines
+
+- **A Camel servlet REST consumer never turns multipart parts into attachments** — it always gets
+  `ServletRestHttpBinding`; `camel.component.servlet.attachment-multipart-binding` only switches plain
+  `servlet:` endpoints. API-8 therefore has `multipartAttachmentProcessor` as its first step (platform-http,
+  the tutorial's original transport, did it while binding).
+- **`<routeContextRef>`/`<restContextRef>` must come before `<restConfiguration>`** in `<camelContext>`
+  (schema order); the tutorial fragments' bean ids are all `tutorial*Context`.
+- Two `ProducerTemplate` beans exist (`CamelConfig.producerTemplate` and the `template` the XML
+  `<camelContext>` registers): inject with `@Qualifier("producerTemplate")`.
 
 - **Registered but every call 503 = the node registered as `127.0.0.1`** (started without `node.host`).
   httpd logs `All workers are in error state` — it looks like a missing balancer, but `mycluster` is

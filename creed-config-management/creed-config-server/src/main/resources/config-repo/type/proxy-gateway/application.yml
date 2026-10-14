@@ -1,0 +1,20 @@
+# Layer 2/6 — type `proxy-gateway`: the standalone front-door proxy (creed-gateway-proxy).
+# No OAuth2 here: it is not part of the mesh's token flow.
+creed:
+  config:
+    layer: type
+    layers:
+      type: proxy-gateway
+  http:
+    connect-timeout: 3s
+    read-timeout: 60s
+  proxy:
+    health-timeout: 1s
+
+spring:
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 3000

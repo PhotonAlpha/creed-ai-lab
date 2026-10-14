@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+   route-api8-upload.xml  -  API-8, file upload over multipart/form-data
+  ============================================================================
+   Tags covered: <rest> <post bindingMode> <to> <from> <process> <log> <marshal>
+   plus a servlet filter in front of Camel.
+
+   The client posts multipart/form-data whose "file" field is a TEXT field holding
+   the file bytes as Base64. Base64FileMultipartFilter decodes it into a binary file
+   part BEFORE the request reaches Camel, so this route sees an ordinary file upload.
+
+   Imported by camel-context.xml via <import resource="classpath:camel/tutorial/route-api8-upload.xml"/>,
+   then wired into the context by <routeContextRef ref="tutorialApi8RouteContext"/>.
+  ============================================================================
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://camel.apache.org/schema/spring
+           http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <routeContext id="tutorialApi8RouteContext" xmlns="http://camel.apache.org/schema/spring">
+
+        <!--
+          ####################################################################
+          API-8  POST /api/v1/files/upload   (multipart/form-data)
+          Tags: <rest> <post bindingMode> <to> <from> <process> <log> <marshal>
+          ####################################################################
+          The request travels through three layers:
+
+            servlet filter   form field file = "aGVsbG8..." (Base64 text)
+                             becomes a file part: filename + content type + raw bytes
+            camel servlet    plain form fields become headers; the file part stays
+                             on the servlet request (the REST binding of the Camel
+                             servlet does not turn parts into attachments)
+            this route       multipartAttachmentProcessor makes each file part a
+                             Camel attachment named after its field ("file"), then
+                             fileUploadProcessor reads that attachment as bytes
+
+          Why <post bindingMode="off"> and the <marshal> below: with the global
+          bindingMode="json" the REST layer would try to parse the body as JSON
+          before the route runs, and here the body is the uploaded file. Binding is
+          switched off for this verb only, so the reply is serialised by hand.
+        -->
+        <route id="api8-file-upload">
+            <from uri="direct:api8-upload"/>
+            <log message="[API-8] >>> entering route api8-file-upload, orderId=${header.orderId}, fileName=${header.fileName}"/>
+
+            <!-- File parts become attachments (camel-platform-http did this while binding; the servlet does not) -->
+            <process ref="multipartAttachmentProcessor"/>
+
+            <!-- Read the decoded file from the attachment and build the reply Map -->
+            <process ref="fileUploadProcessor"/>
+
+            <!-- Map to JSON, since REST binding is off for this verb -->
+            <marshal>
+                <json library="Jackson" prettyPrint="true"/>
+            </marshal>
+            <setHeader name="Content-Type">
+                <constant>application/json</constant>
+            </setHeader>
+
+            <log message="[API-8] &lt;&lt;&lt; route finished, reply = ${body}"/>
+        </route>
+
+    </routeContext>
+</beans>

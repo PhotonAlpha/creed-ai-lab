@@ -1,0 +1,23 @@
+# Layer 3/6 — env-group `pdn`: production.
+creed:
+  config:
+    layer: env-group
+    layers:
+      env-group: pdn
+  env:
+    group: pdn
+
+logging:
+  level:
+    com.creed: WARN
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+server:
+  tomcat:
+    threads:
+      max: 400

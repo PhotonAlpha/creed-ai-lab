@@ -1,0 +1,85 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Camel API-6 订单履约复杂编排",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": { "label": "HTTP 入口" },
+        "backend": { "label": "Processor 节点" },
+        "database": { "label": "聚合状态" },
+        "cloud": { "label": "并行子路由" },
+        "security": { "label": "分支判断" },
+        "messagebus": { "label": "EIP 分发" },
+        "external": { "label": "异步旁路" }
+      }
+    }
+  },
+  "lanes": [
+    { "id": "checks", "label": "并行风控分支" },
+    { "id": "main", "label": "主编排路由 api6-complex-fulfilment" },
+    { "id": "fulfil", "label": "守卫与履约", "variant": "exception" },
+    { "id": "aside", "label": "异步旁路" }
+  ],
+  "phases": [
+    { "id": "intake", "label": "接入与定级", "fromCol": 0, "toCol": 2 },
+    { "id": "assess", "label": "并行风控", "fromCol": 3, "toCol": 3, "variant": "emphasis" },
+    { "id": "deliver", "label": "决策与履约", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": ["restIn", "validate", "level", "scatter", "scoring", "agg", "decide", "guard", "split", "respOut"],
+  "nodes": [
+    { "id": "restIn", "lane": "main", "col": 0, "type": "frontend", "label": "REST 入口", "sublabel": "POST /orders/fulfil", "tag": "servlet", "width": 134 },
+    { "id": "validate", "lane": "main", "col": 1, "type": "backend", "label": "校验备份", "sublabel": "<process> <setProperty>", "width": 134 },
+    { "id": "level", "lane": "main", "col": 2, "type": "security", "label": "订单定级", "sublabel": "<choice> 定级", "tag": "三选一", "width": 134 },
+    { "id": "scatter", "lane": "main", "col": 3, "type": "messagebus", "label": "并行分发", "sublabel": "<multicast> 并发", "width": 134 },
+    { "id": "decide", "lane": "main", "col": 4, "type": "backend", "label": "风控决策", "sublabel": "<process> 决策", "width": 134 },
+    { "id": "respOut", "lane": "main", "col": 5, "type": "backend", "label": "统一收口", "sublabel": "<process> 组装响应", "width": 134 },
+
+    { "id": "scoring", "lane": "checks", "col": 3, "type": "cloud", "label": "三路打分", "sublabel": "RISK · CREDIT · INV", "width": 134 },
+    { "id": "agg", "lane": "checks", "col": 4, "type": "database", "label": "结果聚合", "sublabel": "aggregationStrategy", "width": 134 },
+
+    { "id": "guard", "lane": "fulfil", "col": 4, "type": "security", "label": "履约守卫", "sublabel": "<filter> 二选一", "tag": "不终止路由", "width": 134 },
+    { "id": "split", "lane": "fulfil", "col": 5, "type": "messagebus", "label": "拆单分仓", "sublabel": "<split> + <toD>", "width": 134 },
+
+    { "id": "audit", "lane": "aside", "col": 5, "type": "external", "label": "审计落库", "sublabel": "<wireTap> 异步", "width": 134 }
+  ],
+  "edges": [
+    { "id": "e-in", "from": "restIn", "to": "validate", "label": "direct:api6-fulfil", "variant": "default" },
+    { "id": "e-level", "from": "validate", "to": "level", "variant": "default" },
+
+    { "id": "e-grade-vip", "from": "level", "to": "scatter", "label": "> 10000 : VIP", "variant": "emphasis", "role": "branch" },
+    { "id": "e-grade-app", "from": "level", "to": "scatter", "label": "APP : APP_FAST", "variant": "default", "role": "branch" },
+    { "id": "e-grade-std", "from": "level", "to": "scatter", "label": "其他 : STANDARD", "variant": "dashed", "role": "branch" },
+
+    { "id": "e-fanout", "from": "scatter", "to": "scoring", "label": "复制给 3 个分支", "variant": "emphasis", "role": "branch" },
+    { "id": "e-agg", "from": "scoring", "to": "agg", "variant": "default" },
+    { "id": "e-back", "from": "agg", "to": "decide", "label": "总分回主链", "variant": "emphasis", "role": "return" },
+
+    { "id": "e-guard", "from": "decide", "to": "guard", "label": "decision", "variant": "security" },
+    { "id": "e-pass", "from": "guard", "to": "split", "label": "APPROVED : 履约", "variant": "emphasis" },
+    { "id": "e-reject", "from": "guard", "to": "respOut", "label": "REJECTED : 跳过", "variant": "security", "role": "error" },
+    { "id": "e-tap", "from": "guard", "to": "audit", "label": "异步副本", "variant": "dashed", "role": "async" },
+    { "id": "e-done", "from": "split", "to": "respOut", "label": "履约结果", "variant": "emphasis", "role": "return" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "两个分叉点",
+      "items": [
+        "订单定级是三选一的 <choice>：三条分支写入不同的 orderLevel，随后立刻汇合",
+        "履约守卫是二选一的 <filter>：APPROVED 才走拆单，REJECTED 直接去收口"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "两个易错语义",
+      "items": [
+        "<filter> 不匹配只跳过其内部步骤，路由继续执行，依然返回 200",
+        "<wireTap> 发送副本后立即返回，主流程既不等待也不感知其异常"
+      ]
+    }
+  ]
+}
