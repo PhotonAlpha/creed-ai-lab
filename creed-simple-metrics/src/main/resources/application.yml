@@ -171,6 +171,14 @@ creed:
   audit:
     legacy-filter:
       enabled: true
+    # PoolingHttpClientConnectionManagerAuditExecHandler (camel-http + cookie-relay clients): the
+    # instance/status/latency line is logged for EVERY call; the "pool[route …; total …]" suffix costs two
+    # pool-lock acquisitions, so it is added only to 1-in-`every` calls, calls >= `slow-threshold`, and all
+    # failures. every: 1 = old behaviour (every call), 0 = sampling off (slow + failures only).
+    # slow-threshold excludes the wait for a pool lease (the handler runs after ConnectExec).
+    pool-stats:
+      every: ${CREED_AUDIT_POOL_STATS_EVERY:100}
+      slow-threshold: ${CREED_AUDIT_POOL_STATS_SLOW:1s}
   # LogbookAuditConfiguration's two extension points (Predicate<HttpRequest> "requestCondition" bean +
   # conditional Strategy bean) — kept as separate creed.logbook.* properties instead of overloading
   # logbook.* since they're this module's own additions, not Logbook's own config surface.

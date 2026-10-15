@@ -49,7 +49,7 @@ class CookieRelayRestClientConfigurationTest {
         Logbook logbook = mock(Logbook.class);
 
         ClientHttpRequestFactory requestFactory =
-                config.cookieRelayRequestFactory(pool, logbook, props());
+                config.cookieRelayRequestFactory(pool, logbook, props(), 100, Duration.ofSeconds(1));
         assertThat(requestFactory).isNotNull();
 
         RestClient.Builder builder =

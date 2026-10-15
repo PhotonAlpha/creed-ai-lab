@@ -12,6 +12,8 @@ import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.pool.PoolStats;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * hc5 counterpart of {@link LoadBalancerAuditInterceptor}: one line per network
@@ -33,13 +35,35 @@ import java.io.IOException;
  * DEBUG lease/release lines show, but on one INFO line with method/URI/status/latency and the MDC
  * trace id, so the manager's DEBUG logging can stay off outside leak hunts. {@code pending} is the
  * queue of callers waiting for a connection — the saturation signal the DEBUG lines don't print.
+ *
+ * <p><b>Pool stats are sampled, the instance line is not.</b> {@code getStats}/{@code getTotalStats} each
+ * take the pool's global lock (and walk the pending queue), so doing it on every request adds contention
+ * exactly when the pool is busiest. The instance/status/latency line stays on every request — it is the
+ * only record of which instance served a call — while the {@code pool[...]} suffix is appended to one call
+ * in {@code poolStatsEvery}, to every call slower than {@code slowThreshold}, and to every failure. The
+ * pool-wide picture is in the {@code httpcomponents.httpclient.pool.*} gauges anyway.
+ *
+ * <p>Position matters for what "slow" and "failure" mean here: {@code addExecInterceptorLast} puts this
+ * handler just before {@code MAIN_TRANSPORT}, i.e. <em>after</em> {@code ConnectExec} has leased the
+ * connection. The elapsed time excludes the wait for a connection, and a lease timeout
+ * ({@code ConnectionRequestTimeoutException}) is thrown before this handler runs — it never logs one.
  */
 @Slf4j
 public class PoolingHttpClientConnectionManagerAuditExecHandler implements ExecChainHandler {
     private final PoolingHttpClientConnectionManager pool;
+    /** 1 = every request, N = one in N, 0 = never (slow calls and failures still get the stats). */
+    private final int poolStatsEvery;
+    private final long slowMillis;
+    private final AtomicLong counter = new AtomicLong();
 
-    public PoolingHttpClientConnectionManagerAuditExecHandler(PoolingHttpClientConnectionManager pool) {
+    public PoolingHttpClientConnectionManagerAuditExecHandler(
+            PoolingHttpClientConnectionManager pool, int poolStatsEvery, Duration slowThreshold) {
+        if (poolStatsEvery < 0) {
+            throw new IllegalArgumentException("poolStatsEvery must be >= 0, was " + poolStatsEvery);
+        }
         this.pool = pool;
+        this.poolStatsEvery = poolStatsEvery;
+        this.slowMillis = slowThreshold.toMillis();
     }
 
     @Override
@@ -50,17 +74,24 @@ public class PoolingHttpClientConnectionManagerAuditExecHandler implements ExecC
         try {
             ClassicHttpResponse response = chain.proceed(request, scope);
             long ms = (System.nanoTime() - startNanos) / 1_000_000;
-            log.info("PoolingHttpClientConnection resolved -> instance={}:{} {} {} status={} in {}ms {}",
+            log.info("PoolingHttpClientConnection resolved -> instance={}:{} {} {} status={} in {}ms{}",
                     target.getHostName(), target.getPort(), request.getMethod(),
-                    request.getRequestUri(), response.getCode(), ms, poolSummary(scope));
+                    request.getRequestUri(), response.getCode(), ms,
+                    ms >= slowMillis || sampled() ? " " + poolSummary(scope) : "");
             return response;
         } catch (IOException | HttpException | RuntimeException ex) {
             long ms = (System.nanoTime() - startNanos) / 1_000_000;
+            // failures are rare and are where the pool state is worth having, so always pay for it
             log.warn("PoolingHttpClientConnection resolved -> instance={}:{} {} {} FAILED in {}ms: {} {}",
                     target.getHostName(), target.getPort(), request.getMethod(),
                     request.getRequestUri(), ms, ex.toString(), poolSummary(scope));
             throw ex;
         }
+    }
+
+    /** Lock-free (CAS) one-in-N pick; the first call is always sampled. */
+    private boolean sampled() {
+        return poolStatsEvery > 0 && counter.getAndIncrement() % poolStatsEvery == 0;
     }
 
     private String poolSummary(ExecChain.Scope scope) {

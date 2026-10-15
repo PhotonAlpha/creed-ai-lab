@@ -26,6 +26,11 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
   (`fetch-catalog` / `fetch-order` / `fetch-payment`), and a `@LoadBalanced RestClient`
   (`RemoteClusterProcessor`, used by the `fulfillment` bulk fetches). Both resolve
   `https://<service-id>/...` against one shared `SimpleDiscoveryClient` registry.
+- **`PoolingHttpClientConnectionManagerAuditExecHandler` samples its pool stats** (2026-10-15): the
+  instance/status/latency line is still logged for every call (the only per-call record of the
+  LB-chosen instance), but the `pool[route …; total …]` suffix (two pool-lock acquisitions + a walk of the
+  pending queue) is added to 1-in-`creed.audit.pool-stats.every` calls (default 100), calls ≥
+  `slow-threshold` (1s), and every failure. `every: 1` restores the old behaviour. Unit-tested.
 - **Connection lifecycle on all three HttpClient pools** (2026-10-15): `loadBalancedPool`,
   `healthCheckPool` and `camelHttpPool` now carry a TTL (5m) and an owned `IdleConnectionEvictor`
   (`closeIdle` 30s, every 5s); the two RestClient pools also cap keep-alive at 30s (Tomcat sends no
@@ -88,6 +93,10 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Landmines
 
+- **`PoolingHttpClientConnectionManagerAuditExecHandler` never sees a pool lease timeout**:
+  `addExecInterceptorLast` puts it just before `MAIN_TRANSPORT`, after `ConnectExec` has already leased the
+  connection, so `ConnectionRequestTimeoutException` is thrown before it runs and its elapsed time excludes
+  queueing. For lease waits, use the `pool.total.pending` gauge or the manager's DEBUG lease lines.
 - **`HttpClientBuilder.evictIdleConnections()` is a silent no-op on a shared pool** — `build()` only starts
   its evictor `if (!connManagerShared)`, and every client here is shared. Evictors are owned by
   `ManagedHttpClientPool` / the `camelHttpPoolEvictor` bean instead.

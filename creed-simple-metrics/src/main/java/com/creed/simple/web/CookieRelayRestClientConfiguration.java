@@ -10,6 +10,7 @@ import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,6 +19,8 @@ import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.zalando.logbook.Logbook;
 import org.zalando.logbook.httpclient5.LogbookHttpExecHandler;
+
+import java.time.Duration;
 
 /**
  * Dedicated {@link RestClient} for the {@code POST /camel/api/cookie-relay} demo
@@ -42,7 +45,9 @@ public class CookieRelayRestClientConfiguration {
     ClientHttpRequestFactory cookieRelayRequestFactory(
             ManagedHttpClientPool clusterPool,
             Logbook logbook,
-            PartnerProps props) {
+            PartnerProps props,
+            @Value("${creed.audit.pool-stats.every:100}") int poolStatsEvery,
+            @Value("${creed.audit.pool-stats.slow-threshold:1s}") Duration poolStatsSlowThreshold) {
         PoolingHttpClientConnectionManager clusterHttpConnectionManager = clusterPool.connectionManager();
         RequestConfig requestConfig = RequestConfig.custom()
                 .setConnectionRequestTimeout(Timeout.ofMilliseconds(props.http().connectionRequestTimeout().toMillis()))
@@ -60,7 +65,8 @@ public class CookieRelayRestClientConfiguration {
                 .addExecInterceptorFirst("logbook", new LogbookHttpExecHandler(logbook))
                 // One-line LB-resolved-instance log, same as the camel-http component; pool stats
                 // reflect the shared clusterHttpConnectionManager this client rides on.
-                .addExecInterceptorLast("lbAudit", new PoolingHttpClientConnectionManagerAuditExecHandler(clusterHttpConnectionManager))
+                .addExecInterceptorLast("lbAudit", new PoolingHttpClientConnectionManagerAuditExecHandler(
+                        clusterHttpConnectionManager, poolStatsEvery, poolStatsSlowThreshold))
                 .build();
         return new HttpComponentsClientHttpRequestFactory(httpClient);
     }

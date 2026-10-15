@@ -141,7 +141,9 @@ public class CamelConfig {
             ObservationRegistry observationRegistry,
             Logbook logbook,
             @Value("${creed.camel.http.connection-request-timeout:3s}") Duration connectionRequestTimeout,
-            @Value("${creed.camel.http.response-timeout:10s}") Duration responseTimeout) {
+            @Value("${creed.camel.http.response-timeout:10s}") Duration responseTimeout,
+            @Value("${creed.audit.pool-stats.every:100}") int poolStatsEvery,
+            @Value("${creed.audit.pool-stats.slow-threshold:1s}") Duration poolStatsSlowThreshold) {
         HttpComponent component = new HttpComponent();
         component.setClientConnectionManager(connectionManager);
         // HttpEndpoint applies the configurer after its own builder setup, so the planner is not overridden
@@ -161,8 +163,9 @@ public class CamelConfig {
                 .addExecInterceptorAfter(ChainElement.RETRY.name(), "micrometer",
                         new ObservationExecChainHandler(observationRegistry))
                 // innermost (inside retry): logs the instance the route planner picked, per attempt,
-                // plus route/total occupancy of this pool
-                .addExecInterceptorLast("lbAudit", new PoolingHttpClientConnectionManagerAuditExecHandler(connectionManager)));
+                // plus route/total occupancy of this pool (sampled: creed.audit.pool-stats.*)
+                .addExecInterceptorLast("lbAudit", new PoolingHttpClientConnectionManagerAuditExecHandler(
+                        connectionManager, poolStatsEvery, poolStatsSlowThreshold)));
         component.setConnectionRequestTimeout(connectionRequestTimeout.toMillis());
         component.setResponseTimeout(responseTimeout.toMillis());
         return component;
