@@ -2,13 +2,22 @@ import type { CSSProperties } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ProLayout } from '@ant-design/pro-components';
 import { Button, theme } from 'antd';
-import { ApartmentOutlined, GlobalOutlined, KeyOutlined, LockOutlined, SettingOutlined, TableOutlined } from '@ant-design/icons';
+import {
+  ApartmentOutlined,
+  BugOutlined,
+  GlobalOutlined,
+  KeyOutlined,
+  LockOutlined,
+  SettingOutlined,
+  TableOutlined,
+} from '@ant-design/icons';
 import { useI18n } from './locales';
 import { MatrixPage } from './pages/Matrix';
 import { ConfigPage } from './pages/Config';
 import { TopologyPage } from './pages/Topology';
 import { SplunkPage } from './pages/Splunk';
 import { AesPage } from './pages/Aes';
+import { VeracodePage } from './pages/Veracode';
 
 export function App() {
   const { t, toggleLang } = useI18n();
@@ -44,6 +53,7 @@ export function App() {
             { path: '/config', name: t('nav.config'), icon: <SettingOutlined /> },
             { path: '/splunk', name: t('nav.splunk'), icon: <KeyOutlined /> },
             { path: '/aes', name: t('nav.aes'), icon: <LockOutlined /> },
+            { path: '/veracode', name: t('nav.veracode'), icon: <BugOutlined /> },
           ],
         }}
         menuItemRender={(item, dom) => <Link to={item.path ?? '/'}>{dom}</Link>}
@@ -61,6 +71,7 @@ export function App() {
           <Route path="/config" element={<ConfigPage />} />
           <Route path="/splunk" element={<SplunkPage />} />
           <Route path="/aes" element={<AesPage />} />
+          <Route path="/veracode" element={<VeracodePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </ProLayout>

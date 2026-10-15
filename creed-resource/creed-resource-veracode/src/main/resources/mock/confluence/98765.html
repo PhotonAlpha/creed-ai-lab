@@ -1,0 +1,25 @@
+<p>Scan of <strong>creed-platform</strong> by Veracode SCA, policy <em>Creed Default</em>. Status:
+<ac:structured-macro ac:name="status" ac:schema-version="1"><ac:parameter ac:name="colour">Red</ac:parameter><ac:parameter ac:name="title">DID NOT PASS</ac:parameter></ac:structured-macro></p>
+<h2>Summary</h2>
+<table data-layout="default"><colgroup><col /><col /></colgroup>
+<tbody>
+<tr><th><p>Scan date</p></th><th><p>Findings</p></th></tr>
+<tr><td><p>2026-10-14</p></td><td><p>11</p></td></tr>
+</tbody></table>
+<h2>Findings</h2>
+<table data-layout="full-width"><colgroup><col /><col /><col /><col /><col /><col /><col /><col /></colgroup>
+<tbody>
+<tr><th><p>CVE</p></th><th><p>Title</p></th><th><p>Component</p></th><th><p>Severity</p></th><th><p>CVSS</p></th><th><p>Affected Version</p></th><th><p>Fixed Version</p></th><th><p>Description</p></th></tr>
+<tr><td><p>CVE-2021-44228</p></td><td><p>Apache Log4j2 JNDI features do not protect against attacker-controlled LDAP endpoints</p></td><td><p>log4j-core 2.14.1</p></td><td><p>Very High</p></td><td><p>10.0</p></td><td><p>2.3.0</p></td><td><p>2.17.1</p></td><td><p>An attacker who can control log messages can execute arbitrary code loaded from LDAP servers when message lookup substitution is enabled.</p></td></tr>
+<tr><td><p>CVE-2022-22965</p></td><td><p>Spring Framework RCE via data binding on JDK 9+</p></td><td><p>spring-beans 5.3.17</p></td><td><p>Very High</p></td><td><p>9.8</p></td><td><p>2.3.0</p></td><td><p>5.3.18</p></td><td><p>A Spring MVC or WebFlux application on JDK 9+ may be vulnerable to remote code execution via data binding.</p></td></tr>
+<tr><td><p>CVE-2022-42889</p></td><td><p>Apache Commons Text variable interpolation RCE</p></td><td><p>commons-text 1.9</p></td><td><p>Very High</p></td><td><p>9.8</p></td><td><p>2.3.0</p></td><td><p>1.10.0</p></td><td><p>StringSubstitutor default lookups (script, dns, url) allow code execution or contact with remote servers.</p></td></tr>
+<tr><td><p>CVE-2022-1471</p></td><td><p>SnakeYaml Constructor deserialization</p></td><td><p>snakeyaml 1.33</p></td><td><p>High</p></td><td><p>8.3</p></td><td><p>2.3.0</p></td><td><p>2.0</p></td><td><p>SnakeYaml's Constructor class does not restrict types which can be instantiated during deserialization.</p></td></tr>
+<tr><td><p>CVE-2022-1471</p></td><td><p>SnakeYaml Constructor deserialization</p></td><td><p>snakeyaml 1.30 (via spring-boot-starter 2.7.0)</p></td><td><p>High</p></td><td><p>8.3</p></td><td><p>2.3.0</p></td><td><p>2.0</p></td><td><p>Same flaw, second copy pulled in transitively.</p></td></tr>
+<tr><td><p>CVE-2020-36518</p></td><td><p>jackson-databind deep wrapper array nesting DoS</p></td><td><p>jackson-databind 2.12.6</p></td><td><p>High</p></td><td><p>7.5</p></td><td><p>2.3.0</p></td><td><p>2.12.6.1</p></td><td><p>Java StackOverflow exception and denial of service via a large depth of nested objects.</p></td></tr>
+<tr><td><p>CVE-2024-38816</p></td><td><p>Spring Framework path traversal in functional web frameworks</p></td><td><p>spring-webmvc 6.1.12</p></td><td><p>High</p></td><td><p>7.5</p></td><td><p>2.4.0</p></td><td><p>6.1.13</p></td><td><p>Applications serving static resources through RouterFunctions may be vulnerable to path traversal.</p></td></tr>
+<tr><td><p>N/A (CWE-89)</p></td><td><p>SQL Injection in ReportQueryBuilder</p></td><td><p>creed-report (first-party)</p></td><td><p>High</p></td><td><p></p></td><td><p>2.3.0</p></td><td><p></p></td><td><p>Static analysis: user-controlled sort column concatenated into a native query.</p></td></tr>
+<tr><td><p>CVE-2023-6378</p></td><td><p>logback serialization vulnerability in receiver component</p></td><td><p>logback-classic 1.4.11</p></td><td><p>Medium</p></td><td><p>7.1</p></td><td><p>2.5.0</p></td><td><p>1.4.12</p></td><td><p>A serialization vulnerability in logback receiver allows a denial-of-service attack.</p></td></tr>
+<tr><td><p>CVE-2021-4104, CVE-2022-23302</p></td><td><p>Log4j 1.2 JMSAppender / JMSSink deserialization</p></td><td><p>log4j 1.2.17</p></td><td><p>Medium</p></td><td><p>6.6 (v3.1)</p></td><td><p>2.3.0</p></td><td><p>none - migrate to log4j2</p></td><td><p>Deserialization of untrusted data when the attacker has write access to the Log4j configuration.</p></td></tr>
+<tr><td><p></p></td><td><p></p></td><td><p>guava 31.0</p></td><td><p>Low</p></td><td><p>3.3</p></td><td><p>2.3.0</p></td><td><p>32.0.0</p></td><td><p>Row left half-filled by an editor.</p></td></tr>
+</tbody></table>
+<p>Questions: #appsec on Slack.</p>

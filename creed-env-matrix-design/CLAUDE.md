@@ -58,6 +58,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 联调：Vite 把 `/api` 代理到 `VITE_API_TARGET`（`.env` 里是 `https://localhost:18095`）；
   连 mock 或 `dev` profile 需要 `VITE_API_TARGET=http://localhost:3001`。
   `/api/env-matrix/splunk` 单独代理到 `VITE_SPLUNK_TARGET`（`.env`：BFF `http://localhost:3002`）。
+- Veracode 分析：`/api/veracode` 单独代理到 `VITE_VERACODE_TARGET`（`.env`：`http://localhost:18097`，
+  `creed-resource-veracode`，明文 HTTP，Confluence 与 Jira 在后端进程内 mock）。
 - Splunk 会话代理：Node BFF（`server/bff.js`），审计默认存内存，开关 `SPLUNK_AUDIT_STORE=pg` / `mysql` 时写入 PostgreSQL / MySQL。
 
 ## 4. 目录结构（目标）
@@ -70,7 +72,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 │   │   ├── Topology     # 矩阵拓扑图（/topology）
 │   │   ├── Config       # CRUD 编辑页（/config）
 │   │   ├── Splunk       # Splunk 会话代理（/splunk）
-│   │   └── Aes          # AES 加解密（/aes）
+│   │   ├── Aes          # AES 加解密（/aes）
+│   │   └── Veracode     # Veracode 报告分析（/veracode，后端 creed-resource-veracode）
 │   └── api/             # 前端 API 封装
 ├── server/
 │   ├── index.(js|ts)    # mock API 服务
@@ -147,6 +150,13 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   （V9，按需求）—— 结果列表无需输入即可解密，但数据库副本也因此可以直接解密全部值。
 - 结果列表显示每条记录的 Secret Key（及 randomkey），用于核对真实配置文件；可勾选后批量解密
   （记录自身的 Secret Key + 表单中属性键相同那一行的 IV 和 salt）或删除。
+
+### 5.6 Veracode 分析（`/veracode`）
+- 后端：`creed-resource/creed-resource-veracode`；调用 Confluence page 与 Jira 使用 Spring `@HttpExchange`，本地先 mock。
+- 从 Confluence 读取 Veracode 报告表格，按 CVE（无 CVE 时按标题）+ affect version 在 Jira 中查找是否存在：
+  存在则列出 Jira 编号与状态；不存在则可按需创建（单行 / 所选 / 全部缺失，或分析时自动创建）。
+- 也可以上传文件分析（.html / .csv / .xlsx / .xls，表头规则与 Confluence 表格相同）。
+- 支持导出 Excel。
 
 ## 6. 命令
 

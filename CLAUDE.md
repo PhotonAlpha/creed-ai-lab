@@ -1,7 +1,7 @@
 # creed-ai-lab — project conventions
 
 Multi-module OAuth2 mesh: authorization server, two edge gateways (reactive + servlet) plus a
-standalone tunnel proxy, four resource servers, config server, Camel gateway, two reporting apps,
+standalone tunnel proxy, five resource servers, config server, Camel gateway, two reporting apps,
 one React frontend, one Node mock server.
 
 **Invariant conventions only** — this file loads in full every turn. Module-specific, changing, or
@@ -59,6 +59,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-order` | 18091 / 18092 | `/api/order` | primary / secondary |
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
+| `creed-resource-veracode` | 18097 | `/api/veracode` | HTTP, stateless; Veracode report from Confluence → Jira lookup/create (`@HttpExchange`) → xlsx; Confluence + Jira mocked in-process (`veracode.mock.enabled`) |
 | `creed-env-matrix-design` | 5173 / 3002 | — | Vite, proxies `/api` → `VITE_API_TARGET` (`.env`: 18095) and the Splunk API → `VITE_SPLUNK_TARGET` (`.env`: creed-gateway-proxy 8088); legacy Node BFF `npm run bff` on 3002 |
 | `creed-mock-buddy` | 5173 / 4000 | — | HTTP / HTTPS (borrows `creed-gateway` cert), **Node/Fastify**; YAML mock server, standalone |
 | `creed-backstage` | 3003 / 7007 | — | **Backstage**: Software Catalog (`catalog/**/catalog-info.yaml`) + Swagger UI; one `catalog/<module>/` per functional area; multi-file OpenAPI → Redocly bundle `dist/openapi.yaml` (committed, `$text`), `yarn openapi:build [module]` |

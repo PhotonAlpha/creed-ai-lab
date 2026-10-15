@@ -1,0 +1,25 @@
+# The actuator profile is included from application.yml and cannot be un-included here, so the OTel
+# starter is active: it interpolates ${spring.application.name} and ${server.port}, and must not try to
+# reach the collector.
+spring:
+  application:
+    name: creed-resource-veracode-test
+server:
+  port: 0
+otel:
+  sdk:
+    disabled: true
+
+veracode:
+  mock:
+    enabled: true
+  confluence:
+    # Never called over the network: VeracodeApiTest swaps both clients onto MockMvc.
+    base-url: http://localhost/mock/confluence
+    page-id: "98765"
+  jira:
+    base-url: http://localhost/mock/jira
+    browse-url: http://localhost/mock/jira/browse/{key}
+    # Small on purpose: the sample report needs several search batches and pages.
+    jql-batch-size: 3
+    page-size: 2

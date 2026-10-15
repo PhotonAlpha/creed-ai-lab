@@ -32,6 +32,14 @@ time; check the proxy target first. A shell-exported value wins over `.env`, and
 
 Complete and verified in a browser against the real backend.
 
+- **Veracode analysis (`/veracode`, 2026-10-16)** — new page, backend `creed-resource-veracode` on
+  :18097 via the `/api/veracode` proxy entry (`VITE_VERACODE_TARGET`; not served by the node mock).
+  Source is a Confluence page id **or an uploaded file** (Dragger; `.html/.csv/.xlsx/.xls`); create and
+  export follow the analysis on screen via `sourceOf()` (page id or upload id). `upload_expired` is shown
+  as "upload it again".
+  Typechecks; **not yet checked in a browser** (the extension could not attach to any page that
+  session). The API itself was verified over HTTP through the Vite proxy.
+
 - **Matrix (`/`)** — `service × country` grid, per-dimension filters, three-way scheme filter,
   conflict highlighting with a badge, conflicts-only toggle, health summary + re-check, conflict
   panel listing each colliding address.

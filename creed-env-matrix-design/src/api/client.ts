@@ -42,7 +42,15 @@ async function parseError(response: Response): Promise<ApiError> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
+  return requestAt<T>(BASE, path, init);
+}
+
+/**
+ * `request` against another backend's prefix — `/api/veracode` is a different service
+ * (creed-resource-veracode) behind its own Vite proxy entry, with the same error envelope.
+ */
+async function requestAt<T>(base: string, path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${base}${path}`, {
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
     ...init,
   });
@@ -86,4 +94,4 @@ function toQuery(params: Record<string, string[] | string | undefined>): string 
   return query ? `?${query}` : '';
 }
 
-export { request, requestAllowing422, toQuery };
+export { parseError, request, requestAt, requestAllowing422, toQuery };

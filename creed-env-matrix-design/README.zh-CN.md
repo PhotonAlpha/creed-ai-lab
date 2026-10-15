@@ -448,6 +448,24 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
 
 ---
 
+### Veracode 分析（`/veracode`）
+
+由**另一个服务** `creed-resource/creed-resource-veracode` 提供（明文 HTTP :18097，无数据库），经 Vite 的
+`/api/veracode` 代理（`VITE_VERACODE_TARGET`）访问。它没有 node mock：Confluence 与 Jira 由该 Java 模块在
+进程内 mock，使用本页需要先启动它。
+
+- **分析**：从 Confluence 页面读取报告表格（默认页面 ID 由后端提供），按 **CVE（没有 CVE 时用标题）+ 影响版本**
+  在 Jira 中查找。每行显示「已有 Jira」及其编号和状态，或「缺失」。
+- Jira 项目中不存在的版本标记为「Jira 无此版本」：不对其做查询，在版本创建之前也无法建单。
+- **创建**：单行创建、「创建所选」或「创建全部缺失」。后端会先重新读取页面并重新检查 Jira，因此重复点击会返回
+  「Jira 中已存在」而不会重复建单。勾选「自动创建缺失的 Jira」则在分析时一并创建（需确认）。
+- **上传文件**：不读 Confluence 页面，直接分析报告文件：`.html`/`.htm`（如从浏览器另存的 Confluence 页面）、
+  `.csv`（`,` `;` 或制表符分隔；UTF-8，或中文 Windows 版 Excel 写出的 GB18030）、`.xlsx`/`.xls`（读取每个工作表，
+  表头前面可以有标题行）。表头规则与页面相同。后端在内存中保留解析结果 2 小时，因此建单、导出、「重新检查 Jira」
+  都基于该文件；服务重启后需要重新上传。大小上限 10 MB。
+- **导出 Excel**：下载一次新的分析结果（*Findings* 与 *Source* 两个工作表）。
+- 打开页面时只分析、从不自动建单 —— 否则会在没人要求的情况下写入 Jira。
+
 ## 6. API
 
 基础路径 `/api/env-matrix`。过滤条件使用可重复的查询参数 —— `?tier=UAT&tier=SIT&scheme=https`

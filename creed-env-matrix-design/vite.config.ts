@@ -36,6 +36,13 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           xfwd: true,
         },
+        // creed-resource-veracode: a different service, plain HTTP, no PKI. Before `/api` for the
+        // same first-match reason as the Splunk entry.
+        '/api/veracode': {
+          target: env.VITE_VERACODE_TARGET ?? 'http://localhost:18097',
+          changeOrigin: true,
+          xfwd: true,
+        },
         '/api': {
           target: env.VITE_API_TARGET ?? 'http://localhost:3001',
           changeOrigin: true,
