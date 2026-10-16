@@ -23,3 +23,9 @@ Resolves instances **explicitly** rather than via an `lb://` URL — this is fix
 - `application.yml`: port 8080, `spring.config.import=optional:configserver:` (optional — runs standalone), local SSL bundle `creed-gateway-server` from `file:${creed.rootPath}/creed-gateway-{keystore,truststore}.p12`.
 - `application-cloud.yml`: config-server-driven variant.
 - Because bundles use `file:${creed.rootPath}`, run with `-Dspring-boot.run.workingDirectory="$PWD"` (see [[creed-platform]]).
+
+## Spring Boot 4 note
+
+The HTTPS customizer is `web/ReactiveHttpsConfiguration`, a `WebServerFactoryCustomizer<ConfigurableReactiveWebServerFactory>`. It used to be a copy of the servlet modules' `TomcatHttpsConfiguration` typed on `TomcatServletWebServerFactory` — which this WebFlux/Netty module never creates, so the customizer never fired and the `creed-gateway-server` SSL bundle was silently never applied (the gateway served plain HTTP on 8080). Boot 4 forced the issue by moving the Tomcat classes into their own module. Do not reintroduce a servlet-typed customizer here.
+
+The `cloud` profile bootstraps from the config server over HTTPS and trusts it via `classpath:certs/truststore.p12`, which is **not in git** — on a fresh clone that profile cannot start.

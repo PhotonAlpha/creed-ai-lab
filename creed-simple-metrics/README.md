@@ -71,7 +71,7 @@ LoadBalancer 轮询健康实例。
 **[docs/camel-tutorial/README.md](docs/camel-tutorial/README.md)**（含迁移时的改动与原因）。
 
 **本节点可注册到 Apache HTTP Server 的 mod_cluster**（`creed.mod-cluster.*`，默认关）：用的是上游官方的
-`mod_cluster-container-tomcat-10.1` 监听器——JWS 6.x 放在 `$JWS_HOME/tomcat/lib` 里、用 `server.xml` 的
+`mod_cluster-container-tomcat-11.0` 监听器（Boot 4 / Tomcat 11；Boot 3 时是 `-tomcat-10.1`）——JWS 6.x 放在 `$JWS_HOME/tomcat/lib` 里、用 `server.xml` 的
 `<Listener className="org.jboss.modcluster.container.tomcat.ModClusterListener" .../>` 挂的同一个库；
 这里没有 `server.xml`，由 `ModClusterListenerConfiguration` 把它挂到嵌入式 Tomcat 的 **Server** 上，
 并给 Engine 设 `jvmRoute`、用 `status-interval` 设 backgroundProcessorDelay。MCMP 握手、动态负载因子、

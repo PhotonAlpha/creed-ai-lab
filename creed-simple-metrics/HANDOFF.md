@@ -47,7 +47,7 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
   catalog instances (200 / 409 / 400 / 404 identical; logs show `[LB-ROUTE]` vs `LB resolved ->`) and
   by `ReserveComparisonProcessorTest`. Requests in `.support/http-client/creed-simple-metrics.http`.
 - **Camel tutorial migrated in** (2026-10-14, from `mvn_space/camel-session-0to1`, Boot 4 → this
-  module's Boot 3.5). Eight teaching APIs at `/camel/api/v1/*` + mocks at `/mock/*` + Swagger UI with
+  module's Boot 4.1). Eight teaching APIs at `/camel/api/v1/*` + mocks at `/mock/*` + Swagger UI with
   six OpenAPI groups; `com.creed.simple.tutorial`, `camel/tutorial/*.xml` (wired by ref in
   `camel-context.xml`), `tutorial/tutorial.yml` (via `spring.config.import`), docs/decks/diagrams/http/
   script under `docs/camel-tutorial/` (its README lists every migration change and why).
@@ -64,7 +64,7 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
   `RequestDataContext` → an instance-list supplier that filters on `metadata.stickyId`.
 - **Runtime-toggleable health checks**: `GET/PUT /admin/lb/health-check`.
 - **mod_cluster node registration** (`modcluster/`, `creed.mod-cluster.*`, OFF by default): the
-  upstream `mod_cluster-container-tomcat-10.1` listener (the library JWS 6.x ships and wires with
+  upstream `mod_cluster-container-tomcat-11.0` listener (the library JWS 6.x ships and wires with
   `<Listener>` in `server.xml`) attached to the embedded Tomcat `Server`. The library owns the MCMP
   handshake, dynamic load metrics, context discovery, re-registration and shutdown removal;
   `ModClusterListenerStatusReporter` adds the one thing it does not report — a startup banner saying

@@ -17,7 +17,7 @@ for the inspection itself (the inspection runs inside the already-running creed-
 - `controller/EnvironmentViewController.java` — `@Controller`, Thymeleaf pages.
 - `model/` — `EnvironmentSnapshot`, `PropertySourceView`, `PropertyEntry`, `RenderedEnvironment` (records).
 - `templates/environment.html`, `templates/environment-rendered.html`.
-- Context path is `/report` (e.g. `http://localhost:9100/report/...`). Spring Boot 3.5.x.
+- Context path is `/report` (e.g. `http://localhost:9100/report/...`). Spring Boot 4.1.x.
 
 ## Requirements (in implementation order)
 

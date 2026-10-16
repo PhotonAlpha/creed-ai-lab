@@ -11,7 +11,7 @@ distinct resolve to the same address.
 | | |
 |---|---|
 | Frontend | React 19 + TypeScript + Vite 8 + Ant Design 5 / Ant Design Pro components |
-| Backend | [`creed-resource-env-matrix`](../creed-resource/creed-resource-env-matrix) (Spring Boot 3.5, PostgreSQL) |
+| Backend | [`creed-resource-env-matrix`](../creed-resource/creed-resource-env-matrix) (Spring Boot 4.1, PostgreSQL) |
 | Mock backend | `server/index.js` — same contract, no database required |
 | BFF | `server/bff.js` — serves `dist/`, **owns the Splunk broker** (`server/splunk/`), proxies the rest of `/api` |
 

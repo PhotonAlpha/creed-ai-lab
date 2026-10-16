@@ -10,7 +10,7 @@
 | | |
 |---|---|
 | 前端 | React 19 + TypeScript + Vite 8 + Ant Design 5 / Ant Design Pro 组件 |
-| 后端 | [`creed-resource-env-matrix`](../creed-resource/creed-resource-env-matrix)（Spring Boot 3.5、PostgreSQL） |
+| 后端 | [`creed-resource-env-matrix`](../creed-resource/creed-resource-env-matrix)（Spring Boot 4.1、PostgreSQL） |
 | Mock 后端 | `server/index.js` —— 契约完全一致，无需数据库 |
 | BFF | `server/bff.js` —— 托管 `dist/`，**负责 Splunk 会话代理**（`server/splunk/`），其余 `/api` 反向代理到后端 |
 
