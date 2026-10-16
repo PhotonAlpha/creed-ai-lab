@@ -16,7 +16,7 @@ import java.util.Set;
 
 /**
  * Per-route pool gauges that the built-in
- * {@link io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder}
+ * {@link com.creed.metrics.ConnectionPoolMetrics}
  * does <em>not</em> provide — that binder only reads {@code getTotalStats()} and publishes pool-wide
  * aggregates ({@code httpcomponents.httpclient.pool.total.*}) plus the single
  * {@code pool.route.max.default} config value. This binder instead walks

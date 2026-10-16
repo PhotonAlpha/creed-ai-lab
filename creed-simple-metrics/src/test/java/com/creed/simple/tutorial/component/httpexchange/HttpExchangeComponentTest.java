@@ -2,7 +2,7 @@ package com.creed.simple.tutorial.component.httpexchange;
 
 import com.creed.simple.tutorial.client.ArtisanClient;
 import com.creed.simple.tutorial.client.MyAccountDetailsVO;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.apache.camel.CamelContext;
 import org.apache.camel.Exchange;
 import org.apache.camel.ProducerTemplate;

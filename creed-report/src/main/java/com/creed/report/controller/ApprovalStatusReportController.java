@@ -9,8 +9,8 @@ import com.creed.report.service.InvalidMergeRequestException;
 import com.creed.report.service.PdfExportService;
 import com.creed.report.service.PdfMergeService;
 import com.lowagie.text.pdf.BaseFont;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.MessageSource;
 import org.springframework.http.HttpHeaders;
@@ -315,7 +315,7 @@ public class ApprovalStatusReportController {
         try {
             return objectMapper.readValue(SAMPLE_JSON, ApprovalStatusReport.class);
         }
-        catch (JsonProcessingException ex) {
+        catch (JacksonException ex) {
             // The JSON is a constant in this file: if it does not parse, the build is broken, not
             // the request. Fail loudly rather than serving an empty document.
             throw new IllegalStateException("The hard-coded approval-status sample is not valid JSON", ex);

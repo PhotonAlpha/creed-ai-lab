@@ -4,7 +4,7 @@ import com.creed.report.model.EnvironmentSnapshot;
 import com.creed.report.model.PropertyEntry;
 import com.creed.report.model.PropertySourceView;
 import com.creed.report.model.RenderedEnvironment;
-import org.springframework.boot.DefaultBootstrapContext;
+import org.springframework.boot.bootstrap.DefaultBootstrapContext;
 import org.springframework.boot.context.config.ConfigDataEnvironmentPostProcessor;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.EnumerablePropertySource;

@@ -1,8 +1,8 @@
 package com.creed.simple.lb;
 
+import com.creed.metrics.ConnectionPoolMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
-import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
 import org.apache.hc.client5.http.ConnectionKeepAliveStrategy;
 import org.apache.hc.client5.http.impl.IdleConnectionEvictor;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
@@ -73,7 +73,7 @@ public final class ManagedHttpClientPool implements MeterBinder, Closeable {
 
     @Override
     public void bindTo(MeterRegistry registry) {
-        new PoolingHttpClientConnectionManagerMetricsBinder(connectionManager, metricsName).bindTo(registry);
+        new ConnectionPoolMetrics(connectionManager, metricsName).bindTo(registry);
     }
 
     @Override

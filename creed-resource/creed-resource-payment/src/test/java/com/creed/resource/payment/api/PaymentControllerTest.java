@@ -45,8 +45,8 @@ class PaymentControllerTest {
                 .andExpect(jsonPath("$.status").value("PENDING"))
                 .andExpect(jsonPath("$.method").value("CARD"))
                 .andReturn().getResponse().getContentAsString();
-        return com.fasterxml.jackson.databind.json.JsonMapper.builder().build()
-                .readTree(location).get("id").asText();
+        return tools.jackson.databind.json.JsonMapper.builder().build()
+                .readTree(location).get("id").asString();
     }
 
     @Test
@@ -110,8 +110,8 @@ class PaymentControllerTest {
                         .content("{\"orderId\":\"ORD-43\",\"customer\":\"Eve\",\"amount\":3.30}"))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
-        String id = com.fasterxml.jackson.databind.json.JsonMapper.builder().build()
-                .readTree(body).get("id").asText();
+        String id = tools.jackson.databind.json.JsonMapper.builder().build()
+                .readTree(body).get("id").asString();
         mvc.perform(post("/api/payment/" + id + "/authorize"))
                 .andExpect(status().isConflict());
         mvc.perform(post("/api/payment/" + id + "/capture"))

@@ -7,7 +7,7 @@ import com.creed.report.i18n.CountryStyles;
 import com.creed.report.service.InvalidMergeRequestException;
 import com.creed.report.service.PdfExportService;
 import com.creed.report.service.PdfMergeService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import org.junit.jupiter.api.BeforeEach;

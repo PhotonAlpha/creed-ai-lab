@@ -6,7 +6,7 @@ import com.creed.report.i18n.CountryStyles;
 import com.creed.report.i18n.ReportCountry;
 import com.creed.report.model.ApprovalStatusReport;
 import com.creed.report.service.PdfExportService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.lowagie.text.pdf.PdfDictionary;
 import com.lowagie.text.pdf.PdfName;
 import com.lowagie.text.pdf.PdfReader;

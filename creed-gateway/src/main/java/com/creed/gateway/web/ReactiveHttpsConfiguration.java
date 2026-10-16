@@ -1,16 +1,25 @@
 package com.creed.gateway.web;
 
 import org.springframework.boot.ssl.SslBundles;
-import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
+import org.springframework.boot.web.server.reactive.ConfigurableReactiveWebServerFactory;
 import org.springframework.boot.web.server.Ssl;
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 
 /**
- * Requirement 1: enable the config-server's embedded Tomcat HTTPS listener
- * <em>programmatically</em> via {@link WebServerFactoryCustomizer}&lt;{@link TomcatServletWebServerFactory}&gt;
- * rather than through the {@code server.ssl.*} properties.
+ * Requirement 1: enable this gateway's embedded HTTPS listener <em>programmatically</em> via
+ * {@link WebServerFactoryCustomizer}&lt;{@link ConfigurableReactiveWebServerFactory}&gt; rather than
+ * through the {@code server.ssl.*} properties.
+ *
+ * <p><b>Reactive, not servlet.</b> This module is WebFlux on Reactor Netty, so it has no
+ * {@code TomcatServletWebServerFactory} bean. The class used to be a copy of the servlet modules'
+ * {@code TomcatHttpsConfiguration} and was typed on that factory, which meant
+ * {@code WebServerFactoryCustomizerBeanPostProcessor} never matched it and the SSL bundle below was
+ * silently never applied — the gateway served plain HTTP on 8080. Typing the customizer on
+ * {@link ConfigurableReactiveWebServerFactory} (which declares {@code setSsl}/{@code setSslBundles}
+ * on {@code ConfigurableWebServerFactory}) fixes that and keeps it independent of the reactive
+ * server implementation.
  *
  * <p>The TLS material itself still comes from a Spring Boot 3 SSL Bundle
  * ({@code creed-pem-server} by default, defined in {@code application-ssl.yml}); we simply
@@ -23,13 +32,13 @@ import org.springframework.core.Ordered;
  */
 @Configuration(proxyBeanMethods = false)
 //@ConditionalOnProperty(prefix = "creed.https", name = "enabled", havingValue = "true", matchIfMissing = true)
-public class TomcatHttpsConfiguration
-        implements WebServerFactoryCustomizer<TomcatServletWebServerFactory>, Ordered {
+public class ReactiveHttpsConfiguration
+        implements WebServerFactoryCustomizer<ConfigurableReactiveWebServerFactory>, Ordered {
 
     private final SslBundles sslBundles;
     private final String bundle;
 
-    public TomcatHttpsConfiguration(
+    public ReactiveHttpsConfiguration(
             SslBundles sslBundles,
             @org.springframework.beans.factory.annotation.Value("${creed.https.bundle:creed-pem-server}") String bundle) {
         this.sslBundles = sslBundles;
@@ -37,7 +46,7 @@ public class TomcatHttpsConfiguration
     }
 
     @Override
-    public void customize(TomcatServletWebServerFactory factory) {
+    public void customize(ConfigurableReactiveWebServerFactory factory) {
         Ssl ssl = new Ssl();
         ssl.setEnabled(true);
         ssl.setBundle(bundle);

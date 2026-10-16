@@ -1,7 +1,7 @@
 package com.creed.resource.veracode.mock;
 
 import com.creed.resource.veracode.domain.Finding;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
@@ -65,7 +65,7 @@ public class MockJiraController {
 
     @PostMapping("/rest/api/2/search")
     ResponseEntity<?> search(@RequestBody JsonNode body) {
-        String jql = body.path("jql").asText("");
+        String jql = body.path("jql").asString("");
         int startAt = Math.max(0, body.path("startAt").asInt(0));
         int maxResults = Math.min(Math.max(1, body.path("maxResults").asInt(50)), 100);
 
@@ -112,13 +112,13 @@ public class MockJiraController {
     ResponseEntity<?> create(@RequestBody JsonNode body) {
         JsonNode fields = body.path("fields");
         Map<String, String> errors = new LinkedHashMap<>();
-        if (!MockJiraStore.PROJECT.equalsIgnoreCase(fields.path("project").path("key").asText())) {
+        if (!MockJiraStore.PROJECT.equalsIgnoreCase(fields.path("project").path("key").asString())) {
             errors.put("project", "project is required");
         }
-        if (!ISSUE_TYPES.contains(fields.path("issuetype").path("name").asText().toLowerCase())) {
+        if (!ISSUE_TYPES.contains(fields.path("issuetype").path("name").asString().toLowerCase())) {
             errors.put("issuetype", "Specify a valid issue type");
         }
-        String summary = fields.path("summary").asText("");
+        String summary = fields.path("summary").asString("");
         if (summary.isBlank()) {
             errors.put("summary", "You must specify a summary of the issue.");
         } else if (summary.length() > 255) {
@@ -126,7 +126,7 @@ public class MockJiraController {
         }
         List<String> versions = new ArrayList<>();
         for (JsonNode version : fields.path("versions")) {
-            String name = version.path("name").asText();
+            String name = version.path("name").asString();
             if (store.versions().stream().noneMatch(name::equals)) {
                 errors.put("versions", "Version name '" + name + "' is not valid");
             }
@@ -136,8 +136,8 @@ public class MockJiraController {
             return error(HttpStatus.BAD_REQUEST, null, errors);
         }
         List<String> labels = new ArrayList<>();
-        fields.path("labels").forEach(l -> labels.add(l.asText()));
-        MockJiraStore.Issue issue = store.create(summary, fields.path("description").asText(null), versions, labels);
+        fields.path("labels").forEach(l -> labels.add(l.asString()));
+        MockJiraStore.Issue issue = store.create(summary, fields.path("description").asString(null), versions, labels);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "id", String.valueOf(issue.id()), "key", issue.key(), "self", self(issue)));
     }

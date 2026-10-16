@@ -20,6 +20,13 @@
     <dependencies>
         <!-- ============ OpenTelemetry ============ -->
         <!-- Bridges Micrometer Observation/Tracing to OpenTelemetry -->
+        <!-- Spring Boot 4 moved tracing auto-configuration out of spring-boot-starter-actuator into
+             its own module. Without it the Micrometer bridge below registers no Tracer bean and any
+             component injecting io.micrometer.tracing.Tracer fails the context at startup. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-micrometer-tracing</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-tracing-bridge-otel</artifactId>
@@ -36,6 +43,13 @@
             <artifactId>opentelemetry-logback-appender-1.0</artifactId>
         </dependency>
 
+        <!-- ConnectionPoolMetrics observes an Apache hc5 pool. Optional: only the modules that
+             actually run an hc5 pool need it, and every one of those already declares it. -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>

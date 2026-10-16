@@ -7,7 +7,7 @@ import com.creed.jasper.export.ExportRequest;
 import com.creed.jasper.render.ApprovalStatusRenderer;
 import com.creed.jasper.service.ApprovalStatusSamples;
 import com.creed.jasper.service.JasperReportService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.lowagie.text.pdf.PdfDictionary;
 import com.lowagie.text.pdf.PdfName;
 import com.lowagie.text.pdf.PdfReader;

@@ -24,7 +24,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
+import com.creed.metrics.ConnectionPoolMetrics;
 
 /**
  * Outbound {@link RestTemplate} for calling creed-gateway over HTTPS, backed by Apache HttpClient 5.
@@ -32,7 +32,7 @@ import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClient
  * <p>Unlike the SSL-bundle-driven {@code RestTemplateBuilder.sslBundle(..)} approach (where Boot
  * builds and hides the HttpClient), here we construct the {@link PoolingHttpClientConnectionManager}
  * ourselves so we can hand the very same instance to
- * {@link PoolingHttpClientConnectionManagerMetricsBinder}. That binder registers
+ * {@link ConnectionPoolMetrics}. That binder registers
  * {@code httpcomponents.httpclient.pool.*} gauges (total max / available / leased / pending and the
  * per-route max) against the {@link MeterRegistry}, so the connection-pool occupancy shows up in
  * {@code /actuator/metrics}, the Prometheus scrape and the OTLP bridge — and is logged by
@@ -85,10 +85,10 @@ public class GatewayRestTemplateConfiguration {
      * lets Spring inject the auto-configured {@link MeterRegistry}.
      */
     @Bean
-    PoolingHttpClientConnectionManagerMetricsBinder gatewayConnectionPoolMetrics(
+    ConnectionPoolMetrics gatewayConnectionPoolMetrics(
             PoolingHttpClientConnectionManager gatewayConnectionManager, MeterRegistry meterRegistry) {
-        PoolingHttpClientConnectionManagerMetricsBinder binder =
-                new PoolingHttpClientConnectionManagerMetricsBinder(gatewayConnectionManager, GATEWAY_POOL_NAME);
+        ConnectionPoolMetrics binder =
+                new ConnectionPoolMetrics(gatewayConnectionManager, GATEWAY_POOL_NAME);
         binder.bindTo(meterRegistry);
         return binder;
     }

@@ -6,7 +6,7 @@ import com.creed.report.i18n.CountryFormatter;
 import com.creed.report.i18n.CountryProfile;
 import com.creed.report.i18n.CountryStyles;
 import com.creed.report.i18n.ReportCountry;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.lowagie.text.pdf.BaseFont;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.parser.PdfTextExtractor;

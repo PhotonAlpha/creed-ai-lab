@@ -1,8 +1,8 @@
 package com.creed.jasper.service;
 
 import com.creed.jasper.domain.ApprovalStatusReport;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * The hard-coded approval-status payload, transcribed from {@code creed-report/docs/template.jpg}.
@@ -112,7 +112,7 @@ public final class ApprovalStatusSamples {
         try {
             return objectMapper.readValue(SAMPLE_JSON, ApprovalStatusReport.class);
         }
-        catch (JsonProcessingException ex) {
+        catch (JacksonException ex) {
             // The JSON is a constant in this file: if it does not parse, the build is broken, not
             // the request. Fail loudly rather than serving an empty document.
             throw new IllegalStateException("The hard-coded approval-status sample is not valid JSON", ex);

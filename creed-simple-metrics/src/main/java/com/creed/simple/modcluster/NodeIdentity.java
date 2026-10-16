@@ -1,7 +1,7 @@
 package com.creed.simple.modcluster;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.web.context.WebServerApplicationContext;
+import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ApplicationContext;
 import org.springframework.util.StringUtils;
 

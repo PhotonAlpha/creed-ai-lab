@@ -1,6 +1,6 @@
 package com.creed.simple.route;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.springframework.stereotype.Component;
@@ -43,7 +43,7 @@ public class FulfillmentFilterProcessor implements Processor {
         Map<String, Integer> stockByItem = new HashMap<>();
         if (catalog != null) {
             for (JsonNode product : catalog) {
-                stockByItem.put(product.path("name").asText(), product.path("stock").asInt());
+                stockByItem.put(product.path("name").asString(), product.path("stock").asInt());
             }
         }
 
@@ -52,8 +52,8 @@ public class FulfillmentFilterProcessor implements Processor {
         if (orders != null) {
             for (JsonNode order : orders) {
                 total++;
-                String status = order.path("status").asText();
-                String item = order.path("item").asText();
+                String status = order.path("status").asString();
+                String item = order.path("item").asString();
                 int quantity = order.path("quantity").asInt();
                 if (ACTIONABLE.contains(status) && stockByItem.getOrDefault(item, 0) >= quantity) {
                     fulfillable.add(toOrder(order));
@@ -75,12 +75,12 @@ public class FulfillmentFilterProcessor implements Processor {
 
     private Map<String, Object> toOrder(JsonNode order) {
         Map<String, Object> o = new LinkedHashMap<>();
-        o.put("id", order.path("id").asText());
-        o.put("customer", order.path("customer").asText());
-        o.put("item", order.path("item").asText());
+        o.put("id", order.path("id").asString());
+        o.put("customer", order.path("customer").asString());
+        o.put("item", order.path("item").asString());
         o.put("quantity", order.path("quantity").asInt());
         o.put("total", order.path("total").asDouble());
-        o.put("status", order.path("status").asText());
+        o.put("status", order.path("status").asString());
         return o;
     }
 }

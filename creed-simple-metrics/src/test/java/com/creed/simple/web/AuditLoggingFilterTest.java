@@ -108,7 +108,10 @@ class AuditLoggingFilterTest {
     @Test
     void reusesAnAlreadyWrappedRequestInsteadOfDoubleWrapping() throws Exception {
         MockHttpServletRequest raw = new MockHttpServletRequest("GET", "/camel/x");
-        ContentCachingRequestWrapper wrapped = new ContentCachingRequestWrapper(raw);
+        // Spring Framework 7 dropped the single-argument constructor; a cache limit is now
+        // mandatory. The value is irrelevant here — the assertion is that the filter reuses an
+        // already-wrapped request instead of wrapping it twice.
+        ContentCachingRequestWrapper wrapped = new ContentCachingRequestWrapper(raw, 8192);
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         HttpServletRequest[] seen = new HttpServletRequest[1];

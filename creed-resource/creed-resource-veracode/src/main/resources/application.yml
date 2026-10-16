@@ -11,6 +11,10 @@ spring:
     name: creed-resource-veracode
   profiles:
     include: actuator
+  # Jackson 3 (Boot 4) turned FAIL_ON_NULL_FOR_PRIMITIVES on: a request body that omits a boolean
+  # (`{}` for {"autoCreate": false}) became a 400. Keep the Jackson 2 defaults the API was written for.
+  jackson:
+    use-jackson2-defaults: true
   servlet:
     multipart:
       max-file-size: ${CREED_VERACODE_MAX_UPLOAD:10MB}

@@ -2,7 +2,7 @@ package com.creed.partner.api;
 
 import com.creed.partner.web.PartnerClusterProperties;
 import com.creed.partner.web.PartnerClusterProperties.ClusterSpec;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;

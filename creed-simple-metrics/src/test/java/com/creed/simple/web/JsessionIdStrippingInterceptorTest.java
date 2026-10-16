@@ -45,13 +45,13 @@ class JsessionIdStrippingInterceptorTest {
 
     @Test
     void dropsTheHeaderWhenJsessionIdWasTheOnlyCookie() throws Exception {
-        assertThat(intercept(JSESSIONID).containsKey(HttpHeaders.SET_COOKIE)).isFalse();
+        assertThat(intercept(JSESSIONID).containsHeader(HttpHeaders.SET_COOKIE)).isFalse();
     }
 
     @Test
     void leavesResponsesWithoutJsessionIdUntouched() throws Exception {
         assertThat(intercept(WSASID, THEME).get(HttpHeaders.SET_COOKIE)).containsExactly(WSASID, THEME);
-        assertThat(intercept().containsKey(HttpHeaders.SET_COOKIE)).isFalse();
+        assertThat(intercept().containsHeader(HttpHeaders.SET_COOKIE)).isFalse();
     }
 
     @Test

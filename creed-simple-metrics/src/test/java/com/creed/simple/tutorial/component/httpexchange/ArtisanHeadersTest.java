@@ -72,7 +72,7 @@ class ArtisanHeadersTest {
     @Test
     void outsideTheComponentNothingIsAdded() throws Exception {
         HttpHeaders headers = sentHeaders(null);
-        assertThat(headers.containsKey("X-Trace-Id")).isFalse();
-        assertThat(headers.containsKey("X-Channel")).isFalse();
+        assertThat(headers.containsHeader("X-Trace-Id")).isFalse();
+        assertThat(headers.containsHeader("X-Channel")).isFalse();
     }
 }

@@ -8,7 +8,7 @@ import com.creed.jasper.i18n.ReportLanguage;
 import com.creed.jasper.render.ApprovalStatusRenderer;
 import com.creed.jasper.service.ApprovalStatusSamples;
 import com.creed.jasper.service.JasperReportService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.lowagie.text.pdf.PdfReader;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;

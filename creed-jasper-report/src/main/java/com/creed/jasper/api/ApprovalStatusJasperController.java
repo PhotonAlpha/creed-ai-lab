@@ -9,7 +9,7 @@ import com.creed.jasper.i18n.ReportLanguage;
 import com.creed.jasper.render.ApprovalStatusRenderer;
 import com.creed.jasper.service.ApprovalStatusSamples;
 import com.creed.jasper.service.JasperReportService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;

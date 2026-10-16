@@ -1,4 +1,8 @@
 spring:
+  # Jackson 3 (Boot 4) changed defaults the APIs were written against - e.g. FAIL_ON_NULL_FOR_PRIMITIVES
+  # is on, so a body omitting a boolean field is a 400. Keep Jackson 2's until each API is reviewed.
+  jackson:
+    use-jackson2-defaults: true
   config:
     import: "optional:configserver:"
   profiles:

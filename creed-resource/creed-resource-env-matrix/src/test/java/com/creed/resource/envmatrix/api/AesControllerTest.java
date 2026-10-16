@@ -3,13 +3,13 @@ package com.creed.resource.envmatrix.api;
 import com.creed.resource.envmatrix.domain.EnvAesRecordRepository;
 import com.creed.resource.envmatrix.domain.EnvEndpoint;
 import com.creed.resource.envmatrix.domain.EnvEndpointRepository;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
@@ -192,11 +192,11 @@ class AesControllerTest {
         JsonNode first = saveMsBoth();
         assertThat(first.get("inserted").asInt()).isEqualTo(2);
         JsonNode records = first.get("records");
-        assertThat(records.get(0).get("encryptedValue").asText()).isEqualTo(VECTOR_MS1);
-        assertThat(records.get(1).get("encryptedValue").asText()).isEqualTo(VECTOR_MS2);
-        assertThat(records.get(0).get("secretKey").asText()).isEqualTo("r4nd0mms1.cn.uat110.1.1.11");
-        assertThat(records.get(1).get("secretKey").asText()).isEqualTo("r4nd0mms2.cn.uat110.1.1.12");
-        assertThat(records.get(0).get("randomKey").asText()).isEqualTo(RANDOM);
+        assertThat(records.get(0).get("encryptedValue").asString()).isEqualTo(VECTOR_MS1);
+        assertThat(records.get(1).get("encryptedValue").asString()).isEqualTo(VECTOR_MS2);
+        assertThat(records.get(0).get("secretKey").asString()).isEqualTo("r4nd0mms1.cn.uat110.1.1.11");
+        assertThat(records.get(1).get("secretKey").asString()).isEqualTo("r4nd0mms2.cn.uat110.1.1.12");
+        assertThat(records.get(0).get("randomKey").asString()).isEqualTo(RANDOM);
 
         // CBC with a fixed IV is deterministic: the same value re-encrypts to the same bytes.
         JsonNode again = saveMsBoth();
@@ -352,7 +352,7 @@ class AesControllerTest {
     void deleteMany() throws Exception {
         JsonNode saved = saveMsBoth();
         mockMvc.perform(delete(BASE + "/records")
-                        .param("ids", saved.get("records").get(0).get("id").asText(), "999999"))
+                        .param("ids", saved.get("records").get(0).get("id").asString(), "999999"))
                 .andExpect(status().isNoContent());
         assertThat(recordRepository.count()).isEqualTo(1);
     }
@@ -362,8 +362,8 @@ class AesControllerTest {
     void decryptRecordsWithStoredIvAndSalt() throws Exception {
         JsonNode saved = saveMsBoth();
         JsonNode first = saved.get("records").get(0);
-        assertThat(first.get("iv").asText()).isEqualTo(IV);
-        assertThat(first.get("salt").asText()).isEqualTo(SALT);
+        assertThat(first.get("iv").asString()).isEqualTo(IV);
+        assertThat(first.get("salt").asString()).isEqualTo(SALT);
         long ms1 = first.get("id").asLong();
         long ms2 = saved.get("records").get(1).get("id").asLong();
 

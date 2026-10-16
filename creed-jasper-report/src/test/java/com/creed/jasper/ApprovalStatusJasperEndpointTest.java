@@ -2,7 +2,7 @@ package com.creed.jasper;
 
 import com.creed.jasper.api.ApprovalStatusJasperController;
 import com.creed.jasper.service.JasperReportService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
