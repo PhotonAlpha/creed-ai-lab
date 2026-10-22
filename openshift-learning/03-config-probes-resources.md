@@ -8,6 +8,21 @@
 
 ## 知识点
 
+### 命令逐段解释
+```shell
+oc create secret generic veracode-secrets --from-literal=CREED_JIRA_TOKEN=dummy-for-mock
+```
+
+| 部分  |  含义 |
+|-----|---|
+|  `oc create`   |  创建一个资源 |
+|  `secret`   | `资源类型是 Secret，用来存放密码、令牌等敏感信息`  |
+|  `generic`   | `Secret 的子类型，表示"通用型"，就是普通的键值对。其他类型还有 docker-registry（镜像仓库凭证）、tls（证书）等`  |
+|  `veracode-secrets`  |  这个 Secret 的名字，之后在 Deployment 里引用它就用这个名字 |
+|  `--from-literal=CREED_JIRA_TOKEN=dummy-for-mock`  |  直接在命令行里写一个键值对：键是 CREED_JIRA_TOKEN，值是 dummy-for-mock |
+
+所以整条命令的意思是：创建一个名叫 veracode-secrets 的 Secret，里面存一条数据，键为 CREED_JIRA_TOKEN，值为 dummy-for-mock。从名字看，dummy-for-mock 是个占位的假值，用来模拟一个 Jira 令牌，真实场景里这里会换成真正的 token。
+
 ### 配置注入
 
 - **ConfigMap 映射成环境变量** → Spring 的宽松绑定：`VERACODE_JIRA_PROJECT_KEY` 对应 `veracode.jira.project-key`。

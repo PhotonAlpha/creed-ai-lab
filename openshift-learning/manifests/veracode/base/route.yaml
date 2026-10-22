@@ -1,0 +1,10 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: veracode
+spec:
+  to: { kind: Service, name: veracode }
+  port: { targetPort: http }
+  tls:
+    termination: edge          # 由路由器终止 TLS，路由器到 Pod 走明文 HTTP；第 06 章细讲
+    insecureEdgeTerminationPolicy: Redirect

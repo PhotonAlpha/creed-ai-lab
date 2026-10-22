@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: veracode
+  labels: { app: veracode }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: veracode }
+  template:
+    metadata:
+      labels: { app: veracode }
+    spec:
+      containers:
+        - name: veracode
+          image: image-registry.openshift-image-registry.svc:5000/creed-lab/veracode:latest
+          ports:
+            - containerPort: 18097
+              name: http

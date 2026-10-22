@@ -25,6 +25,47 @@
 - **mock 模式在集群里照样能用**：veracode 的 Confluence 和 Jira base URL 默认指向 `http://localhost:${server.port}/mock/...`，
   也就是 Pod 自己调用自己，不需要任何外部系统。
 
+### Deployment、Service、Route：分别是什么，怎么连起来
+
+第 4 步要手写这三个对象。它们各管一件事，缺一个浏览器都访问不到应用：
+
+| 对象 | 回答的问题 | 本章里的作用 |
+|---|---|---|
+| **Deployment** | 「跑什么、跑几份」 | 按 Pod 模板（镜像、端口、环境变量）维持 `replicas` 个 Pod；Pod 挂了重建，改模板就滚动替换 |
+| **Service** | 「集群里怎么稳定地找到这些 Pod」 | Pod 会重建、IP 会变；Service 给它们一个固定的名字 `veracode.creed-lab.svc` 和虚拟 IP，并在就绪的 Pod 之间做负载均衡。只在**集群内部**可达 |
+| **Route** | 「集群外面怎么进来」 | OpenShift 特有。在路由器（HAProxy）上登记一个外部主机名，如 `veracode-creed-lab.apps-crc.testing`，可以在这里终止 TLS，再把流量转给 Service 背后的 Pod |
+
+一句话：**Deployment 负责让 Pod 活着，Service 负责让 Pod 能被找到，Route 负责让外部能访问到。**
+
+三者之间**没有父子关系**，谁也不「包含」谁，靠两种引用松散地连在一起：
+
+```text
+浏览器 ──https──▶ Route ──(spec.to.name)──▶ Service ──(selector 匹配 label)──▶ Pod ◀──(创建/维护)── Deployment
+                 veracode                    veracode     app=veracode          app=veracode           veracode
+```
+
+1. **Service → Pod：靠 label 选择器，不是靠名字。** Service 的 `selector: { app: veracode }` 去匹配所有带
+   `app=veracode` 标签的 Pod，而这个标签来自 Deployment 的 `spec.template.metadata.labels`。
+   Service 根本不知道 Deployment 的存在：手动起一个带同样标签的 Pod，也会被它选中。
+   Deployment 自己的 `spec.selector.matchLabels` 是另一回事，它只用来认领「哪些 Pod 归我管」，必须和模板里的标签一致。
+2. **Route → Service：靠名字。** `spec.to: { kind: Service, name: veracode }` 直接写死 Service 的名字。
+
+端口也是一条链，用端口**名字** `http` 串起来，比写死数字更不容易改漏：
+
+| 位置 | 字段 | 值 | 含义 |
+|---|---|---|---|
+| Deployment | `containerPort` / `name` | `18097` / `http` | 应用在容器里真正监听的端口，并起名 `http` |
+| Service | `port` | `8080` | 集群内调用方访问的端口：`http://veracode:8080` |
+| Service | `targetPort` | `http` | 转发到 Pod 上名为 `http` 的端口，即 18097 |
+| Route | `port.targetPort` | `http` | 选用 Service 里名为 `http` 的端口 |
+
+> 一个细节：HAProxy 路由器**不经过** Service 的虚拟 IP，而是直接读取 Service 对应的 EndpointSlice，把请求发给 Pod IP。
+> 所以 Route 的流量不会用到 Service 的 `port: 8080`；Service 在这里的作用是「圈定哪些 Pod、用哪个端口」。
+> 集群内其他 Pod 调 `veracode:8080` 时才走 Service 的虚拟 IP。第 05、06 章细讲两种负载均衡的区别。
+
+因此排查时也按这条链从后往前看：Pod 是否 Running 且就绪 → EndpointSlice 里有没有 Pod IP（selector、端口名对不对）→
+Route 的 `to.name` 是否指向正确的 Service。见下文「常见坑」里的 503。
+
 ## 步骤
 
 ### 1. 打可执行 jar（在仓库根目录执行）
