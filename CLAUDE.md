@@ -66,7 +66,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-mock-buddy` | 5173 / 4000 | — | HTTP / HTTPS (borrows `creed-gateway` cert), **Node/Fastify**; YAML mock server, standalone |
 | `creed-backstage` | 3003 / 7007 | — | **Backstage**: Software Catalog (`catalog/**/catalog-info.yaml`) + Swagger UI; one `catalog/<module>/` per functional area; multi-file OpenAPI → Redocly bundle `dist/openapi.yaml` (committed, `$text`), `yarn openapi:build [module]` |
 | `.support/httpd` (docker) | 6666 / 16666 / 9443 | `/mod_cluster_manager` | Apache + mod_proxy_cluster: MCMP over **mTLS** / browser status page (loopback, no client cert; 666x is browser-blocked) / HTTPS traffic; `creed-simple-metrics` registers here |
-| `creed-common-metrics` | — | — | library: `application-actuator.yml` + OTel helpers |
+| `creed-common-metrics` | — | — | library: `application-actuator.yml` + OTel helpers; generic request/response envelope + `@CommandMapping` (controller → validator → command, AOP auto-config) |
 
 Resource servers and gateways run `primary` / `secondary` (local two-instance) or `cloud`
 (config-server driven). OIDC issuer everywhere is
