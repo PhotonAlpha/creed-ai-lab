@@ -530,6 +530,85 @@ node mock for it: the Java module mocks Confluence and Jira in-process, so run i
 - **Export Excel** downloads a fresh analysis (sheet *Findings* + sheet *Source*).
 - The analysis is never auto-created on page load — that would write to Jira without anyone asking.
 
+### Migration sync risk (`/migration-risk`)
+
+Backed by another **separate service**, `creed-resource/creed-resource-migration-risk` (plain HTTP
+:18098, no database), through Vite's `/api/migration-risk` proxy entry (`VITE_MIGRATION_RISK_TARGET`).
+No node mock: the Java module generates two **demo repositories** at startup, and the page opens on them.
+
+The situation it serves: repo2 is a migration of repo1 (Boot 4 / Jackson 3 / Camel 4), and another team
+keeps committing to repo1. Give it the two repository paths (on the backend host, under
+`migration-risk.allowed-roots`) and the **baseline** — the repo1 commit the migration started from, or the
+last sync. The baseline field lists repo1's tags, branches and recent commits; when the two repositories share
+history (two clones of one origin) their merge-base is suggested and filled in. It runs RefactoringMiner twice against that one baseline:
+
+- **A** repo1@baseline → repo1@HEAD: what the other team changed (tab *A: upstream refactorings*);
+- **B** repo1@baseline → repo2@HEAD: where the migration put things (tab *B: migration mapping*).
+
+Every class / method / field set A touches is then looked up through B, and non-Java files are compared
+key by key (Spring config, `pom.xml`) or byte by byte. The result is one table of **risk items**:
+
+| Risk | Category | Meaning |
+|---|---|---|
+| High | Gone in repo2 / Split in repo2 | repo1 changed something repo2 deleted or split — decide by hand |
+| High | Migrated API used | lines repo1 added use Jackson 2, `javax.*`, Boot 3 classes ... (configurable rules) |
+| High | Config changed / Dependencies changed | `application*.yml`/`.properties`, `pom.xml` — each key shown with what repo2 has |
+| Medium | Moved / renamed | the element lives elsewhere in repo2; the new location is shown |
+| Medium | Changed on both sides | the migration changed it too: three-way merge |
+| Medium | Deleted upstream | still in repo2 — delete it there too? |
+| Medium | Upstream refactoring | repo1 renamed / moved it; replay that in repo2 |
+| Low / Medium | Other file | compared with repo2 at the same path |
+| Low | Syncs as is / New code | repo2 has it unchanged (imports aside) / new code with a home in repo2 |
+
+Expand a row for the evidence (the RefactoringMiner refactoring that decided it) and the details (config
+keys, dependency versions, matched lines). *Structural only* hides the hundreds of detail refactorings
+(variable renames, type changes ...) a migration produces. The *How the risk is graded* panel repeats this
+table in the page.
+
+**Branches, folders, releases, review, diff.** In *Git* mode each repository has its own branch picker (branches,
+remote branches, tags; the checked-out branch is shown), and the baseline suggestion follows the selected branches.
+*Plain folders* mode takes three directories — baseline, repo1, repo2 — and needs no git at all (files as on disk;
+`target`, `build`, `node_modules`, `.idea` ... skipped). With a **release** name the result is saved: every item
+gets a review column — ✓ *safe* (expected), ⚠ *needs attention* (with a note), or back to *pending* — singly or for
+the selected rows, plus a review filter and progress counters. *Saved releases* reopens any earlier run; re-running a
+release keeps the verdicts of items that did not change (marked ↻). The **A / B** buttons open the backend's
+side-by-side diff (RefactoringMiner's own Monaco viewer, served by the backend through the same proxy): A = what
+repo1 changed, B = where the migration put it.
+
+#### repo1 branch, baseline, repo2 branch — what each one is
+
+They are the three points in time the comparison uses:
+
+```
+repo1:  ──●─────────●────●   ← repo1 branch (now)
+          ↑ baseline   the other team's new commits
+           \
+repo2:      ●────●────●──●   ← repo2 branch (now)
+              the migration's commits
+```
+
+| Input | What it is | Role in the comparison |
+|---|---|---|
+| **repo1 branch** | the old repository's branch the other team still commits to (e.g. `master`); its newest commit is used | end of A: "what repo1 looks like now" |
+| **Baseline** | repo1's commit when the migration started (or at the last sync) — a commit id, tag or branch | the **shared start** of A and B; must be in the repo1 branch's history |
+| **repo2 branch** | the migrated repository's working branch (e.g. `develop/spring-boot-4`); its newest commit is used | end of B: "what the migrated code looks like now" |
+
+- **A = baseline → repo1 branch**: what the other team changed since — what has to be synced.
+- **B = baseline → repo2 branch**: where the migration put the baseline code and what it made of it — the
+  old element → new element map.
+
+Every element A touches is looked up through B, so the baseline decides what counts as new:
+
+- **Too early** — changes made before the migration started show up as new: lots of items that need no syncing.
+- **Too late** — changes before the baseline that were never synced **do not appear at all**. This is the
+  dangerous direction: nothing tells you they were missed.
+- **Two clones of one origin** — the page suggests the merge-base of the two selected branches, which is normally
+  exactly the commit the migration branched from. After a sync, the next baseline is the repo1 commit synced up to.
+- **A baseline that is not in the repo1 branch's history** raises a warning: A then includes another branch's changes.
+
+**Folder mode**: baseline folder = baseline, repo1 folder = repo1 branch, repo2 folder = repo2 branch.
+API fields: `baseline` / `repo1Head` / `repo2Head`; in folder mode `baselinePath` / `repo1Path` / `repo2Path`.
+
 ## 6. API
 
 Base path `/api/env-matrix`. Filters are repeated query parameters —

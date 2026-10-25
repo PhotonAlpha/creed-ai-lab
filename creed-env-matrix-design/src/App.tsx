@@ -4,6 +4,7 @@ import { ProLayout } from '@ant-design/pro-components';
 import { Button, theme } from 'antd';
 import {
   ApartmentOutlined,
+  BranchesOutlined,
   BugOutlined,
   GlobalOutlined,
   KeyOutlined,
@@ -18,6 +19,7 @@ import { TopologyPage } from './pages/Topology';
 import { SplunkPage } from './pages/Splunk';
 import { AesPage } from './pages/Aes';
 import { VeracodePage } from './pages/Veracode';
+import { MigrationRiskPage } from './pages/MigrationRisk';
 
 export function App() {
   const { t, toggleLang } = useI18n();
@@ -54,6 +56,7 @@ export function App() {
             { path: '/splunk', name: t('nav.splunk'), icon: <KeyOutlined /> },
             { path: '/aes', name: t('nav.aes'), icon: <LockOutlined /> },
             { path: '/veracode', name: t('nav.veracode'), icon: <BugOutlined /> },
+            { path: '/migration-risk', name: t('nav.migrationRisk'), icon: <BranchesOutlined /> },
           ],
         }}
         menuItemRender={(item, dom) => <Link to={item.path ?? '/'}>{dom}</Link>}
@@ -72,6 +75,7 @@ export function App() {
           <Route path="/splunk" element={<SplunkPage />} />
           <Route path="/aes" element={<AesPage />} />
           <Route path="/veracode" element={<VeracodePage />} />
+          <Route path="/migration-risk" element={<MigrationRiskPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </ProLayout>

@@ -32,6 +32,18 @@ time; check the proxy target first. A shell-exported value wins over `.env`, and
 
 Complete and verified in a browser against the real backend.
 
+- **Migration sync risk (`/migration-risk`, 2026-10-25)** — page and menu entry, backend
+  `creed-resource-migration-risk` on :18098 via `/api/migration-risk` (`VITE_MIGRATION_RISK_TARGET`; not in the
+  node mock). Split into `index.tsx` (settings, saved runs, stats, tabs), `AnalysisForm.tsx` (Git / folder mode,
+  per-repo branch pickers from `GET /refs?path=`, baseline AutoComplete + merge-base from
+  `/baseline-suggestion`, release AutoComplete), `ItemsTable.tsx` (review column, batch review, one page-level
+  note modal, A/B diff links) and `constants.ts`. A demo baseline is cleared when repo1's path changes; backend
+  `fields[]` errors land on their input (`/refs`' `path`/`head` renamed to the repo asked for). The diff links
+  open the backend's Thymeleaf page `/api/migration-risk/view/diff` (same proxy prefix) with commit ids.
+  `npm run typecheck` and `npm run build` pass; the API (refs, suggestion, save, review, reload, diff HTML) was
+  verified through the Vite proxy on a real pair. **Not yet checked in a browser** — the extension could not
+  attach to any page this session either.
+
 - **Veracode analysis (`/veracode`, 2026-10-16)** — new page, backend `creed-resource-veracode` on
   :18097 via the `/api/veracode` proxy entry (`VITE_VERACODE_TARGET`; not served by the node mock).
   Source is a Confluence page id **or an uploaded file** (Dragger; `.html/.csv/.xlsx/.xls`); create and

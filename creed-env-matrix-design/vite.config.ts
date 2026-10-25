@@ -43,6 +43,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           xfwd: true,
         },
+        // creed-resource-migration-risk: also its own service (plain HTTP, :18098), same first-match rule.
+        '/api/migration-risk': {
+          target: env.VITE_MIGRATION_RISK_TARGET ?? 'http://localhost:18098',
+          changeOrigin: true,
+          xfwd: true,
+        },
         '/api': {
           target: env.VITE_API_TARGET ?? 'http://localhost:3001',
           changeOrigin: true,

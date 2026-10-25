@@ -60,6 +60,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   `/api/env-matrix/splunk` 单独代理到 `VITE_SPLUNK_TARGET`（`.env`：BFF `http://localhost:3002`）。
 - Veracode 分析：`/api/veracode` 单独代理到 `VITE_VERACODE_TARGET`（`.env`：`http://localhost:18097`，
   `creed-resource-veracode`，明文 HTTP，Confluence 与 Jira 在后端进程内 mock）。
+- 迁移同步风险：`/api/migration-risk` 单独代理到 `VITE_MIGRATION_RISK_TARGET`（`.env`：`http://localhost:18098`，
+  `creed-resource-migration-risk`，明文 HTTP，后端自带示例仓库）。
 - Splunk 会话代理：Node BFF（`server/bff.js`），审计默认存内存，开关 `SPLUNK_AUDIT_STORE=pg` / `mysql` 时写入 PostgreSQL / MySQL。
 
 ## 4. 目录结构（目标）
@@ -73,7 +75,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 │   │   ├── Config       # CRUD 编辑页（/config）
 │   │   ├── Splunk       # Splunk 会话代理（/splunk）
 │   │   ├── Aes          # AES 加解密（/aes）
-│   │   └── Veracode     # Veracode 报告分析（/veracode，后端 creed-resource-veracode）
+│   │   ├── Veracode     # Veracode 报告分析（/veracode，后端 creed-resource-veracode）
+│   │   └── MigrationRisk # 迁移同步风险（/migration-risk，后端 creed-resource-migration-risk）
 │   └── api/             # 前端 API 封装
 ├── server/
 │   ├── index.(js|ts)    # mock API 服务
@@ -157,6 +160,20 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   存在则列出 Jira 编号与状态；不存在则可按需创建（单行 / 所选 / 全部缺失，或分析时自动创建）。
 - 也可以上传文件分析（.html / .csv / .xlsx / .xls，表头规则与 Confluence 表格相同）。
 - 支持导出 Excel。
+
+### 5.7 迁移同步风险（`/migration-risk`）
+- 后端：`creed-resource/creed-resource-migration-risk`；RefactoringMiner（目录比较模式）+ JGit + JDT；结果存 PostgreSQL `migration_risk`。
+- 两种比较方式：**Git**（repo1 / repo2 各自选择分支，基线从 repo1 选；两个仓库有共同历史时自动建议并填入 merge-base）；
+  **文件夹**（基线 / repo1 / repo2 三个普通目录，不需要 git，按磁盘现状读取）。两个仓库不需要共同的 git 历史。
+- 基线 + 两次分析 + 交叉比对：A = repo1@基线 → repo1@HEAD（别的 team 改了什么），B = repo1@基线 → repo2@HEAD（迁移的映射），
+  A 涉及的每个元素到 B 中查去向，按规则分为高 / 中 / 低（规则表见 `README.zh-CN.md` 与页面中的「风险分级规则」）。
+- 非 Java 文件：Spring 配置与 pom.xml 按配置项 / 依赖比较并附上 repo2 中的值；其他文件与 repo2 同路径文件按内容比较；
+  repo1 新增的代码行按可配置的规则（`migration-risk.api-rules`）检查是否使用了需迁移的 API。
+- 填写 **release** 时结果写入数据库并归到该 release；每一项可人工 review：符合预期标记为「安全」，否则「需关注」（可写备注）。
+  同一 release 再次分析时，内容没变的项目沿用上次的结论。留空则只分析不保存。
+- 「对比视图」：后端 Thymeleaf 页面 `/api/migration-risk/view/diff`，即 RefactoringMiner 的左右对比（Monaco）视图；
+  A = 上游改动，B = 迁移后的位置；风险项、变更文件里都有入口。
+- 只比较 repo1 变更过的文件（加上 repo2 同路径、同文件名的文件），整仓比较太慢太占内存。
 
 ## 6. 命令
 

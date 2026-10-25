@@ -1,0 +1,431 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { PageContainer, ProCard } from '@ant-design/pro-components';
+import {
+  Alert,
+  App,
+  Button,
+  Col,
+  Collapse,
+  Descriptions,
+  Empty,
+  Form,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Switch,
+  Table,
+  Tabs,
+  Tag,
+  Tooltip,
+  Typography,
+} from 'antd';
+import type { TableColumnsType } from 'antd';
+import { DiffOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { RISK_CATEGORIES, diffUrl, migrationRiskApi } from '../../api/migrationRisk';
+import type {
+  AnalysisSummary,
+  ChangedFileView,
+  CodeLocation,
+  CommitView,
+  DetectedRefactoring,
+  MigrationRiskAnalysis,
+  MigrationRiskSettings,
+  ReleaseView,
+  RiskCategory,
+  RiskItem,
+} from '../../api/migrationRisk';
+import { useI18n } from '../../locales';
+import type { MessageKey } from '../../locales';
+import { AnalysisForm, EMPTY_FORM } from './AnalysisForm';
+import { ItemsTable } from './ItemsTable';
+import { CATEGORY_LEVEL, LEVEL_COLOR, fieldErrors } from './constants';
+import type { FormValues } from './constants';
+
+const { Text, Paragraph } = Typography;
+
+function Locations({ locations }: { locations: CodeLocation[] }) {
+  return (
+    <Space direction="vertical" size={0}>
+      {locations.map((l) => (
+        <Tooltip key={`${l.path}:${l.startLine}:${l.kind}`} title={l.element}>
+          <Text code style={{ fontSize: 12 }}>{`${l.path}:${l.startLine}-${l.endLine}`}</Text>
+        </Tooltip>
+      ))}
+    </Space>
+  );
+}
+
+function Commit({ commit }: { commit: CommitView }) {
+  return (
+    <Tooltip title={`${commit.id} · ${commit.author} · ${new Date(commit.time).toLocaleString()}`}>
+      <Space size={4}>
+        <Text code>{commit.shortId}</Text>
+        {commit.revision !== commit.id && <Tag>{commit.revision}</Tag>}
+        <Text type="secondary" ellipsis style={{ maxWidth: 260 }}>{commit.message}</Text>
+      </Space>
+    </Tooltip>
+  );
+}
+
+/** "2026-10-25 20:51 · 9 items · 3 safe / 1 attention / 5 pending" */
+const runLabel = (a: AnalysisSummary, t: ReturnType<typeof useI18n>['t']) =>
+  t('migrationRisk.saved.runLabel', {
+    time: new Date(a.analyzedAt).toLocaleString(),
+    total: a.counts.total,
+    safe: a.review.safe,
+    attention: a.review.attention,
+    pending: a.review.pending,
+  });
+
+export function MigrationRiskPage() {
+  const { t } = useI18n();
+  const { message } = App.useApp();
+  const [form] = Form.useForm<FormValues>();
+
+  const [settings, setSettings] = useState<MigrationRiskSettings | null>(null);
+  const [releases, setReleases] = useState<ReleaseView[]>([]);
+  const [openRelease, setOpenRelease] = useState<number | null>(null);
+  const [runs, setRuns] = useState<AnalysisSummary[]>([]);
+  const [analysis, setAnalysis] = useState<MigrationRiskAnalysis | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [structuralOnly, setStructuralOnly] = useState(true);
+
+  /** Guards against an older answer resolving after a newer one (StrictMode double mount, fast clicks). */
+  const requestId = useRef(0);
+
+  const show = useCallback(async (call: () => Promise<MigrationRiskAnalysis>) => {
+    const current = ++requestId.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await call();
+      if (current !== requestId.current) return;
+      setAnalysis(result);
+      return result;
+    } catch (e) {
+      if (current !== requestId.current) return;
+      setAnalysis(null);
+      setError((e as Error).message);
+      form.setFields(fieldErrors(e));
+    } finally {
+      if (current === requestId.current) setLoading(false);
+    }
+  }, [form]);
+
+  const loadReleases = useCallback(() => {
+    migrationRiskApi.releases().then(setReleases).catch((e: Error) => message.error(e.message));
+  }, [message]);
+
+  const analyze = useCallback(async (v: FormValues) => {
+    const release = v.release?.trim() || undefined;
+    const result = await show(() => (v.mode === 'DIRECTORY'
+      ? migrationRiskApi.analyzeDirectories({ baselinePath: v.baselinePath, repo1Path: v.repo1Path, repo2Path: v.repo2Path, release })
+      : migrationRiskApi.analyze({
+        repo1Path: v.repo1Path, baseline: v.baseline, repo1Head: v.repo1Head, repo2Path: v.repo2Path,
+        repo2Head: v.repo2Head, release,
+      })));
+    if (result?.analysisId != null) {
+      message.success(t('migrationRisk.saved.done', { release: result.release ?? '' }));
+      loadReleases();
+    }
+  }, [show, loadReleases, message, t]);
+
+  const runDemo = useCallback((mode: FormValues['mode'], demo = settings?.demo) => {
+    if (!demo) return;
+    const values: FormValues = mode === 'DIRECTORY'
+      ? { ...EMPTY_FORM, mode, baselinePath: demo.baselineFolder, repo1Path: demo.repo1Folder, repo2Path: demo.repo2Folder }
+      : { ...EMPTY_FORM, mode, repo1Path: demo.repo1Path, baseline: demo.baseline, repo1Head: demo.repo1Head, repo2Path: demo.repo2Path, repo2Head: demo.repo2Head };
+    form.resetFields();
+    form.setFieldsValue(values);
+    void analyze(values);
+  }, [settings, form, analyze]);
+
+  useEffect(() => {
+    migrationRiskApi.settings()
+      .then((s) => {
+        setSettings(s);
+        // Read-only and well under a second, so the page opens on a real (unsaved) result.
+        if (s.demo) runDemo('GIT', s.demo);
+      })
+      .catch((e: Error) => setError(e.message));
+    loadReleases();
+    // runDemo is stable enough for a mount-time call; re-running on its identity would re-analyse.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (openRelease == null) {
+      setRuns([]);
+      return;
+    }
+    migrationRiskApi.releaseAnalyses(openRelease).then(setRuns).catch((e: Error) => message.error(e.message));
+  }, [openRelease, message]);
+
+  /** A saved run puts its inputs back into the form, so "Analyse" re-runs it under the same release. */
+  const openRun = async (id: number) => {
+    const result = await show(() => migrationRiskApi.savedAnalysis(id));
+    if (!result) return;
+    const s = result.source;
+    form.resetFields();
+    form.setFieldsValue(s.mode === 'DIRECTORY'
+      ? { ...EMPTY_FORM, mode: 'DIRECTORY', release: result.release ?? '', baselinePath: s.baselinePath ?? '', repo1Path: s.repo1Path, repo2Path: s.repo2Path }
+      : {
+        ...EMPTY_FORM, mode: 'GIT', release: result.release ?? '', repo1Path: s.repo1Path, repo2Path: s.repo2Path,
+        baseline: s.baseline?.revision ?? '', repo1Head: s.repo1Head?.revision ?? 'HEAD', repo2Head: s.repo2Head?.revision ?? 'HEAD',
+      });
+  };
+
+  const onReviewed = (updated: RiskItem[]) => {
+    const byId = new Map(updated.map((i) => [i.id, i]));
+    setAnalysis((prev) => prev && { ...prev, items: prev.items.map((i) => byId.get(i.id) ?? i) });
+    loadReleases();
+  };
+
+  const categoryLabel = (c: RiskCategory) => t(`migrationRisk.category.${c}` as MessageKey);
+
+  const refactoringColumns: TableColumnsType<DetectedRefactoring> = [
+    { title: t('migrationRisk.col.type'), dataIndex: 'type', width: 200, render: (type: string) => <Tag>{type}</Tag> },
+    {
+      title: t('migrationRisk.col.description'),
+      dataIndex: 'description',
+      width: 520,
+      render: (d: string) => <Paragraph style={{ margin: 0 }} ellipsis={{ rows: 3, tooltip: d }}>{d}</Paragraph>,
+    },
+    { title: t('migrationRisk.col.before'), dataIndex: 'before', width: 300, render: (l: CodeLocation[]) => <Locations locations={l} /> },
+    { title: t('migrationRisk.col.after'), dataIndex: 'after', width: 300, render: (l: CodeLocation[]) => <Locations locations={l} /> },
+  ];
+
+  const fileColumns: TableColumnsType<ChangedFileView> = [
+    { title: t('migrationRisk.col.change'), dataIndex: 'change', width: 110, render: (c: string) => <Tag>{c}</Tag> },
+    {
+      title: t('migrationRisk.col.path'),
+      key: 'path',
+      render: (_, f) => (f.change === 'RENAMED'
+        ? <Text code>{`${f.oldPath} → ${f.newPath}`}</Text>
+        : <Text code>{f.newPath ?? f.oldPath}</Text>),
+    },
+    { title: t('migrationRisk.col.fileKind'), dataIndex: 'kind', width: 100, render: (k: string) => <Tag>{k}</Tag> },
+    { title: t('migrationRisk.col.addedLines'), dataIndex: 'addedLines', width: 120, align: 'right' },
+    {
+      title: t('migrationRisk.col.diff'),
+      key: 'diff',
+      width: 90,
+      render: (_, f) => analysis && f.kind === 'JAVA' && (
+        <Button size="small" icon={<DiffOutlined />} target="_blank"
+          href={diffUrl(analysis.source, 'A', f.newPath ?? f.oldPath)}>A</Button>
+      ),
+    },
+  ];
+
+  const refactoringTable = (list: DetectedRefactoring[]) => (
+    <Table<DetectedRefactoring>
+      rowKey={(r) => `${r.type}|${r.description}`}
+      size="small"
+      columns={refactoringColumns}
+      dataSource={structuralOnly ? list.filter((r) => r.structural) : list}
+      pagination={{ pageSize: 20, showSizeChanger: true }}
+      scroll={{ x: 1320 }}
+    />
+  );
+
+  const counts = analysis?.counts;
+  const items = analysis?.items ?? [];
+  const reviewCount = (s: string) => items.filter((i) => i.review?.status === s).length;
+  const source = analysis?.source;
+
+  return (
+    <PageContainer title={t('migrationRisk.title')} subTitle={t('migrationRisk.subtitle')}>
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <ProCard bordered>
+          <AnalysisForm form={form} settings={settings} releases={releases} loading={loading}
+            onAnalyze={(v) => void analyze(v)} onDemo={(mode) => runDemo(mode)} />
+        </ProCard>
+
+        <ProCard bordered title={t('migrationRisk.saved.title')} collapsible defaultCollapsed={releases.length === 0}>
+          <Space wrap>
+            <Select<number>
+              style={{ minWidth: 260 }}
+              placeholder={t('migrationRisk.saved.release')}
+              value={openRelease ?? undefined}
+              onChange={setOpenRelease}
+              allowClear
+              onClear={() => setOpenRelease(null)}
+              options={releases.map((r) => ({
+                value: r.id,
+                label: `${r.name} (${t('migrationRisk.saved.runs', { count: r.analysisCount })})`,
+              }))}
+            />
+            <Select<number>
+              style={{ minWidth: 420 }}
+              placeholder={t('migrationRisk.saved.run')}
+              disabled={runs.length === 0}
+              onChange={(id) => void openRun(id)}
+              options={runs.map((a) => ({ value: a.id, label: runLabel(a, t) }))}
+            />
+            {openRelease != null && runs.length > 0 && (
+              <Button icon={<FolderOpenOutlined />} onClick={() => void openRun(runs[0].id)}>
+                {t('migrationRisk.saved.openLatest')}
+              </Button>
+            )}
+          </Space>
+        </ProCard>
+
+        {error && <Alert type="error" showIcon message={t('migrationRisk.failed')} description={error} />}
+
+        {analysis && analysis.warnings.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message={t('migrationRisk.warnings', { count: analysis.warnings.length })}
+            description={<ul style={{ margin: 0, paddingInlineStart: 18 }}>{analysis.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
+          />
+        )}
+
+        {analysis && source && (
+          <ProCard bordered>
+            <Descriptions size="small" column={{ xs: 1, md: 2, xl: 3 }}>
+              {analysis.release ? (
+                <Descriptions.Item label={t('migrationRisk.release')}>
+                  <Tag color="blue">{analysis.release}</Tag><Text type="secondary">#{analysis.analysisId}</Text>
+                </Descriptions.Item>
+              ) : (
+                <Descriptions.Item label={t('migrationRisk.release')}>
+                  <Tooltip title={t('migrationRisk.saved.notSavedHint')}><Tag>{t('migrationRisk.saved.notSaved')}</Tag></Tooltip>
+                </Descriptions.Item>
+              )}
+              {source.mode === 'GIT' && source.baseline && source.repo1Head && source.repo2Head ? (
+                <>
+                  <Descriptions.Item label={t('migrationRisk.baseline')}><Commit commit={source.baseline} /></Descriptions.Item>
+                  <Descriptions.Item label={t('migrationRisk.repo1Branch')}><Commit commit={source.repo1Head} /></Descriptions.Item>
+                  <Descriptions.Item label={t('migrationRisk.repo2Branch')}><Commit commit={source.repo2Head} /></Descriptions.Item>
+                </>
+              ) : (
+                <>
+                  <Descriptions.Item label={t('migrationRisk.folder.baseline')}><Text code>{source.baselinePath}</Text></Descriptions.Item>
+                  <Descriptions.Item label={t('migrationRisk.folder.repo1')}><Text code>{source.repo1Path}</Text></Descriptions.Item>
+                  <Descriptions.Item label={t('migrationRisk.folder.repo2')}><Text code>{source.repo2Path}</Text></Descriptions.Item>
+                </>
+              )}
+              <Descriptions.Item label={t('migrationRisk.analyzedAt')}>
+                {new Date(analysis.analyzedAt).toLocaleString()}
+                <Text type="secondary">&nbsp;({t('migrationRisk.duration', { ms: analysis.durationMillis })})</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('migrationRisk.diff.title')}>
+                <Space size={4}>
+                  <Button size="small" icon={<DiffOutlined />} href={diffUrl(source, 'A')} target="_blank">{t('migrationRisk.diff.openA')}</Button>
+                  <Button size="small" icon={<DiffOutlined />} href={diffUrl(source, 'B')} target="_blank">{t('migrationRisk.diff.openB')}</Button>
+                </Space>
+              </Descriptions.Item>
+            </Descriptions>
+          </ProCard>
+        )}
+
+        <Collapse
+          items={[{
+            key: 'rules',
+            label: t('migrationRisk.rules.title'),
+            children: (
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Paragraph type="secondary" style={{ margin: 0 }}>{t('migrationRisk.rules.method')}</Paragraph>
+                <Table<RiskCategory>
+                  rowKey={(c) => c}
+                  size="small"
+                  pagination={false}
+                  dataSource={[...RISK_CATEGORIES]}
+                  columns={[
+                    {
+                      title: t('migrationRisk.col.level'),
+                      key: 'level',
+                      width: 110,
+                      render: (_, c) => {
+                        const level = CATEGORY_LEVEL[c];
+                        return level
+                          ? <Tag color={LEVEL_COLOR[level]}>{t(`migrationRisk.level.${level}` as MessageKey)}</Tag>
+                          : <Text type="secondary">{t('migrationRisk.rules.lowOrMedium')}</Text>;
+                      },
+                    },
+                    { title: t('migrationRisk.col.category'), key: 'category', width: 200, render: (_, c) => categoryLabel(c) },
+                    { title: t('migrationRisk.rules.meaning'), key: 'meaning', render: (_, c) => t(`migrationRisk.categoryHint.${c}` as MessageKey) },
+                  ]}
+                />
+              </Space>
+            ),
+          }]}
+        />
+
+        {counts && (
+          <Row gutter={16}>
+            {([
+              ['total', counts.total, t('migrationRisk.stat.total')],
+              ['HIGH', counts.high, t('migrationRisk.level.HIGH')],
+              ['MEDIUM', counts.medium, t('migrationRisk.level.MEDIUM')],
+              ['LOW', counts.low, t('migrationRisk.level.LOW')],
+              ...(analysis?.analysisId != null ? [
+                ['PENDING', reviewCount('PENDING'), t('migrationRisk.review.PENDING')],
+                ['SAFE', reviewCount('SAFE'), t('migrationRisk.review.SAFE')],
+                ['ATTENTION', reviewCount('ATTENTION'), t('migrationRisk.review.ATTENTION')],
+              ] : []),
+            ] as [string, number, string][]).map(([key, value, title]) => (
+              <Col key={key} xs={12} md={6} xl={analysis?.analysisId != null ? 3 : 6}>
+                <ProCard bordered><Statistic title={title} value={value} /></ProCard>
+              </Col>
+            ))}
+          </Row>
+        )}
+
+        <ProCard bordered>
+          {analysis || loading ? (
+            <Tabs
+              items={[
+                {
+                  key: 'items',
+                  label: t('migrationRisk.tab.items', { count: items.length }),
+                  children: <ItemsTable analysis={analysis} loading={loading} onReviewed={onReviewed} />,
+                },
+                {
+                  key: 'upstream',
+                  label: t('migrationRisk.tab.upstream', {
+                    count: (analysis?.upstreamRefactorings ?? []).filter((r) => !structuralOnly || r.structural).length,
+                  }),
+                  children: refactoringTable(analysis?.upstreamRefactorings ?? []),
+                },
+                {
+                  key: 'migration',
+                  label: t('migrationRisk.tab.migration', {
+                    count: (analysis?.migrationRefactorings ?? []).filter((r) => !structuralOnly || r.structural).length,
+                  }),
+                  children: refactoringTable(analysis?.migrationRefactorings ?? []),
+                },
+                {
+                  key: 'files',
+                  label: t('migrationRisk.tab.files', { count: analysis?.changedFiles.length ?? 0 }),
+                  children: (
+                    <Table<ChangedFileView>
+                      rowKey={(f) => `${f.change}|${f.oldPath}|${f.newPath}`}
+                      size="small"
+                      columns={fileColumns}
+                      dataSource={analysis?.changedFiles ?? []}
+                      pagination={{ pageSize: 50, showSizeChanger: true }}
+                    />
+                  ),
+                },
+              ]}
+              tabBarExtraContent={(
+                <Tooltip title={t('migrationRisk.structuralOnlyHint')}>
+                  <Space size={6}>
+                    <Switch size="small" checked={structuralOnly} onChange={setStructuralOnly} />
+                    <Text type="secondary">{t('migrationRisk.structuralOnly')}</Text>
+                  </Space>
+                </Tooltip>
+              )}
+            />
+          ) : (
+            <Empty description={t('migrationRisk.empty')} />
+          )}
+        </ProCard>
+      </Space>
+    </PageContainer>
+  );
+}
