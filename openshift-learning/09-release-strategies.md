@@ -80,6 +80,113 @@ oc rollout undo deploy/veracode                  # 回到上一个版本（手�
 - [ ] 蓝绿切换后，`/actuator/env/HOSTNAME` 立即全部变成 green 的 Pod
 - [ ] 能解释：GitOps 模式下 `oc rollout undo` 为什么「回滚了但又自己变回去了」
 
+## 深入练习：看清机制
+
+格式：**要弄清的问题 → 命令 → 观察 / 解释**。
+
+### 实验 1：maxSurge / maxUnavailable 的算术
+
+```bash
+oc scale deploy/veracode --replicas=4
+oc get deploy veracode -o jsonpath='{.spec.strategy}'; echo         # 默认 25% / 25%
+oc get rs -l app=veracode -w &
+oc set env deploy/veracode RELEASE_MARK=$(date +%s)
+oc rollout status deploy/veracode; kill %1
+```
+
+**解释**：
+- 4 个副本时：`maxSurge = ceil(4 × 25%) = 1`（最多 5 个 Pod），`maxUnavailable = floor(4 × 25%) = 1`（至少 3 个可用）。
+  注意一个向上取整、一个向下取整。
+- `-w` 的输出里能看到新 RS 每次 +1，旧 RS 每次 −1，交替进行，总数一直在 3–5 之间。
+- 把策略改成 `maxSurge: 1, maxUnavailable: 0` 再发布一次：旧 RS 必须等新 Pod **就绪**后才能缩容。
+  所以 readinessProbe 不只决定流量，也决定滚动发布的节奏。
+
+### 实验 2：滚动发布卡住时会发生什么
+
+```bash
+oc patch deploy veracode -p '{"spec":{"progressDeadlineSeconds":60}}'
+oc set image deploy/veracode veracode=image-registry.openshift-image-registry.svc:5000/creed-lab/veracode:nope
+sleep 75; oc get deploy veracode -o jsonpath='{.status.conditions[?(@.type=="Progressing")]}' | python3 -m json.tool
+oc get pod -l app=veracode                   # 老 Pod 依然在提供服务
+oc rollout undo deploy/veracode
+```
+
+**观察**：
+- `Progressing` 条件变成 `False`，原因是 `ProgressDeadlineExceeded`。
+- 但 **Deployment 不会自动回滚**，它只是把状态标记出来，旧 Pod 继续提供服务。`maxUnavailable` 保证了这一点。
+- 自动回滚要靠上层工具：CI 根据 `oc rollout status` 的退出码执行 undo，或者使用 Argo Rollouts。
+
+### 实验 3：优雅停机的时间线
+
+```bash
+POD=$(oc get pod -l app=veracode -o name | head -1)
+oc logs -f $POD --timestamps &
+date -u +%T; oc delete $POD --wait=false
+sleep 20; kill %1
+```
+
+**观察**：
+- 先是 preStop 的 sleep（如果配置了）：这几秒里日志没有任何输出。
+- 然后 JVM 收到 SIGTERM，Spring 打印 `Commencing graceful shutdown. Waiting for active requests to complete`，
+  接着是 `Graceful shutdown complete`，然后进程退出。
+- 把时间戳对齐：**delete → preStop 结束 → SIGTERM → 停机完成** 这几段时间加起来，必须小于 `terminationGracePeriodSeconds`。
+
+**反向验证**：宽限期小于 preStop 时间。
+
+```bash
+oc patch deploy veracode -p '{"spec":{"template":{"spec":{"terminationGracePeriodSeconds":3}}}}'
+# preStop 是 sleep 5：宽限期到了，进程直接被 SIGKILL，日志里不会出现 Graceful shutdown complete
+oc patch deploy veracode -p '{"spec":{"template":{"spec":{"terminationGracePeriodSeconds":30}}}}'
+```
+
+> 新版本 Kubernetes 支持原生的 `lifecycle.preStop.sleep: {seconds: 5}`，不再要求镜像里有 `sleep` 命令。
+> 用 `oc explain deployment.spec.template.spec.containers.lifecycle.preStop` 确认你的集群支持哪种写法。
+
+### 实验 4：为什么需要 preStop
+
+把实验 3 和第 05 章实验 4 对照起来看。删除 Pod 时，有两件事**同时**开始：
+
+1. kubelet 执行 preStop，然后给进程发 SIGTERM；
+2. EndpointSlice 把这个端点标记为终止中，再由路由器和 OVN 各自更新自己的后端列表。
+
+第 2 件事要经过好几个组件，需要时间。没有 preStop 的话，应用可能在路由器还没摘掉它时就停止接受新连接了，
+这段间隙里进来的请求会失败。preStop 的 sleep 并不是让应用做什么，**而是让应用晚一点开始停机**，等流量先切走。
+
+用本章步骤 1 的压测循环对比有无 preStop 的情况：在 4 副本、频繁发布的条件下，没有 preStop 时偶尔会出现 502/503。
+
+### 实验 5：Recreate 的停机窗口
+
+```bash
+oc patch deploy veracode --type=merge -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+# 终端 A 跑步骤 1 的压测循环；终端 B：
+oc set env deploy/veracode RELEASE_MARK=$(date +%s)
+oc patch deploy veracode --type=merge -p '{"spec":{"strategy":{"type":"RollingUpdate"}}}'
+```
+
+**观察**：终端 A 出现一段连续的 503，持续时间大约等于「旧 Pod 停机 + 新 Pod 启动 + 就绪」。这就是 Recreate 的代价，换来的是「新旧版本永不同时运行」。
+
+### 实验 6：回滚的本质是「换一个旧的 Pod 模板」
+
+```bash
+oc rollout history deploy/veracode
+oc rollout history deploy/veracode --revision=2          # 看那个版本的模板
+oc get rs -l app=veracode -o custom-columns=NAME:.metadata.name,REV:.metadata.annotations.deployment\\.kubernetes\\.io/revision,DESIRED:.spec.replicas
+oc rollout undo deploy/veracode --to-revision=2
+oc get rs -l app=veracode -o custom-columns=NAME:.metadata.name,REV:.metadata.annotations.deployment\\.kubernetes\\.io/revision,DESIRED:.spec.replicas
+```
+
+**观察**：
+- 每个版本就是一个保留下来的 ReplicaSet，`revision` 写在它的注解里。
+- 回滚后，被选中的那个旧 RS 的 revision 号变成了**最新**的号：回滚本身也是一次新的发布。
+- 保留多少个版本由 `revisionHistoryLimit` 决定（默认 10），超出的旧 RS 会被清理，也就回滚不到了。
+
+### 检查点（机制）
+
+- [ ] 算出了 4 副本时 maxSurge 和 maxUnavailable 的实际值，并在 `-w` 输出里验证
+- [ ] 看到 `ProgressDeadlineExceeded`，并确认 Deployment 没有自动回滚
+- [ ] 对齐了优雅停机各阶段的时间戳，复现了宽限期不足时的 SIGKILL
+- [ ] 能用「两件事同时开始」解释 preStop 存在的理由
+
 ## 常见坑
 
 - **只依赖默认的优雅停机，但 Pod 的终止宽限期太短**：`terminationGracePeriodSeconds` 默认 30s，

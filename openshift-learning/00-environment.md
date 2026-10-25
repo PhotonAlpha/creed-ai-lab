@@ -80,6 +80,95 @@ crc delete     # 删除虚拟机，所有数据清空（cache 里的 bundle 保�
 - [ ] `oc get clusterversion` 显示版本 4.22.14
 - [ ] （开启了监控时）`oc adm top nodes` 有数据
 
+## 深入练习：看清机制
+
+前面的步骤只回答「能不能用」，这一节回答「它是怎么工作的」。每个实验的格式都是：**要弄清的问题 → 命令 → 观察到什么、为什么**。
+实验结果没有在本机集群上逐条跑过，以实际输出为准。如果和描述不一致，正好说明版本行为变了，把差异记到检查点里。
+
+### 实验 1：`oc login` 之后，本机到底存了什么
+
+**要弄清的问题**：`oc` 怎么知道连哪个集群、用什么身份？
+
+```bash
+oc config get-contexts                # 每次 login 都会新增一个 context：<project>/<server>/<user>
+oc config view --minify               # 当前 context 用到的 cluster、user；token 显示为 REDACTED
+oc whoami -t | cut -c1-12; echo ...   # developer 的 token 前缀（sha256~...），它就是每个请求的 Bearer 头
+oc get pods -v=8 2>&1 | grep -E 'GET https|Authorization' | head -3
+```
+
+**观察**：
+- `-v=8` 能看到真实的 HTTP 请求：`GET https://api.crc.testing:6443/api/v1/namespaces/creed-lab/pods`，
+  请求头里带着 `Authorization: Bearer <masked>`。
+- **`oc` 只是一个 REST 客户端**，所有命令最后都会变成对 API Server 的 HTTP 调用。
+  后面章节遇到「命令做了什么」的疑问，都可以用 `-v=8` 自己查。
+
+### 实验 2：developer 和 kubeadmin 这两个身份是从哪来的
+
+**要弄清的问题**：OpenShift 的用户不是 Kubernetes 对象吗？密码存在哪？
+
+```bash
+oc login -u kubeadmin https://api.crc.testing:6443
+oc get oauth cluster -o jsonpath='{.spec.identityProviders[*].type}'; echo   # CRC 用 HTPasswd
+oc get users; oc get identities                                              # 登录过的用户才会出现
+oc get secret -n openshift-config | grep -i htpass                           # 密码哈希存在这个 Secret 里
+```
+
+**观察**：
+- 密码不在 User 对象里，而在 OAuth 配置引用的 htpasswd Secret 里。
+- 用户第一次登录时，OAuth Server 才创建 `User` 和 `Identity` 两个对象，并把它们关联起来。
+- `kubeadmin` 是一个特殊的临时管理员（`kube-system/kubeadmin` Secret），生产集群配好正式的身份源后应该删掉它。
+
+### 实验 3：集群是由哪些「组件」组成的，它们健康吗
+
+```bash
+oc get clusteroperators                 # 每一行是一个平台组件：AVAILABLE / PROGRESSING / DEGRADED
+oc get clusterversion -o jsonpath='{.items[0].status.desired.version}'; echo
+oc api-resources --api-group=route.openshift.io       # OpenShift 加进来的 API 组之一
+oc api-resources | wc -l                              # 和原生 Kubernetes 对比，多出很多 *.openshift.io
+```
+
+**观察**：
+- OpenShift 的每个平台能力（ingress、DNS、镜像仓库、OAuth、监控……）都由一个 Operator 管理，`clusteroperators` 就是它们的状态汇总。
+- CRC 为了省资源关掉了一部分组件（例如监控）。打开 `enable-cluster-monitoring` 后再看一次，`monitoring` 的状态会变化。
+
+### 实验 4：进到唯一的节点里看一看（kubeadmin）
+
+**要弄清的问题**：Pod 最终是被谁运行起来的？
+
+```bash
+NODE=$(oc get nodes -o name)
+oc debug $NODE -- chroot /host sh -c '
+  crictl ps | head -5;                       # CRI-O 管理的容器，和 oc get pod -A 一一对应
+  ls /etc/kubernetes/manifests/;             # 静态 Pod：etcd、kube-apiserver 等控制面组件
+  systemctl is-active kubelet crio'
+```
+
+**观察**：
+- `oc debug node/...` 在节点上起一个特权 Pod，`chroot /host` 后就进入了 RHCOS 主机的文件系统。
+- 链路是 **kubelet → CRI-O → runc**。控制面组件本身也是 Pod，而且是由 kubelet 直接读本地文件启动的「静态 Pod」。
+- 后面第 10 章排查「容器起不来」时，会再用到这个入口。
+
+### 实验 5：`*.apps-crc.testing` 是怎么解析到本机虚拟机的
+
+```bash
+crc ip                                       # 虚拟机地址（user 网络模式下可能是 127.0.0.1）
+ls /etc/resolver/ 2>/dev/null && cat /etc/resolver/testing 2>/dev/null
+grep -i crc.testing /etc/hosts
+dscacheutil -q host -a name hello-creed-lab.apps-crc.testing
+```
+
+**观察**：
+- macOS 上 `crc setup` 用两种方式之一让 `*.crc.testing` 可解析：`/etc/resolver/testing` 指向虚拟机里的 DNS，或者往 `/etc/hosts` 写条目。
+  看看你的机器用的是哪一种。
+- `/etc/hosts` 不支持通配符。如果是这种方式，新 Route 的主机名能不能解析，就取决于 CRC 有没有替你加条目。这也是 VPN 一开、DNS 就失效的根源。
+
+### 检查点（机制）
+
+- [ ] 用 `-v=8` 找到了 `oc get pods` 对应的 REST 路径
+- [ ] 能说出 developer 的密码存在哪个 Secret 里，以及 User/Identity 是什么时候创建的
+- [ ] 在节点上用 `crictl ps` 找到了自己项目里的一个容器
+- [ ] 能说出本机解析 `*.apps-crc.testing` 用的是 resolver 还是 hosts
+
 ## 常见坑
 
 - **`oc: command not found`**：没有执行 `eval $(crc oc-env)`。也可以单独安装与集群版本匹配的 `oc`。

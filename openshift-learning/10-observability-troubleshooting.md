@@ -94,6 +94,112 @@ oc apply -f openshift-learning/manifests/veracode/base/servicemonitor.yaml
 - [ ] 在 Console 里查到了按 Pod 区分的请求速率；第 06 章 roundrobin 实验时，三个 Pod 的速率曲线基本一致
 - [ ] 能区分 `oc logs` 和 `oc logs --previous` 分别在什么时候用
 
+## 深入练习：看清机制
+
+格式：**要弄清的问题 → 命令 → 观察 / 解释**。
+
+### 实验 1：`oc debug` 到底创建了什么
+
+```bash
+oc debug deploy/veracode --keep-labels=false -- sleep 600 &
+sleep 10; DBG=$(oc get pod -o name | grep debug)
+diff <(oc get deploy veracode -o jsonpath='{.spec.template.spec.containers[0]}' | python3 -m json.tool) \
+     <(oc get $DBG -o jsonpath='{.spec.containers[0]}' | python3 -m json.tool)
+oc get $DBG --show-labels
+kill %1
+```
+
+**观察**：
+- 调试 Pod 复制了镜像、环境变量和卷，但**去掉了探针**，命令换成了你指定的命令，并且**不带原来的 label**。
+- 所以它不会被 Service 选中，不会接到流量，也不会因为探针失败被重启。
+- 这正是排查「启动即崩溃」时需要的：进入一个和出事 Pod 环境完全一样、但不会自己跑起来的容器，手动执行启动命令，看它报什么错。
+
+### 实验 2：退出码就是第一条线索
+
+```bash
+oc get pod -l app=veracode -o jsonpath='{range .items[*]}{.metadata.name}{"  "}{.status.containerStatuses[0].lastState.terminated.exitCode}{"  "}{.status.containerStatuses[0].lastState.terminated.reason}{"\n"}{end}'
+```
+
+| 退出码 | 含义 | 常见原因 |
+|---|---|---|
+| 0 | 正常退出 | 进程跑完了。对 Web 服务来说通常意味着入口命令写错了 |
+| 1 | 应用自己报错退出 | Spring 启动失败，看 `oc logs --previous` |
+| 137 | 128+9，SIGKILL | `OOMKilled`；或者优雅停机超过宽限期（第 09 章实验 3） |
+| 143 | 128+15，SIGTERM | 正常的终止流程 |
+
+用第 03 章实验 7 和第 09 章实验 3 分别制造 137，对比 `reason` 字段：前者是 `OOMKilled`，后者通常是 `Error`。退出码相同，原因完全不同。
+
+### 实验 3：日志在节点上的什么地方（kubeadmin）
+
+```bash
+POD=$(oc get pod -l app=veracode -o jsonpath='{.items[0].metadata.name}')
+NODE=$(oc get pod $POD -o jsonpath='{.spec.nodeName}')
+oc debug node/$NODE -- chroot /host sh -c "ls /var/log/pods/ | grep veracode; ls /var/log/pods/creed-lab_${POD}_*/veracode/"
+```
+
+**解释**：
+- 容器的 stdout/stderr 由 CRI-O 写到节点的 `/var/log/pods/<ns>_<pod>_<uid>/<container>/N.log`，N 是重启次数。
+- `oc logs` 读的是当前这个文件，`--previous` 读的是上一个。Pod 被删除后目录也跟着删掉，日志就没了。
+  所以生产环境需要日志收集（OpenShift Logging、Loki 等），在日志被删之前把它运走。
+- 写到 `LOGGING_FILE_PATH` 里的文件日志不在这里，`oc logs` 看不到。它在容器自己的文件系统里，容器重建后也会丢失。
+
+### 实验 4：不重启改日志级别，抓线程栈
+
+```bash
+oc port-forward deploy/veracode 18097:18097 &
+curl -s localhost:18097/actuator/loggers/com.creed.resource.veracode
+curl -s -XPOST localhost:18097/actuator/loggers/com.creed.resource.veracode -H 'Content-Type: application/json' -d '{"configuredLevel":"DEBUG"}'
+curl -s -XPOST localhost:18097/api/veracode/analysis -H 'Content-Type: application/json' -d '{}' >/dev/null
+oc logs deploy/veracode --since=30s | grep -c DEBUG
+curl -s localhost:18097/actuator/threaddump -H 'Accept: text/plain' | head -30
+oc exec deploy/veracode -- kill -3 1; oc logs deploy/veracode --since=10s | grep -m3 '"http-nio'
+kill %1
+```
+
+**解释**：
+- `/actuator/loggers` 直接修改运行中的 Logback 配置，不需要重启。这和第 03 章「配置只在启动时读一次」形成对比：
+  Spring 的少数组件提供了运行时修改接口，大部分配置没有。
+- `kill -3`（SIGQUIT）让 JVM 把线程栈打印到 stdout，所以能在 `oc logs` 里看到。这是镜像里没有 jcmd/jstack 时最可靠的办法。
+- 改的级别只在**这一个 Pod** 里生效，多副本时要逐个改，Pod 重启后也会恢复。
+
+### 实验 5：Prometheus 给指标加了哪些标签
+
+在 Console → Observe → Metrics 中分别查询：
+
+```promql
+up{namespace="creed-lab"}
+http_server_requests_seconds_count{namespace="creed-lab"}
+```
+
+**观察**：
+- 每个序列都带着 `namespace`、`pod`、`service`、`job`、`endpoint`、`instance` 这些标签，而应用自己导出的指标里**没有**它们。
+- 这些标签是 Prometheus 采集时根据 ServiceMonitor 的服务发现结果加上的：先从 Service 找到 EndpointSlice，再找到每个 Pod。
+- 对照 `/actuator/prometheus` 的原始输出，能看到应用自己带的 `application` 标签（来自 `creed-common-metrics`）。
+
+**反向验证**：把 ServiceMonitor 的 `port` 写成 `8080`（数字，而不是名字 `http`），等一两分钟，`up` 序列消失。
+`port` 字段匹配的是 Service 端口的**名字**。
+
+### 实验 6：事件不是永久保存的
+
+```bash
+oc get events --sort-by=.lastTimestamp | head -3          # 最早的一条有多久了
+oc get events -o jsonpath='{.items[0].metadata.creationTimestamp}'; echo
+```
+
+**解释**：
+- 事件是普通的 API 对象，但 API Server 会在一段时间后（默认几个小时）自动删除它们。
+- 所以「昨天晚上 Pod 重启过」这种问题，`oc get events` 是回答不了的，要靠监控里的
+  `kube_pod_container_status_restarts_total` 或者日志系统。
+- 同一个事件重复发生时只更新计数（`count`、`lastTimestamp`），不会新建对象。
+
+### 检查点（机制）
+
+- [ ] 用 diff 看出了 `oc debug` 去掉了哪些字段
+- [ ] 制造了两种退出码为 137 的情况，并用 `reason` 区分开
+- [ ] 在节点上找到了容器的日志文件，并说出 `--previous` 读的是哪个文件
+- [ ] 不重启 Pod，把日志级别改成了 DEBUG
+- [ ] 说出 `pod`、`namespace` 标签是谁加上去的
+
 ## 常见坑
 
 - **只看 `oc logs`**：容器已经重启过的话，当前日志里没有崩溃原因，要加 `--previous`。

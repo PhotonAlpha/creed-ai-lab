@@ -28,8 +28,9 @@
 openshift-learning/manifests/veracode/
 ├── Dockerfile
 ├── base/
-│   ├── kustomization.yaml       # resources: deployment.yaml, service.yaml, route.yaml
-│   ├── deployment.yaml          # 第 02、03 章的成果：探针、资源、envFrom
+│   ├── kustomization.yaml       # resources: deployment.yaml, service.yaml, route.yaml, configmap.yaml
+│   ├── deployment.yaml          # 第 02、03 章的成果：探针、资源、envFrom、ConfigMap 卷
+│   ├── configmap.yaml           # 第 03 章练习 2：veracode-app-config（挂成 /etc/veracode/config）
 │   ├── service.yaml
 │   └── route.yaml
 └── overlays/
@@ -115,6 +116,110 @@ git commit -am "ci: veracode dev -> $(params.commit)" && git push
 - [ ] 手动执行 `oc scale deploy/veracode --replicas=5 -n creed-lab-dev`，几秒后被 selfHeal 改回 Git 中的值
 - [ ] 在 Git 里删掉 Route 并推送，集群里的 Route 也被删除（prune 生效）
 - [ ] 完整跑通一次：push 代码 → 流水线 → Git 中的标签更新 → dev 环境滚动发布到新的 SHA
+
+## 深入练习：看清机制
+
+格式：**要弄清的问题 → 命令 → 观察 / 解释**。
+
+### 实验 1：Argo CD 怎么认出「这是我管的资源」
+
+```bash
+oc get deploy veracode -n creed-lab-dev -o yaml | grep -iE 'argocd|app.kubernetes.io/instance' 
+oc get cm argocd-cm -n openshift-gitops -o jsonpath='{.data.application\.resourceTrackingMethod}'; echo
+oc get argocd openshift-gitops -n openshift-gitops -o jsonpath='{.spec.resourceTrackingMethod}'; echo
+```
+
+**观察 / 解释**：
+- 同步出来的每个资源上都有一个**跟踪标记**：一个 label（`app.kubernetes.io/instance`），或者一个 annotation（`argocd.argoproj.io/tracking-id`），
+  取决于实例配置的 tracking method。
+- prune 只会删除「带着本 Application 标记、但 Git 里已经没有」的资源，手工创建的资源不会被误删。
+- 用 label 跟踪时，如果你自己的 Helm/Kustomize 也写了 `app.kubernetes.io/instance`，就会产生冲突。这是新版本默认改用 annotation 的原因之一。
+
+### 实验 2：多久能发现 Git 的变化
+
+```bash
+oc get cm argocd-cm -n openshift-gitops -o jsonpath='{.data.timeout\.reconciliation}'; echo     # 空 = 默认 180s
+# 改一下 overlays/dev 的副本数并 push，然后计时
+date; git commit -am "test: replicas" && git push
+oc get deploy veracode -n creed-lab-dev -w
+```
+
+**解释**：
+- Argo CD 默认**每 3 分钟轮询一次** Git（并带有随机抖动），所以 push 后要等几十秒到三分钟左右。
+- 生产环境给 Git 仓库配置 webhook 指向 Argo CD，可以做到秒级。CRC 收不到 GitHub 的 webhook（第 07 章同样的原因），所以这里只能等轮询。
+- 对比 selfHeal：集群里的手工修改由 Kubernetes 的 watch 实时发现，**几秒内就会被改回去**。两个方向的延迟差别很大。
+
+### 实验 3：selfHeal 和 HPA 打架
+
+```bash
+oc autoscale deploy/veracode --min=2 --max=4 --cpu-percent=70 -n creed-lab-dev
+oc get deploy veracode -n creed-lab-dev -w      # 副本数在 HPA 的值和 Git 的值之间来回跳
+```
+
+**解释与修复**：
+- HPA 改 `spec.replicas`，Argo CD 发现与 Git 不一致就改回去，HPA 再改……两个控制器在争夺同一个字段。
+- 修复：在 Application 里声明让 Argo CD 忽略这个字段，并且 overlay 里**不要再写死 replicas**：
+
+```yaml
+spec:
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers: [/spec/replicas]
+  syncPolicy:
+    syncOptions: [RespectIgnoreDifferences=true]
+```
+
+**原则**：**一个字段只能有一个主人**。同样的冲突也会出现在 Service mesh 注入的 sidecar、Operator 写入的默认值上。
+
+### 实验 4：configMapGenerator 的哈希和滚动发布
+
+```bash
+cd openshift-learning/manifests/veracode/overlays/dev
+oc kustomize . | grep -n 'veracode-config'           # ConfigMap 自己的名字，以及 Deployment 里引用它的地方
+# 改一个 literal 的值，再渲染一次，对比哈希后缀
+oc kustomize . | grep -o 'veracode-config-[a-z0-9]*' | sort -u
+```
+
+**观察**：
+- ConfigMap 的名字变成了 `veracode-config-<哈希>`，Deployment 里 `envFrom` 引用的名字被**同步改写**。
+- 内容一变，哈希就变 → Deployment 模板变了 → 滚动发布。这是对第 03 章「改 ConfigMap 不会重启 Pod」最干净的解决方案。
+- 第 03 章练习 2 的 `veracode-app-config`（文件形式）也可以改成 `configMapGenerator` 的 `files:`，同样能获得这个效果。
+- 旧的 ConfigMap 会留在集群里，直到 prune 清理掉它。这在回滚时反而有用：旧的 ReplicaSet 引用的还是旧名字。
+
+### 实验 5：同步顺序——sync wave
+
+```yaml
+# 给 ConfigMap 加注解，让它先于 Deployment 创建
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+```
+
+**解释**：
+- 默认情况下，Argo CD 在同一轮同步里按资源类型排序（Namespace → ConfigMap/Secret → Deployment ……）。
+- 需要更明确的顺序时用 sync wave，数字小的先执行，每一波都等前一波健康之后才继续。
+- 数据库迁移之类「必须先跑完」的事情，用 `PreSync` hook。
+
+### 实验 6：健康状态是怎么算的
+
+```bash
+oc set probe deploy/veracode --readiness --get-url=http://:18097/nope -n creed-lab-dev
+# Argo CD 界面：veracode-dev 从 Healthy 变成 Progressing，超过 progressDeadlineSeconds（默认 600s）后变成 Degraded
+oc get deploy veracode -n creed-lab-dev -o jsonpath='{.status.conditions}' | python3 -m json.tool
+```
+
+**解释**：
+- 这次手工修改会被 selfHeal 改回去。如果想多观察一会儿，先在 Application 上暂停自动同步。
+- Argo CD 对 Deployment 的健康判断依据就是 Deployment 自己的 `status.conditions`（`Progressing`、`Available`），
+  它没有发明新标准。这和 `oc rollout status` 用的是同一份数据。
+
+### 检查点（机制）
+
+- [ ] 找到了资源上的 Argo CD 跟踪标记，并说出 prune 依据的是它
+- [ ] 测出 push 到同步的实际延迟，并和 selfHeal 的延迟对比
+- [ ] 复现并修好了 HPA 与 selfHeal 的冲突
+- [ ] 看到 `configMapGenerator` 的哈希名被改写进 Deployment
 
 ## 常见坑
 

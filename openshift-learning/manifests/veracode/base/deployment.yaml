@@ -17,3 +17,13 @@ spec:
           ports:
             - containerPort: 18097
               name: http
+          # 第 03 章练习 2：ConfigMap 挂成目录（不要用 subPath，否则 ConfigMap 更新永远到不了 Pod）
+          volumeMounts:
+            - name: app-config
+              mountPath: /etc/veracode/config
+              readOnly: true
+      volumes:
+        - name: app-config
+          configMap:
+            name: veracode-app-config
+            optional: true        # ConfigMap 不存在时 Pod 照样启动，应用用打包的默认值

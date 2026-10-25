@@ -172,6 +172,110 @@ curl -sk -XPOST https://$HOST/api/veracode/analysis -H 'Content-Type: applicatio
 - [ ] 通过 Route 调 `/api/veracode/analysis`，得到 `counts.total = 10`
 - [ ] 能说出：没设置 `LOGGING_FILE_PATH` 时会怎样，并实际验证一次（去掉这个变量后重新部署，看日志）
 
+## 深入练习：看清机制
+
+格式：**要弄清的问题 → 命令 → 观察 / 解释**。
+
+### 实验 1：镜像里到底写了什么，容器启动时实际跑的是什么命令
+
+```bash
+# 镜像的元数据：USER、ENV、Entrypoint/Cmd、WorkingDir（来自 ImageStreamTag，不需要本机 docker）
+oc get istag veracode:latest -o jsonpath='{.image.dockerImageMetadata.Config}' | python3 -m json.tool
+
+# 运行中的 1 号进程：run-java.sh 最终拼出来的 java 命令行
+oc exec deploy/veracode -- sh -c 'tr "\0" " " < /proc/1/cmdline; echo'
+oc exec deploy/veracode -- sh -c 'grep -E "^(Uid|Gid|Groups)" /proc/1/status'
+```
+
+**观察**：
+- 镜像的 `User` 是 `185`，但 `/proc/1/status` 里的 Uid 是项目区间里的随机值，Gid 是 0。
+- 1 号进程的命令行里能看到 `-XX:MaxRAMPercentage=75`（来自 `JAVA_OPTS_APPEND`），以及基础镜像脚本自己加的其他 JVM 参数。
+  **这是调 JVM 参数时唯一可信的依据**，不要只看 Dockerfile。
+- 1 号进程就是 java：脚本最后用 `exec` 替换了自己，所以 SIGTERM 会直接发给 JVM。第 09 章优雅停机依赖这一点。
+
+### 实验 2：「GID 0 + 组可写」这条规则，亲手打破一次
+
+**要弄清的问题**：为什么写目录要 `chgrp 0 && chmod g=u`，只 `chown 185` 不行？
+
+```bash
+oc exec deploy/veracode -- sh -c 'id; ls -ld /deployments /tmp; touch /deployments/probe && echo writable || echo read-only'
+# 把日志目录指到 /deployments 下，看应用会不会启动失败
+oc set env deploy/veracode LOGGING_FILE_PATH=/deployments/logs
+oc logs -f deploy/veracode | grep -iE 'logs|denied|FileNotFound' | head
+oc set env deploy/veracode LOGGING_FILE_PATH=/tmp/logs        # 恢复
+```
+
+**观察 / 解释**：
+- 看 `/deployments` 的属主、属组和权限位，再对照 `id` 的输出，判断随机 UID 是靠「属主」还是「属组 0」才有（或没有）写权限。
+- 随机 UID 永远不会是属主，所以**只有属组权限有意义**。
+- 如果自己写的 Dockerfile 要建可写目录，标准写法是：
+  `RUN mkdir -p /app/data && chgrp -R 0 /app/data && chmod -R g=u /app/data`。
+
+### 实验 3：每次改 Pod 模板都会生成新的 ReplicaSet
+
+```bash
+oc get rs -l app=veracode
+oc set env deploy/veracode DEMO_MARK=1
+oc get rs -l app=veracode             # 多了一个 RS，旧 RS 的副本数降到 0，但 RS 本身保留着
+oc rollout restart deploy/veracode
+oc get deploy veracode -o jsonpath='{.spec.template.metadata.annotations}'; echo   # kubectl.kubernetes.io/restartedAt
+oc set env deploy/veracode DEMO_MARK-
+```
+
+**解释**：
+- `rollout restart` 并没有什么特殊的「重启」接口，它只是往 Pod 模板里写了一个带时间戳的注解。
+- 模板变了，Deployment 控制器就照常滚动一次。
+- 保留下来的旧 RS 就是 `rollout undo` 能回滚的版本（第 09 章）。
+
+### 实验 4：`:latest` 和 imagePullPolicy
+
+```bash
+oc get deploy veracode -o jsonpath='{.spec.template.spec.containers[0].imagePullPolicy}'; echo   # Always
+oc get pod -l app=veracode -o jsonpath='{.items[0].status.containerStatuses[0].imageID}'; echo   # 实际运行的 digest
+```
+
+**解释**：
+- 镜像标签是 `:latest`、又没写 `imagePullPolicy` 时，默认值是 `Always`，每次启动 Pod 都会问仓库「latest 现在指向哪个 digest」。
+- 所以同一个 Deployment 下的两个 Pod，**可能跑着不同的镜像**：一个是旧 latest，一个是新 latest。
+- 把标签换成 digest（`@sha256:...`）或 Git SHA（第 07 章），这个问题就消失了。
+
+### 实验 5：端口名这条链断了会怎样
+
+```bash
+oc patch deploy veracode --type=json -p '[{"op":"replace","path":"/spec/template/spec/containers/0/ports/0/name","value":"web"}]'
+oc rollout status deploy/veracode
+oc get endpointslices -l kubernetes.io/service-name=veracode -o yaml | grep -A3 -E '^  ports:|endpoints:'
+curl -sk -o /dev/null -w '%{http_code}\n' https://$HOST/api/veracode/settings     # 503
+oc patch deploy veracode --type=json -p '[{"op":"replace","path":"/spec/template/spec/containers/0/ports/0/name","value":"http"}]'
+```
+
+**观察**：
+- Pod 是 Running 且就绪的，但 Service 的 `targetPort: http` 在新 Pod 上找不到同名端口。
+- 这个 Pod 可能仍然出现在某个 EndpointSlice 里，但那个切片的 `ports` 是空的。端点有了，却没有端口可连，所以不会有流量发给它。
+- 路由器没有可用的后端，返回 503。
+- **Pod 健康 ≠ 能接到流量**。排查 503 要顺着链路逐跳检查，正是本章开头那张表。
+
+### 实验 6：Route 的准入状态，以及主机名冲突
+
+```bash
+oc get route veracode -o jsonpath='{.status.ingress[0].conditions}'; echo        # Admitted=True
+oc create route edge veracode-dup --service=veracode --hostname=$HOST
+oc get route veracode-dup -o jsonpath='{.status.ingress[0].conditions[0].reason}'; echo   # HostAlreadyClaimed
+oc delete route veracode-dup
+```
+
+**解释**：
+- Route 创建成功（API 返回 201）不等于路由器接受了它。路由器自己再做一次「准入」，结果写在 `status.ingress` 里。
+- 同一个主机名默认归**最早创建的那个 Route**（不同命名空间之间的规则由 IngressController 的 `namespaceOwnership` 控制）。
+- 所以 Route 不生效时，先看 `status`，再看 HAProxy。
+
+### 检查点（机制）
+
+- [ ] 从 `/proc/1/cmdline` 里读出了实际生效的 JVM 参数
+- [ ] 能解释为什么随机 UID 只能靠「属组 0」获得写权限
+- [ ] 能说出 `rollout restart` 实际修改了 Deployment 的哪个字段
+- [ ] 复现了「Pod 就绪但 Route 503」，并说出原因
+
 ## 常见坑
 
 - **`no main manifest attribute`**：jar 不是可执行 jar，回到第 1 步，确认执行了 `spring-boot:repackage`。

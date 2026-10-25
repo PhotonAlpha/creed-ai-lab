@@ -1,0 +1,20 @@
+# 第 03 章练习 2：只写要覆盖的键，其余取镜像里打包的 application.yml。
+# 应用启动时会读取 /etc/veracode/config/ 下的 application.yml 和 application-<profile>.yml
+# （默认目录写在 CreedResourceVeracodeApplication 里，可用 CREED_VERACODE_CONFIG_DIR 改），
+# 它们的优先级高于所有打包进镜像的配置文件，但低于环境变量。
+# 修改后不会自动生效：oc rollout restart deploy/veracode。
+# 不要放密码或 token —— 那些放 Secret（练习 1）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: veracode-app-config
+  labels: { app: veracode }
+data:
+  application.yml: |
+    veracode:
+      jira:
+        issue-type: Task          # 默认 Bug
+        jql-batch-size: 20        # 默认 40
+        labels: [veracode, ocp]
+      upload:
+        max-entries: 20           # 默认 50

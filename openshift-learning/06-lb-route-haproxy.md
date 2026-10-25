@@ -106,6 +106,132 @@ oc set route-backends veracode veracode=100 veracode-v2=0
 - [ ] 关闭粘滞并使用 `roundrobin` 后，9 次请求在 3 个 Pod 上的分布是 3/3/3
 - [ ] 权重设为 90/10 时，20 次请求里 v2 出现了 1–4 次
 
+## 深入练习：看清机制
+
+格式：**要弄清的问题 → 命令 → 观察 / 解释**。实验 1、2、5 需要 kubeadmin（读路由器 Pod）。
+
+```bash
+ROUTER=$(oc -n openshift-ingress get pod -o name | head -1)
+rexec() { oc -n openshift-ingress exec $ROUTER -- "$@"; }
+```
+
+### 实验 1：路由器靠什么把一个主机名对应到 backend
+
+```bash
+rexec ls /var/lib/haproxy/conf/ | grep '\.map$'
+rexec grep -h veracode /var/lib/haproxy/conf/os_edge_reencrypt_be.map /var/lib/haproxy/conf/os_http_be.map 2>/dev/null
+rexec grep -n 'backend be_edge_http:creed-lab:veracode' /var/lib/haproxy/conf/haproxy.config
+```
+
+**观察**：
+- 路由器把 Route 翻译成两部分：
+  - **map 文件**：「主机名 + 路径 → backend 名」的映射表，按 TLS 类型分成好几个文件；
+  - **haproxy.config 里的 backend 段**：负载均衡算法、cookie、超时，以及每个 Pod 一行 `server`。
+- 前端统一接入流量后查 map，决定交给哪个 backend。
+- backend 名的格式是 `be_<类型>:<命名空间>:<route名>`，排查时用 Route 名直接 grep。
+
+### 实验 2：路由器是怎么跟上 Pod 变化的
+
+```bash
+rexec grep -c 'server pod:veracode' /var/lib/haproxy/conf/haproxy.config      # 当前 Pod 数
+oc scale deploy/veracode --replicas=4 -n creed-lab; sleep 10
+rexec grep 'server pod:veracode' /var/lib/haproxy/conf/haproxy.config | awk '{print $2, $3}'
+oc -n openshift-ingress logs $ROUTER --since=2m | grep -iE 'reload|router reloaded' | tail -3
+```
+
+**观察 / 解释**：
+- 路由器进程监听 Route、Service 和 EndpointSlice。端点一变，它就重写配置并让 HAProxy 重新加载（或通过运行时 API 动态更新 server）。
+- `server` 行里是 **Pod IP:18097**，没有 Service 的 ClusterIP。这再次证明 Route 的流量不经过 OVN 的 Service 负载均衡。
+- 改注解后「过一两秒才生效」，就是这个重写和重新加载的延迟。
+
+### 实验 3：粘滞 cookie 里存的是什么
+
+```bash
+rm -f tmp/jar; curl -sk -c tmp/jar https://$HOST/api/veracode/settings -o /dev/null
+cat tmp/jar | grep -v '^#'                                          # cookie 名和值
+rexec grep -A30 'backend be_edge_http:creed-lab:veracode' /var/lib/haproxy/conf/haproxy.config | grep -E 'cookie|server pod'
+```
+
+**观察**：
+- backend 里有一行 `cookie <名字> insert indirect nocache httponly`，每一行 `server` 末尾都带着 `cookie <值>`。
+- 你拿到的 cookie 值和其中某一行的值一模一样。
+
+**动手改 cookie，验证机制**：
+
+```bash
+OTHER=$(rexec grep -A30 'backend be_edge_http:creed-lab:veracode' /var/lib/haproxy/conf/haproxy.config | grep 'server pod' | awk '{for(i=1;i<=NF;i++) if($i=="cookie") print $(i+1)}' | tail -1)
+NAME=$(grep -v '^#' tmp/jar | awk 'NF{print $6}' | tail -1)
+for i in 1 2 3; do curl -sk -b "$NAME=$OTHER" https://$HOST/actuator/env/HOSTNAME | grep -o 'veracode-[a-z0-9-]*' | head -1; done
+```
+
+三次都落在同一个 Pod：**粘滞完全由客户端带回来的那个值决定**。删掉那个 Pod 再请求一次，
+HAProxy 发现 cookie 指向的 server 已不存在，就会重新选一个（redispatch），并下发新的 cookie。
+
+### 实验 4：三种 TLS 终止，客户端看到的证书各是哪一张
+
+先完成第 03 章练习 1（veracode 用自己的证书跑 HTTPS），再依次把 Route 换成三种终止方式：
+
+```bash
+show_cert() { openssl s_client -connect $HOST:443 -servername $HOST </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer; }
+
+# edge：路由器的默认通配证书；路由器到 Pod 是明文。Pod 已经改成 HTTPS 了，
+#       所以应用返回 400 This combination of host and port requires TLS（第 03 章练习 1 实测过同样的响应）
+oc create route edge veracode-edge --service=veracode --port=http; HOST=$(oc get route veracode-edge -o jsonpath='{.spec.host}'); show_cert
+curl -sk https://$HOST/actuator/health
+
+# reencrypt：外面还是路由器的证书，路由器再用 ca-chain.crt 校验 Pod 的证书
+oc create route reencrypt veracode-re --service=veracode --port=http \
+  --dest-ca-cert=.support/scripts/pki/ca-chain.crt
+HOST=$(oc get route veracode-re -o jsonpath='{.spec.host}'); show_cert; curl -sk https://$HOST/actuator/health
+
+# passthrough：客户端直接看到 Pod 的证书 CN=veracode
+oc create route passthrough veracode-pt --service=veracode --port=http
+HOST=$(oc get route veracode-pt -o jsonpath='{.spec.host}'); show_cert
+oc delete route veracode-edge veracode-re veracode-pt
+```
+
+**观察 / 解释**：
+- edge 和 reencrypt 显示的是 `*.apps-crc.testing` 的证书（由 ingress operator 签发）；passthrough 显示的是 `CN=veracode`，
+  而且浏览器会报主机名不匹配，因为证书的 SAN 里没有 Route 的主机名。
+- reencrypt 时，路由器会用 `destinationCACertificate` 校验后端证书，并按 **Service 的 DNS 名**
+  （`veracode.creed-lab.svc`）校验主机名。所以第 03 章签证书时 SAN 里必须有它。
+  把 `--dest-ca-cert` 换成一张无关的 CA 证书，会得到 503。
+- passthrough 下路由器只看 SNI，看不到 HTTP：cookie、路径、HTTP 头注解全部失效（见「常见坑」）。
+
+### 实验 5：路由器给请求加了哪些头
+
+veracode 没有回显请求头的接口，所以临时部署一个会回显的小服务：
+
+```bash
+oc create deployment echo --image=registry.access.redhat.com/ubi9/python-312 -- \
+  python3 -c 'import http.server as h
+class H(h.BaseHTTPRequestHandler):
+    def do_GET(s):
+        s.send_response(200); s.end_headers(); s.wfile.write(str(s.headers).encode())
+h.HTTPServer(("",8080),H).serve_forever()'
+oc expose deploy/echo --port=8080
+oc create route edge echo --service=echo
+curl -sk https://$(oc get route echo -o jsonpath='{.spec.host}')/ | grep -iE 'forwarded|x-forwarded'
+oc annotate route echo haproxy.router.openshift.io/set-forwarded-headers=never --overwrite; sleep 3
+curl -sk https://$(oc get route echo -o jsonpath='{.spec.host}')/ | grep -iE 'forwarded|x-forwarded'
+oc delete deploy/echo svc/echo route/echo
+```
+
+**观察**：
+- 默认会加上 `X-Forwarded-For`、`X-Forwarded-Host`、`X-Forwarded-Port`、`X-Forwarded-Proto: https` 和 `Forwarded`。
+- 应用拿到的「客户端 IP」实际上是路由器的 IP，真实客户端 IP 在 `X-Forwarded-For` 里。
+  Spring Boot 要配置 `server.forward-headers-strategy=native`（或 framework）才会把它当成 `request.getRemoteAddr()`，
+  生成重定向 URL 时也才会用 https。
+- 这也解释了第 05 章的说法：经过 Route 进来的流量，按源 IP 做亲和没有意义。
+
+### 检查点（机制）
+
+- [ ] 在 map 文件里找到了 veracode 主机名对应的 backend 名
+- [ ] 扩容后，haproxy.config 里的 `server` 行跟着变多，地址是 Pod IP
+- [ ] 手工伪造 cookie 值，把请求固定到了指定的 Pod
+- [ ] 三种 TLS 终止各自看到的证书和你的预期一致，并能解释 reencrypt 为什么要校验 Service 的 DNS 名
+- [ ] 看到了路由器注入的 `X-Forwarded-*` 头
+
 ## 常见坑
 
 - **粘滞只是缓解了问题，没有根治**：Pod 被重启或缩容时，粘在它上面的会话仍然会丢失。根治办法是让应用无状态，或者使用共享存储。

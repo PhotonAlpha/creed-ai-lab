@@ -84,6 +84,87 @@ oc get builds -w
 - [ ] `oc logs build/veracode-git-1` 里能看到 Maven 的输出和 `repackage`
 - [ ] 能解释：为什么 GitHub 的 webhook 在 CRC 上用不了，生产集群又需要满足什么条件
 
+## 深入练习：看清机制
+
+格式：**要弄清的问题 → 命令 → 观察 / 解释**。
+
+### 实验 1：一次 Build 在集群里是什么
+
+```bash
+oc start-build veracode --from-dir=tmp/ocp-ctx
+oc get pod -l openshift.io/build.name -w                      # 构建 Pod：veracode-N-build
+oc get build -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,DIGEST:.status.output.to.imageDigest
+oc logs build/veracode-N | head -20                           # 把 N 换成最新序号
+```
+
+**观察 / 解释**：
+- 每次 Build 就是一个普通的 Pod，名字是 `<build>-build`，用 Buildah 在里面构建镜像，然后推送到内置仓库。
+- `--from-dir` 会把目录打成 tar 包，经 API Server 传进构建 Pod。构建日志开头能看到接收源码的输出。这也是上传整个仓库会很慢的原因。
+- 构建成功后，`status.output.to.imageDigest` 记录了**推送上去的那个 digest**。之后所有「指向哪个镜像」的问题，都以 digest 为准。
+
+### 实验 2：ImageStreamTag 是一个可以移动的指针
+
+```bash
+oc describe is veracode | sed -n '/latest/,/^$/p'      # tag 历史：每次构建一条，最上面是当前
+OLD=$(oc get is veracode -o jsonpath='{.status.tags[?(@.tag=="latest")].items[1].image}')
+echo $OLD                                               # 上一次构建的 digest
+oc tag veracode@$OLD veracode:latest                    # 把指针拨回上一个镜像
+oc rollout status deploy/veracode                       # 触发器跟着滚动了：这就是一次「镜像级回滚」
+```
+
+**解释**：
+- 镜像本身不可变，`latest` 只是 ImageStream 里一个随时可以挪的名字，`oc tag` 就是挪指针。
+- 有了触发器以后，挪指针就等于发布。所以生产环境要用 RBAC 控制谁能执行 `oc tag`。
+
+### 实验 3：触发器到底改了 Deployment 的什么
+
+```bash
+oc get deploy veracode -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+oc get deploy veracode -o jsonpath='{.metadata.annotations.image\.openshift\.io/triggers}' | python3 -m json.tool
+```
+
+**观察**：
+- Deployment 里的 `image` 被改成了 `image-registry.openshift-image-registry.svc:5000/creed-lab/veracode@sha256:...`，
+  是 **digest**，而不是你写的 `:latest`。
+- 触发器控制器监听 ImageStreamTag，变化时把解析出的 digest 写回 Pod 模板，模板变了就滚动。
+- 这也顺带解决了第 02 章实验 4 的问题：所有 Pod 都钉在同一个 digest 上。
+
+### 实验 4：为什么短镜像名会 ImagePullBackOff，怎么让它能用
+
+```bash
+oc set image-lookup veracode                            # 打开 lookupPolicy.local
+oc get is veracode -o jsonpath='{.spec.lookupPolicy}'; echo
+oc run lookup-test --image=veracode:latest --restart=Never --command -- sleep 30
+oc get pod lookup-test -o jsonpath='{.spec.containers[0].image}'; echo   # 已被改写成完整地址 + digest
+oc delete pod lookup-test
+```
+
+**解释**：
+- 容器运行时只认完整的镜像地址，短名 `veracode` 默认会被当成 `docker.io/library/veracode`。
+- 打开 `lookupPolicy.local` 后，在 Pod **准入**阶段，OpenShift 会把同项目里 ImageStream 的短名改写成内置仓库的完整地址。
+  这和第 01 章 SCC 改写 securityContext 是同一个时机。
+
+### 实验 5：BuildConfig 的 ConfigChange / ImageChange 触发
+
+```bash
+oc get bc veracode -o jsonpath='{.spec.triggers}'; echo
+oc set triggers bc/veracode --from-image=openjdk-21-runtime:latest   # 需要先 oc import-image 这个基础镜像
+oc import-image openjdk-21-runtime:latest --from=registry.access.redhat.com/ubi9/openjdk-21-runtime --confirm
+oc get builds -w                                                   # 基础镜像更新时会自动重新构建
+```
+
+**解释**：
+- 形成了一条链：**基础镜像更新 → 重新构建 → 新的 veracode:latest → Deployment 滚动**，全程不需要人工操作。
+- 这条链就是「安全补丁自动生效」的实现方式，同时也是「上游一变，生产跟着变」的风险来源。
+- 用 `oc import-image --scheduled` 可以定期检查上游镜像。
+
+### 检查点（机制）
+
+- [ ] 找到了构建 Pod，并说出 `imageDigest` 记录在哪个对象的哪个字段
+- [ ] 用 `oc tag` 拨回了上一个 digest，Deployment 自动回滚
+- [ ] 看到触发器把 Deployment 的 `image` 改成了 `@sha256:` 形式
+- [ ] 能解释 `lookupPolicy.local` 是在哪个阶段改写镜像名的
+
 ## 常见坑
 
 - **多阶段构建里的 Maven 每次都重新下载依赖**：BuildConfig 没有好用的缓存机制，这是第 07 章改用 Tekton 加 PVC 的理由之一。

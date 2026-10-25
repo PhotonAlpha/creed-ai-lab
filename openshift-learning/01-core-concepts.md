@@ -73,6 +73,111 @@ oc delete all -l app=hello
 - [ ] 在 Pod 里执行 `oc rsh deploy/hello id`，能看到一个随机 UID、`gid=0(root)`
 - [ ] 在 Web Console 的 Developer → Topology 里找到同一个应用
 
+## 深入练习：看清机制
+
+格式：**要弄清的问题 → 命令 → 观察 / 解释**。先用 `oc new-app` 重新部署一次 hello，做完再删。
+
+### 实验 1：控制循环——删掉 Pod，谁把它补回来
+
+```bash
+oc get pod -l deployment=hello -w &          # 后台持续观察
+oc delete pod -l deployment=hello
+# 几秒后看到：旧 Pod Terminating，新 Pod 从 Pending → ContainerCreating → Running
+kill %1
+```
+
+**解释**：没有任何命令「重启」了 Pod。ReplicaSet 控制器一直在比较「期望 1 个」和「实际 0 个」，发现差异就创建一个新 Pod。
+**Kubernetes 的所有对象都是这样工作的**：你写期望状态，控制器不断把实际状态往期望状态推。第 08 章 Argo CD 的 selfHeal 是同一个思路，只是把期望状态放到了 Git 里。
+
+### 实验 2：ownerReferences——对象之间的父子链
+
+```bash
+RS=$(oc get rs -l deployment=hello -o name | head -1)
+oc get $RS -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}'; echo   # Deployment/hello
+oc get pod -l deployment=hello -o jsonpath='{.items[0].metadata.ownerReferences[0].kind}'; echo       # ReplicaSet
+oc get pod -l deployment=hello --show-labels      # 注意 pod-template-hash：它区分同一个 Deployment 的不同 ReplicaSet
+
+# 孤儿实验：只删 ReplicaSet，不删它的 Pod
+oc delete $RS --cascade=orphan
+oc get rs,pod -l deployment=hello
+```
+
+**观察**：
+- 删掉 RS 之后，Deployment 马上又创建了一个 RS。新 RS 的 `pod-template-hash` 和旧的一样，于是它直接「认领」了还活着的 Pod，Pod 并没有重建。
+- **认领靠的是 label selector，不是名字**。这就是第 05 章实验 3 改 label 会让 Pod 变成孤儿的原因。
+- 默认的级联删除由垃圾回收器按 ownerReferences 完成，`--cascade=orphan` 只是让它跳过这一步。
+
+### 实验 3：SCC 在 Pod 创建时改写了什么
+
+**要弄清的问题**：镜像没写 UID，YAML 也没写 securityContext，随机 UID 是谁塞进去的？
+
+```bash
+POD=$(oc get pod -l deployment=hello -o name | head -1)
+oc get $POD -o jsonpath='{.metadata.annotations.openshift\.io/scc}'; echo          # restricted-v2
+oc get $POD -o jsonpath='{.spec.containers[0].securityContext}' | python3 -m json.tool
+oc get ns creed-lab -o yaml | grep 'sa.scc'                                          # 这个项目的 UID 区间
+```
+
+**观察**：
+- Pod 的 `securityContext` 里多了 `runAsUser`、`capabilities.drop: [ALL]`、`allowPrivilegeEscalation: false`、`seccompProfile` 等字段，
+  而你的 YAML 里一个都没写。
+- `runAsUser` 是项目注解 `openshift.io/sa.scc.uid-range` 的起始值。
+- 这是 **admission（准入）阶段的改写**：API Server 在把对象存进 etcd 之前，由 SCC 准入插件按选中的 SCC 补全并校验。
+
+**反向验证**：请求一个区间之外的 UID，会被准入拒绝。
+
+```bash
+oc run uid-test --image=registry.access.redhat.com/ubi9/ubi-minimal --restart=Never \
+  --overrides='{"spec":{"securityContext":{"runAsUser":1000}}}' -- id
+oc get events --sort-by=.lastTimestamp | tail -3     # 预期看到 unable to validate against any security context constraint
+oc delete pod uid-test --ignore-not-found
+```
+
+### 实验 4：RBAC——为什么 developer 能做这些、不能做那些
+
+```bash
+oc auth can-i create deployments -n creed-lab         # yes
+oc auth can-i get nodes                               # no
+oc auth can-i --list -n creed-lab | head -20
+oc get rolebinding -n creed-lab -o wide               # new-project 给创建者绑定的 admin 角色就在这里
+```
+
+**解释**：权限 = Role/ClusterRole（能做什么）+ RoleBinding（谁、在哪个命名空间）。`admin` 是一个 ClusterRole，
+`oc new-project` 用 RoleBinding 把它限定在当前项目里。这就是「项目管理员」和「集群管理员」的区别。
+
+### 实验 5：Pod 里的 DNS 是怎么配的
+
+```bash
+oc rsh deploy/hello cat /etc/resolv.conf
+oc rsh deploy/hello getent hosts hello                       # 短名
+oc rsh deploy/hello getent hosts hello.creed-lab.svc         # 带命名空间
+oc rsh deploy/hello getent hosts kubernetes.default.svc      # 跨命名空间必须带命名空间
+```
+
+**观察**：
+- `search` 一行有 `creed-lab.svc.cluster.local svc.cluster.local cluster.local`，`options ndots:5`。
+- 所以在同一个项目里写 `hello` 就够了；跨项目要写 `hello.<ns>.svc`。
+- `ndots:5` 意味着名字里点少于 5 个时，会先逐个尝试 search 后缀。所以访问外部域名时，会先产生几次注定失败的集群内查询。
+
+### 实验 6：Ingress 会被翻译成 Route
+
+```bash
+oc create ingress hello --rule="hello-ing.apps-crc.testing/*=hello:8080"
+oc get route                                          # 多了一个名字带随机后缀的 Route
+oc get route -o jsonpath='{.items[?(@.spec.host=="hello-ing.apps-crc.testing")].metadata.ownerReferences[0].kind}'; echo   # Ingress
+oc delete ingress hello; oc get route                 # Route 跟着被回收
+```
+
+**解释**：OpenShift 的路由器只认 Route。有一个控制器负责把 Ingress 转换成 Route，并把 Ingress 设为 Route 的 owner。
+所以用 Ingress 写的清单在 OpenShift 上也能用，只是能用的特性少于 Route 注解。
+
+### 检查点（机制）
+
+- [ ] 能用「控制循环」解释实验 1，并说出它和 Argo CD selfHeal 的共同点
+- [ ] 做完孤儿实验，能解释为什么 Pod 没有重建
+- [ ] 找到了 SCC 改写进 Pod 的 `runAsUser`，并能说出它取自哪个项目注解
+- [ ] 能说出 `hello`、`hello.creed-lab.svc` 两种写法分别在什么时候可用
+
 ## 常见坑
 
 - **Docker Hub 镜像经常以 root 运行或监听 80 端口**，在 `restricted-v2` 下会 CrashLoop。

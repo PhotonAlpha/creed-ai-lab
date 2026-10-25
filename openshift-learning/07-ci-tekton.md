@@ -174,6 +174,98 @@ tkn pipelinerun logs -f --last
 - [ ] curl 模拟的 webhook 触发了一次 PipelineRun
 - [ ] 能解释 workspace、results、params 三种传值方式分别适合传什么
 
+## 深入练习：看清机制
+
+格式：**要弄清的问题 → 命令 → 观察 / 解释**。先跑完一次流水线，再拿它的运行记录做解剖。
+
+```bash
+PR=$(tkn pipelinerun list -o jsonpath='{.items[0].metadata.name}')
+```
+
+### 实验 1：一个 Task = 一个 Pod，一个 Step = 一个容器
+
+```bash
+oc get taskrun -l tekton.dev/pipelineRun=$PR
+TR_POD=$(oc get pod -l tekton.dev/pipelineRun=$PR,tekton.dev/pipelineTask=test-and-package -o name)
+oc get $TR_POD -o jsonpath='init: {.spec.initContainers[*].name}{"\n"}steps: {.spec.containers[*].name}{"\n"}'
+oc get $TR_POD -o jsonpath='{.spec.containers[0].command}{"\n"}{.spec.containers[0].args}{"\n"}'
+```
+
+**观察 / 解释**：
+- 每个 Step 都是 Pod 里的一个容器，名字是 `step-<名字>`；init 容器负责准备入口程序和脚本。
+- 容器的 `command` 不是你写的脚本，而是 **`/tekton/bin/entrypoint`**，参数里带着 `-wait_file` 和 `-post_file`。
+- Kubernetes 会**同时**启动一个 Pod 里的所有容器，Tekton 却需要按顺序执行。它的办法是：
+  每个 step 先等上一个 step 写出的文件（`/tekton/run/N/out`）出现，再开始执行自己的脚本。
+  「顺序执行」是 Tekton 自己用文件实现的，不是 Kubernetes 提供的能力。
+
+### 实验 2：results 是怎么从 Task 传出来的
+
+```bash
+oc get taskrun -l tekton.dev/pipelineRun=$PR,tekton.dev/pipelineTask=clone -o jsonpath='{.items[0].status.results}' | python3 -m json.tool
+CLONE_POD=$(oc get pod -l tekton.dev/pipelineRun=$PR,tekton.dev/pipelineTask=clone -o name)
+oc get $CLONE_POD -o jsonpath='{.status.containerStatuses[*].state.terminated.message}' | head -c 400; echo
+```
+
+**解释**：
+- step 把结果写到 `/tekton/results/<名字>`，entrypoint 在容器退出时把它放进**容器的终止消息**（termination message）。
+- 控制器从 Pod 的 status 里读出终止消息，写进 TaskRun 的 `status.results`，下游 Task 用 `$(tasks.clone.results.commit)` 引用。
+- 终止消息有大小上限（每个容器 4 KiB 左右，整个 Pod 12 KiB）。所以 results 只适合传 commit SHA、digest 这类小值，文件要走 workspace。
+
+### 实验 3：workspace 背后的 PVC 和 affinity assistant
+
+```bash
+oc get pod | grep -i affinity-assistant          # 流水线运行期间才有
+oc get pod -l tekton.dev/pipelineRun=$PR -o wide | awk '{print $1, $7}'   # 各个 Task Pod 落在哪个节点
+oc get pvc veracode-pipeline-ws -o jsonpath='{.spec.accessModes}'; echo
+```
+
+**解释**：
+- ReadWriteOnce 的 PVC 只能被**一个节点**挂载。
+- 流水线的多个 Task Pod 共用这个 PVC 时，Tekton 会先起一个 affinity assistant Pod，再让所有 Task Pod 用 Pod 亲和调度到它所在的节点上。
+- 在单节点的 CRC 上看不出区别，但在多节点集群上，这就是「为什么我的流水线 Pod 全挤在一个节点上」的答案。
+
+### 实验 4：参数替换发生在哪里
+
+```bash
+oc get taskrun -l tekton.dev/pipelineRun=$PR,tekton.dev/pipelineTask=build-image -o jsonpath='{.items[0].spec.params}' | python3 -m json.tool
+oc get taskrun -l tekton.dev/pipelineRun=$PR,tekton.dev/pipelineTask=build-image -o jsonpath='{.items[0].status.taskSpec.steps[0].script}' | head -5
+```
+
+**观察**：
+- TaskRun 的 `spec.params` 里，`IMAGE` 已经是带 commit SHA 的完整地址了。
+- `$(...)` 是 Tekton 控制器在**创建 Pod 之前**做的字符串替换，不是 shell 变量。所以 `$(params.x)` 不能写成 `${params.x}`；
+  脚本里真正的 shell 变量要写成 `$VAR`，并避开 `$(...)` 这种语法。
+
+### 实验 5：Task 是从哪里「解析」来的
+
+```bash
+oc get resolutionrequests -n creed-lab | tail -3
+oc get resolutionrequest -n creed-lab -o jsonpath='{.items[-1:].spec.params}'; echo
+```
+
+**解释**：
+- `resolver: cluster` 并不是把 Task 复制到你的项目里，而是每次运行时由解析器去 `openshift-pipelines` 命名空间读取定义，结果嵌进 TaskRun 的 `status.taskSpec`。
+- 所以 Operator 升级、更新自带的 Task 之后，**下一次运行就会用上新版本**，参数名也可能跟着变（见「常见坑」）。
+
+### 实验 6：`finally` 和失败
+
+```bash
+oc patch pipeline veracode-ci --type=json -p '[{"op":"add","path":"/spec/finally","value":[{"name":"report","taskSpec":{"steps":[{"name":"echo","image":"registry.access.redhat.com/ubi9/ubi-minimal","script":"echo pipeline status: $(tasks.status)"}]}}]}]'
+tkn pipeline start veracode-ci -w name=ws,claimName=veracode-pipeline-ws --use-param-defaults -p git-revision=does-not-exist --showlog
+```
+
+**观察**：
+- `clone` 失败，后面的 Task 都被跳过（Skipped），但 `finally` 里的 `report` 仍然执行，并打印出 `Failed`。
+- `finally` 是放通知、清理、回写状态的地方。`$(tasks.status)` 是 Tekton 提供的聚合状态变量。
+
+### 检查点（机制）
+
+- [ ] 能解释 Tekton 是怎么让同一个 Pod 里的多个容器按顺序执行的
+- [ ] 在 Pod 的终止消息里找到了 `commit` 这个 result
+- [ ] 能说出 results 和 workspace 各自的容量边界
+- [ ] 看到参数替换后的 TaskRun spec，并能解释为什么 `$(params.x)` 不是 shell 语法
+- [ ] `finally` 在主流程失败时依然执行
+
 ## 常见坑
 
 - **流水线 Pod 内存不够**：Maven 构建加上 buildah 很吃内存，CRC 内存小的时候 Pod 会 OOMKilled 或一直 Pending。回到第 00 章加内存，或者先关掉监控。
