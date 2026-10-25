@@ -51,6 +51,11 @@ migration-risk:
   max-candidates-per-name: 5
   # Folder mode reads whatever is on disk; these directory names are skipped at any depth. Build output and IDE
   # files differ between any two checkouts and would bury the real changes.
+  # Background analyses streamed over SSE (POST /analyses/jobs, GET /analyses/jobs/{id}/events).
+  jobs:
+    concurrency: ${CREED_MIGRATION_RISK_CONCURRENCY:2}
+    queue: 10
+    retention: 30m
   directory-excludes: [.git, .svn, .idea, .vscode, .gradle, target, build, out, dist, node_modules, logs, tmp]
   # Added upstream lines matching one of these are flagged HIGH (MIGRATION_API): code written against an API
   # the migration replaced. Java regex, matched per line.

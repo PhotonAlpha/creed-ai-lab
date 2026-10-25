@@ -87,12 +87,19 @@ public class JavaRiskAnalyzer {
             }
         }
 
-        pairs.forEach((oldPath, newPath) -> items.addAll(comparePair(ctx, oldPath, newPath)));
+        int total = pairs.size() + deleted.size() + added.size();
+        int done = 0;
+        for (Map.Entry<String, String> pair : pairs.entrySet()) {
+            ctx.progress().step(Progress.Stage.JAVA, done++, total, pair.getValue());
+            items.addAll(comparePair(ctx, pair.getKey(), pair.getValue()));
+        }
         for (String path : deleted) {
+            ctx.progress().step(Progress.Stage.JAVA, done++, total, path);
             ctx.structure(Side.BASELINE, path).ifPresent(s -> s.topLevelTypes()
                     .forEach(t -> deletedClass(ctx, t, path).ifPresent(items::add)));
         }
         for (String path : added) {
+            ctx.progress().step(Progress.Stage.JAVA, done++, total, path);
             ctx.structure(Side.HEAD, path).ifPresent(s -> s.topLevelTypes()
                     .forEach(t -> items.add(addedClass(ctx, t, path))));
         }

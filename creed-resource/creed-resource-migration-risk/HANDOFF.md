@@ -34,6 +34,9 @@ Other knobs: `CREED_MIGRATION_RISK_DB_URL|USER|PASSWORD`, `CREED_MIGRATION_RISK_
 | `GET /baseline-suggestion?repo1Path=&repo1Head=&repo2Path=&repo2Head=` | merge-base of the two selected heads (`MERGE_BASE`) when one object DB holds both — two clones of one origin — else `NO_SHARED_HISTORY` |
 | `POST /analyses` `{repo1Path, baseline, repo1Head?, repo2Path, repo2Head?, release?}` | git mode. `release` = save it (release created on first use); response gets `analysisId`, `release`, `items[].review` |
 | `POST /analyses/directories` `{baselinePath, repo1Path, repo2Path, release?}` | folder mode: three plain directories, no git; files as on disk (uncommitted included), `directory-excludes` skipped |
+| `POST /analyses/jobs` · `POST /analyses/directories/jobs` (same bodies) | **background** analysis: 202 `{jobId}` after a quick check of paths / revisions (a bad baseline is still an immediate 400 on its field); 503 `busy` beyond `migration-risk.jobs.concurrency` + `queue` |
+| `GET /analyses/jobs/{id}/events` | **SSE**: `stage` / `progress` (`{stage, percent, done?, total?, detail, elapsedMillis}`) then `done` or `failed` (the error body); stages replayed on every (re)connect; `:` heartbeat every 15 s |
+| `GET /analyses/jobs/{id}` · `DELETE /analyses/jobs/{id}` | status + last progress + the result (once DONE) or error; cancel (stops at the next progress report) |
 | `GET /analyses/{id}` | a saved run, items with their current review |
 | `GET /releases` · `GET /releases/{id}/analyses` | releases with the latest run's counts + review progress; a release's runs, newest first |
 | `PUT /items/{id}/review` `{status, note?, reviewer?}` · `PUT /items/review` `{itemIds[], ...}` | `SAFE` / `ATTENTION` / `PENDING` (undo); `@Version` → 409 `review_conflict` |
@@ -64,10 +67,16 @@ files. Against PostgreSQL 15 (`creed-artifactory-db`, database `migration_risk`)
 of release `R2026.11` saved, the second carried 6 verdicts over (5 SAFE + 1 ATTENTION; 3 left PENDING).
 The diff page and the new frontend were **not seen in a browser** (the extension could not attach).
 
+SSE verified 2026-10-25 through the Vite proxy on a large run (repo1 `creed-ai-lab` 30 commits back → 726 changed
+files / 364 Java, 782 items, ~330 s): stages replayed on re-subscribe, heartbeats every 15 s for the whole of run A,
+live `MIGRATION` / `JAVA` / `done` events — no buffering.
+
 ## Open items
 
-- Synchronous analysis; no progress, no cancellation, no concurrency limit. The diff view recomputes the AST diff
-  per (inputs, side) — cached, 8 entries.
+- Progress inside a RefactoringMiner run is unknowable (one call, no callback): on 2026-10-25 run A over 364 Java
+  files took ~5.5 min with nothing to report but elapsed time; run B ~4 s. Cancelling does not interrupt a run in
+  flight — the job stops at the next report. Jobs live in memory (lost on restart; kept `jobs.retention` = 30 min).
+- The diff view recomputes the AST diff per (inputs, side) — cached, 8 entries — synchronously.
 - The diff page loads Bootstrap / jQuery / Monaco 0.39 from CDNs (as RefactoringMiner's own page does): it needs
   internet access in the browser.
 - No export, no Backstage entry, not routed by `creed-gateway-proxy`. No accounts: `reviewer` is free text.

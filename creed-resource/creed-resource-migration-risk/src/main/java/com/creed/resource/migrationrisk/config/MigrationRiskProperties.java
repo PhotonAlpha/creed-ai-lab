@@ -27,12 +27,24 @@ public record MigrationRiskProperties(
         @Min(1) int maxCandidatesPerName,
         List<ApiRule> apiRules,
         List<String> directoryExcludes,
+        Jobs jobs,
         Demo demo) {
 
     public MigrationRiskProperties {
         apiRules = apiRules == null ? List.of() : List.copyOf(apiRules);
         directoryExcludes = directoryExcludes == null ? List.of() : List.copyOf(directoryExcludes);
         demo = demo == null ? new Demo(true) : demo;
+        jobs = jobs == null ? new Jobs(2, 10, java.time.Duration.ofMinutes(30)) : jobs;
+    }
+
+    /**
+     * Background analyses (the SSE endpoints).
+     *
+     * @param concurrency analyses running at once — each RefactoringMiner run is CPU- and memory-heavy
+     * @param queue       accepted but waiting; beyond this a start is refused with 503 {@code busy}
+     * @param retention   how long a finished job (and its result) stays fetchable
+     */
+    public record Jobs(@Min(1) int concurrency, @Min(0) int queue, java.time.Duration retention) {
     }
 
     /** One migration-sensitive API: an added upstream line matching {@code pattern} is flagged HIGH. */

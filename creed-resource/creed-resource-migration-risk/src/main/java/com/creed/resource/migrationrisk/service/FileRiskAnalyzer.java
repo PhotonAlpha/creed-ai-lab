@@ -39,7 +39,10 @@ public class FileRiskAnalyzer {
 
     public List<RiskItem> analyze(AnalysisContext ctx) {
         List<RiskItem> items = new ArrayList<>();
+        int done = 0;
         for (ChangedFile file : ctx.changes()) {
+            ctx.progress().step(Progress.Stage.FILES, done++,
+                    ctx.changes().size(), file.path());
             items.addAll(apiUsage(ctx, file));
             if (file.isJava()) {
                 continue;

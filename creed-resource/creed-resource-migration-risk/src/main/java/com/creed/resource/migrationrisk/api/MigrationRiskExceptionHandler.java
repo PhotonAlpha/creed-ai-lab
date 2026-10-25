@@ -2,6 +2,7 @@ package com.creed.resource.migrationrisk.api;
 
 import com.creed.resource.migrationrisk.git.GitRepositories;
 import com.creed.resource.migrationrisk.service.MigrationRiskService;
+import com.creed.resource.migrationrisk.service.AnalysisJobs;
 import com.creed.resource.migrationrisk.service.ReleaseStore;
 import com.creed.resource.migrationrisk.service.RepositoryGuard;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -23,33 +24,21 @@ import java.util.Map;
 @Slf4j
 public class MigrationRiskExceptionHandler {
 
-    @ExceptionHandler(RepositoryGuard.PathNotAllowedException.class)
-    ResponseEntity<Map<String, Object>> notAllowed(RepositoryGuard.PathNotAllowedException e) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(body("path_not_allowed", e.getMessage(), field(e.field(), e.getMessage())));
+    /** Domain failures — the mapping is shared with background jobs ({@link ApiErrors}). */
+    @ExceptionHandler({RepositoryGuard.PathNotAllowedException.class, GitRepositories.InvalidRepositoryException.class,
+            MigrationRiskService.TooManyChangesException.class, ReleaseStore.NotFoundException.class,
+            ObjectOptimisticLockingFailureException.class})
+    ResponseEntity<Map<String, Object>> domain(RuntimeException e) {
+        ApiErrors.ApiError error = ApiErrors.of(e);
+        log.warn("rejected: {} — {}", error.body().get("error"), e.getMessage());
+        return ResponseEntity.status(error.status()).body(error.body());
     }
 
-    @ExceptionHandler(GitRepositories.InvalidRepositoryException.class)
-    ResponseEntity<Map<String, Object>> invalidRepository(GitRepositories.InvalidRepositoryException e) {
-        return ResponseEntity.badRequest()
-                .body(body("invalid_repository", e.getMessage(), field(e.field(), e.getMessage())));
-    }
-
-    @ExceptionHandler(MigrationRiskService.TooManyChangesException.class)
-    ResponseEntity<Map<String, Object>> tooMany(MigrationRiskService.TooManyChangesException e) {
-        return ResponseEntity.unprocessableEntity().body(body("too_many_changes", e.getMessage(), null));
-    }
-
-    @ExceptionHandler(ReleaseStore.NotFoundException.class)
-    ResponseEntity<Map<String, Object>> notFound(ReleaseStore.NotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body("not_found", e.getMessage(), null));
-    }
-
-    /** Someone else reviewed the item in between: reload and decide again rather than overwrite. */
-    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
-    ResponseEntity<Map<String, Object>> conflict(ObjectOptimisticLockingFailureException e) {
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(body("review_conflict", "the item was reviewed by someone else meanwhile — reload", null));
+    @ExceptionHandler(AnalysisJobs.BusyException.class)
+    ResponseEntity<Map<String, Object>> busy(AnalysisJobs.BusyException e) {
+        log.warn("rejected: busy — {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiErrors.error(HttpStatus.SERVICE_UNAVAILABLE, "busy", e.getMessage(), null).body());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -67,11 +56,6 @@ public class MigrationRiskExceptionHandler {
         return ResponseEntity.internalServerError().body(body("analysis_failed", e.getMessage(), null));
     }
 
-    /** The page marks the input the failure belongs to — a wrong baseline is not a wrong repository. */
-    private static List<Map<String, String>> field(String field, String message) {
-        return field == null ? null : List.of(Map.of("field", field, "message", message));
-    }
-
     private static Map<String, String> fieldError(FieldError error) {
         Map<String, String> entry = new LinkedHashMap<>();
         entry.put("field", error.getField());
@@ -79,20 +63,8 @@ public class MigrationRiskExceptionHandler {
         return entry;
     }
 
-    // Every rejection is logged: a wrong baseline or path otherwise leaves nothing on the server side to go by.
     private static Map<String, Object> body(String error, String message, List<Map<String, String>> fields) {
         log.warn("rejected: {} — {}", error, message);
-        return envelope(error, message, fields);
-    }
-
-    private static Map<String, Object> envelope(String error, String message, List<Map<String, String>> fields) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", error);
-        body.put("message", message);
-        if (fields != null) {
-            body.put("fields", fields);
-        }
-        body.put("time", Instant.now().toString());
-        return body;
+        return ApiErrors.error(HttpStatus.BAD_REQUEST, error, message, fields).body();
     }
 }

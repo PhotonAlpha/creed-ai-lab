@@ -24,12 +24,14 @@ public final class AnalysisContext {
     private final Map<String, List<String>> targetPathsByName;
     private final RefactoringIndex upstream;
     private final RefactoringIndex migration;
+    private final Progress progress;
     private final Map<String, Optional<String>> texts = new HashMap<>();
     private final Map<String, Optional<JavaStructure>> structures = new HashMap<>();
 
     public AnalysisContext(SourceTree baseline, SourceTree head, SourceTree target, List<ChangedFile> changes,
                            Map<String, List<String>> targetPathsByName,
-                           RefactoringIndex upstream, RefactoringIndex migration) {
+                           RefactoringIndex upstream, RefactoringIndex migration, Progress progress) {
+        this.progress = progress;
         this.baseline = baseline;
         this.head = head;
         this.target = target;
@@ -37,6 +39,10 @@ public final class AnalysisContext {
         this.targetPathsByName = targetPathsByName;
         this.upstream = upstream;
         this.migration = migration;
+    }
+
+    public Progress progress() {
+        return progress;
     }
 
     public List<ChangedFile> changes() {

@@ -37,6 +37,11 @@ releases and reviews; the analysis itself is computed per request. Page `/migrat
   subset → `DirComparator` → RefactoringMiner's own `MonacoCore.makeDiffConfig()`; its `web/dist/*.js|css` are
   served from its jar at `/api/migration-risk/view/assets/`. Added / deleted files get a one-sided config.
 
+- `AnalysisJobs` + `Progress`: background analyses on their own bounded pool, progress pushed over SSE (`SseEmitter`).
+  `Progress.Stage` bands (RESOLVE 0 … MIGRATION 45, JAVA 80 … DONE 100); the job's `Progress` throws
+  `CancelledException` at the next report after `DELETE`. `ApiErrors` maps exceptions to the error body for both
+  the exception handler and the `failed` event.
+
 ## Rules that are easy to break
 
 - **RefactoringMiner version vs JDK**: 3.1.x is compiled for Java 23 (class 67), 3.0.13 is the last Java-21 build.
@@ -71,6 +76,11 @@ releases and reviews; the analysis itself is computed per request. Page `/migrat
   API reverse proxy) already forwards. Its links carry **commit ids**, so a saved run keeps showing its code.
 - **Flyway needs `spring-boot-starter-flyway` on Boot 4** — bare `flyway-core` runs no migration, silently.
   Tests run `V1` on H2 (`MODE=PostgreSQL`, Flyway on), so write migrations that both accept.
+- **SSE: the result is not an event.** `done` carries only ids; the page fetches `GET /analyses/jobs/{id}` (a big
+  project's result is megabytes). Stage + terminal events are kept for replay, step events only as the latest
+  one, throttled to 200 ms — a 2000-file run must not be 2000 frames. All writes to one job's emitters (events
+  and the 15 s heartbeat comment) go through the job's lock: two threads writing one connection interleave
+  frames. `X-Accel-Buffering: no` keeps nginx / the OpenShift router from buffering the stream.
 - **The baseline is the input people get wrong.** The page prefilled the demo tag `migration-baseline`;
   replacing only the two paths then failed every real analysis with "unknown revision". The page now clears
   a demo baseline when repo1 changes and fills an empty one from `GET /refs`' merge-base suggestion
@@ -83,6 +93,9 @@ releases and reviews; the analysis itself is computed per request. Page `/migrat
 
 `src/pages/MigrationRisk/{index,AnalysisForm,ItemsTable,constants}`, `src/api/migrationRisk.ts`. Review notes use
 one page-level `Modal` (not a popover per row — see [[creed-env-matrix]]); the reviewer name is kept in
-`localStorage`. Diff links are plain `<a target=_blank>` to `diffUrl(source, side, file)`. One i18n key per backend `RiskCategory`
+`localStorage`. Diff links are plain `<a target=_blank>` to `diffUrl(source, side, file)`. Analyses run through
+`useAnalysisJob` (EventSource; on `done`/`failed`/a closed stream it asks `GET /analyses/jobs/{id}` for the
+terminal state, so a missed frame cannot strand the page) and `JobProgressCard`. The table's *Details* column
+shows the first 3 detail lines (or the evidence), coloured by `+` / `-` / `~` prefix. One i18n key per backend `RiskCategory`
 (`migrationRisk.category.*` + `.categoryHint.*`) and per `TargetState` / `ElementKind` / `UpstreamChange` —
 adding an enum value backend-side needs both locale files. `CATEGORY_LEVEL` mirrors `RiskCategory.level`.

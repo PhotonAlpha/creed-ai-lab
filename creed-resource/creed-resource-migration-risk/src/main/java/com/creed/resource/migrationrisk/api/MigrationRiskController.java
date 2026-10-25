@@ -10,7 +10,13 @@ import com.creed.resource.migrationrisk.api.dto.ReleaseViews.BatchReviewRequest;
 import com.creed.resource.migrationrisk.api.dto.ReleaseViews.ReleaseView;
 import com.creed.resource.migrationrisk.api.dto.ReleaseViews.ReviewRequest;
 import com.creed.resource.migrationrisk.domain.RiskItem;
+import com.creed.resource.migrationrisk.service.AnalysisJobs;
+import com.creed.resource.migrationrisk.service.Progress;
 import com.creed.resource.migrationrisk.service.ReleaseStore;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import com.creed.resource.migrationrisk.service.BaselineAdvisor;
 import com.creed.resource.migrationrisk.config.MigrationRiskProperties;
 import com.creed.resource.migrationrisk.demo.DemoRepositories;
@@ -19,6 +25,7 @@ import com.creed.resource.migrationrisk.service.RepositoryGuard;
 import jakarta.validation.Valid;
 
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,11 +46,13 @@ public class MigrationRiskController {
     private final ObjectProvider<DemoRepositories> demo;
     private final BaselineAdvisor baselines;
     private final ReleaseStore store;
+    private final AnalysisJobs jobs;
 
     public MigrationRiskController(MigrationRiskService service, MigrationRiskProperties properties,
                                    RepositoryGuard guard, ObjectProvider<DemoRepositories> demo,
-                                   BaselineAdvisor baselines, ReleaseStore store) {
+                                   BaselineAdvisor baselines, ReleaseStore store, AnalysisJobs jobs) {
         this.store = store;
+        this.jobs = jobs;
         this.service = service;
         this.properties = properties;
         this.guard = guard;
@@ -93,6 +102,65 @@ public class MigrationRiskController {
         AnalysisResponse result = service.analyze(request);
         return request.release() == null ? result
                 : store.save(request.release(), result.source().baseline().id(), result);
+    }
+
+    // ---------------------------------------------------------------- background analyses + SSE progress
+
+    /**
+     * Starts a git-mode analysis in the background: 202 + {@code jobId}, then follow
+     * {@code GET /analyses/jobs/{jobId}/events}. Paths and revisions are checked first, so a wrong baseline is
+     * still an immediate 400 on its field rather than a failed job.
+     */
+    @PostMapping("/analyses/jobs")
+    public ResponseEntity<Map<String, String>> startAnalysis(@Valid @RequestBody AnalysisRequest request) {
+        MigrationRiskService.Inputs in = MigrationRiskService.inputs(request);
+        service.validate(in);
+        String id = jobs.start("git " + request.repo1Path() + " @ " + request.baseline() + " vs " + request.repo2Path(),
+                progress -> save(request.release(), request.baseline(), service.analyze(in, progress), progress));
+        return ResponseEntity.accepted().body(Map.of("jobId", id));
+    }
+
+    @PostMapping("/analyses/directories/jobs")
+    public ResponseEntity<Map<String, String>> startDirectoryAnalysis(@Valid @RequestBody DirectoryAnalysisRequest request) {
+        MigrationRiskService.Inputs in = MigrationRiskService.inputs(request);
+        service.validate(in);
+        String id = jobs.start("folders " + request.baselinePath() + " | " + request.repo1Path() + " | " + request.repo2Path(),
+                progress -> save(request.release(), request.baselinePath(), service.analyze(in, progress), progress));
+        return ResponseEntity.accepted().body(Map.of("jobId", id));
+    }
+
+    private AnalysisResponse save(String release, String baselineRef, AnalysisResponse result, Progress progress) {
+        if (release == null) {
+            return result;
+        }
+        progress.stage(Progress.Stage.SAVE, "saving under release " + release);
+        String ref = result.source().baseline() != null ? result.source().baseline().id() : baselineRef;
+        return store.save(release, ref, result);
+    }
+
+    /**
+     * {@code text/event-stream}: {@code stage} / {@code progress} / {@code done} / {@code failed}. Earlier events are
+     * replayed on (re)connect, so an EventSource that reconnects loses nothing.
+     */
+    @GetMapping(path = "/analyses/jobs/{id}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<SseEmitter> jobEvents(@PathVariable String id) {
+        return ResponseEntity.ok()
+                .header("Cache-Control", "no-cache")
+                // nginx / OpenShift router would otherwise buffer the stream until it ends.
+                .header("X-Accel-Buffering", "no")
+                .body(jobs.subscribe(id));
+    }
+
+    /** Status, last progress, and — once done — the full result (or the error). */
+    @GetMapping("/analyses/jobs/{id}")
+    public AnalysisJobs.JobView job(@PathVariable String id) {
+        return jobs.view(id);
+    }
+
+    @DeleteMapping("/analyses/jobs/{id}")
+    public ResponseEntity<Void> cancelJob(@PathVariable String id) {
+        jobs.cancel(id);
+        return ResponseEntity.accepted().build();
     }
 
     @GetMapping("/analyses/{id}")

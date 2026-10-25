@@ -68,5 +68,42 @@ commits*; the shared baseline separates them.
 | LOW | `AUTO_SYNC` | repo2 has the element unchanged since the baseline (imports aside) |
 | LOW | `NEW_CODE` | new upstream code whose home exists in repo2 |
 
+## What RefactoringMiner does here
+
+[RefactoringMiner](https://github.com/tsantalis/RefactoringMiner) compares two versions of Java code and reports
+the **refactorings** between them — a class moved or renamed, a method renamed, moved, pulled up, extracted,
+inlined, split — each with the exact file and line range on both sides. It also produces an **AST diff**. It works
+on two directories with no git history needed, which is what lets repo1 be compared with a repo2 that does not
+share its history.
+
+This module uses it in exactly three places, always on the exported subset of files repo1 changed:
+
+| Use | Call | What it answers | Feeds |
+|---|---|---|---|
+| **Run A** — repo1 baseline → repo1 head | `detectAtDirectories` | Which structural refactorings the other team made upstream | `UPSTREAM_REFACTORING` items; pairs a moved file's old and new version; stops an upstream rename from showing up as one deleted and one added method |
+| **Run B** — repo1 baseline → repo2 head | `detectAtDirectories` | Where the migration put each baseline element: the **old element → new element map** | `RELOCATED` (moved / renamed method or class, with its new location), `TARGET_SPLIT` (extracted / inlined / split / merged), and the class lookup behind every other category |
+| **Diff view** — the same pair as A or B | `diffAtDirectories` + `MonacoCore.makeDiffConfig()` | Which code was inserted, deleted, updated or moved, and where to | The Thymeleaf side-by-side page (`/api/migration-risk/view/diff`) |
+
+Example (demo): run B reports `Move Class OrderProcessor → order.processing.OrderProcessor` and `Rename Method
+handle → process`, with line ranges. The upstream edit to `OrderProcessor.handle()` is matched against that range,
+so the item says "now at `processing/OrderProcessor.java:9`, `process(orderId String)`" instead of "method gone".
+
+**What it does not do — this module does:**
+
+- **Plain modifications.** RefactoringMiner reports refactorings, not edits: a method whose body changed without
+  being moved or renamed does not appear in its output. Which methods and fields repo1 modified, and whether
+  repo2 still has the baseline version, comes from comparing JDT-normalized declarations (`JavaStructure`).
+- **Risk grading** (`JavaRiskAnalyzer`, `FileRiskAnalyzer`), **non-Java files** (`ConfigDiff` for pom / Spring
+  config, content ids for the rest), **migration-API rules**, **git access** (JGit), **persistence and review**.
+- Only structural refactorings drive items (`RefactoringIndex.isStructural`). The migration also produces
+  hundreds of detail refactorings (variable renames, type changes, annotations); they are listed in the page's
+  A / B tabs but hidden by default.
+
+Technical constraints (details in the skill): the version is pinned in the pom (3.1.x = Java 23 bytecode → JDK 25);
+several of its dependencies are excluded (Jetty 9, Spring 4.1.6, GitHub/Perforce clients); its jar's own
+`logback.xml` is overridden by `logging.config`; directories must be passed as real absolute paths.
+
+## Limits
+
 What it cannot tell: behaviour that changed under identical code (Jackson 3's defaults, for example) —
 that is what tests are for. Run notes, API and limits: [`HANDOFF.md`](HANDOFF.md).

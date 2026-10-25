@@ -74,9 +74,41 @@ public class MigrationRiskService {
 
     /** Git mode: three commits — repo1's baseline and head, repo2's head. */
     public AnalysisResponse analyze(AnalysisRequest request) {
+        return analyze(inputs(request), Progress.NONE);
+    }
+
+    public static Inputs inputs(AnalysisRequest r) {
+        return Inputs.git(r.repo1Path(), r.baseline(), r.repo1Head(), r.repo2Path(), r.repo2Head());
+    }
+
+    public static Inputs inputs(DirectoryAnalysisRequest r) {
+        return Inputs.folders(r.baselinePath(), r.repo1Path(), r.repo2Path());
+    }
+
+    /** Either mode, reporting to {@code progress} (a background job) or to nobody. */
+    public AnalysisResponse analyze(Inputs in, Progress progress) {
         long started = System.nanoTime();
-        return withTrees(Inputs.git(request.repo1Path(), request.baseline(), request.repo1Head(), request.repo2Path(),
-                request.repo2Head()), trees -> run(trees, started));
+        return withTrees(in, progress, trees -> run(trees, started, progress));
+    }
+
+    /**
+     * The cheap part of an analysis, run before a background job is accepted: paths allowed, repositories
+     * open, revisions resolve. A wrong baseline is answered at once (with its field), not as a failed job.
+     */
+    public void validate(Inputs in) {
+        if (in.mode() == Inputs.Mode.DIRECTORY) {
+            guard.check(in.baselinePath(), "baselinePath");
+            guard.check(in.repo1Path(), "repo1Path");
+            guard.check(in.repo2Path(), "repo2Path");
+            return;
+        }
+        Path repo1Dir = guard.check(in.repo1Path(), "repo1Path");
+        Path repo2Dir = guard.check(in.repo2Path(), "repo2Path");
+        try (Git repo1 = GitRepositories.open(repo1Dir, "repo1Path"); Git repo2 = GitRepositories.open(repo2Dir, "repo2Path")) {
+            GitRepositories.resolve(repo1, in.baseline(), "baseline");
+            GitRepositories.resolve(repo1, in.repo1Head(), "repo1Head");
+            GitRepositories.resolve(repo2, in.repo2Head(), "repo2Head");
+        }
     }
 
     /**
@@ -85,9 +117,7 @@ public class MigrationRiskService {
      * apart as "the migration changed this on purpose" or "repo1 changed this since".
      */
     public AnalysisResponse analyzeDirectories(DirectoryAnalysisRequest request) {
-        long started = System.nanoTime();
-        return withTrees(Inputs.folders(request.baselinePath(), request.repo1Path(), request.repo2Path()),
-                trees -> run(trees, started));
+        return analyze(inputs(request), Progress.NONE);
     }
 
     /**
@@ -96,7 +126,13 @@ public class MigrationRiskService {
      * view both start here, so they always look at the same files.
      */
     public <T> T withTrees(Inputs in, Function<Trees, T> work) {
+        return withTrees(in, Progress.NONE, work);
+    }
+
+    public <T> T withTrees(Inputs in, Progress progress, Function<Trees, T> work) {
         List<String> warnings = new ArrayList<>();
+        progress.stage(Progress.Stage.RESOLVE, in.mode() == Inputs.Mode.DIRECTORY ? "reading the three folders"
+                : "opening repo1 and repo2, resolving revisions");
         if (in.mode() == Inputs.Mode.DIRECTORY) {
             log.info("analysis (folders): baseline={} | repo1={} | repo2={}", in.baselinePath(), in.repo1Path(),
                     in.repo2Path());
@@ -110,6 +146,8 @@ public class MigrationRiskService {
             if (baselineDir.equals(repo1Dir)) {
                 warnings.add("the baseline folder is repo1 itself: there is nothing upstream to compare");
             }
+            progress.stage(Progress.Stage.DIFF, "comparing " + baseline.paths().size() + " baseline files with "
+                    + head.paths().size() + " repo1 files");
             List<ChangedFile> changes = DirectoryDiff.diff(baseline, head);
             log.info("baseline folder -> repo1 folder: {} changed files ({} Java) out of {} / {} files; repo2 has {}",
                     changes.size(), changes.stream().filter(ChangedFile::isJava).count(), baseline.paths().size(),
@@ -130,6 +168,8 @@ public class MigrationRiskService {
                 warnings.add("baseline " + baseline.commit().abbreviate(10).name() + " is not an ancestor of repo1 "
                         + in.repo1Head() + ": the upstream diff includes changes from another branch");
             }
+            progress.stage(Progress.Stage.DIFF, "git diff " + baseline.commit().abbreviate(10).name() + ".."
+                    + head.commit().abbreviate(10).name());
             List<ChangedFile> changes = GitRepositories.diff(repo1.getRepository(), baseline.commit(), head.commit());
             log.info("baseline {} -> repo1 {}: {} changed files ({} Java); repo2 at {}",
                     baseline.commit().abbreviate(10).name(), head.commit().abbreviate(10).name(), changes.size(),
@@ -162,7 +202,7 @@ public class MigrationRiskService {
                         List<String> warnings, Source source) {
     }
 
-    private AnalysisResponse run(Trees trees, long started) {
+    private AnalysisResponse run(Trees trees, long started, Progress progress) {
         SourceTree baseline = trees.baseline();
         SourceTree head = trees.head();
         SourceTree target = trees.target();
@@ -179,7 +219,7 @@ public class MigrationRiskService {
         RefactoringIndex migration;
         Path workspace = properties.workDir().resolve(UUID.randomUUID().toString());
         try {
-            Runs runs = detect(workspace, baseline, head, target, changes, warnings);
+            Runs runs = detect(workspace, baseline, head, target, changes, warnings, progress);
             upstream = new RefactoringIndex(runs.upstream());
             migration = new RefactoringIndex(runs.migration());
         } finally {
@@ -187,7 +227,7 @@ public class MigrationRiskService {
         }
 
         AnalysisContext ctx = new AnalysisContext(baseline, head, target, changes, target.pathsByFileName(),
-                upstream, migration);
+                upstream, migration, progress);
         List<RiskItem> items = new ArrayList<>();
         items.addAll(javaAnalyzer.analyze(ctx));
         items.addAll(fileAnalyzer.analyze(ctx));
@@ -208,16 +248,18 @@ public class MigrationRiskService {
      * (before, target). Both runs share {@code before}, so their "before" locations are the same code.
      */
     private Runs detect(Path workspace, SourceTree baseline, SourceTree head, SourceTree target,
-                        List<ChangedFile> changes, List<String> warnings) {
+                        List<ChangedFile> changes, List<String> warnings, Progress progress) {
         List<ChangedFile> java = changes.stream().filter(ChangedFile::isJava).toList();
         if (java.isEmpty()) {
             return new Runs(List.of(), List.of());
         }
+        progress.stage(Progress.Stage.EXPORT, "exporting " + java.size() + " changed Java files and their repo2 candidates");
         Exported exported = export(workspace, baseline, head, target, changes, warnings);
-        Path before = exported.before();
-        Path upstream = exported.upstream();
-        Path migrated = exported.target();
-        return new Runs(detector.detect("A upstream", before, upstream), detector.detect("B migration", before, migrated));
+        progress.stage(Progress.Stage.UPSTREAM, "RefactoringMiner A: repo1 baseline -> repo1 head (" + java.size() + " files)");
+        List<DetectedRefactoring> upstream = detector.detect("A upstream", exported.before(), exported.upstream());
+        progress.stage(Progress.Stage.MIGRATION, "RefactoringMiner B: repo1 baseline -> repo2");
+        List<DetectedRefactoring> migration = detector.detect("B migration", exported.before(), exported.target());
+        return new Runs(upstream, migration);
     }
 
     private record Runs(List<DetectedRefactoring> upstream, List<DetectedRefactoring> migration) {
