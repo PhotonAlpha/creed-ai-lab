@@ -39,6 +39,8 @@ veracode:
       token: ${CREED_CONFLUENCE_TOKEN:}
     connect-timeout: 5s
     read-timeout: 20s
+    # spring.ssl.bundle name for an https base URL signed by a private CA; blank = JDK cacerts.
+    ssl-bundle: ${CREED_CONFLUENCE_SSL_BUNDLE:}
 
   jira:
     base-url: ${CREED_JIRA_URL:http://localhost:${server.port}/mock/jira}
@@ -55,6 +57,7 @@ veracode:
       token: ${CREED_JIRA_TOKEN:}
     connect-timeout: 5s
     read-timeout: 20s
+    ssl-bundle: ${CREED_JIRA_SSL_BUNDLE:}
 
   # Report column headers (case-insensitive). See ReportProperties for the defaults.
   report:
@@ -65,3 +68,14 @@ veracode:
   upload:
     ttl: 2h
     max-entries: 50
+management:
+  endpoint:
+    configprops:
+      show-values: always
+    env:
+      access: unrestricted
+      show-values: always
+  endpoints:
+    web:
+      exposure:
+        include: "*"

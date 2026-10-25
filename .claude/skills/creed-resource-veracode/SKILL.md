@@ -5,7 +5,7 @@ description: creed-resource-veracode — Veracode report analysis backend (Confl
 
 # creed-resource-veracode
 
-Plain HTTP **18097**, no DB, no PKI, stateless. Frontend page `/veracode` in `creed-env-matrix-design`
+Plain HTTP **18097** (HTTPS with profile `ssl`), no DB, stateless. Frontend page `/veracode` in `creed-env-matrix-design`
 (Vite proxy `/api/veracode` → `VITE_VERACODE_TARGET`). See [[creed-platform]] for build/run, and
 [[creed-env-matrix]] for the frontend's conventions (one root ConfigProvider, no `.ant-*`, i18n keys
 typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
@@ -45,6 +45,15 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 - Search pages until an **empty page or `startAt >= total`** — trusting `total` alone can spin.
 - Exception handler is `@RestControllerAdvice(assignableTypes = VeracodeController.class)`: the mocks must
   keep answering in Confluence's/Jira's own error shapes, which `UpstreamException.detail` parses.
+- **TLS goes through `ssl-bundle` per client, not Boot's HTTP-client properties** — `configure()` builds its
+  own `JdkClientHttpRequestFactory`. Profile `ssl` (one-way, `client-auth: none`) serves HTTPS and points
+  the self-calling mocks at `https://localhost` with the server's own bundle as trust; keep the bundle
+  declaration out of `application.yml` (Boot opens declared bundles eagerly).
+- actuator shows values (`show-values: always`); secrets are masked only by `ActuatorSanitizingConfiguration`.
+  A new secret property must end in password/secret/token or it shows in `/actuator/env` in plain text.
+- **`spring.config.additional-location` is a default property set in `main()` (`application()`)**, so
+  `@SpringBootTest` never sees it — test it through `CreedResourceVeracodeApplication.application()`
+  (`ExternalConfigDirTest`). It is not honoured from `application.yml`: Boot reads it before any config file is loaded.
 - Jira Cloud: `/rest/api/2/search` is retired there (→ `/rest/api/3/search/jql`); the client is DC v2.
 
 ## Tests

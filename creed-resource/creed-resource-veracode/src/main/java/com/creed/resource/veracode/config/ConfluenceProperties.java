@@ -13,6 +13,8 @@ import java.time.Duration;
  * @param pageId         the page the UI opens with; the user may type another
  * @param browseUrl      template for the page link shown in the UI, {@code {id}} is replaced. Only used
  *                       when the page JSON carries no {@code _links.webui}
+ * @param sslBundle      {@code spring.ssl.bundle.*} name whose trust (and key) material the client uses
+ *                       for an {@code https} base URL; blank = the JDK's default trust store
  */
 @Validated
 @ConfigurationProperties("veracode.confluence")
@@ -22,5 +24,6 @@ public record ConfluenceProperties(
         String browseUrl,
         @DefaultValue RemoteAuth auth,
         @DefaultValue("5s") Duration connectTimeout,
-        @DefaultValue("20s") Duration readTimeout) {
+        @DefaultValue("20s") Duration readTimeout,
+        String sslBundle) {
 }

@@ -62,7 +62,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-order` | 18091 / 18092 | `/api/order` | primary / secondary |
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
-| `creed-resource-veracode` | 18097 | `/api/veracode` | HTTP, stateless; Veracode report from Confluence → Jira lookup/create (`@HttpExchange`) → xlsx; Confluence + Jira mocked in-process (`veracode.mock.enabled`) |
+| `creed-resource-veracode` | 18097 | `/api/veracode` | HTTP (HTTPS with profile `ssl`, one-way TLS), stateless; Veracode report from Confluence → Jira lookup/create (`@HttpExchange`) → xlsx; Confluence + Jira mocked in-process (`veracode.mock.enabled`) |
 | `creed-resource-migration-risk` | 18098 | `/api/migration-risk` | HTTP; migration sync risk: RefactoringMiner on repo1@baseline→HEAD and baseline→repo2 (git branches or plain folders) → HIGH/MEDIUM/LOW items; saved per release in Postgres `migration_risk` (`h2` profile without Docker) for SAFE/ATTENTION review; Thymeleaf AST-diff page `/api/migration-risk/view/diff`; repos only under `migration-risk.allowed-roots` |
 | `creed-env-matrix-design` | 5173 / 3002 | — | Vite, proxies `/api` → `VITE_API_TARGET` (`.env`: 18095) and the Splunk API → `VITE_SPLUNK_TARGET` (`.env`: creed-gateway-proxy 8088); legacy Node BFF `npm run bff` on 3002 |
 | `creed-mock-buddy` | 5173 / 4000 | — | HTTP / HTTPS (borrows `creed-gateway` cert), **Node/Fastify**; YAML mock server, standalone |

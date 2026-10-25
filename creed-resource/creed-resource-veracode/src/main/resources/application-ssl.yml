@@ -1,0 +1,41 @@
+# HTTPS on 18097 (one-way TLS, no client certificate) - the OpenShift course, chapter 03 exercise 1.
+#
+#   SPRING_PROFILES_ACTIVE=ssl, keystore + truststore mounted at /etc/veracode/tls (Secret veracode-tls).
+#   Password, either way (the env var wins):
+#     A. CREED_VERACODE_SSL_PASSWORD from a secretKeyRef
+#     B. SPRING_CONFIG_IMPORT=optional:configtree:/etc/veracode/ssl-pass/ with a file veracode.ssl.password
+#   Neither set -> the binder does NOT report an unresolvable placeholder: it keeps the literal text
+#   "${veracode.ssl.password}" as the password, and startup fails exactly like a wrong password
+#   (UnrecoverableKeyException ... BadPaddingException). Check that the source exists before the value.
+#
+# Declared only in this profile: Boot opens every declared bundle at startup (SslMeterBinder, actuator
+# SslInfo), so a bundle in application.yml would break the plain-HTTP run that has no keystore.
+spring:
+  ssl:
+    bundle:
+      jks:
+        veracode:
+          keystore:
+            location: ${CREED_VERACODE_SSL_KEYSTORE:file:/etc/veracode/tls/keystore.p12}
+            password: ${CREED_VERACODE_SSL_PASSWORD:${veracode.ssl.password}}
+            type: PKCS12
+          truststore:
+            location: ${CREED_VERACODE_SSL_TRUSTSTORE:file:/etc/veracode/tls/truststore.p12}
+            password: ${CREED_VERACODE_SSL_PASSWORD:${veracode.ssl.password}}
+            type: PKCS12
+
+server:
+  ssl:
+    bundle: veracode
+    client-auth: none
+
+# The mocks are this process calling itself, now over TLS. The bundle's truststore (Creed root +
+# intermediate) is what lets the clients verify the cert; its SAN must carry `localhost`.
+veracode:
+  confluence:
+    base-url: ${CREED_CONFLUENCE_URL:https://localhost:${server.port}/mock/confluence}
+    ssl-bundle: ${CREED_CONFLUENCE_SSL_BUNDLE:veracode}
+  jira:
+    base-url: ${CREED_JIRA_URL:https://localhost:${server.port}/mock/jira}
+    browse-url: ${CREED_JIRA_BROWSE_URL:https://localhost:${server.port}/mock/jira/browse/{key}}
+    ssl-bundle: ${CREED_JIRA_SSL_BUNDLE:veracode}

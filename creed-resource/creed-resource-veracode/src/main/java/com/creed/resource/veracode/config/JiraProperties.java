@@ -20,6 +20,7 @@ import java.util.List;
  * @param jqlBatchSize   findings per search; each adds one {@code summary ~} clause, and a long JQL
  *                       is slow on Jira's side and can exceed its URL/body limits
  * @param pageSize       {@code maxResults} per search page (Jira caps it, usually at 100)
+ * @param sslBundle      see {@link ConfluenceProperties#sslBundle()}
  */
 @Validated
 @ConfigurationProperties("veracode.jira")
@@ -34,7 +35,8 @@ public record JiraProperties(
         @DefaultValue("100") @Min(1) @Max(1000) int pageSize,
         @DefaultValue RemoteAuth auth,
         @DefaultValue("5s") Duration connectTimeout,
-        @DefaultValue("20s") Duration readTimeout) {
+        @DefaultValue("20s") Duration readTimeout,
+        String sslBundle) {
 
     public String browse(String key) {
         return browseUrl.replace("{key}", key);

@@ -17,6 +17,23 @@ Against the real systems: `CREED_VERACODE_MOCK=false`, `CREED_CONFLUENCE_URL`, `
 `CREED_JIRA_BROWSE_URL=https://jira.example.com/browse/{key}`, `CREED_JIRA_PROJECT`,
 `CREED_VERACODE_PAGE_ID`, and `CREED_{CONFLUENCE,JIRA}_AUTH=BEARER|BASIC` + `_TOKEN` (+ `_USER` for BASIC).
 
+HTTPS (profile `ssl`, one-way TLS, `client-auth: none`) — keystore/truststore default to
+`/etc/veracode/tls/*.p12` (override `CREED_VERACODE_SSL_KEYSTORE` / `_TRUSTSTORE`), password from
+`CREED_VERACODE_SSL_PASSWORD` or a configtree file `veracode.ssl.password`. The mocks switch to
+`https://localhost:${server.port}` and both clients trust through the same bundle. The cert must carry
+SAN `localhost`; issuing one from the existing CA is in `openshift-learning/03-config-probes-resources.md`
+exercise 1. Verified 2026-10-25: analysis over TLS gives the same 10 / 3 / 7 / 1 as plain HTTP.
+
+```bash
+CREED_VERACODE_SSL_KEYSTORE=file:tmp/ocp03/pki/veracode-keystore.p12 \
+CREED_VERACODE_SSL_TRUSTSTORE=file:tmp/ocp03/pki/veracode-truststore.p12 CREED_VERACODE_SSL_PASSWORD=changeit \
+mvn -pl creed-resource/creed-resource-veracode spring-boot:run -Dspring-boot.run.profiles=ssl -Dspring-boot.run.workingDirectory="$PWD"
+```
+
+External config: `application.yml` / `application-<profile>.yml` in `CREED_VERACODE_CONFIG_DIR`
+(default `/etc/veracode/config/`, the OpenShift ConfigMap mount) override every packaged file,
+`application-ssl.yml` included; env vars still win. Read at startup only.
+
 ## API (`/api/veracode`)
 
 | | |
@@ -34,7 +51,7 @@ Errors: `{error, message, fields?, time}` — 404 `page_not_found`, 422 `report_
 
 ## Current state
 
-Complete against the mocks. **23 tests pass** (parser, matching/JQL, and the whole chain over MockMvc
+Complete against the mocks. **38 tests pass** (parser, matching/JQL, actuator masking, external config dir, and the whole chain over MockMvc
 through the real `@HttpExchange` proxies). Verified over real HTTP on :18097: the sample page gives
 10 findings — 3 in Jira, 7 missing, 1 with a version Jira lacks; create returned `CREED-105`; the
 export downloads. Upload (2026-10-16): the sample page saved as `.html`, the module's own export
@@ -66,8 +83,18 @@ it was not checked in a browser (the browser extension could not attach to any p
   per process; two instances could still duplicate (Jira has no unique key to lean on).
 - **Jira Cloud has retired `POST /rest/api/2/search`** (`/rest/api/3/search/jql`, token paging). The
   client is Data Center v2; Cloud needs that one method changed.
+- **Clients trust a private CA only via `veracode.{confluence,jira}.ssl-bundle`.** The request factory
+  is built in `RemoteClientsConfiguration`, so Boot's HTTP-client SSL properties never reach it. Blank =
+  JDK cacerts → `PKIX` / `confluence_error` 502 against a Creed-signed cert.
+- **The bundle is declared only in `application-ssl.yml`**: Boot opens every declared bundle at startup,
+  so declaring it in `application.yml` breaks the plain-HTTP run. A missing password is not reported as an
+  unresolvable placeholder — the literal `${veracode.ssl.password}` becomes the password and startup fails
+  with the wrong-password `BadPaddingException`.
+- **actuator `env`/`configprops` run with `show-values: always`**, which masks nothing by itself;
+  `ActuatorSanitizingConfiguration` masks keys ending in password/secret/token (case-insensitive) and
+  containing credentials. Not `ifLikelySensitive()` — it would also mask `project-key` and every URL.
 - Redirects are not followed — a wrong Data Center base URL shows as its 302, not as "HTML is not JSON".
-- Plain HTTP and **no auth on this service** (like the siblings' `permitAll`) — but it holds a Jira
+- Plain HTTP by default and **no auth on this service** (like the siblings' `permitAll`) — but it holds a Jira
   token that can create issues. Do not expose it beyond localhost as is.
 
 ## Open items
