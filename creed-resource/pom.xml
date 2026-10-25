@@ -21,5 +21,6 @@
         <module>creed-resource-payment</module>
         <module>creed-resource-env-matrix</module>
         <module>creed-resource-veracode</module>
+        <module>creed-resource-migration-risk</module>
     </modules>
 </project>

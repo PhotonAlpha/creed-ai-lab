@@ -1,0 +1,8 @@
+# Runs the module without Docker: a file database next to the demo repositories. Same Flyway migrations.
+#   mvn -pl creed-resource/creed-resource-migration-risk spring-boot:run -Dspring-boot.run.profiles=h2 ...
+spring:
+  datasource:
+    url: "jdbc:h2:file:${migration-risk.work-dir}/db/migration-risk;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE"
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""

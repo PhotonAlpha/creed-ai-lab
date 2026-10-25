@@ -12,10 +12,11 @@ narrative content belongs in a skill or a `HANDOFF.md` (§6).
 Java **21** source/target, built with **JDK 25** · Spring Boot **4.1.1** (Spring Framework 7,
 Jakarta EE 11, Tomcat 11) · Spring Cloud **2025.1.3** · **Jackson 3** (`tools.jackson.*`; annotations stay
 `com.fasterxml.jackson.annotation`) · Camel 4.23.0 (simple-metrics only) · Logbook 4.2.0 (simple-metrics only)
-· JasperReports 6.21.3 (jasper-report only) · httpclient5 5.6.4 (Boot-managed)
+· JasperReports 6.21.3 (jasper-report only)
+· RefactoringMiner 3.1.6 + JGit 6.10 + JDT 3.39 + Thymeleaf (migration-risk only; 3.1.x is Java 23 bytecode → run on JDK 25) · httpclient5 5.6.4 (Boot-managed)
 · Maven 3.9.16, local repo **`/Users/ethan/Desktop/workspace/repos`**
 (not `~/.m2`) · frontend React 19 + TS + Vite 8 + **antd 5** + Ant Design Pro 2 + AntV G6 5 ·
-PostgreSQL on the `creed-artifactory-db` container (env-matrix only; everything else is in-memory).
+PostgreSQL on the `creed-artifactory-db` container (env-matrix and migration-risk; everything else is in-memory).
 
 Versions live in the root `pom.xml`. Only pin in a module pom when the BOM doesn't manage the
 artifact (e.g. POI in creed-report).
@@ -62,6 +63,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
 | `creed-resource-veracode` | 18097 | `/api/veracode` | HTTP, stateless; Veracode report from Confluence → Jira lookup/create (`@HttpExchange`) → xlsx; Confluence + Jira mocked in-process (`veracode.mock.enabled`) |
+| `creed-resource-migration-risk` | 18098 | `/api/migration-risk` | HTTP; migration sync risk: RefactoringMiner on repo1@baseline→HEAD and baseline→repo2 (git branches or plain folders) → HIGH/MEDIUM/LOW items; saved per release in Postgres `migration_risk` (`h2` profile without Docker) for SAFE/ATTENTION review; Thymeleaf AST-diff page `/api/migration-risk/view/diff`; repos only under `migration-risk.allowed-roots` |
 | `creed-env-matrix-design` | 5173 / 3002 | — | Vite, proxies `/api` → `VITE_API_TARGET` (`.env`: 18095) and the Splunk API → `VITE_SPLUNK_TARGET` (`.env`: creed-gateway-proxy 8088); legacy Node BFF `npm run bff` on 3002 |
 | `creed-mock-buddy` | 5173 / 4000 | — | HTTP / HTTPS (borrows `creed-gateway` cert), **Node/Fastify**; YAML mock server, standalone |
 | `creed-backstage` | 3003 / 7007 | — | **Backstage**: Software Catalog (`catalog/**/catalog-info.yaml`) + Swagger UI; one `catalog/<module>/` per functional area; multi-file OpenAPI → Redocly bundle `dist/openapi.yaml` (committed, `$text`), `yarn openapi:build [module]` |
@@ -117,6 +119,9 @@ that silently isn't auto-configured.
 - **`spring-boot-starter-test` no longer bundles MockMvc / TestRestTemplate.** Add
   `spring-boot-starter-webmvc-test` and/or `spring-boot-resttestclient` (or
   `spring-boot-starter-test-classic` for the old all-in-one behaviour).
+- **`flyway-core` alone runs no migration.** Flyway's auto-configuration moved to `spring-boot-flyway`: declare
+  `spring-boot-starter-flyway`. Nothing fails — the schema just stops moving (creed-resource-env-matrix still
+  declares only `flyway-core` as of 2026-10-25).
 - **`spring-boot-starter-web` no longer brings RestTemplate/RestClient.** Add
   `spring-boot-starter-restclient` for `RestTemplateBuilder` and the
   `org.springframework.boot.http.client` builders.

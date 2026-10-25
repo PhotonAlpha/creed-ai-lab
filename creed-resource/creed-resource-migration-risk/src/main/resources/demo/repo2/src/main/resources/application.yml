@@ -1,0 +1,15 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: shop
+  jackson:
+    use-jackson2-defaults: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+shop:
+  order:
+    max-items: 10

@@ -1,0 +1,15 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: shop
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+shop:
+  order:
+    max-items: 20
+    retry:
+      enabled: true

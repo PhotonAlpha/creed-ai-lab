@@ -1,0 +1,10 @@
+<routes xmlns="http://camel.apache.org/schema/spring">
+    <route id="order-intake">
+        <from uri="direct:order"/>
+        <log message="order ${body}"/>
+        <filter>
+            <simple>${body} != null</simple>
+            <to uri="bean:orderService?method=placeOrder"/>
+        </filter>
+    </route>
+</routes>

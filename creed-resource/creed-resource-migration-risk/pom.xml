@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.creed</groupId>
+        <artifactId>creed-resource</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>creed-resource-migration-risk</artifactId>
+    <name>creed-resource-migration-risk</name>
+    <description>Migration sync risk — what the old repo changed since the baseline, where it went in the migrated repo, and how risky syncing it is</description>
+
+    <properties>
+        <!-- None of these is managed by the Boot BOM.
+             RefactoringMiner: 3.0.13 is the newest release compiled for Java 21 (class version 65);
+             3.1.x is compiled for Java 23 and would not run on this repo's Java 21 runtime.
+             JGit / JDT / commons-io: the versions RefactoringMiner 3.0.13 itself was built against, declared
+             directly because RefactoringMiner only lists them at runtime scope and this module compiles
+             against them. -->
+        <refactoring-miner.version>3.1.6</refactoring-miner.version>
+        <jgit.version>6.10.1.202505221210-r</jgit.version>
+        <jdt-core.version>3.39.0</jdt-core.version>
+        <commons-io.version>2.16.1</commons-io.version>
+        <gumtree.version>3.0.0</gumtree.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.tsantalis</groupId>
+            <artifactId>refactoring-miner</artifactId>
+            <version>${refactoring-miner.version}</version>
+            <!-- Everything here serves features this module does not use: mining GitHub / Perforce history,
+                 the command line, and the web diff viewer. spark-core and rendersnake would put Jetty 9,
+                 javax.servlet and Spring 4.1.6 next to Boot 4; logback-classic is Boot's to provide.
+                 Without them the dependency set drops from 176 MB to ~51 MB, and detectAtDirectories still
+                 runs (MigrationRiskApiTest exercises it). -->
+            <exclusions>
+                <exclusion>
+                    <groupId>org.kohsuke</groupId>
+                    <artifactId>github-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.perforce</groupId>
+                    <artifactId>p4java</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.sparkjava</groupId>
+                    <artifactId>spark-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.rendersnake</groupId>
+                    <artifactId>rendersnake</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.jcommander</groupId>
+                    <artifactId>jcommander</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>ch.qos.logback</groupId>
+                    <artifactId>logback-classic</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- The diff view (DiffViewController) feeds RefactoringMiner's own Monaco viewer config, built by
+             gui.webdiff.viewers.monaco.MonacoCore, which links rendersnake classes at load time. Only the jar:
+             its dependencies are Spring 4.1.6, Guice and javax.servlet — the reason it is excluded above. -->
+        <dependency>
+            <groupId>org.rendersnake</groupId>
+            <artifactId>rendersnake</artifactId>
+            <version>1.9.0</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-thymeleaf</artifactId>
+        </dependency>
+        <!-- GumTree (RefactoringMiner lists it at runtime scope): DiffViewService handles its Diff / Pair types. -->
+        <dependency>
+            <groupId>com.github.gumtreediff</groupId>
+            <artifactId>core</artifactId>
+            <version>${gumtree.version}</version>
+        </dependency>
+        <!-- Arrived only through github-api; RefactoringMiner's directory mode reads files with it. -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>${commons-io.version}</version>
+        </dependency>
+        <!-- Commits -> file trees (no git binary needed in the container). -->
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>${jgit.version}</version>
+        </dependency>
+        <!-- Method-level structure (JavaStructure): which methods/fields an upstream commit touched. -->
+        <dependency>
+            <groupId>org.eclipse.jdt</groupId>
+            <artifactId>org.eclipse.jdt.core</artifactId>
+            <version>${jdt-core.version}</version>
+        </dependency>
+
+        <!-- Persistence: analyses saved per release, items reviewed as SAFE / ATTENTION. PostgreSQL on the
+             creed-artifactory-db container (database migration_risk); H2 for the `h2` profile and the tests. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <!-- The starter, not bare flyway-core: Boot 4 moved Flyway's auto-configuration into
+             spring-boot-flyway, and with flyway-core alone no migration ever runs — silently. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+        <!-- Flyway 10+ ships each dialect separately ("Unsupported Database: PostgreSQL" without it). -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- Runtime, not test: the `h2` profile runs the module without Docker (file database in work-dir). -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.creed</groupId>
+            <artifactId>creed-common-metrics</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

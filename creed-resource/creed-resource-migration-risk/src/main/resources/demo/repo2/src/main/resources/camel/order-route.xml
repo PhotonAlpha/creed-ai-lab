@@ -1,0 +1,7 @@
+<routes xmlns="http://camel.apache.org/schema/spring">
+    <route id="order-intake">
+        <from uri="direct:order"/>
+        <log message="order ${body} (${header.CamelHttpMethod})"/>
+        <to uri="bean:orderService?method=placeOrder"/>
+    </route>
+</routes>

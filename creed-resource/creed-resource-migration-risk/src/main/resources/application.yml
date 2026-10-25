@@ -1,0 +1,107 @@
+# Migration sync risk. Plain HTTP on 18098, no database, no PKI: every answer is computed from the two
+# git repositories at request time. The frontend reaches it through Vite's `/api/migration-risk` proxy
+# (VITE_MIGRATION_RISK_TARGET).
+#
+#   mvn -pl creed-resource/creed-resource-migration-risk spring-boot:run -Dspring-boot.run.workingDirectory="$PWD"
+server:
+  port: ${CREED_MIGRATION_RISK_PORT:18098}
+
+spring:
+  application:
+    name: creed-resource-migration-risk
+  profiles:
+    include: actuator
+  # Jackson 3 (Boot 4) turned FAIL_ON_NULL_FOR_PRIMITIVES on; keep the Jackson 2 defaults like every module.
+  jackson:
+    use-jackson2-defaults: true
+
+  # Analyses saved under a release, with each item's review. Create the database once:
+  #   docker exec creed-artifactory-db createdb -U artifactory migration_risk
+  # No Docker at hand: run with the `h2` profile (file database under migration-risk.work-dir).
+  datasource:
+    url: "${CREED_MIGRATION_RISK_DB_URL:jdbc:postgresql://127.0.0.1:5432/migration_risk}"
+    username: "${CREED_MIGRATION_RISK_DB_USER:artifactory}"
+    password: "${CREED_MIGRATION_RISK_DB_PASSWORD:artifactory_pw}"
+    hikari:
+      pool-name: migration-risk-pool
+      maximum-pool-size: 5
+      connection-timeout: 5000
+  jpa:
+    # Flyway owns the schema (db/migration, written to run on PostgreSQL and H2 alike).
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+migration-risk:
+  # The request names repositories by path on THIS host. Only paths under one of these roots are opened —
+  # the API would otherwise read any git repository the process can reach. Comma-separated.
+  allowed-roots: ${CREED_MIGRATION_RISK_ROOTS:${user.home}}
+  # Per-analysis scratch space (the exported file subsets RefactoringMiner compares); deleted afterwards.
+  work-dir: ${CREED_MIGRATION_RISK_WORK_DIR:${java.io.tmpdir}/creed-migration-risk}
+  # An upstream range bigger than this is refused (422 too_many_changes): RefactoringMiner's memory and
+  # time grow with the files it parses. Narrow the baseline instead.
+  max-changed-files: ${CREED_MIGRATION_RISK_MAX_FILES:2000}
+  # A file with the same name elsewhere in repo2 is copied into the comparison so RefactoringMiner can see a
+  # moved class; common names (package-info.java, Utils.java) are capped at this many candidates.
+  max-candidates-per-name: 5
+  # Folder mode reads whatever is on disk; these directory names are skipped at any depth. Build output and IDE
+  # files differ between any two checkouts and would bury the real changes.
+  directory-excludes: [.git, .svn, .idea, .vscode, .gradle, target, build, out, dist, node_modules, logs, tmp]
+  # Added upstream lines matching one of these are flagged HIGH (MIGRATION_API): code written against an API
+  # the migration replaced. Java regex, matched per line.
+  api-rules:
+    - id: jackson2
+      pattern: 'com\.fasterxml\.jackson\.(databind|core|datatype|dataformat)\.'
+      hint: 'Jackson 3: tools.jackson.* (annotations stay com.fasterxml.jackson.annotation)'
+    - id: jackson2-exception
+      pattern: '\bJsonProcessingException\b'
+      hint: 'Jackson 3: tools.jackson.core.JacksonException (unchecked)'
+    - id: javax-servlet
+      pattern: '\bjavax\.servlet\.'
+      hint: 'Jakarta EE: jakarta.servlet.*'
+    - id: javax-persistence
+      pattern: '\bjavax\.(persistence|validation|annotation\.PostConstruct|xml\.bind)\b'
+      hint: 'Jakarta EE: jakarta.*'
+    - id: boot-rest-template-builder
+      pattern: 'org\.springframework\.boot\.web\.client\.'
+      hint: 'Boot 4: org.springframework.boot.restclient.* (spring-boot-starter-restclient)'
+    - id: boot-embedded-tomcat
+      pattern: 'org\.springframework\.boot\.web\.embedded\.'
+      hint: 'Boot 4: org.springframework.boot.tomcat.* / org.springframework.boot.jetty.*'
+    - id: boot-actuate-moved
+      pattern: 'org\.springframework\.boot\.actuate\.(metrics\.MetricsEndpoint|health\.HealthEndpoint)'
+      hint: 'Boot 4: org.springframework.boot.{micrometer.metrics,health}.actuate.endpoint.*'
+    - id: http-headers-map
+      pattern: '\.containsKey\(\s*HttpHeaders\.'
+      hint: 'Spring Framework 7: HttpHeaders is not a Map — containsHeader(...)'
+    - id: camel-hystrix
+      pattern: 'org\.apache\.camel\.component\.hystrix|\.hystrix\(\)'
+      hint: 'Camel 4 removed camel-hystrix: use camel-resilience4j (circuitBreaker())'
+  # Two small generated repositories (src/main/resources/demo/**) so the page and the tests have something
+  # to analyse without real checkouts. Rebuilt in <work-dir>/demo at every start, with fixed commit times,
+  # so their commit ids are always the same.
+  demo:
+    enabled: ${CREED_MIGRATION_RISK_DEMO:true}
+management:
+  otlp:
+    metrics:
+      export:
+        enabled: off
+otel:
+  sdk:
+    disabled: true
+  # 或只关闭指标
+  metrics:
+    exporter: none
+logging:
+  # RefactoringMiner's jar carries its own logback.xml (root WARN, stderr only), and Boot picks a plain
+  # logback.xml before logback-spring.xml — it silently replaced creed-common-metrics' config: no INFO on the
+  # console, no log file, no OTLP logs. Naming the config explicitly skips that search.
+  config: classpath:logback-spring.xml
+  level:
+    io.opentelemetry.exporter: OFF

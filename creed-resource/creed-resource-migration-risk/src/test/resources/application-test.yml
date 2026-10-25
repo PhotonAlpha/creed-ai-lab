@@ -1,0 +1,27 @@
+# The actuator profile is included from application.yml and cannot be un-included here, so the OTel
+# starter is active: it interpolates ${spring.application.name} and ${server.port}, and must not try to
+# reach the collector.
+spring:
+  application:
+    name: creed-resource-migration-risk-test
+  # H2 in PostgreSQL mode with Flyway ON: V1 is written to run on both, so the tests execute the real
+  # migration instead of Hibernate's DDL — the module never needs the Docker Postgres for `mvn test`.
+  datasource:
+    url: "jdbc:h2:mem:migration_risk_test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE"
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  flyway:
+    enabled: true
+server:
+  port: 0
+otel:
+  sdk:
+    disabled: true
+
+migration-risk:
+  # Inside the module's target/: nothing outside the build directory is read or written.
+  work-dir: ${user.dir}/target/migration-risk-work
+  allowed-roots: ${user.dir}/target/migration-risk-work
+  demo:
+    enabled: true
