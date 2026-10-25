@@ -538,6 +538,39 @@ A 涉及的每个元素都到 B 里查去向，因此基线决定了「什么算
 **文件夹模式中的对应关系**：基线文件夹 = 基线，repo1 文件夹 = repo1 分支，repo2 文件夹 = repo2 分支。
 接口字段分别是 `baseline` / `repo1Head` / `repo2Head`，文件夹模式为 `baselinePath` / `repo1Path` / `repo2Path`。
 
+#### 大项目的进度显示
+
+点击「分析」后，后端以后台任务运行，页面通过 SSE（Server-Sent Events）实时跟进：进度卡片显示各阶段
+（打开仓库 → 计算变更 → 导出文件 → RefactoringMiner A → RefactoringMiner B → 比对 Java → 其他文件 → 保存）、进度条、
+正在比对的文件和已用时间，并可「取消」。RefactoringMiner 单次分析内部没有进度：几百个变更的 Java 文件，这一步就要几分钟，
+卡片上会注明。断线后浏览器会自动重连，后端补发已有阶段，不会丢进度。
+表格新增「详情」列，直接显示每项数据的前几行（配置项、依赖版本、匹配到的代码行；`+` 绿、`-` 红、`~` 橙），更多内容悬停查看。
+
+#### RefactoringMiner 在这里的作用
+
+[RefactoringMiner](https://github.com/tsantalis/RefactoringMiner) 对比同一段 Java 代码的两个版本，找出其中的**重构**：
+类的移动或重命名，方法的重命名、移动、上移、抽取、内联、拆分等，并给出两侧的文件和行号范围；它还能生成 **AST 级别的 diff**。
+它可以直接比较两个目录，不需要 git 历史，所以没有共同历史的 repo1 和 repo2 也能比较。
+
+本工具只在三处用到它，每次都只处理 repo1 改动过的那部分文件：
+
+| 用途 | 调用 | 回答的问题 | 用在哪里 |
+|---|---|---|---|
+| **分析 A**：repo1 基线 → repo1 分支 | `detectAtDirectories` | 别的 team 在 repo1 里做了哪些结构性重构 | 「repo1 的重构」风险项；把移动过的文件前后配对；避免把 repo1 的一次重命名误报成「删除一个方法 + 新增一个方法」 |
+| **分析 B**：repo1 基线 → repo2 分支 | `detectAtDirectories` | 迁移把基线时的每个元素放到了哪里，即**旧元素 → 新元素的映射表** | 「已移动 / 重命名」（给出新位置）、「repo2 中已拆分」（抽取 / 内联 / 拆分 / 合并），以及其他类别查找类时的依据 |
+| **对比视图**：与 A 或 B 相同的两组文件 | `diffAtDirectories` + `MonacoCore` | 哪些代码被新增、删除、修改或移动，移到了哪里 | 后端的 Thymeleaf 左右对比页面 |
+
+例子（示例仓库）：分析 B 报告 `Move Class OrderProcessor → order.processing.OrderProcessor` 和
+`Rename Method handle → process`，并附有行号范围。repo1 对 `OrderProcessor.handle()` 的修改按行号范围对上之后，
+风险项显示的是「现在位于 `processing/OrderProcessor.java:9` 的 `process(orderId String)`」，而不是「方法不存在」。
+
+**它不负责的部分（由本工具自己完成）：**
+- **普通修改。** RefactoringMiner 只报告重构，不报告修改：方法体改了、但没有移动或重命名，它不会输出任何内容。
+  repo1 改了哪些方法和字段、repo2 是否仍是基线版本，由本工具用 JDT 解析后比较规范化的代码得出。
+- 风险分级、非 Java 文件（pom / Spring 配置按配置项比较，其他文件按内容比较）、需迁移 API 的规则检查、git 读取（JGit）、
+  保存与 review。
+- 只有结构性重构会产生风险项。迁移还会产生成百上千条细节重构（变量重命名、类型变化、注解等），它们列在 A / B 页签里，默认隐藏。
+
 ## 6. API
 
 基础路径 `/api/env-matrix`。过滤条件使用可重复的查询参数 —— `?tier=UAT&tier=SIT&scheme=https`

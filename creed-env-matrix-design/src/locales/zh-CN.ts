@@ -583,6 +583,22 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'migrationRisk.filter.allReviews': '全部结论',
   'migrationRisk.repo1BranchHint': 'repo1 的现在：另一个 team 仍在提交的分支。基线 → 该分支 = 需要同步的改动（A）。',
   'migrationRisk.repo2BranchHint': '迁移后的代码现在的样子。基线 → 该分支 = 迁移把每个元素放到了哪里（B）。',
+  'migrationRisk.col.details': '详情',
+  'migrationRisk.details.more': '… 还有 {count} 行（悬停查看）',
+  'migrationRisk.job.title': '分析中…',
+  'migrationRisk.job.cancel': '取消',
+  'migrationRisk.job.cancelled': '已取消分析',
+  'migrationRisk.job.elapsed': '已用时 {time}',
+  'migrationRisk.job.opaque': 'RefactoringMiner 单次分析内部没有进度，大项目在这一步需要几分钟',
+  'migrationRisk.job.stage.RESOLVE': '打开仓库',
+  'migrationRisk.job.stage.DIFF': '计算变更',
+  'migrationRisk.job.stage.EXPORT': '导出文件',
+  'migrationRisk.job.stage.UPSTREAM': 'RefactoringMiner A',
+  'migrationRisk.job.stage.MIGRATION': 'RefactoringMiner B',
+  'migrationRisk.job.stage.JAVA': '比对 Java',
+  'migrationRisk.job.stage.FILES': '其他文件',
+  'migrationRisk.job.stage.SAVE': '保存',
+  'migrationRisk.job.stage.DONE': '完成',
 };
 
 export default zhCN;

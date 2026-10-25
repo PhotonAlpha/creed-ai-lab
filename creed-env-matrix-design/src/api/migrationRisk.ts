@@ -225,6 +225,34 @@ export interface ReviewRequest {
 const json = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
 const putJson = (body: unknown): RequestInit => ({ method: 'PUT', body: JSON.stringify(body) });
 
+/** Stages of a background analysis, in order; each owns a band of the overall percentage. */
+export const JOB_STAGES = ['RESOLVE', 'DIFF', 'EXPORT', 'UPSTREAM', 'MIGRATION', 'JAVA', 'FILES', 'SAVE', 'DONE'] as const;
+export type JobStage = (typeof JOB_STAGES)[number];
+
+/** Payload of the SSE `stage` and `progress` events. `done`/`total` only for the looping stages. */
+export interface JobProgress {
+  stage: JobStage;
+  percent: number;
+  done: number | null;
+  total: number | null;
+  detail: string | null;
+  elapsedMillis: number;
+}
+
+export type JobStatus = 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED' | 'CANCELLED';
+
+export interface JobView {
+  id: string;
+  status: JobStatus;
+  progress: JobProgress | null;
+  startedAt: string;
+  finishedAt: string | null;
+  /** Present once DONE. */
+  result: MigrationRiskAnalysis | null;
+  /** The usual `{error, message, fields?}` body, once FAILED / CANCELLED. */
+  error: { error: string; message: string; fields?: { field: string; message: string }[] } | null;
+}
+
 export const migrationRiskApi = {
   settings: () => requestAt<MigrationRiskSettings>(BASE, '/settings'),
   refs: (path: string, head?: string) =>
@@ -237,6 +265,15 @@ export const migrationRiskApi = {
       repo2Head: r.repo2Head || undefined,
     })}`),
   analyze: (request: AnalysisRequest) => requestAt<MigrationRiskAnalysis>(BASE, '/analyses', json(request)),
+  /** Background analysis: returns at once; follow `jobEventsUrl(jobId)` (SSE), then fetch `job(jobId)`. */
+  startAnalysis: (request: AnalysisRequest) => requestAt<{ jobId: string }>(BASE, '/analyses/jobs', json(request)),
+  startDirectoryAnalysis: (request: DirectoryAnalysisRequest) =>
+    requestAt<{ jobId: string }>(BASE, '/analyses/directories/jobs', json(request)),
+  job: (jobId: string) => requestAt<JobView>(BASE, `/analyses/jobs/${jobId}`),
+  /** 202 with no body — `requestAt` would try to parse it as JSON. */
+  cancelJob: async (jobId: string) => {
+    await fetch(`${BASE}/analyses/jobs/${jobId}`, { method: 'DELETE' });
+  },
   analyzeDirectories: (request: DirectoryAnalysisRequest) =>
     requestAt<MigrationRiskAnalysis>(BASE, '/analyses/directories', json(request)),
   savedAnalysis: (id: number) => requestAt<MigrationRiskAnalysis>(BASE, `/analyses/${id}`),
@@ -266,3 +303,6 @@ export function diffUrl(source: AnalysisSource, side: 'A' | 'B', file?: string |
     };
   return `${BASE}/view/diff${toQuery({ ...params, side, file: file ?? undefined })}`;
 }
+
+/** SSE stream of a job: `stage`, `progress`, then `done` or `failed`; replayed from the start on reconnect. */
+export const jobEventsUrl = (jobId: string) => `${BASE}/analyses/jobs/${jobId}/events`;

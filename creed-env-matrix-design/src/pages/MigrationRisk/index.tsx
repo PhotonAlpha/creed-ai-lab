@@ -38,6 +38,9 @@ import type {
 import { useI18n } from '../../locales';
 import type { MessageKey } from '../../locales';
 import { AnalysisForm, EMPTY_FORM } from './AnalysisForm';
+import { JobProgressCard } from './JobProgressCard';
+import { useAnalysisJob } from './useAnalysisJob';
+import { ApiError } from '../../api/client';
 import { ItemsTable } from './ItemsTable';
 import { CATEGORY_LEVEL, LEVEL_COLOR, fieldErrors } from './constants';
 import type { FormValues } from './constants';
@@ -91,6 +94,7 @@ export function MigrationRiskPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [structuralOnly, setStructuralOnly] = useState(true);
+  const job = useAnalysisJob();
 
   /** Guards against an older answer resolving after a newer one (StrictMode double mount, fast clicks). */
   const requestId = useRef(0);
@@ -106,13 +110,17 @@ export function MigrationRiskPage() {
       return result;
     } catch (e) {
       if (current !== requestId.current) return;
+      if (e instanceof ApiError && e.body?.error === 'cancelled') {
+        message.info(t('migrationRisk.job.cancelled'));
+        return;
+      }
       setAnalysis(null);
       setError((e as Error).message);
       form.setFields(fieldErrors(e));
     } finally {
       if (current === requestId.current) setLoading(false);
     }
-  }, [form]);
+  }, [form, message, t]);
 
   const loadReleases = useCallback(() => {
     migrationRiskApi.releases().then(setReleases).catch((e: Error) => message.error(e.message));
@@ -120,17 +128,18 @@ export function MigrationRiskPage() {
 
   const analyze = useCallback(async (v: FormValues) => {
     const release = v.release?.trim() || undefined;
-    const result = await show(() => (v.mode === 'DIRECTORY'
-      ? migrationRiskApi.analyzeDirectories({ baselinePath: v.baselinePath, repo1Path: v.repo1Path, repo2Path: v.repo2Path, release })
-      : migrationRiskApi.analyze({
+    // A background job followed over SSE: large projects take minutes, the page shows where it is meanwhile.
+    const result = await show(() => job.run(() => (v.mode === 'DIRECTORY'
+      ? migrationRiskApi.startDirectoryAnalysis({ baselinePath: v.baselinePath, repo1Path: v.repo1Path, repo2Path: v.repo2Path, release })
+      : migrationRiskApi.startAnalysis({
         repo1Path: v.repo1Path, baseline: v.baseline, repo1Head: v.repo1Head, repo2Path: v.repo2Path,
         repo2Head: v.repo2Head, release,
-      })));
+      }))));
     if (result?.analysisId != null) {
       message.success(t('migrationRisk.saved.done', { release: result.release ?? '' }));
       loadReleases();
     }
-  }, [show, loadReleases, message, t]);
+  }, [show, job, loadReleases, message, t]);
 
   const runDemo = useCallback((mode: FormValues['mode'], demo = settings?.demo) => {
     if (!demo) return;
@@ -271,6 +280,10 @@ export function MigrationRiskPage() {
             )}
           </Space>
         </ProCard>
+
+        {job.running && (
+          <JobProgressCard progress={job.progress} startedAt={job.startedAt} onCancel={() => void job.cancel()} />
+        )}
 
         {error && <Alert type="error" showIcon message={t('migrationRisk.failed')} description={error} />}
 

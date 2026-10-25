@@ -21,6 +21,20 @@ const { Text, Paragraph } = Typography;
 type LevelFilter = 'ALL' | RiskLevel;
 type ReviewFilter = 'ALL' | ReviewStatus;
 
+/** How many detail lines a row shows before "N more". */
+const DETAIL_LINES = 3;
+
+/** `+ added`, `- removed`, `~ changed`, `L12: matched line` — coloured like a diff so the column scans at a glance. */
+function DetailLine({ line }: { line: string }) {
+  const type = line.startsWith('+ ') ? 'success' : line.startsWith('- ') ? 'danger'
+    : line.startsWith('~ ') ? 'warning' : undefined;
+  return (
+    <Paragraph style={{ margin: 0, fontSize: 12, fontFamily: 'monospace' }} ellipsis={{ rows: 1, tooltip: line }}>
+      <Text type={type} style={{ fontFamily: 'monospace', fontSize: 12 }}>{line}</Text>
+    </Paragraph>
+  );
+}
+
 const where = (l: Location | null) => (l ? (l.line != null ? `${l.path}:${l.line}` : l.path) : null);
 
 const matchesKeyword = (item: RiskItem, keyword: string) => {
@@ -137,6 +151,27 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
       dataIndex: 'change',
       width: 100,
       render: (c: RiskItem['change']) => <Tag>{t(`migrationRisk.change.${c}` as MessageKey)}</Tag>,
+    },
+    {
+      title: t('migrationRisk.col.details'),
+      dataIndex: 'details',
+      width: 420,
+      render: (details: string[], i) => {
+        // Evidence explains the level when there are no data lines (e.g. "migration: Rename Method ...").
+        const lines = details.length > 0 ? details : i.evidence;
+        if (lines.length === 0) return null;
+        const rest = lines.length - DETAIL_LINES;
+        return (
+          <div style={{ maxWidth: 400 }}>
+            {lines.slice(0, DETAIL_LINES).map((line) => <DetailLine key={line} line={line} />)}
+            {rest > 0 && (
+              <Tooltip title={<div style={{ whiteSpace: 'pre-wrap' }}>{lines.slice(DETAIL_LINES).join('\n')}</div>}>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('migrationRisk.details.more', { count: rest })}</Text>
+              </Tooltip>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: t('migrationRisk.col.target'),
@@ -286,7 +321,7 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
         dataSource={rows}
         pagination={{ pageSize: 20, showSizeChanger: true }}
         // Numeric width, not 'max-content': with a fixed-right column the latter collapses the last scrolling column.
-        scroll={{ x: saved ? 1400 : 1150 }}
+        scroll={{ x: saved ? 1820 : 1570 }}
         rowSelection={saved ? { selectedRowKeys: selected, onChange: (keys) => setSelected(keys as string[]) } : undefined}
         expandable={{
           rowExpandable: (i) => i.evidence.length + i.details.length > 0 || i.upstream != null,

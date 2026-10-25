@@ -40,6 +40,8 @@ Complete and verified in a browser against the real backend.
   note modal, A/B diff links) and `constants.ts`. A demo baseline is cleared when repo1's path changes; backend
   `fields[]` errors land on their input (`/refs`' `path`/`head` renamed to the repo asked for). The diff links
   open the backend's Thymeleaf page `/api/migration-risk/view/diff` (same proxy prefix) with commit ids.
+  Analyses run as backend jobs followed over SSE (`useAnalysisJob` + `JobProgressCard`: stage steps, progress
+  bar, current file, elapsed time, cancel); the items table has a *Details* column (first 3 lines, coloured).
   `npm run typecheck` and `npm run build` pass; the API (refs, suggestion, save, review, reload, diff HTML) was
   verified through the Vite proxy on a real pair. **Not yet checked in a browser** — the extension could not
   attach to any page this session either.

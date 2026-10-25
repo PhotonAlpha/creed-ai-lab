@@ -609,6 +609,19 @@ Every element A touches is looked up through B, so the baseline decides what cou
 **Folder mode**: baseline folder = baseline, repo1 folder = repo1 branch, repo2 folder = repo2 branch.
 API fields: `baseline` / `repo1Head` / `repo2Head`; in folder mode `baselinePath` / `repo1Path` / `repo2Path`.
 
+**Progress for large projects.** *Analyse* runs as a backend job and the page follows it over Server-Sent
+Events: a progress card shows the stages (open → changes → export → RefactoringMiner A → RefactoringMiner B →
+cross-check → other files → save), a progress bar, the file being cross-checked and the elapsed time, with a
+*Cancel* button. A RefactoringMiner run reports nothing until it ends — on a few hundred changed Java files that
+stage alone takes minutes, which the card says. The *Details* column shows the first lines of each item's data
+(changed keys, versions, matched lines; green `+`, red `-`, orange `~`).
+
+**What RefactoringMiner does here.** It is used in three places only: run A (baseline → repo1 branch) finds the
+structural refactorings the other team made; run B (baseline → repo2 branch) is the old element → new element map
+that tells where the migration moved or split each element; and its AST diff drives the side-by-side page. It does
+**not** report plain edits (a changed method body) — those, the risk grading, non-Java files and review are this
+tool's own logic. Full table: `creed-resource/creed-resource-migration-risk/README.md`.
+
 ## 6. API
 
 Base path `/api/env-matrix`. Filters are repeated query parameters —

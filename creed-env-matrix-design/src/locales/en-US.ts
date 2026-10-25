@@ -591,6 +591,22 @@ const enUS = {
   'migrationRisk.filter.allReviews': 'All reviews',
   'migrationRisk.repo1BranchHint': 'repo1 now: the branch the other team still commits to. Baseline → this branch is what has to be synced (A).',
   'migrationRisk.repo2BranchHint': 'The migrated code now. Baseline → this branch shows where the migration put each element (B).',
+  'migrationRisk.col.details': 'Details',
+  'migrationRisk.details.more': '… {count} more (hover)',
+  'migrationRisk.job.title': 'Analysing…',
+  'migrationRisk.job.cancel': 'Cancel',
+  'migrationRisk.job.cancelled': 'Analysis cancelled',
+  'migrationRisk.job.elapsed': 'Elapsed {time}',
+  'migrationRisk.job.opaque': 'RefactoringMiner reports no progress inside one run — large projects take minutes here',
+  'migrationRisk.job.stage.RESOLVE': 'Open',
+  'migrationRisk.job.stage.DIFF': 'Changes',
+  'migrationRisk.job.stage.EXPORT': 'Export',
+  'migrationRisk.job.stage.UPSTREAM': 'RefactoringMiner A',
+  'migrationRisk.job.stage.MIGRATION': 'RefactoringMiner B',
+  'migrationRisk.job.stage.JAVA': 'Cross-check Java',
+  'migrationRisk.job.stage.FILES': 'Other files',
+  'migrationRisk.job.stage.SAVE': 'Save',
+  'migrationRisk.job.stage.DONE': 'Done',
 } as const;
 
 export default enUS;
