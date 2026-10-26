@@ -9,6 +9,7 @@ import {
   Descriptions,
   Empty,
   Form,
+  Input,
   Row,
   Select,
   Space,
@@ -22,7 +23,7 @@ import {
   theme,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { DiffOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DiffOutlined, DownloadOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { RISK_CATEGORIES, diffUrl, migrationRiskApi } from '../../api/migrationRisk';
 import type {
   AnalysisSummary,
@@ -30,6 +31,7 @@ import type {
   CodeLocation,
   CommitView,
   DetectedRefactoring,
+  IgnoreRule,
   MigrationRiskAnalysis,
   MigrationRiskSettings,
   ReleaseView,
@@ -72,22 +74,34 @@ function Commit({ commit }: { commit: CommitView }) {
   );
 }
 
-/** "2026-10-25 20:51 · 9 items · 3 safe / 1 attention / 5 pending" */
+/** "2026-10-25 20:51 · 9 files · 3 synced · 3 safe / 1 attention / 5 pending" */
 const runLabel = (a: AnalysisSummary, t: ReturnType<typeof useI18n>['t']) =>
   t('migrationRisk.saved.runLabel', {
     time: new Date(a.analyzedAt).toLocaleString(),
     total: a.counts.total,
+    synced: a.review.synced ?? 0,
     safe: a.review.safe,
     attention: a.review.attention,
     pending: a.review.pending,
   });
 
+/** Saves a fetched file under its server-given name. */
+function download(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /** Stat boxes coloured by what they ask of the reader: red = act, yellow = look, green = done. Design tokens, not CSS. */
-const STAT_TONE: Record<string, 'Error' | 'Warning' | 'Success' | undefined> = {
+const STAT_TONE: Record<string, 'Error' | 'Warning' | 'Success' | 'Info' | undefined> = {
   HIGH: 'Error',
   ATTENTION: 'Error',
   MEDIUM: 'Warning',
   SAFE: 'Success',
+  SYNCED: 'Info',
 };
 
 export function MigrationRiskPage() {
@@ -104,6 +118,10 @@ export function MigrationRiskPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [structuralOnly, setStructuralOnly] = useState(true);
+  const [resolved, setResolved] = useState<RiskItem[]>([]);
+  const [ignoreRules, setIgnoreRules] = useState<IgnoreRule[]>([]);
+  const [newRule, setNewRule] = useState({ pattern: '', category: null as RiskCategory | null, note: '' });
+  const [exporting, setExporting] = useState(false);
   const job = useAnalysisJob();
 
   /** Guards against an older answer resolving after a newer one (StrictMode double mount, fast clicks). */
@@ -131,6 +149,10 @@ export function MigrationRiskPage() {
       if (current === requestId.current) setLoading(false);
     }
   }, [form, message, t]);
+
+  const loadIgnoreRules = useCallback(() => {
+    migrationRiskApi.ignoreRules().then(setIgnoreRules).catch((e: Error) => message.error(e.message));
+  }, [message]);
 
   const loadReleases = useCallback(() => {
     migrationRiskApi.releases().then(setReleases).catch((e: Error) => message.error(e.message));
@@ -181,9 +203,55 @@ export function MigrationRiskPage() {
       })
       .catch((e: Error) => setError(e.message));
     loadReleases();
+    loadIgnoreRules();
     // runDemo is stable enough for a mount-time call; re-running on its identity would re-analyse.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** A re-run of a release: what its previous run had and this one does not. */
+  useEffect(() => {
+    const id = analysis?.analysisId;
+    if (id == null) {
+      setResolved([]);
+      return;
+    }
+    migrationRiskApi.resolved(id).then(setResolved).catch(() => setResolved([]));
+  }, [analysis?.analysisId]);
+
+  const exportAs = async (format: 'xlsx' | 'md') => {
+    if (!analysis) return;
+    setExporting(true);
+    try {
+      const { blob, name } = await migrationRiskApi.export(analysis, format);
+      download(blob, name);
+    } catch (e) {
+      message.error((e as Error).message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const addRule = async () => {
+    try {
+      await migrationRiskApi.addIgnoreRule({
+        pattern: newRule.pattern.trim(), category: newRule.category, note: newRule.note.trim() || undefined,
+      });
+      setNewRule({ pattern: '', category: null, note: '' });
+      loadIgnoreRules();
+      message.success(t('migrationRisk.ignore.added'));
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
+  const deleteRule = async (id: number) => {
+    try {
+      await migrationRiskApi.deleteIgnoreRule(id);
+      loadIgnoreRules();
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
 
   useEffect(() => {
     if (openRelease == null) {
@@ -257,7 +325,7 @@ export function MigrationRiskPage() {
       size="small"
       columns={refactoringColumns}
       dataSource={structuralOnly ? list.filter((r) => r.structural) : list}
-      pagination={{ pageSize: 20, showSizeChanger: true }}
+      pagination={{ defaultPageSize: 20, showSizeChanger: true }}
       scroll={{ x: 1320 }}
     />
   );
@@ -361,6 +429,16 @@ export function MigrationRiskPage() {
                 {new Date(analysis.analyzedAt).toLocaleString()}
                 <Text type="secondary">&nbsp;({t('migrationRisk.duration', { ms: analysis.durationMillis })})</Text>
               </Descriptions.Item>
+              <Descriptions.Item label={t('migrationRisk.export.title')}>
+                <Space size={4}>
+                  <Button size="small" icon={<DownloadOutlined />} loading={exporting} onClick={() => void exportAs('xlsx')}>
+                    Excel
+                  </Button>
+                  <Button size="small" icon={<DownloadOutlined />} loading={exporting} onClick={() => void exportAs('md')}>
+                    Markdown
+                  </Button>
+                </Space>
+              </Descriptions.Item>
               <Descriptions.Item label={t('migrationRisk.diff.title')}>
                 <Space size={4}>
                   <Tooltip title={t('migrationRisk.diff.a')}>
@@ -377,6 +455,60 @@ export function MigrationRiskPage() {
 
         <Collapse
           items={[{
+            key: 'ignore',
+            label: t('migrationRisk.ignore.panel', { count: ignoreRules.length }),
+            children: (
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Paragraph type="secondary" style={{ margin: 0 }}>{t('migrationRisk.ignore.hint')}</Paragraph>
+                <Space wrap>
+                  <Input value={newRule.pattern} placeholder="**/generated/**" style={{ width: 280 }}
+                    onChange={(e) => setNewRule({ ...newRule, pattern: e.target.value })} />
+                  <Select<RiskCategory | null>
+                    value={newRule.category}
+                    onChange={(v) => setNewRule({ ...newRule, category: v })}
+                    style={{ width: 220 }}
+                    options={[
+                      { value: null, label: t('migrationRisk.ignore.wholeFile') },
+                      ...RISK_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) })),
+                    ]}
+                  />
+                  <Input value={newRule.note} placeholder={t('migrationRisk.ignore.note')} style={{ width: 240 }}
+                    maxLength={1000} onChange={(e) => setNewRule({ ...newRule, note: e.target.value })} />
+                  <Button type="primary" disabled={!newRule.pattern.trim()} onClick={() => void addRule()}>
+                    {t('migrationRisk.ignore.save')}
+                  </Button>
+                </Space>
+                <Table<IgnoreRule>
+                  rowKey="id"
+                  size="small"
+                  pagination={false}
+                  dataSource={ignoreRules}
+                  columns={[
+                    { title: t('migrationRisk.ignore.pattern'), dataIndex: 'pattern', render: (p: string) => <Text code>{p}</Text> },
+                    {
+                      title: t('migrationRisk.col.category'),
+                      dataIndex: 'category',
+                      width: 200,
+                      render: (c: RiskCategory | null) => (c ? categoryLabel(c) : t('migrationRisk.ignore.wholeFile')),
+                    },
+                    {
+                      title: t('migrationRisk.ignore.scope'),
+                      dataIndex: 'scope',
+                      render: (s: string | null) => (s ? <Text code>{s}</Text> : t('migrationRisk.ignore.allProjects')),
+                    },
+                    { title: t('migrationRisk.ignore.note'), dataIndex: 'note' },
+                    {
+                      key: 'delete',
+                      width: 60,
+                      render: (_, r) => (
+                        <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => void deleteRule(r.id)} />
+                      ),
+                    },
+                  ]}
+                />
+              </Space>
+            ),
+          }, {
             key: 'rules',
             label: t('migrationRisk.rules.title'),
             children: (
@@ -416,6 +548,7 @@ export function MigrationRiskPage() {
               ['MEDIUM', counts.medium, t('migrationRisk.level.MEDIUM')],
               ['LOW', counts.low, t('migrationRisk.level.LOW')],
               ...(analysis?.analysisId != null ? [
+                ['SYNCED', reviewCount('SYNCED'), t('migrationRisk.review.SYNCED')],
                 ['PENDING', reviewCount('PENDING'), t('migrationRisk.review.PENDING')],
                 ['SAFE', reviewCount('SAFE'), t('migrationRisk.review.SAFE')],
                 ['ATTENTION', reviewCount('ATTENTION'), t('migrationRisk.review.ATTENTION')],
@@ -425,7 +558,9 @@ export function MigrationRiskPage() {
               return (
                 <Col key={key} xs={12} md={6} xl={analysis?.analysisId != null ? 3 : 6}>
                   <ProCard bordered style={tone && { background: token[`color${tone}Bg`], borderColor: token[`color${tone}Border`] }}>
-                    <Statistic title={title} value={value} valueStyle={tone && { color: token[`color${tone}`] }} />
+                    {/* synced is the sync's progress: shown out of the total */}
+                    <Statistic title={title} value={value} suffix={key === 'SYNCED' ? `/ ${counts.total}` : undefined}
+                      valueStyle={tone && { color: token[`color${tone}`] }} />
                   </ProCard>
                 </Col>
               );
@@ -440,8 +575,47 @@ export function MigrationRiskPage() {
                 {
                   key: 'items',
                   label: t('migrationRisk.tab.items', { count: items.length }),
-                  children: <ItemsTable analysis={analysis} loading={loading} onReviewed={onReviewed} />,
+                  children: (
+                    <ItemsTable analysis={analysis} settings={settings} loading={loading} onReviewed={onReviewed}
+                      onIgnoreRuleAdded={loadIgnoreRules} />
+                  ),
                 },
+                ...(resolved.length > 0 ? [{
+                  key: 'resolved',
+                  label: t('migrationRisk.tab.resolved', { count: resolved.length }),
+                  children: (
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <Text type="secondary">{t('migrationRisk.resolved.hint')}</Text>
+                      <Table<RiskItem>
+                        rowKey="id"
+                        size="small"
+                        dataSource={resolved}
+                        pagination={{ defaultPageSize: 20, showSizeChanger: true }}
+                        columns={[
+                          {
+                            title: t('migrationRisk.col.level'),
+                            dataIndex: 'level',
+                            width: 90,
+                            render: (l: RiskItem['level']) => <Tag color={LEVEL_COLOR[l]}>{t(`migrationRisk.level.${l}` as MessageKey)}</Tag>,
+                          },
+                          { title: t('migrationRisk.col.category'), dataIndex: 'category', width: 180, render: (c: RiskCategory) => categoryLabel(c) },
+                          { title: t('migrationRisk.col.file'), dataIndex: 'element', render: (e: string) => <Text code>{e}</Text> },
+                          {
+                            title: t('migrationRisk.resolved.lastReview'),
+                            key: 'review',
+                            width: 220,
+                            render: (_, i) => i.review && (
+                              <Space size={4}>
+                                <Tag>{t(`migrationRisk.review.${i.review.status}` as MessageKey)}</Tag>
+                                {i.review.note && <Text type="secondary" style={{ fontSize: 12 }}>{i.review.note}</Text>}
+                              </Space>
+                            ),
+                          },
+                        ]}
+                      />
+                    </Space>
+                  ),
+                }] : []),
                 {
                   key: 'upstream',
                   label: t('migrationRisk.tab.upstream', {
@@ -465,7 +639,7 @@ export function MigrationRiskPage() {
                       size="small"
                       columns={fileColumns}
                       dataSource={analysis?.changedFiles ?? []}
-                      pagination={{ pageSize: 50, showSizeChanger: true }}
+                      pagination={{ defaultPageSize: 50, showSizeChanger: true }}
                     />
                   ),
                 },

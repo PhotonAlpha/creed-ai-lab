@@ -1,11 +1,18 @@
 import { useMemo, useState } from 'react';
-import { App, Button, Input, Modal, Radio, Segmented, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { useSearchParams } from 'react-router-dom';
+import {
+  App, Button, Collapse, Input, Modal, Radio, Segmented, Select, Space, Table, Tag, Tooltip, Typography,
+} from 'antd';
 import type { TableColumnsType } from 'antd';
-import { CheckOutlined, DiffOutlined, EditOutlined, WarningOutlined } from '@ant-design/icons';
-import { RISK_CATEGORIES, diffUrl, migrationRiskApi } from '../../api/migrationRisk';
+import {
+  CheckOutlined, DiffOutlined, EditOutlined, PartitionOutlined, StopOutlined, WarningOutlined,
+} from '@ant-design/icons';
+import { RISK_CATEGORIES, diff3Url, diffUrl, migrationRiskApi } from '../../api/migrationRisk';
 import type {
   Location,
   MigrationRiskAnalysis,
+  MigrationRiskSettings,
+  ReviewDelta,
   ReviewStatus,
   RiskCategory,
   RiskItem,
@@ -21,14 +28,16 @@ const { Text, Paragraph } = Typography;
 type LevelFilter = 'ALL' | RiskLevel;
 type ReviewFilter = 'ALL' | ReviewStatus;
 type CodeFilter = 'ALL' | 'MAIN' | 'TEST';
+type DeltaFilter = 'ALL' | ReviewDelta;
 
 /** How many detail lines a row shows before "N more". */
 const DETAIL_LINES = 3;
+const PAGE_SIZES = [20, 50, 100, 200];
 
-/** `+ added`, `- removed`, `~ changed`, `L12: matched line` — coloured like a diff so the column scans at a glance. */
+/** `+ added`, `- removed`, `~ changed`, `≈ suggested` — coloured like a diff so the column scans at a glance. */
 function DetailLine({ line }: { line: string }) {
   const type = line.startsWith('+ ') ? 'success' : line.startsWith('- ') ? 'danger'
-    : line.startsWith('~ ') ? 'warning' : undefined;
+    : line.startsWith('~ ') ? 'warning' : line.startsWith('≈ ') ? 'secondary' : undefined;
   return (
     <Paragraph style={{ margin: 0, fontSize: 12, fontFamily: 'monospace' }} ellipsis={{ rows: 1, tooltip: line }}>
       <Text type={type} style={{ fontFamily: 'monospace', fontSize: 12 }}>{line}</Text>
@@ -44,7 +53,7 @@ const partsOf = (i: RiskItem) => (i.parts?.length ? i.parts : [i]);
 const matchesKeyword = (item: RiskItem, keyword: string) => {
   if (!keyword) return true;
   const k = keyword.toLowerCase();
-  return [item.element, item.module, item.upstream?.path, item.target?.path, item.review?.note,
+  return [item.element, item.module, item.upstream?.path, item.target?.path, item.review?.note, item.review?.jiraKey,
     ...partsOf(item).flatMap((p) => [p.element, p.target?.path, p.target?.element, ...p.details, ...p.evidence])]
     .some((v) => v?.toLowerCase().includes(k));
 };
@@ -71,29 +80,108 @@ const storedReviewer = () => {
   }
 };
 
+/**
+ * Filters, page and page size live in the URL (`?level=HIGH&module=order&page=2`): a link to a filtered view can be
+ * sent to a colleague, and the browser's back button undoes a filter.
+ */
+function useTableState() {
+  const [params, setParams] = useSearchParams();
+  const list = (key: string) => (params.get(key) ? params.get(key)!.split(',').filter(Boolean) : []);
+  const state = {
+    level: (params.get('level') ?? 'ALL') as LevelFilter,
+    review: (params.get('review') ?? 'ALL') as ReviewFilter,
+    delta: (params.get('delta') ?? 'ALL') as DeltaFilter,
+    code: (params.get('code') ?? 'ALL') as CodeFilter,
+    categories: list('category') as RiskCategory[],
+    modules: list('module'),
+    keyword: params.get('q') ?? '',
+    page: Math.max(1, Number(params.get('page')) || 1),
+    size: PAGE_SIZES.includes(Number(params.get('size'))) ? Number(params.get('size')) : PAGE_SIZES[0],
+  };
+  /** A filter change goes back to page 1; `null` / '' / 'ALL' / [] remove the parameter. */
+  const set = (changes: Partial<Record<'level' | 'review' | 'delta' | 'code' | 'category' | 'module' | 'q' | 'page' | 'size', string | string[] | number | null>>) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (!('page' in changes)) next.delete('page');
+      Object.entries(changes).forEach(([key, value]) => {
+        const v = Array.isArray(value) ? value.join(',') : value == null ? '' : String(value);
+        if (!v || v === 'ALL' || (key === 'page' && v === '1') || (key === 'size' && v === String(PAGE_SIZES[0]))) {
+          next.delete(key);
+        } else {
+          next.set(key, v);
+        }
+      });
+      return next;
+    }, { replace: true });
+  };
+  return { state, set };
+}
+
+/** Per module: files by level and how many are synced — where to split the work. */
+function ModuleSummary({ items, active, onPick }: { items: RiskItem[]; active: string[]; onPick: (m: string) => void }) {
+  const { t } = useI18n();
+  const rows = useMemo(() => {
+    const byModule = new Map<string, { module: string; HIGH: number; MEDIUM: number; LOW: number; synced: number; total: number }>();
+    items.forEach((i) => {
+      const m = i.module ?? '?';
+      const row = byModule.get(m) ?? { module: m, HIGH: 0, MEDIUM: 0, LOW: 0, synced: 0, total: 0 };
+      row[i.level] += 1;
+      row.total += 1;
+      if (i.review?.status === 'SYNCED') row.synced += 1;
+      byModule.set(m, row);
+    });
+    return [...byModule.values()].sort((a, b) => b.HIGH - a.HIGH || b.total - a.total);
+  }, [items]);
+  const count = (n: number, color: string) => (n > 0 ? <Tag color={color}>{n}</Tag> : <Text type="secondary">0</Text>);
+  return (
+    <Table
+      rowKey="module"
+      size="small"
+      pagination={false}
+      scroll={{ y: 240 }}
+      dataSource={rows}
+      columns={[
+        {
+          title: t('migrationRisk.filter.module'),
+          dataIndex: 'module',
+          render: (m: string) => (
+            <Button type="link" size="small" style={{ padding: 0, fontWeight: active.includes(m) ? 600 : undefined }}
+              onClick={() => onPick(m)}>{m}</Button>
+          ),
+        },
+        { title: t('migrationRisk.level.HIGH'), dataIndex: 'HIGH', width: 90, render: (n: number) => count(n, LEVEL_COLOR.HIGH) },
+        { title: t('migrationRisk.level.MEDIUM'), dataIndex: 'MEDIUM', width: 90, render: (n: number) => count(n, LEVEL_COLOR.MEDIUM) },
+        { title: t('migrationRisk.level.LOW'), dataIndex: 'LOW', width: 90, render: (n: number) => count(n, LEVEL_COLOR.LOW) },
+        { title: t('migrationRisk.review.SYNCED'), dataIndex: 'synced', width: 110, render: (n: number, r) => `${n} / ${r.total}` },
+      ]}
+    />
+  );
+}
+
 interface Props {
   analysis: MigrationRiskAnalysis | null;
+  settings: MigrationRiskSettings | null;
   loading: boolean;
   /** Replaces the given items (by id) in the analysis on screen. */
   onReviewed: (items: RiskItem[]) => void;
+  /** An ignore rule was added from a row: the page refreshes its rule list. */
+  onIgnoreRuleAdded: () => void;
 }
 
-export function ItemsTable({ analysis, loading, onReviewed }: Props) {
+export function ItemsTable({ analysis, settings, loading, onReviewed, onIgnoreRuleAdded }: Props) {
   const { t } = useI18n();
   const { message } = App.useApp();
   const saved = analysis?.analysisId != null;
+  const { state: f, set } = useTableState();
 
-  const [levelFilter, setLevelFilter] = useState<LevelFilter>('ALL');
-  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('ALL');
-  const [categories, setCategories] = useState<RiskCategory[]>([]);
-  const [modules, setModules] = useState<string[]>([]);
-  const [codeFilter, setCodeFilter] = useState<CodeFilter>('ALL');
-  const [keyword, setKeyword] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [reviewer, setReviewer] = useState(storedReviewer);
   const [saving, setSaving] = useState(false);
   /** One page-level modal for notes (a modal per row loses its trigger state on re-render — see the skill). */
   const [editing, setEditing] = useState<{ items: RiskItem[]; status: ReviewStatus; note: string } | null>(null);
+  /** The same for "ignore this file / this kind of finding". */
+  const [ignoring, setIgnoring] = useState<{ pattern: string; category: RiskCategory | null; scoped: boolean; note: string } | null>(null);
+  const [keywordDraft, setKeywordDraft] = useState(f.keyword);
 
   const rememberReviewer = (name: string) => {
     setReviewer(name);
@@ -104,26 +192,34 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
     }
   };
 
+  const items = useMemo(() => analysis?.items ?? [], [analysis]);
   /** Modules present in this run, for the filter; runs saved before tags have none. */
   const moduleOptions = useMemo(
-    () => [...new Set((analysis?.items ?? []).map((i) => i.module).filter((m): m is string => !!m))].sort(),
-    [analysis],
+    () => [...new Set(items.map((i) => i.module).filter((m): m is string => !!m))].sort(),
+    [items],
   );
-  const hasTests = (analysis?.items ?? []).some((i) => i.test);
+  const hasTests = items.some((i) => i.test);
+  const hasDelta = items.some((i) => i.review?.delta);
 
   const rows = useMemo(
-    () => (analysis?.items ?? [])
-      .filter((i) => levelFilter === 'ALL' || i.level === levelFilter)
-      .filter((i) => reviewFilter === 'ALL' || i.review?.status === reviewFilter)
-      .filter((i) => categories.length === 0 || partsOf(i).some((p) => categories.includes(p.category)))
-      .filter((i) => modules.length === 0 || (i.module != null && modules.includes(i.module)))
-      .filter((i) => codeFilter === 'ALL' || (codeFilter === 'TEST') === i.test)
-      .filter((i) => matchesKeyword(i, keyword.trim())),
-    [analysis, levelFilter, reviewFilter, categories, modules, codeFilter, keyword],
+    () => items
+      .filter((i) => f.level === 'ALL' || i.level === f.level)
+      .filter((i) => f.review === 'ALL' || i.review?.status === f.review)
+      .filter((i) => f.delta === 'ALL' || i.review?.delta === f.delta)
+      .filter((i) => f.categories.length === 0 || partsOf(i).some((p) => f.categories.includes(p.category)))
+      .filter((i) => f.modules.length === 0 || (i.module != null && f.modules.includes(i.module)))
+      .filter((i) => f.code === 'ALL' || (f.code === 'TEST') === i.test)
+      .filter((i) => matchesKeyword(i, f.keyword.trim())),
+    // the URL state is rebuilt each render; its primitive parts are what change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, f.level, f.review, f.delta, f.categories.join(), f.modules.join(), f.code, f.keyword],
   );
+  // A page beyond the filtered rows would show an empty table: clamp instead.
+  const lastPage = Math.max(1, Math.ceil(rows.length / f.size));
+  const page = Math.min(f.page, lastPage);
 
-  const submit = async (items: RiskItem[], status: ReviewStatus, note?: string) => {
-    const ids = items.map((i) => i.review?.itemId).filter((id): id is number => id != null);
+  const submit = async (targets: RiskItem[], status: ReviewStatus, note?: string) => {
+    const ids = targets.map((i) => i.review?.itemId).filter((id): id is number => id != null);
     if (ids.length === 0) return;
     setSaving(true);
     try {
@@ -142,8 +238,37 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
     }
   };
 
+  const createJira = async (item: RiskItem) => {
+    if (item.review == null) return;
+    try {
+      const updated = await migrationRiskApi.createJira(item.review.itemId);
+      onReviewed([updated]);
+      message.success(t('migrationRisk.jira.created', { key: updated.review?.jiraKey ?? '' }));
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
+  const addIgnoreRule = async () => {
+    if (!ignoring || !analysis) return;
+    try {
+      await migrationRiskApi.addIgnoreRule({
+        pattern: ignoring.pattern.trim(),
+        category: ignoring.category,
+        scope: ignoring.scoped ? analysis.source.repo1Path : null,
+        note: ignoring.note.trim() || undefined,
+      });
+      setIgnoring(null);
+      onIgnoreRuleAdded();
+      message.success(t('migrationRisk.ignore.added'));
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
   const categoryLabel = (c: RiskCategory) => t(`migrationRisk.category.${c}` as MessageKey);
   const categoryHint = (c: RiskCategory) => t(`migrationRisk.categoryHint.${c}` as MessageKey);
+  const reviewLabel = (s: ReviewStatus) => t(`migrationRisk.review.${s}` as MessageKey);
 
   const columns: TableColumnsType<RiskItem> = [
     {
@@ -177,18 +302,19 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
           <Paragraph style={{ margin: 0 }} ellipsis={{ rows: 2, tooltip: element }}>
             <Text code>{element}</Text>
           </Paragraph>
-          {(i.module || i.test || i.parts?.length > 0) && (
-            <Space size={4} wrap>
-              {i.parts?.length > 0 && <Tag>{t('migrationRisk.parts.count', { count: i.parts.length })}</Tag>}
-              {i.module && (
-                <Tooltip title={t('migrationRisk.filter.module')}>
-                  <Tag color="geekblue" style={{ cursor: 'pointer' }}
-                    onClick={() => setModules([i.module!])}>{i.module}</Tag>
-                </Tooltip>
-              )}
-              {i.test && <Tag color="purple">{t('migrationRisk.tag.test')}</Tag>}
-            </Space>
-          )}
+          <Space size={4} wrap>
+            {i.parts?.length > 0 && <Tag>{t('migrationRisk.parts.count', { count: i.parts.length })}</Tag>}
+            {i.module && (
+              <Tooltip title={t('migrationRisk.filter.module')}>
+                <Tag color="geekblue" style={{ cursor: 'pointer' }} onClick={() => set({ module: [i.module!] })}>
+                  {i.module}
+                </Tag>
+              </Tooltip>
+            )}
+            {i.test && <Tag color="purple">{t('migrationRisk.tag.test')}</Tag>}
+            {i.review?.delta === 'NEW' && <Tag color="blue">{t('migrationRisk.delta.NEW')}</Tag>}
+            {i.review?.delta === 'CHANGED' && <Tag color="orange">{t('migrationRisk.delta.CHANGED')}</Tag>}
+          </Space>
         </Space>
       ),
     },
@@ -252,7 +378,7 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
     {
       title: t('migrationRisk.col.diff'),
       key: 'diff',
-      width: 160,
+      width: 170,
       render: (_, i) => analysis && hasDiff(i) && (
         <Space direction="vertical" size={4}>
           <Tooltip title={t('migrationRisk.diff.a')}>
@@ -262,8 +388,14 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
           {/* No counterpart in repo2 = nothing to put next to repo1's code. */}
           <Tooltip title={t('migrationRisk.diff.b')}>
             <Button size="small" icon={<DiffOutlined />} disabled={!i.target}
-              href={diffUrl(analysis.source, 'B', i.target?.path ?? i.upstream?.path)} target="_blank">
+              href={diffUrl(analysis.source, 'B', i.upstream?.path, i.target?.path)} target="_blank">
               {t('migrationRisk.diff.openB')}
+            </Button>
+          </Tooltip>
+          <Tooltip title={t('migrationRisk.diff.threeHint')}>
+            <Button size="small" icon={<PartitionOutlined />} disabled={!i.target}
+              href={diff3Url(analysis.source, i.upstream!.path, i.target?.path)} target="_blank">
+              {t('migrationRisk.diff.three')}
             </Button>
           </Tooltip>
         </Space>
@@ -272,14 +404,16 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
     ...(saved ? [{
       title: t('migrationRisk.col.review'),
       key: 'review',
-      width: 250,
+      width: 290,
       fixed: 'right' as const,
       render: (_: unknown, i: RiskItem) => i.review && (
         <Space direction="vertical" size={2}>
           <Space size={4} wrap>
-            <Tooltip title={i.review.carriedOverFrom != null ? t('migrationRisk.review.carried') : undefined}>
+            <Tooltip title={i.review.auto ? t('migrationRisk.review.auto')
+              : i.review.carriedOverFrom != null ? t('migrationRisk.review.carried') : undefined}>
               <Tag color={REVIEW_COLOR[i.review.status]}>
-                {t(`migrationRisk.review.${i.review.status}` as MessageKey)}
+                {reviewLabel(i.review.status)}
+                {i.review.auto && ' ⚙'}
                 {i.review.carriedOverFrom != null && ' ↻'}
               </Tag>
             </Tooltip>
@@ -295,7 +429,27 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
               <Button size="small" type="text" icon={<EditOutlined />}
                 onClick={() => setEditing({ items: [i], status: i.review!.status, note: i.review?.note ?? '' })} />
             </Tooltip>
+            {i.review.jiraKey ? (
+              settings?.jiraBrowseUrl
+                ? <a href={`${settings.jiraBrowseUrl}${i.review.jiraKey}`} target="_blank" rel="noreferrer"><Tag color="blue">{i.review.jiraKey}</Tag></a>
+                : <Tooltip title={settings?.jiraMock ? t('migrationRisk.jira.mock') : undefined}><Tag color="blue">{i.review.jiraKey}</Tag></Tooltip>
+            ) : (
+              <Tooltip title={t('migrationRisk.jira.create')}>
+                <Button size="small" type="text" onClick={() => void createJira(i)}>Jira</Button>
+              </Tooltip>
+            )}
           </Space>
+          {/* The file changed after its review: what it was, and how many of its findings moved since. */}
+          {i.review.previous && (
+            <Tooltip title={i.review.previous.note ?? undefined}>
+              <Text type="warning" style={{ fontSize: 12 }}>
+                {t('migrationRisk.review.previous', {
+                  status: reviewLabel(i.review.previous.status),
+                  count: i.review.changedParts.length,
+                })}
+              </Text>
+            </Tooltip>
+          )}
           {i.review.note && (
             <Paragraph style={{ margin: 0, fontSize: 12 }} ellipsis={{ rows: 2, tooltip: i.review.note }}>
               {i.review.note}
@@ -311,14 +465,27 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
     }] : []),
   ];
 
-  const selectedItems = (analysis?.items ?? []).filter((i) => selected.includes(i.id));
+  const selectedItems = items.filter((i) => selected.includes(i.id));
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {moduleOptions.length > 1 && (
+        <Collapse
+          size="small"
+          items={[{
+            key: 'modules',
+            label: t('migrationRisk.modules.title', { count: moduleOptions.length }),
+            children: (
+              <ModuleSummary items={items} active={f.modules}
+                onPick={(m) => set({ module: f.modules.length === 1 && f.modules[0] === m ? [] : [m] })} />
+            ),
+          }]}
+        />
+      )}
       <Space wrap>
         <Segmented<LevelFilter>
-          value={levelFilter}
-          onChange={setLevelFilter}
+          value={f.level}
+          onChange={(v) => set({ level: v })}
           options={[
             { value: 'ALL', label: t('migrationRisk.filter.all') },
             { value: 'HIGH', label: t('migrationRisk.level.HIGH') },
@@ -328,13 +495,23 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
         />
         {saved && (
           <Segmented<ReviewFilter>
-            value={reviewFilter}
-            onChange={setReviewFilter}
+            value={f.review}
+            onChange={(v) => set({ review: v })}
             options={[
               { value: 'ALL', label: t('migrationRisk.filter.allReviews') },
-              { value: 'PENDING', label: t('migrationRisk.review.PENDING') },
-              { value: 'SAFE', label: t('migrationRisk.review.SAFE') },
-              { value: 'ATTENTION', label: t('migrationRisk.review.ATTENTION') },
+              ...(['PENDING', 'SAFE', 'ATTENTION', 'SYNCED'] as ReviewStatus[]).map((s) => ({ value: s, label: reviewLabel(s) })),
+            ]}
+          />
+        )}
+        {hasDelta && (
+          <Segmented<DeltaFilter>
+            value={f.delta}
+            onChange={(v) => set({ delta: v })}
+            options={[
+              { value: 'ALL', label: t('migrationRisk.delta.ALL') },
+              { value: 'NEW', label: t('migrationRisk.delta.NEW') },
+              { value: 'CHANGED', label: t('migrationRisk.delta.CHANGED') },
+              { value: 'SAME', label: t('migrationRisk.delta.SAME') },
             ]}
           />
         )}
@@ -342,8 +519,8 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
           mode="multiple"
           allowClear
           maxTagCount="responsive"
-          value={categories}
-          onChange={setCategories}
+          value={f.categories}
+          onChange={(v) => set({ category: v })}
           placeholder={t('migrationRisk.filter.category')}
           style={{ minWidth: 220 }}
           options={RISK_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) }))}
@@ -353,8 +530,8 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
             mode="multiple"
             allowClear
             maxTagCount="responsive"
-            value={modules}
-            onChange={setModules}
+            value={f.modules}
+            onChange={(v) => set({ module: v })}
             placeholder={t('migrationRisk.filter.module')}
             style={{ minWidth: 180 }}
             options={moduleOptions.map((m) => ({ value: m, label: m }))}
@@ -362,8 +539,8 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
         )}
         {hasTests && (
           <Segmented<CodeFilter>
-            value={codeFilter}
-            onChange={setCodeFilter}
+            value={f.code}
+            onChange={(v) => set({ code: v })}
             options={[
               { value: 'ALL', label: t('migrationRisk.filter.allCode') },
               { value: 'MAIN', label: t('migrationRisk.filter.mainOnly') },
@@ -374,8 +551,12 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
         <Input.Search
           allowClear
           placeholder={t('migrationRisk.search')}
-          onSearch={setKeyword}
-          onChange={(e) => !e.target.value && setKeyword('')}
+          value={keywordDraft}
+          onChange={(e) => {
+            setKeywordDraft(e.target.value);
+            if (!e.target.value) set({ q: null });
+          }}
+          onSearch={(v) => set({ q: v.trim() || null })}
           style={{ width: 240 }}
         />
       </Space>
@@ -396,6 +577,10 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
             onClick={() => setEditing({ items: selectedItems, status: 'ATTENTION', note: '' })}>
             {t('migrationRisk.review.selectedAttention', { count: selectedItems.length })}
           </Button>
+          <Button disabled={selectedItems.length === 0} loading={saving}
+            onClick={() => void submit(selectedItems, 'SYNCED')}>
+            {t('migrationRisk.review.selectedSynced', { count: selectedItems.length })}
+          </Button>
         </Space>
       )}
       <Table<RiskItem>
@@ -404,20 +589,38 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
         loading={loading}
         columns={columns}
         dataSource={rows}
-        pagination={{ pageSize: 20, showSizeChanger: true }}
+        // Controlled: a fixed `pageSize` with showSizeChanger ignored every size change, and filtering kept a page
+        // number past the end (an empty table). Page, size and filters are all in the URL now.
+        pagination={{
+          current: page,
+          pageSize: f.size,
+          pageSizeOptions: PAGE_SIZES,
+          showSizeChanger: true,
+          showTotal: (total) => t('migrationRisk.pagination.total', { total }),
+          onChange: (p, size) => set(size !== f.size ? { size, page: 1 } : { page: p }),
+        }}
         // Numeric width, not 'max-content': with a fixed-right column the latter collapses the last scrolling column.
-        scroll={{ x: saved ? 1870 : 1620 }}
+        scroll={{ x: saved ? 1960 : 1670 }}
         rowSelection={saved ? { selectedRowKeys: selected, onChange: (keys) => setSelected(keys as string[]) } : undefined}
         expandable={{
           // Every finding in the file; line-level differences are the diff page's job.
           expandedRowRender: (i) => (
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <Space size={4} wrap>
+                <Button size="small" icon={<StopOutlined />}
+                  onClick={() => setIgnoring({ pattern: i.element, category: null, scoped: true, note: '' })}>
+                  {t('migrationRisk.ignore.file')}
+                </Button>
+              </Space>
               {partsOf(i).map((p) => (
                 <Space key={p.id} direction="vertical" size={2} style={{ width: '100%' }}>
                   <Space size={4} wrap>
                     <Tag color={LEVEL_COLOR[p.level]}>{t(`migrationRisk.level.${p.level}` as MessageKey)}</Tag>
                     <Tooltip title={categoryHint(p.category)}><Text strong>{categoryLabel(p.category)}</Text></Tooltip>
                     {partName(p, i) && <Text code>{partName(p, i)}</Text>}
+                    {i.review?.changedParts.includes(p.id) && (
+                      <Tag color="orange">{t('migrationRisk.review.changedSince')}</Tag>
+                    )}
                     {p.targetState && (
                       <Tag color={STATE_COLOR[p.targetState]}>{t(`migrationRisk.state.${p.targetState}` as MessageKey)}</Tag>
                     )}
@@ -426,6 +629,17 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
                         → {p.target?.repo ? `${p.target.repo}: ` : ''}{where(p.target)}
                       </Text>
                     )}
+                    {analysis && p.target && p.target.path !== i.target?.path && (
+                      // this finding lives in another repo2 file than the row's: open that one
+                      <Button size="small" type="link" icon={<DiffOutlined />} target="_blank"
+                        href={diffUrl(analysis.source, 'B', i.upstream?.path, p.target.path)}>
+                        {t('migrationRisk.diff.openB')}
+                      </Button>
+                    )}
+                    <Button size="small" type="link" icon={<StopOutlined />}
+                      onClick={() => setIgnoring({ pattern: i.element, category: p.category, scoped: true, note: '' })}>
+                      {t('migrationRisk.ignore.category')}
+                    </Button>
                   </Space>
                   {p.evidence.map((e) => <Text key={e} type="secondary" style={{ fontSize: 12 }}>{e}</Text>)}
                   {p.details.map((d) => <DetailLine key={d} line={d} />)}
@@ -450,9 +664,9 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
             <Radio.Group
               value={editing.status}
               onChange={(e) => setEditing({ ...editing, status: e.target.value })}
-              options={(['SAFE', 'ATTENTION', 'PENDING'] as ReviewStatus[]).map((s) => ({
+              options={(['SAFE', 'ATTENTION', 'SYNCED', 'PENDING'] as ReviewStatus[]).map((s) => ({
                 value: s,
-                label: t(`migrationRisk.review.${s}` as MessageKey),
+                label: reviewLabel(s),
               }))}
             />
             <Input.TextArea
@@ -463,6 +677,42 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
               onChange={(e) => setEditing({ ...editing, note: e.target.value })}
               placeholder={t('migrationRisk.review.notePlaceholder')}
             />
+          </Space>
+        )}
+      </Modal>
+      <Modal
+        open={ignoring != null}
+        title={t('migrationRisk.ignore.title')}
+        okText={t('migrationRisk.ignore.save')}
+        onCancel={() => setIgnoring(null)}
+        onOk={() => void addIgnoreRule()}
+        okButtonProps={{ disabled: !ignoring?.pattern.trim() }}
+        destroyOnHidden
+      >
+        {ignoring && (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Text type="secondary">{t('migrationRisk.ignore.hint')}</Text>
+            <Input value={ignoring.pattern} onChange={(e) => setIgnoring({ ...ignoring, pattern: e.target.value })}
+              addonBefore={t('migrationRisk.ignore.pattern')} />
+            <Select<RiskCategory | null>
+              value={ignoring.category}
+              onChange={(v) => setIgnoring({ ...ignoring, category: v })}
+              style={{ width: '100%' }}
+              options={[
+                { value: null, label: t('migrationRisk.ignore.wholeFile') },
+                ...RISK_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) })),
+              ]}
+            />
+            <Radio.Group
+              value={ignoring.scoped}
+              onChange={(e) => setIgnoring({ ...ignoring, scoped: e.target.value })}
+              options={[
+                { value: true, label: t('migrationRisk.ignore.thisProject') },
+                { value: false, label: t('migrationRisk.ignore.allProjects') },
+              ]}
+            />
+            <Input value={ignoring.note} maxLength={1000} placeholder={t('migrationRisk.ignore.note')}
+              onChange={(e) => setIgnoring({ ...ignoring, note: e.target.value })} />
           </Space>
         )}
       </Modal>

@@ -216,13 +216,13 @@ export function AnalysisForm({ form, settings, releases, loading, onAnalyze, onD
           <Col xs={24} lg={8}>
             <Form.Item name="repo1Path" label={t('migrationRisk.repo1Path')} tooltip={t('migrationRisk.repo1PathHint')}
               rules={required}>
-              <Input placeholder="/work/repo1" allowClear />
+              <Input placeholder={mode === 'GIT' ? '/work/repo1 · https://github.com/acme/repo1.git' : '/work/repo1'} allowClear />
             </Form.Item>
           </Col>
           <Col xs={24} lg={8}>
             <Form.Item name="repo2Path" label={t('migrationRisk.repo2Path')} tooltip={t('migrationRisk.repo2PathHint')}
               rules={required}>
-              <Input placeholder="/work/repo2" allowClear />
+              <Input placeholder={mode === 'GIT' ? '/work/repo2 · https://…/repo2.git' : '/work/repo2'} allowClear />
             </Form.Item>
           </Col>
           <Col xs={24} lg={8}>
@@ -305,6 +305,8 @@ export function AnalysisForm({ form, settings, releases, loading, onAnalyze, onD
         {settings && (
           <Text type="secondary" style={{ fontSize: 12 }}>
             {t('migrationRisk.allowedRoots', { roots: settings.allowedRoots.join(', ') })}
+            {mode === 'GIT' && settings.allowedHosts?.length > 0
+              && ` · ${t('migrationRisk.remoteHosts', { hosts: settings.allowedHosts.join(', ') })}`}
           </Text>
         )}
       </Space>

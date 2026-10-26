@@ -24,6 +24,7 @@ export const RISK_CATEGORIES = [
   'TEMPLATE_CONVERTED',
   'NON_JAVA_FILE',
   'AUTO_SYNC',
+  'ALREADY_SYNCED',
   'CONFIG_IN_SYNC',
   'NEW_CODE',
 ] as const;
@@ -33,7 +34,11 @@ export type ElementKind = 'FILE' | 'CLASS' | 'METHOD' | 'FIELDS' | 'CONFIG' | 'D
 export type UpstreamChange = 'ADDED' | 'MODIFIED' | 'DELETED' | 'REFACTORED';
 export type TargetState = 'UNCHANGED' | 'MODIFIED' | 'RELOCATED' | 'MISSING' | 'SPLIT' | 'ABSENT';
 
-export type ReviewStatus = 'PENDING' | 'SAFE' | 'ATTENTION';
+/** SYNCED: repo2 has repo1 HEAD's state — set by the analysis (`auto`) or by hand. */
+export type ReviewStatus = 'PENDING' | 'SAFE' | 'ATTENTION' | 'SYNCED';
+
+/** Against the release's previous run; null for its first run. */
+export type ReviewDelta = 'NEW' | 'CHANGED' | 'SAME';
 
 /** A saved item's review. `carriedOverFrom`: copied from the release's previous run (item unchanged since). */
 export interface Review {
@@ -43,6 +48,14 @@ export interface Review {
   reviewer: string | null;
   reviewedAt: string | null;
   carriedOverFrom: number | null;
+  /** Set by the analysis (SYNCED because repo2 matches), not a person. */
+  auto: boolean;
+  delta: ReviewDelta | null;
+  /** The verdict the file had before its content changed (it is PENDING again). */
+  previous: { status: ReviewStatus; note: string | null; reviewer: string | null } | null;
+  /** With `previous`: ids of the parts new or different since that verdict. */
+  changedParts: string[];
+  jiraKey: string | null;
 }
 
 export interface Location {
@@ -195,6 +208,22 @@ export interface MigrationRiskSettings {
   allowedRoots: string[];
   apiRules: { id: string; pattern: string; hint: string | null }[];
   maxChangedFiles: number;
+  /** Jira issues are made up in memory (no Jira configured). */
+  jiraMock: boolean;
+  /** Prefix for issue links; null with the mock. */
+  jiraBrowseUrl: string | null;
+  /** Hosts whose https:// git URLs are accepted as repositories. */
+  allowedHosts: string[];
+}
+
+/** A file pattern (Ant-style) nobody needs to review; `category` null = the whole file, `scope` null = every project. */
+export interface IgnoreRule {
+  id: number;
+  pattern: string;
+  category: RiskCategory | null;
+  scope: string | null;
+  note: string | null;
+  createdAt: string;
 }
 
 /** One repository's refs. `currentBranch` is null on a detached HEAD. */
@@ -219,6 +248,7 @@ export interface ReviewProgress {
   pending: number;
   safe: number;
   attention: number;
+  synced: number;
 }
 
 export interface AnalysisSummary {
@@ -233,6 +263,7 @@ export interface AnalysisSummary {
   review: ReviewProgress;
   durationMillis: number;
   analyzedAt: string;
+  previousAnalysisId: number | null;
 }
 
 export interface ReleaseView {
@@ -311,6 +342,29 @@ export const migrationRiskApi = {
     requestAt<RiskItem>(BASE, `/items/${itemId}/review`, putJson(review)),
   reviewAll: (itemIds: number[], review: ReviewRequest) =>
     requestAt<RiskItem[]>(BASE, '/items/review', putJson({ itemIds, ...review })),
+  /** What the release's previous run had and this one does not (synced or reverted). */
+  resolved: (analysisId: number) => requestAt<RiskItem[]>(BASE, `/analyses/${analysisId}/resolved`),
+  /** Creates the item's Jira issue once; returns the item with `review.jiraKey`. */
+  createJira: (itemId: number) => requestAt<RiskItem>(BASE, `/items/${itemId}/jira`, { method: 'POST' }),
+  ignoreRules: () => requestAt<IgnoreRule[]>(BASE, '/ignore-rules'),
+  addIgnoreRule: (rule: { pattern: string; category?: RiskCategory | null; scope?: string | null; note?: string }) =>
+    requestAt<IgnoreRule>(BASE, '/ignore-rules', json(rule)),
+  /** 204 with no body — `requestAt` would try to parse it as JSON. */
+  deleteIgnoreRule: async (id: number) => {
+    const res = await fetch(`${BASE}/ignore-rules/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  },
+  /** The analysis on screen as a file (xlsx or Markdown checklist); unsaved analyses export too. */
+  export: async (analysis: MigrationRiskAnalysis, format: 'xlsx' | 'md') => {
+    const res = await fetch(`${BASE}/export?format=${format}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(analysis),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? `migration-sync.${format}`;
+    return { blob: await res.blob(), name };
+  },
 };
 
 /**
@@ -319,7 +373,7 @@ export const migrationRiskApi = {
  * bridge). Commit ids, not branch names, so a saved analysis keeps showing the code it was computed on. Under
  * /api/migration-risk, so the same proxy serves it.
  */
-export function diffUrl(source: AnalysisSource, side: 'A' | 'B', file?: string | null): string {
+export function diffUrl(source: AnalysisSource, side: 'A' | 'B', file?: string | null, target?: string | null): string {
   const params = source.mode === 'DIRECTORY'
     ? { mode: 'DIRECTORY', baselinePath: source.baselinePath ?? undefined, repo1Path: source.repo1Path, repo2Path: source.repo2Path }
     : {
@@ -338,7 +392,18 @@ export function diffUrl(source: AnalysisSource, side: 'A' | 'B', file?: string |
     skipTests: source.skipTests ? 'true' : undefined,
     side,
     file: file ?? undefined,
+    // side B: the repo2 file to compare with, when it is not at the same path (a key kept in repo2B's config/)
+    target: side === 'B' && target && target !== file ? target : undefined,
   })}`;
+}
+
+/** Three panes — repo1 baseline | repo1 HEAD | repo2 — changed lines marked by who changed them. */
+export function diff3Url(source: AnalysisSource, file: string, target?: string | null): string {
+  const url = new URL(diffUrl(source, 'A', file), window.location.origin);
+  url.pathname = `${BASE}/view/diff3`;
+  url.searchParams.delete('side');
+  if (target && target !== file) url.searchParams.set('target', target);
+  return url.pathname + url.search;
 }
 
 /** SSE stream of a job: `stage`, `progress`, then `done` or `failed`; replayed from the start on reconnect. */

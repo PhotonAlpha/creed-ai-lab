@@ -12,7 +12,12 @@ export const STATE_COLOR: Record<TargetState, string> = {
   ABSENT: 'default',
 };
 
-export const REVIEW_COLOR: Record<ReviewStatus, string> = { PENDING: 'default', SAFE: 'success', ATTENTION: 'error' };
+export const REVIEW_COLOR: Record<ReviewStatus, string> = {
+  PENDING: 'default',
+  SAFE: 'success',
+  ATTENTION: 'error',
+  SYNCED: 'cyan',
+};
 
 /** The level each category carries (backend `RiskCategory.level`); NON_JAVA_FILE depends on repo2's copy. */
 export const CATEGORY_LEVEL: Record<RiskCategory, RiskLevel | null> = {
@@ -28,6 +33,7 @@ export const CATEGORY_LEVEL: Record<RiskCategory, RiskLevel | null> = {
   TEMPLATE_CONVERTED: 'MEDIUM',
   NON_JAVA_FILE: null,
   AUTO_SYNC: 'LOW',
+  ALREADY_SYNCED: 'LOW',
   CONFIG_IN_SYNC: 'LOW',
   NEW_CODE: 'LOW',
 };

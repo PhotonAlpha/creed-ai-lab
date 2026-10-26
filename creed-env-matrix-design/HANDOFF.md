@@ -48,6 +48,10 @@ Complete and verified in a browser against the real backend.
   The demo now runs with repo2B. 2026-10-27: the table is one row per file (`items[].parts` = the findings in
   it): category column = riskiest + `+N`, details = one line per finding, expanded row = every finding with its
   data lines. `npm run typecheck` / `build` pass; not seen in a browser.
+  2026-10-27 (later): pagination fixed (literal `pageSize` props made the size changer a no-op; the items table is now
+  controlled, filters + page in the URL); module summary; SYNCED status, delta filter, *Resolved* tab, review memory
+  ("was SAFE before it changed · N findings"), Jira per file, ignore-rule panel + per-row "ignore", Excel / Markdown
+  export, three-way button, git URL hints.
   `npm run typecheck` and `npm run build` pass; the API (refs, suggestion, save, review, reload, diff HTML) was
   verified through the Vite proxy on a real pair. **Not yet checked in a browser** — the extension could not
   attach to any page this session either.
