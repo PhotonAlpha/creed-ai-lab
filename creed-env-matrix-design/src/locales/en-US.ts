@@ -625,6 +625,8 @@ const enUS = {
   'migrationRisk.filter.mainOnly': 'Main only',
   'migrationRisk.filter.testOnly': 'Tests only',
   'migrationRisk.tag.test': 'test',
+  'migrationRisk.parts.count': '{count} findings',
+  'migrationRisk.col.file': 'File',
 } as const;
 
 export default enUS;

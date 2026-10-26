@@ -77,6 +77,11 @@ export interface RiskItem {
   module: string | null;
   /** Test code or test resources. */
   test: boolean;
+  /**
+   * The API returns one record per file; these are the findings inside it (methods, config keys, API matches),
+   * riskiest first. Empty on a part itself, and on runs saved before file records (those rows are one finding).
+   */
+  parts: RiskItem[];
 }
 
 export interface CodeLocation {

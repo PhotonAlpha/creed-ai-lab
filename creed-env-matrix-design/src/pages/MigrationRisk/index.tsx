@@ -244,7 +244,7 @@ export function MigrationRiskPage() {
       title: t('migrationRisk.col.diff'),
       key: 'diff',
       width: 140,
-      render: (_, f) => analysis && f.kind === 'JAVA' && (
+      render: (_, f) => analysis && (
         <Button size="small" icon={<DiffOutlined />} target="_blank"
           href={diffUrl(analysis.source, 'A', f.newPath ?? f.oldPath)}>{t('migrationRisk.diff.openA')}</Button>
       ),

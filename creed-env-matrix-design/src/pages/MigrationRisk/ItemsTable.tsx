@@ -38,16 +38,29 @@ function DetailLine({ line }: { line: string }) {
 
 const where = (l: Location | null) => (l ? (l.line != null ? `${l.path}:${l.line}` : l.path) : null);
 
+/** A file record's findings; a run saved before file records has one finding per row. */
+const partsOf = (i: RiskItem) => (i.parts?.length ? i.parts : [i]);
+
 const matchesKeyword = (item: RiskItem, keyword: string) => {
   if (!keyword) return true;
   const k = keyword.toLowerCase();
-  return [item.element, item.module, item.upstream?.path, item.target?.path, item.target?.element, item.review?.note,
-    ...item.details, ...item.evidence].some((v) => v?.toLowerCase().includes(k));
+  return [item.element, item.module, item.upstream?.path, item.target?.path, item.review?.note,
+    ...partsOf(item).flatMap((p) => [p.element, p.target?.path, p.target?.element, ...p.details, ...p.evidence])]
+    .some((v) => v?.toLowerCase().includes(k));
 };
 
-/** Java items have an AST diff to show; config, pom and other files do not. */
-const hasDiff = (i: RiskItem) => ['METHOD', 'CLASS', 'FIELDS'].includes(i.kind)
-  || (i.kind === 'FILE' && (i.upstream?.path ?? '').endsWith('.java'));
+/** `com.acme.shop.order.OrderService#cancel(String)` -> `OrderService#cancel(String)`; keys and paths unchanged. */
+const shortName = (name: string | null) => (name && name.includes('#')
+  ? name.slice(name.lastIndexOf('.', name.indexOf('#')) + 1) : name);
+
+/** A part's name next to its file: the method / key, not the path again. */
+const partName = (p: RiskItem, file: RiskItem) => (p.element === file.element ? null : p.element);
+
+/**
+ * Every file has a diff: Java as RefactoringMiner's AST diff, anything else (yml, properties, .vm / .ftl ...) as a
+ * line diff on the same page. Only a row without a repo1 path (none today) has nothing to open.
+ */
+const hasDiff = (i: RiskItem) => i.upstream != null;
 
 const REVIEWER_KEY = 'migration-risk.reviewer';
 const storedReviewer = () => {
@@ -102,7 +115,7 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
     () => (analysis?.items ?? [])
       .filter((i) => levelFilter === 'ALL' || i.level === levelFilter)
       .filter((i) => reviewFilter === 'ALL' || i.review?.status === reviewFilter)
-      .filter((i) => categories.length === 0 || categories.includes(i.category))
+      .filter((i) => categories.length === 0 || partsOf(i).some((p) => categories.includes(p.category)))
       .filter((i) => modules.length === 0 || (i.module != null && modules.includes(i.module)))
       .filter((i) => codeFilter === 'ALL' || (codeFilter === 'TEST') === i.test)
       .filter((i) => matchesKeyword(i, keyword.trim())),
@@ -143,22 +156,30 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
       title: t('migrationRisk.col.category'),
       dataIndex: 'category',
       width: 150,
-      render: (c: RiskCategory) => <Tooltip title={categoryHint(c)}><Text>{categoryLabel(c)}</Text></Tooltip>,
+      render: (c: RiskCategory, i) => {
+        const others = [...new Set(partsOf(i).map((p) => p.category))].filter((x) => x !== c);
+        return (
+          <Space size={4} wrap>
+            <Tooltip title={categoryHint(c)}><Text>{categoryLabel(c)}</Text></Tooltip>
+            {others.length > 0 && (
+              <Tooltip title={others.map(categoryLabel).join(' / ')}><Tag>+{others.length}</Tag></Tooltip>
+            )}
+          </Space>
+        );
+      },
     },
     {
-      title: t('migrationRisk.col.element'),
+      title: t('migrationRisk.col.file'),
       dataIndex: 'element',
       width: 380,
       render: (element: string, i) => (
         <Space direction="vertical" size={2}>
-          <Space size={4} align="start">
-            <Tag>{t(`migrationRisk.kind.${i.kind}` as MessageKey)}</Tag>
-            <Paragraph style={{ margin: 0 }} ellipsis={{ rows: 2, tooltip: element }}>
-              <Text code>{element}</Text>
-            </Paragraph>
-          </Space>
-          {(i.module || i.test) && (
-            <Space size={4}>
+          <Paragraph style={{ margin: 0 }} ellipsis={{ rows: 2, tooltip: element }}>
+            <Text code>{element}</Text>
+          </Paragraph>
+          {(i.module || i.test || i.parts?.length > 0) && (
+            <Space size={4} wrap>
+              {i.parts?.length > 0 && <Tag>{t('migrationRisk.parts.count', { count: i.parts.length })}</Tag>}
               {i.module && (
                 <Tooltip title={t('migrationRisk.filter.module')}>
                   <Tag color="geekblue" style={{ cursor: 'pointer' }}
@@ -181,16 +202,26 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
       title: t('migrationRisk.col.details'),
       dataIndex: 'details',
       width: 420,
-      render: (details: string[], i) => {
-        // Evidence explains the level when there are no data lines (e.g. "migration: Rename Method ...").
-        const lines = details.length > 0 ? details : i.evidence;
-        if (lines.length === 0) return null;
-        const rest = lines.length - DETAIL_LINES;
+      render: (_: string[], i) => {
+        // One line per finding in the file: level, category, and the method / key (or its first data line).
+        const parts = partsOf(i);
+        const rest = parts.length - DETAIL_LINES;
         return (
           <div style={{ maxWidth: 400 }}>
-            {lines.slice(0, DETAIL_LINES).map((line) => <DetailLine key={line} line={line} />)}
+            {parts.slice(0, DETAIL_LINES).map((p) => (
+              <Paragraph key={p.id} style={{ margin: 0, fontSize: 12 }}
+                ellipsis={{ rows: 1, tooltip: [partName(p, i), ...p.details].filter(Boolean).join('\n') }}>
+                <Tag color={LEVEL_COLOR[p.level]} style={{ fontSize: 11, lineHeight: '16px', marginInlineEnd: 4 }}>
+                  {categoryLabel(p.category)}
+                </Tag>
+                <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                  {shortName(partName(p, i)) ?? p.details[0] ?? p.evidence[0] ?? ''}
+                </Text>
+              </Paragraph>
+            ))}
             {rest > 0 && (
-              <Tooltip title={<div style={{ whiteSpace: 'pre-wrap' }}>{lines.slice(DETAIL_LINES).join('\n')}</div>}>
+              <Tooltip title={<div style={{ whiteSpace: 'pre-wrap' }}>{parts.slice(DETAIL_LINES)
+                .map((p) => `${categoryLabel(p.category)}  ${shortName(partName(p, i)) ?? p.details[0] ?? ''}`).join('\n')}</div>}>
                 <Text type="secondary" style={{ fontSize: 12 }}>{t('migrationRisk.details.more', { count: rest })}</Text>
               </Tooltip>
             )}
@@ -378,27 +409,28 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
         scroll={{ x: saved ? 1870 : 1620 }}
         rowSelection={saved ? { selectedRowKeys: selected, onChange: (keys) => setSelected(keys as string[]) } : undefined}
         expandable={{
-          rowExpandable: (i) => i.evidence.length + i.details.length > 0 || i.upstream != null,
+          // Every finding in the file; line-level differences are the diff page's job.
           expandedRowRender: (i) => (
-            <Space direction="vertical" size="small" style={{ width: '100%' }}>
-              {where(i.upstream) && (
-                <div><Text strong>{t('migrationRisk.col.upstream')}: </Text><Text code>{where(i.upstream)}</Text></div>
-              )}
-              {i.evidence.length > 0 && (
-                <div>
-                  <Text strong>{t('migrationRisk.evidence')}</Text>
-                  <ul style={{ margin: 0, paddingInlineStart: 18 }}>{i.evidence.map((e) => <li key={e}>{e}</li>)}</ul>
-                </div>
-              )}
-              {i.details.length > 0 && (
-                <div>
-                  <Text strong>{t('migrationRisk.details')}</Text>
-                  <ul style={{ margin: 0, paddingInlineStart: 18 }}>
-                    {i.details.map((d) => <li key={d}><Text code>{d}</Text></li>)}
-                  </ul>
-                </div>
-              )}
-              <Text type="secondary">{categoryHint(i.category)}</Text>
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              {partsOf(i).map((p) => (
+                <Space key={p.id} direction="vertical" size={2} style={{ width: '100%' }}>
+                  <Space size={4} wrap>
+                    <Tag color={LEVEL_COLOR[p.level]}>{t(`migrationRisk.level.${p.level}` as MessageKey)}</Tag>
+                    <Tooltip title={categoryHint(p.category)}><Text strong>{categoryLabel(p.category)}</Text></Tooltip>
+                    {partName(p, i) && <Text code>{partName(p, i)}</Text>}
+                    {p.targetState && (
+                      <Tag color={STATE_COLOR[p.targetState]}>{t(`migrationRisk.state.${p.targetState}` as MessageKey)}</Tag>
+                    )}
+                    {where(p.target) && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        → {p.target?.repo ? `${p.target.repo}: ` : ''}{where(p.target)}
+                      </Text>
+                    )}
+                  </Space>
+                  {p.evidence.map((e) => <Text key={e} type="secondary" style={{ fontSize: 12 }}>{e}</Text>)}
+                  {p.details.map((d) => <DetailLine key={d} line={d} />)}
+                </Space>
+              ))}
             </Space>
           ),
         }}

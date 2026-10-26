@@ -617,6 +617,8 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'migrationRisk.filter.mainOnly': '仅主代码',
   'migrationRisk.filter.testOnly': '仅测试',
   'migrationRisk.tag.test': '测试',
+  'migrationRisk.parts.count': '{count} 处发现',
+  'migrationRisk.col.file': '文件',
 };
 
 export default zhCN;
