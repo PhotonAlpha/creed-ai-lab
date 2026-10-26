@@ -10,12 +10,16 @@ import jakarta.validation.constraints.Size;
  *                     an unpacked release; required, it is what separates migration changes from new ones
  * @param repo1Path    repo1 now
  * @param repo2Path    the migrated code base now
+ * @param repo2bPath   optional second migrated folder, merged with repo2Path into one code base
+ * @param skipTests    leave test code and test resources out of the comparison
  * @param release      as in {@link AnalysisRequest}: saved under this release when given
  */
 public record DirectoryAnalysisRequest(@NotBlank String baselinePath, @NotBlank String repo1Path,
-                                       @NotBlank String repo2Path, @Size(max = 120) String release) {
+                                       @NotBlank String repo2Path, String repo2bPath, boolean skipTests,
+                                       @Size(max = 120) String release) {
 
     public DirectoryAnalysisRequest {
+        repo2bPath = repo2bPath == null || repo2bPath.isBlank() ? null : repo2bPath.trim();
         release = release == null || release.isBlank() ? null : release.trim();
     }
 }

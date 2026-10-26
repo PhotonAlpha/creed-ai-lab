@@ -41,8 +41,11 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ReleaseStore {
 
-    /** "L12: " prefixes on matched API lines move with unrelated edits; they must not reset a review. */
-    private static final Pattern LINE_PREFIX = Pattern.compile("^L\\d+: ");
+    /**
+     * "L12: " prefixes on matched API lines ("+ L12: " / "- L12: " on template diffs) move with unrelated edits;
+     * they must not reset a review.
+     */
+    private static final Pattern LINE_PREFIX = Pattern.compile("^([+-] )?L\\d+: ");
 
     private final MrReleaseRepository releases;
     private final MrAnalysisRepository analyses;
@@ -77,6 +80,7 @@ public class ReleaseStore {
         run.setMode(result.source().mode());
         run.setRepo1Path(result.source().repo1Path());
         run.setRepo2Path(result.source().repo2Path());
+        run.setRepo2bPath(result.source().repo2bPath());
         run.setBaselineRef(baselineRef);
         run.setTotalItems(result.counts().total());
         run.setHighItems(result.counts().high());
@@ -180,7 +184,7 @@ public class ReleaseStore {
                 case ATTENTION -> attention = n;
             }
         }
-        return new AnalysisSummary(a.getId(), release, a.getMode(), a.getRepo1Path(), a.getRepo2Path(),
+        return new AnalysisSummary(a.getId(), release, a.getMode(), a.getRepo1Path(), a.getRepo2Path(), a.getRepo2bPath(),
                 a.getBaselineRef(),
                 new AnalysisResponse.Counts(a.getTotalItems(), a.getHighItems(), a.getMediumItems(), a.getLowItems()),
                 new ReviewProgress(pending, safe, attention), a.getDurationMs(), a.getAnalyzedAt());
@@ -194,9 +198,11 @@ public class ReleaseStore {
         String text = String.join("\u0000",
                 item.level().name(), item.category().name(), item.kind().name(), item.element(),
                 String.valueOf(item.change()), String.valueOf(item.targetState()),
-                item.target() == null ? "" : item.target().path() + "|" + item.target().element(),
+                // repo appended only when set, so items saved before repo2 could be two repositories keep their prints
+                item.target() == null ? "" : item.target().path() + "|" + item.target().element()
+                        + (item.target().repo() == null ? "" : "|" + item.target().repo()),
                 String.join("\u0001", item.evidence()),
-                item.details().stream().map(d -> LINE_PREFIX.matcher(d).replaceFirst(""))
+                item.details().stream().map(d -> LINE_PREFIX.matcher(d).replaceFirst("$1"))
                         .collect(Collectors.joining("\u0001")));
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));

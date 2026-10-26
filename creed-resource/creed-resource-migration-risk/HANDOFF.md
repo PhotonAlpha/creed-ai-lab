@@ -32,15 +32,15 @@ Other knobs: `CREED_MIGRATION_RISK_DB_URL|USER|PASSWORD`, `CREED_MIGRATION_RISK_
 | `GET /settings` | `demo` (git pair + baseline tag + the same versions as three folders), `allowedRoots`, `apiRules`, `maxChangedFiles` |
 | `GET /refs?path=&head=` | one repository: `currentBranch`, `head`, `branches`, `remoteBranches`, `tags`, `recentCommits` (back from `head`) |
 | `GET /baseline-suggestion?repo1Path=&repo1Head=&repo2Path=&repo2Head=` | merge-base of the two selected heads (`MERGE_BASE`) when one object DB holds both — two clones of one origin — else `NO_SHARED_HISTORY` |
-| `POST /analyses` `{repo1Path, baseline, repo1Head?, repo2Path, repo2Head?, release?}` | git mode. `release` = save it (release created on first use); response gets `analysisId`, `release`, `items[].review` |
-| `POST /analyses/directories` `{baselinePath, repo1Path, repo2Path, release?}` | folder mode: three plain directories, no git; files as on disk (uncommitted included), `directory-excludes` skipped |
+| `POST /analyses` `{repo1Path, baseline, repo1Head?, repo2Path, repo2Head?, repo2bPath?, repo2bHead?, skipTests?, release?}` | git mode. `repo2bPath`: a second migrated repo, merged with repo2 (`target.repo` = `repo2A`/`repo2B`); `skipTests`: test code out of the comparison. `release` = save it (release created on first use); response gets `analysisId`, `release`, `items[].review` |
+| `POST /analyses/directories` `{baselinePath, repo1Path, repo2Path, repo2bPath?, skipTests?, release?}` | folder mode: three plain directories, no git; files as on disk (uncommitted included), `directory-excludes` skipped |
 | `POST /analyses/jobs` · `POST /analyses/directories/jobs` (same bodies) | **background** analysis: 202 `{jobId}` after a quick check of paths / revisions (a bad baseline is still an immediate 400 on its field); 503 `busy` beyond `migration-risk.jobs.concurrency` + `queue` |
 | `GET /analyses/jobs/{id}/events` | **SSE**: `stage` / `progress` (`{stage, percent, done?, total?, detail, elapsedMillis}`) then `done` or `failed` (the error body); stages replayed on every (re)connect; `:` heartbeat every 15 s |
 | `GET /analyses/jobs/{id}` · `DELETE /analyses/jobs/{id}` | status + last progress + the result (once DONE) or error; cancel (stops at the next progress report) |
 | `GET /analyses/{id}` | a saved run, items with their current review |
 | `GET /releases` · `GET /releases/{id}/analyses` | releases with the latest run's counts + review progress; a release's runs, newest first |
 | `PUT /items/{id}/review` `{status, note?, reviewer?}` · `PUT /items/review` `{itemIds[], ...}` | `SAFE` / `ATTENTION` / `PENDING` (undo); `@Version` → 409 `review_conflict` |
-| `GET /view/diff?mode=GIT|DIRECTORY&...&side=A|B&file=` | **HTML** (Thymeleaf): RefactoringMiner's Monaco side-by-side view. A = baseline → repo1 head, B = baseline → repo2; Prev/Next, Overview, Legend; zh/en by `Accept-Language` |
+| `GET /view/diff?mode=GIT|DIRECTORY&...&side=A|B&file=` | **HTML** (Thymeleaf): RefactoringMiner's Monaco side-by-side view. A ("Upstream change") = baseline → repo1 head, B ("repo1 vs repo2") = repo1 head → repo2 head (+ `repo2bPath`/`repo2bHead`/`skipTests`); Prev/Next, Overview, Legend; zh/en by `Accept-Language` |
 
 Errors: `{error, message, fields?, time}` — 403 `path_not_allowed`, 400 `invalid_repository` / `validation_failed`,
 404 `not_found`, 409 `review_conflict`, 422 `too_many_changes`, 500 `analysis_failed`. Path and revision errors
@@ -52,13 +52,24 @@ Two RefactoringMiner runs on one baseline: **A** baseline → repo1 head, **B** 
 changed only (`SourceTree`: a git commit or a folder — the analysis does not care which). Per changed method /
 field set / class (`JavaRiskAnalyzer`): B split it → `TARGET_SPLIT`; B moved/renamed it → `RELOCATED`; else find
 the class and the method by signature: identical normalized text → `AUTO_SYNC`, different → `BOTH_MODIFIED`,
-absent → `TARGET_MISSING`. `FileRiskAnalyzer`: pom / Spring config key diffs with repo2's value per key, other
-files by content id, API rules on added lines. Saving (`ReleaseStore`): a re-run of a release copies each
+absent → `TARGET_MISSING`. `FileRiskAnalyzer`: pom key diffs with repo2's value per key, `.vm` → `.ftl`
+(`extension-mappings`) → `TEMPLATE_CONVERTED` with the upstream line diff, other files by content id, API rules on
+added lines. `GlobalConfigAnalyzer`: every properties / yml (`config-files`) of each tree reduced to
+`key -> {file -> value}` (key named by profile / file name / test scope, not by file) — a key is a change only
+when its value set changed, a move between files is not; repo2 in sync → `CONFIG_IN_SYNC` (LOW), else
+`CONFIG_CHANGED`. repo2B: `MergedTree` (unprefixed paths, repo2A wins on a collision + warning). Every item gets
+`module` (nearest pom / build.gradle dir) and `test` (`CodeTags`). Saving (`ReleaseStore`): a re-run of a release copies each
 verdict whose item **fingerprint** (content minus line numbers) is unchanged (`carriedOverFrom`).
 
 ## Current state
 
-**42 tests pass** on JDK 25 (`MigrationRiskApiTest` pins every category on the demo and checks folder mode gives
+2026-10-26: repo2A + repo2B, `skipTests`, module / test tags, `.vm → .ftl`, global config keys, diff B = repo1
+head → repo2 head, readable diff names. Demo grew `repo2b` (templates as `.ftl`, the test, `config/application.yml`),
+an `invoice.vm` / `receipt.vm`, a test class and a key moved to `application.properties`: 16 items (repo2 alone) /
+16 with repo2B (4 HIGH) / 15 with `skipTests`. **57 tests pass**. Flyway `V2` adds `mr_analysis.repo2b_path`.
+Not yet run against the real repos or seen in a browser.
+
+Earlier: **42 tests pass** on JDK 25 (`MigrationRiskApiTest` pins every category on the demo and checks folder mode gives
 the identical items; `ReleaseReviewApiTest` save / review / carry-over on H2 **with Flyway**; `DiffViewTest`;
 unit tests). Verified 2026-10-25 over HTTP through the Vite proxy on a real pair — repo1 `creed-ai-lab-ops`
 (`master`), repo2 `creed-ai-lab` (`develop/spring-boot-4`): suggested baseline `c9025a4`, 9 items, saved as release

@@ -65,7 +65,7 @@ class ReleaseReviewApiTest {
         String first = analyse(release);
         long analysisId = ((Number) JsonPath.read(first, "$.analysisId")).longValue();
         assertThat(JsonPath.<String>read(first, "$.release")).isEqualTo(release);
-        assertThat(JsonPath.<List<String>>read(first, "$.items[*].review.status")).hasSize(12).containsOnly("PENDING");
+        assertThat(JsonPath.<List<String>>read(first, "$.items[*].review.status")).hasSize(16).containsOnly("PENDING");
 
         long missing = itemId(first, "com.acme.shop.order.OrderService#legacyTotal(long,long)");
         long cancel = itemId(first, "com.acme.shop.order.OrderService#cancelOrder(String)");
@@ -107,11 +107,35 @@ class ReleaseReviewApiTest {
         List<Integer> from = JsonPath.read(second,
                 "$.items[?(@.element == 'com.acme.shop.order.OrderService#legacyTotal(long,long)')].review.carriedOverFrom");
         assertThat(from).containsExactly((int) missing);
-        assertThat(JsonPath.<List<String>>read(second, "$.items[?(@.review.status == 'PENDING')]")).hasSize(9);
+        assertThat(JsonPath.<List<String>>read(second, "$.items[?(@.review.status == 'PENDING')]")).hasSize(13);
 
         long releaseId = ((Number) JsonPath.<List<Object>>read(releases, "$[?(@.name == '" + release + "')].id").getFirst()).longValue();
         mvc.perform(get("/api/migration-risk/releases/{id}/analyses", releaseId))
                 .andExpect(jsonPath("$.length()").value(2));
+    }
+
+    /** repo2B, the target's repo label and the module / test tags survive the round trip through the database. */
+    @Test
+    void savedRunWithRepo2bKeepsTagsAndRepoLabels() throws Exception {
+        var d = demo.view();
+        String release = "B-" + UUID.randomUUID();
+        String saved = mvc.perform(post("/api/migration-risk/analyses").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"repo1Path": "%s", "baseline": "%s", "repo2Path": "%s", "repo2bPath": "%s", "release": "%s"}
+                                """.formatted(d.repo1Path(), d.baseline(), d.repo2Path(), d.repo2bPath(), release)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        long analysisId = ((Number) JsonPath.read(saved, "$.analysisId")).longValue();
+        String loaded = mvc.perform(get("/api/migration-risk/analyses/{id}", analysisId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.source.repo2bPath").value(d.repo2bPath()))
+                .andReturn().getResponse().getContentAsString();
+        String test = "$.items[?(@.element == 'com.acme.shop.order.OrderServiceTest#unknownOrderIsNotCancelled()')]";
+        assertThat(JsonPath.<List<String>>read(loaded, test + ".target.repo")).containsExactly("repo2B");
+        assertThat(JsonPath.<List<Boolean>>read(loaded, test + ".test")).containsExactly(true);
+        assertThat(JsonPath.<List<String>>read(loaded, test + ".module")).containsExactly("(root)");
+        mvc.perform(get("/api/migration-risk/releases"))
+                .andExpect(jsonPath("$[?(@.name == '" + release + "')].latest.repo2bPath").value(d.repo2bPath()));
     }
 
     @Test

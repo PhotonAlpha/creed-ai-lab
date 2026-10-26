@@ -37,20 +37,24 @@ public class DiffViewController {
                        @RequestParam(defaultValue = "HEAD") String repo1Head,
                        @RequestParam String repo2Path,
                        @RequestParam(defaultValue = "HEAD") String repo2Head,
+                       @RequestParam(required = false) String repo2bPath,
+                       @RequestParam(required = false) String repo2bHead,
+                       @RequestParam(defaultValue = "false") boolean skipTests,
                        @RequestParam(defaultValue = "A") Side side,
                        @RequestParam(required = false) String file,
                        @RequestParam(required = false) Integer index,
                        Model model) {
         Inputs in = mode == Inputs.Mode.DIRECTORY
-                ? Inputs.folders(baselinePath, repo1Path, repo2Path)
-                : Inputs.git(repo1Path, baseline, repo1Head, repo2Path, repo2Head);
+                ? Inputs.folders(baselinePath, repo1Path, repo2Path, repo2bPath, skipTests)
+                : Inputs.git(repo1Path, baseline, repo1Head, repo2Path, repo2Head, repo2bPath, repo2bHead, skipTests);
         model.addAttribute("side", side);
         model.addAttribute("mode", mode);
         try {
             DiffSet set = diffs.diff(in, side);
             if (set.files().isEmpty()) {
                 model.addAttribute("error", side == Side.A
-                        ? "repo1 changed no Java file since the baseline." : "No Java file to compare on this side.");
+                        ? "repo1 changed no Java file since the baseline."
+                        : "None of the Java files repo1 changed is in repo2 (same path or same file name).");
                 return "diff";
             }
             int current = index != null && index >= 0 && index < set.files().size() ? index : set.indexOf(file);
@@ -65,9 +69,19 @@ public class DiffViewController {
             } else {
                 self.queryParam("baseline", baseline).queryParam("repo1Head", repo1Head).queryParam("repo2Head", repo2Head);
             }
-            // Switching sides keeps the file: the baseline path is the left side in both, else the new file's path.
+            if (in.repo2bPath() != null) {
+                self.queryParam("repo2bPath", in.repo2bPath());
+                if (in.repo2bHead() != null) {
+                    self.queryParam("repo2bHead", in.repo2bHead());
+                }
+            }
+            if (skipTests) {
+                self.queryParam("skipTests", true);
+            }
+            // Switching sides keeps the file: repo1 HEAD's path is the right side of A and the left side of B.
             DiffViewService.FileDiff shown = set.files().get(current);
-            String keep = shown.left() != null ? shown.left() : shown.right();
+            String keep = side == Side.A ? (shown.right() != null ? shown.right() : shown.left())
+                    : (shown.left() != null ? shown.left() : shown.right());
             model.addAttribute("sideA", self.cloneBuilder().queryParam("side", Side.A).queryParam("file", keep).encode().toUriString());
             model.addAttribute("sideB", self.cloneBuilder().queryParam("side", Side.B).queryParam("file", keep).encode().toUriString());
             UriComponentsBuilder sameSide = self.cloneBuilder().queryParam("side", side);

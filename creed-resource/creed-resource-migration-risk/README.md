@@ -103,6 +103,23 @@ Technical constraints (details in the skill): the version is pinned in the pom (
 several of its dependencies are excluded (Jetty 9, Spring 4.1.6, GitHub/Perforce clients); its jar's own
 `logback.xml` is overridden by `logging.config`; directories must be passed as real absolute paths.
 
+## Options and what the table adds
+
+- **repo2B** — when the migration split repo1 into two repositories, give the second one as `repo2bPath`
+  (and `repo2bHead`). repo2 and repo2B are read as one code base: a class, template or config key found in
+  either counts as found, and each item's target says `repo2A` or `repo2B`.
+- **Skip tests** (`skipTests`) — test code (`src/test/**`, `*Test.java`, `*IT.java`, test resources) is left
+  out before anything is compared. Without it, every item still carries a `test` flag and a `module` (nearest
+  directory with a `pom.xml` / `build.gradle`), which the page filters on.
+- **Templates converted by the migration** — a changed `x.vm` that repo2 has as `x.ftl` is `TEMPLATE_CONVERTED`
+  (MEDIUM), with the upstream line diff to port by hand. `migration-risk.extension-mappings` holds the pairs.
+- **Config keys, globally** — every properties / yml file (Spring's `application*` / `bootstrap*`, plus
+  `config-files`) is reduced to keys named without the file: `shop.order.max-items`, `[dev] server.port`. A key
+  moved from `application.yml` to `application.properties` is no change; a key repo2 keeps in another file is
+  found. Each changed key is one item: `CONFIG_CHANGED` (HIGH) or, when repo2 already has the new value,
+  `CONFIG_IN_SYNC` (LOW).
+- **Diff views** — *Upstream change* = repo1 baseline → repo1 HEAD; *repo1 vs repo2* = repo1 HEAD → repo2 HEAD.
+
 ## Limits
 
 What it cannot tell: behaviour that changed under identical code (Jackson 3's defaults, for example) —

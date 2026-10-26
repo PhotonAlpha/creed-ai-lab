@@ -11,7 +11,10 @@ public enum RiskCategory {
     TARGET_SPLIT(RiskLevel.HIGH),
     /** HIGH — added upstream lines use an API the migration replaced (Jackson 2, javax.*, Boot 3 classes ...). */
     MIGRATION_API(RiskLevel.HIGH),
-    /** HIGH — application*.yml / .properties changed: keys may have been renamed or removed in Boot 4. */
+    /**
+     * HIGH — a config key (any .properties / .yml, compared across all files) changed upstream and repo2 does not
+     * hold the new value anywhere: it may have been renamed or removed in Boot 4.
+     */
     CONFIG_CHANGED(RiskLevel.HIGH),
     /** HIGH — pom.xml changed: the dependency may be BOM-managed, renamed or split in Boot 4. */
     DEPENDENCY_CHANGED(RiskLevel.HIGH),
@@ -23,10 +26,17 @@ public enum RiskCategory {
     DELETED_UPSTREAM(RiskLevel.MEDIUM),
     /** MEDIUM — repo1 itself renamed / moved / extracted something; replay the refactoring in repo2. */
     UPSTREAM_REFACTORING(RiskLevel.MEDIUM),
+    /**
+     * MEDIUM — repo2 converted the file to another format ({@code .vm} Velocity -> {@code .ftl} FreeMarker, per
+     * {@code migration-risk.extension-mappings}): the upstream change has to be re-written by hand, not copied.
+     */
+    TEMPLATE_CONVERTED(RiskLevel.MEDIUM),
     /** LOW or MEDIUM — a non-Java file RefactoringMiner cannot read; compared against repo2 byte for byte. */
     NON_JAVA_FILE(null),
     /** LOW — repo2 has the element unchanged since the baseline: the upstream change applies as is. */
     AUTO_SYNC(RiskLevel.LOW),
+    /** LOW — a config key repo1 changed, and repo2 already holds the new value somewhere (any file, either repo2). */
+    CONFIG_IN_SYNC(RiskLevel.LOW),
     /** LOW — new upstream code whose home exists in repo2. */
     NEW_CODE(RiskLevel.LOW);
 

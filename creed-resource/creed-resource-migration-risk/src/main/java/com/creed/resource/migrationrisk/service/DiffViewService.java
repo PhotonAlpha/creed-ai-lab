@@ -27,8 +27,12 @@ import java.util.UUID;
 
 /**
  * RefactoringMiner's AST diff for one side of an analysis, in the shape its own Monaco viewer renders:
- * side {@code A} = repo1 baseline -> repo1 head (what to sync), side {@code B} = repo1 baseline -> repo2 (where the
- * migration put it). Same file subset as the analysis.
+ * side {@code A} = repo1 baseline -> repo1 head (what to sync), side {@code B} = repo1 head -> repo2 head (what the
+ * sync has to bridge: the upstream code next to where the migration put it). Same file subset as the analysis.
+ *
+ * <p>Side B is <em>not</em> the analysis's second RefactoringMiner run (baseline -> repo2): that one shares its
+ * left side with run A so the two can be cross-checked, which is right for deciding a level but wrong for reading —
+ * a reviewer porting a change wants repo1's current code on the left, not the baseline's.
  *
  * <p>The viewer config comes from RefactoringMiner's {@link MonacoCore#makeDiffConfig()} unchanged, so the page
  * shows exactly what RefactoringMiner's web diff shows (moved / updated / deleted / inserted, "moved to file",
@@ -168,10 +172,11 @@ public class DiffViewService {
             try {
                 Exported exported = analysis.export(workspace, trees.baseline(), trees.head(), trees.target(),
                         trees.changes(), new ArrayList<>());
-                Path after = side == Side.A ? exported.upstream() : exported.target();
+                Path left = side == Side.A ? exported.before() : exported.upstream();
+                Path right = side == Side.A ? exported.upstream() : exported.target();
                 long started = System.nanoTime();
                 ProjectASTDiff project = new GitHistoryRefactoringMinerImpl()
-                        .diffAtDirectories(exported.before().toRealPath(), after.toRealPath());
+                        .diffAtDirectories(left.toRealPath(), right.toRealPath());
                 DiffSet set = new DiffSet(new DirComparator(project, diffs -> diffs), project, json);
                 log.info("diff view {}: {} file pairs, {} refactorings in {} ms", side, set.files().size(),
                         set.refactoringCount(), (System.nanoTime() - started) / 1_000_000);

@@ -67,7 +67,7 @@ public final class DirectoryTree implements SourceTree {
         return root;
     }
 
-    /** Every file path, sorted. */
+    @Override
     public Set<String> paths() {
         return files.keySet();
     }

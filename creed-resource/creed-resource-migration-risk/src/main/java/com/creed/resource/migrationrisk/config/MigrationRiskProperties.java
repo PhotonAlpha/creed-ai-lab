@@ -9,6 +9,7 @@ import org.springframework.validation.annotation.Validated;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -17,6 +18,10 @@ import java.util.regex.Pattern;
  * @param maxChangedFiles      upstream ranges with more changed files are refused
  * @param maxCandidatesPerName how many same-named repo2 files are pulled in to catch a moved class
  * @param directoryExcludes    folder mode: directory names skipped at any depth (VCS data, build output, IDE files)
+ * @param configFiles          regex over repo paths: besides Spring's application* / bootstrap* files (always),
+ *                             the properties / yml files whose keys are compared globally
+ * @param extensionMappings    file formats the migration converted ({@code vm: ftl}): a changed {@code x.vm} is
+ *                             looked up as {@code x.ftl} in repo2 and reported TEMPLATE_CONVERTED
  */
 @Validated
 @ConfigurationProperties("migration-risk")
@@ -27,12 +32,19 @@ public record MigrationRiskProperties(
         @Min(1) int maxCandidatesPerName,
         List<ApiRule> apiRules,
         List<String> directoryExcludes,
+        String configFiles,
+        Map<String, String> extensionMappings,
         Jobs jobs,
         Demo demo) {
+
+    /** properties / yml under a resources/ or config/ directory: application config, not CI or chart files. */
+    public static final String DEFAULT_CONFIG_FILES = "(.*/)?(resources|config)/.*\\.(properties|ya?ml)";
 
     public MigrationRiskProperties {
         apiRules = apiRules == null ? List.of() : List.copyOf(apiRules);
         directoryExcludes = directoryExcludes == null ? List.of() : List.copyOf(directoryExcludes);
+        configFiles = configFiles == null || configFiles.isBlank() ? DEFAULT_CONFIG_FILES : configFiles;
+        extensionMappings = extensionMappings == null ? Map.of("vm", "ftl") : Map.copyOf(extensionMappings);
         demo = demo == null ? new Demo(true) : demo;
         jobs = jobs == null ? new Jobs(2, 10, java.time.Duration.ofMinutes(30)) : jobs;
     }

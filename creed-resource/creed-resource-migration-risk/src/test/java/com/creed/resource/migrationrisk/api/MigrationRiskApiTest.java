@@ -31,7 +31,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * The whole chain over the demo repositories: JGit diff and export, both real RefactoringMiner runs, and
  * the cross-check. Each upstream change in {@code demo/repo1-head} was written to land in one category;
- * this pins every one of them.
+ * this pins every one of them — first against repo2 alone, then against repo2A + repo2B ({@code demo/repo2b} holds
+ * the templates converted to FreeMarker, the tests and a config/application.yml).
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -45,10 +46,35 @@ class MigrationRiskApiTest {
     DemoRepositories demo;
 
     private static String analysis;
+    private static String merged;
 
     @BeforeAll
     static void reset() {
         analysis = null;
+        merged = null;
+    }
+
+    /** repo2A + repo2B as one code base. */
+    private String analyseMerged() throws Exception {
+        if (merged == null) {
+            var d = demo.view();
+            merged = analyse("""
+                    {"repo1Path": "%s", "baseline": "%s", "repo2Path": "%s", "repo2bPath": "%s"}
+                    """.formatted(d.repo1Path(), d.baseline(), d.repo2Path(), d.repo2bPath()));
+        }
+        return merged;
+    }
+
+    private String analyse(String body) throws Exception {
+        return mvc.perform(post("/api/migration-risk/analyses").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+    }
+
+    private static Map<String, Object> item(String json, String element) {
+        List<Map<String, Object>> items = JsonPath.read(json, "$.items[?(@.element == '" + element + "')]");
+        assertThat(items).as(element).hasSize(1);
+        return items.getFirst();
     }
 
     private String analyseDemo() throws Exception {
@@ -66,9 +92,7 @@ class MigrationRiskApiTest {
 
     /** The one item for {@code element}, as a map. */
     private Map<String, Object> item(String element) throws Exception {
-        List<Map<String, Object>> items = JsonPath.read(analyseDemo(), "$.items[?(@.element == '" + element + "')]");
-        assertThat(items).as(element).hasSize(1);
-        return items.getFirst();
+        return item(analyseDemo(), element);
     }
 
     private void assertItem(String element, String level, String category, String targetState) throws Exception {
@@ -142,11 +166,20 @@ class MigrationRiskApiTest {
 
     @Test
     void configAndDependencyChangesShowWhatRepo2Has() throws Exception {
-        Map<String, Object> config = item("src/main/resources/application.yml");
-        assertThat(config).containsEntry("level", "HIGH").containsEntry("category", "CONFIG_CHANGED");
-        assertThat(JsonPath.<List<String>>read(config, "$.details")).containsExactly(
-                "~ shop.order.max-items: 10 -> 20  (repo2: 10)",
-                "+ shop.order.retry.enabled = true  (repo2: missing)");
+        // one item per key, not per file
+        Map<String, Object> maxItems = item("shop.order.max-items");
+        assertThat(maxItems).containsEntry("level", "HIGH").containsEntry("category", "CONFIG_CHANGED")
+                .containsEntry("kind", "CONFIG");
+        assertThat(JsonPath.<List<String>>read(maxItems, "$.details")).containsExactly(
+                "~ shop.order.max-items: 10 -> 20",
+                "repo1: 20 @ src/main/resources/application.yml",
+                "repo2: 10 @ src/main/resources/application.yml");
+        assertThat(JsonPath.<List<String>>read(item("shop.order.retry.enabled"), "$.details"))
+                .containsExactly("+ shop.order.retry.enabled = true",
+                        "repo1: true @ src/main/resources/application.yml", "repo2: missing");
+        // spring.application.name moved from application.yml to application.properties, same value: no change
+        assertThat(JsonPath.<List<?>>read(analyseDemo(), "$.items[?(@.element == 'spring.application.name')]")).isEmpty();
+        assertThat(JsonPath.<List<?>>read(analyseDemo(), "$.items[?(@.element =~ /.*application\\.(yml|properties)/)]")).isEmpty();
 
         Map<String, Object> pom = item("pom.xml");
         assertThat(pom).containsEntry("level", "HIGH").containsEntry("category", "DEPENDENCY_CHANGED");
@@ -158,6 +191,82 @@ class MigrationRiskApiTest {
     @Test
     void nonJavaFileChangedOnBothSides() throws Exception {
         assertItem("src/main/resources/camel/order-route.xml", "MEDIUM", "NON_JAVA_FILE", "MODIFIED");
+        // repo2 alone has no template at all: the Velocity file is just missing
+        assertItem("src/main/resources/templates/invoice.vm", "MEDIUM", "NON_JAVA_FILE", "MISSING");
+    }
+
+    @Test
+    void testCodeIsTagged() throws Exception {
+        Map<String, Object> test = item("com.acme.shop.order.OrderServiceTest#unknownOrderIsNotCancelled()");
+        assertThat(test).containsEntry("test", true).containsEntry("module", "(root)")
+                .containsEntry("category", "TARGET_MISSING");
+        assertThat(item("com.acme.shop.order.OrderService#orderCount()")).containsEntry("test", false);
+    }
+
+    // ---------------------------------------------------------------- repo2A + repo2B
+
+    @Test
+    void repo2bIsSearchedTooAndNamedOnTheTarget() throws Exception {
+        String json = analyseMerged();
+        assertThat(JsonPath.<String>read(json, "$.source.repo2bPath")).endsWith("repo2b");
+        assertThat(JsonPath.<String>read(json, "$.source.repo2bHead.revision")).isEqualTo("HEAD");
+        // found in repo2A: labelled so
+        assertThat(JsonPath.<String>read(item(json, "com.acme.shop.order.OrderService#cancelOrder(String)"), "$.target.repo"))
+                .isEqualTo("repo2A");
+        // the test class only repo2B has: no longer missing
+        Map<String, Object> test = item(json, "com.acme.shop.order.OrderServiceTest#unknownOrderIsNotCancelled()");
+        assertThat(test).containsEntry("category", "NEW_CODE").containsEntry("test", true);
+        assertThat(JsonPath.<String>read(test, "$.target.repo")).isEqualTo("repo2B");
+        // a config key repo2B holds in another file is in sync
+        Map<String, Object> retry = item(json, "shop.order.retry.enabled");
+        assertThat(retry).containsEntry("level", "LOW").containsEntry("category", "CONFIG_IN_SYNC");
+        assertThat(JsonPath.<String>read(retry, "$.target.path")).isEqualTo("src/main/resources/config/application.yml");
+        assertThat(JsonPath.<String>read(retry, "$.target.repo")).isEqualTo("repo2B");
+        assertThat(JsonPath.<Integer>read(json, "$.counts.total")).isEqualTo(16);
+        assertThat(JsonPath.<Integer>read(json, "$.counts.high")).isEqualTo(4);
+    }
+
+    @Test
+    void velocityTemplatesAreFoundAsFreeMarker() throws Exception {
+        String json = analyseMerged();
+        Map<String, Object> invoice = item(json, "src/main/resources/templates/invoice.vm");
+        assertThat(invoice).containsEntry("level", "MEDIUM").containsEntry("category", "TEMPLATE_CONVERTED")
+                .containsEntry("targetState", "RELOCATED");
+        assertThat(JsonPath.<String>read(invoice, "$.target.path")).isEqualTo("src/main/resources/templates/invoice.ftl");
+        assertThat(JsonPath.<List<String>>read(invoice, "$.details")).containsSubsequence(
+                "- L2: <p>Customer: $invoice.customer</p>",
+                "+ L2: <p>Customer: $!invoice.customer</p>",
+                "+ L3: <p>Due: $invoice.dueDate</p>");
+        // a new .vm while repo2 only has .ftl: to be written as FreeMarker
+        assertThat(item(json, "src/main/resources/templates/receipt.vm"))
+                .containsEntry("category", "TEMPLATE_CONVERTED").containsEntry("targetState", "ABSENT");
+    }
+
+    @Test
+    void skipTestsLeavesTestCodeOut() throws Exception {
+        var d = demo.view();
+        String json = analyse("""
+                {"repo1Path": "%s", "baseline": "%s", "repo2Path": "%s", "repo2bPath": "%s", "skipTests": true}
+                """.formatted(d.repo1Path(), d.baseline(), d.repo2Path(), d.repo2bPath()));
+        assertThat(JsonPath.<List<Boolean>>read(json, "$.items[*].test")).isNotEmpty().doesNotContain(true);
+        assertThat(JsonPath.<Boolean>read(json, "$.source.skipTests")).isTrue();
+        assertThat(JsonPath.<List<String>>read(json, "$.warnings")).contains("1 changed test file(s) skipped (skipTests)");
+        assertThat(JsonPath.<Integer>read(json, "$.counts.total")).isEqualTo(15);
+    }
+
+    @Test
+    void foldersWithRepo2bGiveTheSameItemsAsGit() throws Exception {
+        var d = demo.view();
+        String folders = mvc.perform(post("/api/migration-risk/analyses/directories").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"baselinePath": "%s", "repo1Path": "%s", "repo2Path": "%s", "repo2bPath": "%s"}
+                                """.formatted(d.baselineFolder(), d.repo1Folder(), d.repo2Folder(), d.repo2bFolder())))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(folders, "$.items[*].id"))
+                .containsExactlyElementsOf(JsonPath.<List<String>>read(analyseMerged(), "$.items[*].id"));
+        assertThat(JsonPath.<List<String>>read(folders, "$.items[*].target.repo"))
+                .containsExactlyElementsOf(JsonPath.<List<String>>read(analyseMerged(), "$.items[*].target.repo"));
     }
 
     @Test
@@ -167,10 +276,11 @@ class MigrationRiskApiTest {
         assertThat(levels).isSortedAccordingTo((a, b) -> List.of("HIGH", "MEDIUM", "LOW").indexOf(a)
                 - List.of("HIGH", "MEDIUM", "LOW").indexOf(b));
         int total = JsonPath.read(json, "$.counts.total");
-        assertThat(total).isEqualTo(levels.size()).isEqualTo(12);
-        assertThat(JsonPath.<Integer>read(json, "$.counts.high")).isEqualTo(4);
+        assertThat(total).isEqualTo(levels.size()).isEqualTo(16);
+        assertThat(JsonPath.<Integer>read(json, "$.counts.high")).isEqualTo(6);
         assertThat(JsonPath.<String>read(json, "$.source.baseline.revision")).isEqualTo(DemoRepositories.BASELINE_TAG);
-        assertThat(JsonPath.<List<String>>read(json, "$.warnings")).isEmpty();
+        assertThat(JsonPath.<List<String>>read(json, "$.warnings")).containsExactly(
+                "1 config key(s) only moved between files upstream, values unchanged: not reported");
     }
 
     @Test

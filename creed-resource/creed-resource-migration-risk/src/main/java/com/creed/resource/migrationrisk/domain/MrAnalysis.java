@@ -37,6 +37,10 @@ public class MrAnalysis {
     @Column(name = "repo2_path", nullable = false, length = 1000)
     private String repo2Path;
 
+    /** The second repo2 (V2); null for a single repo2. */
+    @Column(name = "repo2b_path", length = 1000)
+    private String repo2bPath;
+
     /** The baseline as given: a revision (git mode) or the baseline folder (folder mode). */
     @Column(name = "baseline_ref", nullable = false, length = 1000)
     private String baselineRef;

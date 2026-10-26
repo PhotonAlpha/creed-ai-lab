@@ -28,7 +28,10 @@ import java.util.stream.Stream;
  * <ul>
  *   <li>{@code repo1}: {@code demo/repo1-baseline} committed and tagged {@value #BASELINE_TAG}, then
  *       {@code demo/repo1-head} committed on top — the other team's work;</li>
- *   <li>{@code repo2}: {@code demo/repo2}, the baseline migrated to Boot 4 / Jackson 3 (no shared history).</li>
+ *   <li>{@code repo2}: {@code demo/repo2}, the baseline migrated to Boot 4 / Jackson 3 (no shared history);</li>
+ *   <li>{@code repo2b}: {@code demo/repo2b}, what the migration moved into a second repository — the FreeMarker
+ *       templates (converted from Velocity), the tests and a {@code config/application.yml}. Analysed with repo2
+ *       only, those are what repo2 "lacks"; with repo2B added, they are found.</li>
  * </ul>
  * The same three versions are also written as plain folders under {@code demo/folders/} for folder mode.
  * Rebuilt at every start under {@code <work-dir>/demo}. Fixed authors and commit times make the commit ids
@@ -43,12 +46,14 @@ public class DemoRepositories {
 
     private final Path repo1;
     private final Path repo2;
+    private final Path repo2b;
     private final Path folders;
 
     public DemoRepositories(MigrationRiskProperties properties) {
         Path root = properties.workDir().resolve("demo");
         this.repo1 = root.resolve("repo1");
         this.repo2 = root.resolve("repo2");
+        this.repo2b = root.resolve("repo2b");
         this.folders = root.resolve("folders");
         try {
             FileSystemUtils.deleteRecursively(root);
@@ -60,9 +65,13 @@ public class DemoRepositories {
             try (Git git = Git.init().setDirectory(repo2.toFile()).setInitialBranch("main").call()) {
                 commit(git, "demo/repo2", "Migrate to Spring Boot 4 / Jackson 3", "2026-02-10T11:00:00Z");
             }
+            try (Git git = Git.init().setDirectory(repo2b.toFile()).setInitialBranch("main").call()) {
+                commit(git, "demo/repo2b", "Templates (FreeMarker), tests and shared config", "2026-02-12T10:00:00Z");
+            }
             copyFolder("demo/repo1-baseline", folders.resolve("baseline"));
             copyFolder("demo/repo1-head", folders.resolve("repo1"));
             copyFolder("demo/repo2", folders.resolve("repo2"));
+            copyFolder("demo/repo2b", folders.resolve("repo2b"));
             log.info("demo repositories ready under {}", root);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -104,7 +113,7 @@ public class DemoRepositories {
 
     public MigrationRiskSettings.Demo view() {
         return new MigrationRiskSettings.Demo(repo1.toString(), BASELINE_TAG, "HEAD", repo2.toString(), "HEAD",
-                folders.resolve("baseline").toString(), folders.resolve("repo1").toString(),
-                folders.resolve("repo2").toString());
+                repo2b.toString(), folders.resolve("baseline").toString(), folders.resolve("repo1").toString(),
+                folders.resolve("repo2").toString(), folders.resolve("repo2b").toString());
     }
 }

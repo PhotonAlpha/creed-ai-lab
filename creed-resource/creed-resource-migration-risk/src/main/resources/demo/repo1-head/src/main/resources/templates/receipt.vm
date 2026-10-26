@@ -1,0 +1,1 @@
+<p>Receipt $receipt.id for order $receipt.orderId</p>

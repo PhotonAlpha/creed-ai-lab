@@ -31,7 +31,14 @@ releases and reviews; the analysis itself is computed per request. Page `/migrat
   `DirectoryDiff` = git-diff for folders (content ids are **git blob ids** in both, histogram diff for added
   lines, exact-content renames). `MigrationRiskService.withTrees(Inputs, fn)` opens either kind — the analysis
   and the diff view both start there.
-- `ReleaseStore` + `domain/Mr*` (Flyway `V1`): `mr_release` / `mr_analysis` (result JSON minus items) / `mr_item`
+- `source/MergedTree`: repo2A + repo2B as one tree — **paths not prefixed** (a module moved to repo2B at the same
+  relative path must still match), first member wins on a collision (warning), `origin(path)` → item `target.repo`.
+- `GlobalConfigAnalyzer`: config compared by **global key** across all `config-files` (`ConfigDiff.globalKeys`:
+  bare key for the default profile, `[dev] key`, `[test] key`, `[messages_zh.properties] key`); change = the key's
+  value *set* changed. Parsed once per content id. `FileRiskAnalyzer` skips these files (still API rules).
+- `CodeTags`: `module` (nearest build-file dir) + `test` from the path alone; `skipTests` filters `changes` in
+  `withTrees`, so the analysis, RefactoringMiner's input and the diff view all agree.
+- `ReleaseStore` + `domain/Mr*` (Flyway `V1`, `V2` = `repo2b_path`): `mr_release` / `mr_analysis` (result JSON minus items) / `mr_item`
   (item JSON, review columns, `@Version`). Re-runs carry verdicts by `item_key` + `fingerprint`.
 - `DiffViewService` + `web/DiffViewController` + `templates/diff.html`: `diffAtDirectories` on the same exported
   subset → `DirComparator` → RefactoringMiner's own `MonacoCore.makeDiffConfig()`; its `web/dist/*.js|css` are
@@ -43,6 +50,13 @@ releases and reviews; the analysis itself is computed per request. Page `/migrat
   the exception handler and the `failed` event.
 
 ## Rules that are easy to break
+
+- **Diff side B is head → repo2, the analysis's run B is baseline → repo2.** Run B must share its left side with
+  run A for the cross-check; a reader porting a change wants repo1's current code on the left. Don't "unify" them.
+- **Config keys must not be named by file** — that is what makes a moved key "no change" and a key repo2B keeps in
+  `config/application.yml` "in sync". Test resources are a separate scope, or a test override reads as prod.
+- Fingerprints append `target.repo` only when set, and strip `+ L12: ` / `- L12: ` prefixes: saved reviews from
+  before repo2B keep carrying over.
 
 - **RefactoringMiner version vs JDK**: 3.1.x is compiled for Java 23 (class 67), 3.0.13 is the last Java-21 build.
   The pom pins 3.1.6 since 2026-10-25 → run and test on JDK 25; JDK 21 fails with `UnsupportedClassVersionError`.
@@ -93,7 +107,10 @@ releases and reviews; the analysis itself is computed per request. Page `/migrat
 
 `src/pages/MigrationRisk/{index,AnalysisForm,ItemsTable,constants}`, `src/api/migrationRisk.ts`. Review notes use
 one page-level `Modal` (not a popover per row — see [[creed-env-matrix]]); the reviewer name is kept in
-`localStorage`. Diff links are plain `<a target=_blank>` to `diffUrl(source, side, file)`. Analyses run through
+`localStorage`. Diff links are plain `<a target=_blank>` to `diffUrl(source, side, file)`, labelled "Upstream change" /
+"repo1 vs repo2" (never bare A / B — asked for). Module select + main/test Segmented filter the table; the form's
+*Skip tests* switch is the backend `skipTests`. Stat boxes: HIGH / ATTENTION red, MEDIUM yellow, SAFE green,
+from antd tokens (`color{Error,Warning,Success}{Bg,Border}`). Analyses run through
 `useAnalysisJob` (EventSource; on `done`/`failed`/a closed stream it asks `GET /analyses/jobs/{id}` for the
 terminal state, so a missed frame cannot strand the page) and `JobProgressCard`. The table's *Details* column
 shows the first 3 detail lines (or the evidence), coloured by `+` / `-` / `~` prefix. One i18n key per backend `RiskCategory`

@@ -19,8 +19,8 @@ public final class ReleaseViews {
                               AnalysisSummary latest) {
     }
 
-    /** A saved run without its items, for history lists. */
-    public record AnalysisSummary(long id, String release, String mode, String repo1Path, String repo2Path,
+    /** A saved run without its items, for history lists. {@code repo2bPath}: null unless repo2 was two repositories. */
+    public record AnalysisSummary(long id, String release, String mode, String repo1Path, String repo2Path, String repo2bPath,
                                   String baselineRef, AnalysisResponse.Counts counts, ReviewProgress review,
                                   long durationMillis, Instant analyzedAt) {
     }

@@ -1,0 +1,4 @@
+shop:
+  order:
+    retry:
+      enabled: true

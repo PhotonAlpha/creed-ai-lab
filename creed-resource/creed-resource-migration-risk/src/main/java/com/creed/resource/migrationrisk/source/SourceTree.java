@@ -7,6 +7,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * One version of a code base, read by repository-relative path: a git commit ({@link GitTree}) or a plain
@@ -25,6 +27,13 @@ public interface SourceTree {
 
     /** Every file path, keyed by file name ({@code OrderService.java} -> its paths). */
     Map<String, List<String>> pathsByFileName();
+
+    /** Every file path, sorted. */
+    default Set<String> paths() {
+        Set<String> paths = new TreeSet<>();
+        pathsByFileName().values().forEach(paths::addAll);
+        return paths;
+    }
 
     /** Writes each existing path's text under {@code target}, keeping the relative layout. */
     default void export(Iterable<String> paths, Path target) {

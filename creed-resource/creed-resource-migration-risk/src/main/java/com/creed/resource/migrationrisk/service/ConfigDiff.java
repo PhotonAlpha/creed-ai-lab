@@ -25,10 +25,9 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Key-level diffs for the files RefactoringMiner cannot read and Boot 4 changes most: Spring config
- * ({@code application*.yml|yaml|properties}, {@code bootstrap*}) and {@code pom.xml}. Each changed key is
- * also looked up in repo2's version of the file — a key repo2 does not have is exactly the
- * "renamed in Boot 4" case worth checking.
+ * Key-level reading of the files RefactoringMiner cannot read and Boot 4 changes most: properties / yml (as
+ * global key names, see {@link #globalKeys} and {@link GlobalConfigAnalyzer}) and {@code pom.xml} (diffed per file,
+ * each changed key looked up in repo2's pom — a key repo2 does not have is the "renamed in Boot 4" case).
  */
 public final class ConfigDiff {
 
@@ -45,18 +44,19 @@ public final class ConfigDiff {
         return fileName(path).equals("pom.xml");
     }
 
+    /** A properties / yml file the global config comparison reads: Spring config anywhere, else per {@code configFiles}. */
+    public static boolean isConfigFile(String path, Pattern configFiles) {
+        return isSpringConfig(path) || configFiles.matcher(path).matches();
+    }
+
     private static String fileName(String path) {
         return path.substring(path.lastIndexOf('/') + 1);
     }
 
     /**
-     * {@code + key = value}, {@code - key}, {@code ~ key: old -> new}, each followed by what repo2 has:
+     * pom keys, {@code + key = value}, {@code - key}, {@code ~ key: old -> new}, each followed by what repo2 has:
      * {@code (repo2: value)} or {@code (repo2: missing)}. {@code target} null = repo2 has no such file.
      */
-    public static List<String> configLines(String path, String before, String after, String target) {
-        return lines(flatten(path, before), flatten(path, after), target == null ? null : flatten(path, target));
-    }
-
     public static List<String> pomLines(String before, String after, String target) {
         return lines(pom(before), pom(after), target == null ? null : pom(target));
     }
@@ -86,13 +86,27 @@ public final class ConfigDiff {
         return target.containsKey(key) ? "(repo2: " + target.get(key) + ")" : "(repo2: missing)";
     }
 
-    // ---------------------------------------------------------------- Spring config
+    // ---------------------------------------------------------------- global keys
 
-    static Map<String, String> flatten(String path, String text) {
+    /**
+     * The file's keys as the global comparison names them, so the same setting in another file is the same key:
+     * <ul>
+     *   <li>Spring config: the bare key for the default profile ({@code shop.order.max-items}), else
+     *       {@code [dev] key} — from {@code application-dev.yml} or a yml document's
+     *       {@code spring.config.activate.on-profile} / {@code spring.profiles};</li>
+     *   <li>any other file: {@code [messages_zh.properties] key} — its keys mean nothing outside that file name;</li>
+     *   <li>test resources get a {@code test:} scope, so a test override never reads as the production value.</li>
+     * </ul>
+     * Whether {@code application.yml} or {@code application.properties}, in which module, under {@code config/}
+     * or not, does not change the name — that is what makes a key moved between those files no change at all.
+     */
+    public static Map<String, String> globalKeys(String path, String text, boolean test) {
         Map<String, String> keys = new LinkedHashMap<>();
         if (text == null || text.isBlank()) {
             return keys;
         }
+        String name = fileName(path);
+        String fileScope = isSpringConfig(path) ? springProfile(name) : name;
         if (path.endsWith(".properties")) {
             Properties properties = new Properties();
             try {
@@ -100,19 +114,46 @@ public final class ConfigDiff {
             } catch (IOException e) {
                 throw new IllegalStateException(e);
             }
-            properties.stringPropertyNames().stream().sorted().forEach(k -> keys.put(k, properties.getProperty(k)));
+            properties.stringPropertyNames().stream().sorted()
+                    .forEach(k -> keys.put(scoped(test, fileScope, k), properties.getProperty(k)));
             return keys;
         }
-        // SafeConstructor: a config file from someone else's repository must not instantiate arbitrary types.
         Yaml yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
         int document = 0;
         for (Object doc : yaml.loadAll(text)) {
-            // Profile documents after '---' can repeat a key with another value; keep them apart.
-            flattenInto(keys, document == 0 ? "" : "[doc " + document + "] ", doc);
+            Map<String, String> flat = new LinkedHashMap<>();
+            flattenInto(flat, "", doc);
+            String scope = fileScope;
+            if (isSpringConfig(path)) {
+                String profile = flat.getOrDefault("spring.config.activate.on-profile", flat.get("spring.profiles"));
+                if (profile != null) {
+                    scope = profile;
+                } else if (document > 0) {
+                    scope = scope.isEmpty() ? "doc " + document : scope + " doc " + document;
+                }
+            } else if (document > 0) {
+                scope = scope + " doc " + document;
+            }
+            String finalScope = scope;
+            flat.forEach((k, v) -> keys.put(scoped(test, finalScope, k), v));
             document++;
         }
         return keys;
     }
+
+    /** {@code application-dev.yml} -> {@code dev}; {@code application.yml} / {@code bootstrap.yml} -> "". */
+    private static String springProfile(String fileName) {
+        String base = fileName.substring(0, fileName.lastIndexOf('.'));
+        int dash = base.indexOf('-');
+        return dash < 0 ? "" : base.substring(dash + 1);
+    }
+
+    private static String scoped(boolean test, String scope, String key) {
+        String s = (test ? "test" + (scope.isEmpty() ? "" : ":") : "") + scope;
+        return s.isEmpty() ? key : "[" + s + "] " + key;
+    }
+
+    // ---------------------------------------------------------------- yml
 
     private static void flattenInto(Map<String, String> keys, String prefix, Object value) {
         if (value instanceof Map<?, ?> map) {

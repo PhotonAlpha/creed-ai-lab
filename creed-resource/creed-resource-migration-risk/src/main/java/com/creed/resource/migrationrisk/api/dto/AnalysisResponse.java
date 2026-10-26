@@ -30,6 +30,9 @@ public record AnalysisResponse(
      * @param mode         {@code GIT} or {@code DIRECTORY}
      * @param baselinePath the baseline folder (DIRECTORY mode); null in GIT mode, where the baseline is a commit
      * @param baseline     the resolved commits — null in DIRECTORY mode
+     * @param repo2bPath   the second repo2 (repo2B), merged with repo2Path; null for one repo2
+     * @param repo2bHead   its resolved commit (GIT mode with repo2B)
+     * @param skipTests    test code was left out of the comparison
      */
     public AnalysisResponse withSaved(long id, String releaseName, List<RiskItem> reviewed) {
         return new AnalysisResponse(id, releaseName, source, counts, reviewed, upstreamRefactorings,
@@ -42,7 +45,8 @@ public record AnalysisResponse(
     }
 
     public record Source(String mode, String baselinePath, String repo1Path, String repo2Path,
-                         CommitView baseline, CommitView repo1Head, CommitView repo2Head) {
+                         CommitView baseline, CommitView repo1Head, CommitView repo2Head,
+                         String repo2bPath, CommitView repo2bHead, boolean skipTests) {
     }
 
     public record CommitView(String revision, String id, String shortId, String message, String author, Instant time) {
@@ -51,7 +55,7 @@ public record AnalysisResponse(
     public record Counts(int total, int high, int medium, int low) {
     }
 
-    /** {@code kind}: JAVA, CONFIG (Spring config), POM, OTHER. */
+    /** {@code kind}: JAVA, CONFIG (a properties / yml file of the global key comparison), POM, OTHER. */
     public record ChangedFileView(String change, String oldPath, String newPath, String kind, int addedLines) {
     }
 }

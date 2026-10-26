@@ -57,6 +57,13 @@ migration-risk:
     queue: 10
     retention: 30m
   directory-excludes: [.git, .svn, .idea, .vscode, .gradle, target, build, out, dist, node_modules, logs, tmp]
+  # Config is compared key by key across ALL these files of each tree (a key moved between files is no change; a
+  # key repo2 keeps in another file, or in repo2B, is found). Spring's application*/bootstrap* files always count;
+  # this regex adds the rest — properties / yml under resources/ or config/, not CI pipelines or Helm charts.
+  config-files: '(.*/)?(resources|config)/.*\.(properties|ya?ml)'
+  # Formats the migration converted: a changed x.vm is looked up as x.ftl in repo2 (TEMPLATE_CONVERTED, MEDIUM).
+  extension-mappings:
+    vm: ftl
   # Added upstream lines matching one of these are flagged HIGH (MIGRATION_API): code written against an API
   # the migration replaced. Java regex, matched per line.
   api-rules:
@@ -84,6 +91,9 @@ migration-risk:
     - id: http-headers-map
       pattern: '\.containsKey\(\s*HttpHeaders\.'
       hint: 'Spring Framework 7: HttpHeaders is not a Map — containsHeader(...)'
+    - id: velocity
+      pattern: 'org\.apache\.velocity\.|\bVelocityEngine\b'
+      hint: 'repo2 renders FreeMarker (.ftl): freemarker.template.Configuration instead of Velocity'
     - id: camel-hystrix
       pattern: 'org\.apache\.camel\.component\.hystrix|\.hystrix\(\)'
       hint: 'Camel 4 removed camel-hystrix: use camel-resilience4j (circuitBreaker())'

@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Everything one analysis reads, with the three trees it compares:
@@ -25,13 +26,16 @@ public final class AnalysisContext {
     private final RefactoringIndex upstream;
     private final RefactoringIndex migration;
     private final Progress progress;
+    private final boolean skipTests;
     private final Map<String, Optional<String>> texts = new HashMap<>();
     private final Map<String, Optional<JavaStructure>> structures = new HashMap<>();
 
     public AnalysisContext(SourceTree baseline, SourceTree head, SourceTree target, List<ChangedFile> changes,
                            Map<String, List<String>> targetPathsByName,
-                           RefactoringIndex upstream, RefactoringIndex migration, Progress progress) {
+                           RefactoringIndex upstream, RefactoringIndex migration, Progress progress,
+                           boolean skipTests) {
         this.progress = progress;
+        this.skipTests = skipTests;
         this.baseline = baseline;
         this.head = head;
         this.target = target;
@@ -43,6 +47,16 @@ public final class AnalysisContext {
 
     public Progress progress() {
         return progress;
+    }
+
+    /** Test code was left out of {@link #changes()}; whole-tree readers (the config index) must skip it too. */
+    public boolean skipTests() {
+        return skipTests;
+    }
+
+    /** Every file of one tree — for the readers that look past the change set (config keys, file extensions). */
+    public Set<String> paths(Side side) {
+        return tree(side).paths();
     }
 
     public List<ChangedFile> changes() {

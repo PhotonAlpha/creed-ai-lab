@@ -29,7 +29,7 @@ class DiffViewTest {
     DemoRepositories demo;
 
     @Test
-    void sideBShowsWhereTheMigrationMovedTheMethod() throws Exception {
+    void sideBComparesRepo1HeadWithWhereTheMigrationMovedTheMethod() throws Exception {
         var d = demo.view();
         mvc.perform(get("/api/migration-risk/view/diff")
                         .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
@@ -41,6 +41,9 @@ class DiffViewTest {
                         containsString("mymonaco({"),
                         containsString("src/main/java/com/acme/shop/order/processing/OrderProcessor.java"),
                         containsString("handle renamed to process"),
+                        containsString("repo1 vs repo2: repo1 HEAD → repo2 HEAD"),
+                        // the left side is repo1 HEAD (with the upstream edit), not the baseline
+                        containsString("orderId.trim().replace("),
                         containsString("left-container-"),
                         containsString("/api/migration-risk/view/assets/monaco.js"))));
     }
