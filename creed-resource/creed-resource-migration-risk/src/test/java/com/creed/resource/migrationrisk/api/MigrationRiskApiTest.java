@@ -71,10 +71,18 @@ class MigrationRiskApiTest {
                 .andReturn().getResponse().getContentAsString();
     }
 
+    /** The one element-level finding for {@code element}: a part of its file's record. */
     private static Map<String, Object> item(String json, String element) {
-        List<Map<String, Object>> items = JsonPath.read(json, "$.items[?(@.element == '" + element + "')]");
+        List<Map<String, Object>> items = JsonPath.read(json, "$.items[*].parts[?(@.element == '" + element + "')]");
         assertThat(items).as(element).hasSize(1);
         return items.getFirst();
+    }
+
+    /** The record of one file. */
+    private static Map<String, Object> file(String json, String path) {
+        List<Map<String, Object>> files = JsonPath.read(json, "$.items[?(@.element == '" + path + "')]");
+        assertThat(files).as(path).hasSize(1);
+        return files.getFirst();
     }
 
     private String analyseDemo() throws Exception {
@@ -149,7 +157,7 @@ class MigrationRiskApiTest {
     void upstreamRenameIsReportedOnceNotAsDeletePlusAdd() throws Exception {
         assertItem("com.acme.shop.invoice.InvoiceService#generate(String,long)", "MEDIUM", "UPSTREAM_REFACTORING",
                 "UNCHANGED");
-        List<?> renderAdded = JsonPath.read(analyseDemo(), "$.items[?(@.element =~ /.*render.*/)]");
+        List<?> renderAdded = JsonPath.read(analyseDemo(), "$.items[*].parts[?(@.element =~ /.*render.*/)]");
         assertThat(renderAdded).isEmpty();
     }
 
@@ -178,8 +186,13 @@ class MigrationRiskApiTest {
                 .containsExactly("+ shop.order.retry.enabled = true",
                         "repo1: true @ src/main/resources/application.yml", "repo2: missing");
         // spring.application.name moved from application.yml to application.properties, same value: no change
-        assertThat(JsonPath.<List<?>>read(analyseDemo(), "$.items[?(@.element == 'spring.application.name')]")).isEmpty();
-        assertThat(JsonPath.<List<?>>read(analyseDemo(), "$.items[?(@.element =~ /.*application\\.(yml|properties)/)]")).isEmpty();
+        assertThat(JsonPath.<List<?>>read(analyseDemo(), "$.items[*].parts[?(@.element == 'spring.application.name')]")).isEmpty();
+        // both config keys are parts of the one application.yml record; application.properties has none
+        Map<String, Object> yml = file(analyseDemo(), "src/main/resources/application.yml");
+        assertThat(JsonPath.<List<String>>read(yml, "$.parts[*].element"))
+                .containsExactly("shop.order.max-items", "shop.order.retry.enabled");
+        assertThat(yml).containsEntry("level", "HIGH").containsEntry("kind", "FILE");
+        assertThat(JsonPath.<List<?>>read(analyseDemo(), "$.items[?(@.element =~ /.*application\\.properties/)]")).isEmpty();
 
         Map<String, Object> pom = item("pom.xml");
         assertThat(pom).containsEntry("level", "HIGH").containsEntry("category", "DEPENDENCY_CHANGED");
@@ -193,6 +206,24 @@ class MigrationRiskApiTest {
         assertItem("src/main/resources/camel/order-route.xml", "MEDIUM", "NON_JAVA_FILE", "MODIFIED");
         // repo2 alone has no template at all: the Velocity file is just missing
         assertItem("src/main/resources/templates/invoice.vm", "MEDIUM", "NON_JAVA_FILE", "MISSING");
+    }
+
+    /** One record per file: the riskiest finding decides it, the others ride along as parts. */
+    @Test
+    void findingsAreGroupedPerFile() throws Exception {
+        Map<String, Object> orderService = file(analyseDemo(), "src/main/java/com/acme/shop/order/OrderService.java");
+        assertThat(orderService).containsEntry("level", "HIGH").containsEntry("category", "TARGET_MISSING")
+                .containsEntry("kind", "FILE").containsEntry("change", "MODIFIED")
+                .containsEntry("id", "FILE:src/main/java/com/acme/shop/order/OrderService.java");
+        assertThat(JsonPath.<List<String>>read(orderService, "$.parts[*].element")).containsExactly(
+                "com.acme.shop.order.OrderService#legacyTotal(long,long)",
+                "com.acme.shop.order.OrderService#cancelOrder(String)",
+                "com.acme.shop.order.OrderService#orderCount()");
+        // the API match and the new class land in the same file record
+        assertThat(JsonPath.<List<String>>read(file(analyseDemo(), "src/main/java/com/acme/shop/report/SalesReport.java"),
+                "$.parts[*].category")).containsExactly("MIGRATION_API", "NEW_CODE");
+        List<String> paths = JsonPath.read(analyseDemo(), "$.items[*].element");
+        assertThat(paths).doesNotHaveDuplicates();
     }
 
     @Test
@@ -222,7 +253,7 @@ class MigrationRiskApiTest {
         assertThat(retry).containsEntry("level", "LOW").containsEntry("category", "CONFIG_IN_SYNC");
         assertThat(JsonPath.<String>read(retry, "$.target.path")).isEqualTo("src/main/resources/config/application.yml");
         assertThat(JsonPath.<String>read(retry, "$.target.repo")).isEqualTo("repo2B");
-        assertThat(JsonPath.<Integer>read(json, "$.counts.total")).isEqualTo(16);
+        assertThat(JsonPath.<Integer>read(json, "$.counts.total")).isEqualTo(12);
         assertThat(JsonPath.<Integer>read(json, "$.counts.high")).isEqualTo(4);
     }
 
@@ -251,7 +282,7 @@ class MigrationRiskApiTest {
         assertThat(JsonPath.<List<Boolean>>read(json, "$.items[*].test")).isNotEmpty().doesNotContain(true);
         assertThat(JsonPath.<Boolean>read(json, "$.source.skipTests")).isTrue();
         assertThat(JsonPath.<List<String>>read(json, "$.warnings")).contains("1 changed test file(s) skipped (skipTests)");
-        assertThat(JsonPath.<Integer>read(json, "$.counts.total")).isEqualTo(15);
+        assertThat(JsonPath.<Integer>read(json, "$.counts.total")).isEqualTo(11);
     }
 
     @Test
@@ -276,8 +307,8 @@ class MigrationRiskApiTest {
         assertThat(levels).isSortedAccordingTo((a, b) -> List.of("HIGH", "MEDIUM", "LOW").indexOf(a)
                 - List.of("HIGH", "MEDIUM", "LOW").indexOf(b));
         int total = JsonPath.read(json, "$.counts.total");
-        assertThat(total).isEqualTo(levels.size()).isEqualTo(16);
-        assertThat(JsonPath.<Integer>read(json, "$.counts.high")).isEqualTo(6);
+        assertThat(total).isEqualTo(levels.size()).isEqualTo(12);
+        assertThat(JsonPath.<Integer>read(json, "$.counts.high")).isEqualTo(5);
         assertThat(JsonPath.<String>read(json, "$.source.baseline.revision")).isEqualTo(DemoRepositories.BASELINE_TAG);
         assertThat(JsonPath.<List<String>>read(json, "$.warnings")).containsExactly(
                 "1 config key(s) only moved between files upstream, values unchanged: not reported");

@@ -32,6 +32,8 @@ class ReleaseReviewApiTest {
     @Autowired
     DemoRepositories demo;
 
+    private static final String ORDER_SERVICE = "src/main/java/com/acme/shop/order/OrderService.java";
+
     private String analyse(String release) throws Exception {
         var d = demo.view();
         return mvc.perform(post("/api/migration-risk/analyses").contentType(MediaType.APPLICATION_JSON)
@@ -42,8 +44,9 @@ class ReleaseReviewApiTest {
                 .andReturn().getResponse().getContentAsString();
     }
 
-    private static long itemId(String json, String element) {
-        List<Integer> ids = JsonPath.read(json, "$.items[?(@.element == '" + element + "')].review.itemId");
+    /** The saved record of one file. */
+    private static long itemId(String json, String path) {
+        List<Integer> ids = JsonPath.read(json, "$.items[?(@.element == '" + path + "')].review.itemId");
         assertThat(ids).hasSize(1);
         return ids.getFirst();
     }
@@ -65,11 +68,11 @@ class ReleaseReviewApiTest {
         String first = analyse(release);
         long analysisId = ((Number) JsonPath.read(first, "$.analysisId")).longValue();
         assertThat(JsonPath.<String>read(first, "$.release")).isEqualTo(release);
-        assertThat(JsonPath.<List<String>>read(first, "$.items[*].review.status")).hasSize(16).containsOnly("PENDING");
+        assertThat(JsonPath.<List<String>>read(first, "$.items[*].review.status")).hasSize(12).containsOnly("PENDING");
 
-        long missing = itemId(first, "com.acme.shop.order.OrderService#legacyTotal(long,long)");
-        long cancel = itemId(first, "com.acme.shop.order.OrderService#cancelOrder(String)");
-        long count = itemId(first, "com.acme.shop.order.OrderService#orderCount()");
+        long missing = itemId(first, ORDER_SERVICE);
+        long cancel = itemId(first, "src/main/java/com/acme/shop/payment/PaymentClient.java");
+        long count = itemId(first, "pom.xml");
 
         mvc.perform(put("/api/migration-risk/items/{id}/review", missing).contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -102,12 +105,12 @@ class ReleaseReviewApiTest {
         String second = analyse(release);
         assertThat(((Number) JsonPath.read(second, "$.analysisId")).longValue()).isNotEqualTo(analysisId);
         List<String> carried = JsonPath.read(second,
-                "$.items[?(@.element == 'com.acme.shop.order.OrderService#legacyTotal(long,long)')].review.status");
+                "$.items[?(@.element == '" + ORDER_SERVICE + "')].review.status");
         assertThat(carried).containsExactly("ATTENTION");
         List<Integer> from = JsonPath.read(second,
-                "$.items[?(@.element == 'com.acme.shop.order.OrderService#legacyTotal(long,long)')].review.carriedOverFrom");
+                "$.items[?(@.element == '" + ORDER_SERVICE + "')].review.carriedOverFrom");
         assertThat(from).containsExactly((int) missing);
-        assertThat(JsonPath.<List<String>>read(second, "$.items[?(@.review.status == 'PENDING')]")).hasSize(13);
+        assertThat(JsonPath.<List<String>>read(second, "$.items[?(@.review.status == 'PENDING')]")).hasSize(9);
 
         long releaseId = ((Number) JsonPath.<List<Object>>read(releases, "$[?(@.name == '" + release + "')].id").getFirst()).longValue();
         mvc.perform(get("/api/migration-risk/releases/{id}/analyses", releaseId))
@@ -130,7 +133,7 @@ class ReleaseReviewApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.source.repo2bPath").value(d.repo2bPath()))
                 .andReturn().getResponse().getContentAsString();
-        String test = "$.items[?(@.element == 'com.acme.shop.order.OrderServiceTest#unknownOrderIsNotCancelled()')]";
+        String test = "$.items[?(@.element == 'src/test/java/com/acme/shop/order/OrderServiceTest.java')]";
         assertThat(JsonPath.<List<String>>read(loaded, test + ".target.repo")).containsExactly("repo2B");
         assertThat(JsonPath.<List<Boolean>>read(loaded, test + ".test")).containsExactly(true);
         assertThat(JsonPath.<List<String>>read(loaded, test + ".module")).containsExactly("(root)");

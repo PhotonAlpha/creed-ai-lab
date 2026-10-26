@@ -86,6 +86,37 @@ class DiffViewTest {
                 .andExpect(content().string(containsString("mymonaco({")));
     }
 
+    /** RefactoringMiner reads Java only; config and templates get a plain line diff in the same viewer. */
+    @Test
+    void configAndTemplatesGetALineDiff() throws Exception {
+        var d = demo.view();
+        // repo1 HEAD's application.yml next to repo2's
+        mvc.perform(get("/api/migration-risk/view/diff")
+                        .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
+                        .param("side", "B").param("file", "src/main/resources/application.yml"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(allOf(containsString("max-items: 20"), containsString("max-items: 10"),
+                        containsString("\"kind\":\"inserted\""), containsString("\"kind\":\"deleted\""))));
+        // with repo2B, invoice.vm is put next to its FreeMarker version
+        mvc.perform(get("/api/migration-risk/view/diff")
+                        .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
+                        .param("repo2bPath", d.repo2bPath())
+                        .param("side", "B").param("file", "src/main/resources/templates/invoice.vm"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(allOf(containsString("src/main/resources/templates/invoice.ftl"),
+                        containsString("<#list invoice.lines as line>"), containsString("$!invoice.customer"))));
+        // the upstream change of a template
+        mvc.perform(get("/api/migration-risk/view/diff")
+                        .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
+                        .param("side", "A").param("file", "src/main/resources/templates/invoice.vm"))
+                .andExpect(content().string(containsString("Due: $invoice.dueDate")));
+        // a file the side does not have is an error, not silently the first file
+        mvc.perform(get("/api/migration-risk/view/diff")
+                        .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
+                        .param("side", "B").param("file", "no/such/file.txt"))
+                .andExpect(content().string(containsString("no/such/file.txt has no diff on this side")));
+    }
+
     @Test
     void viewerAssetsAreServedFromTheRefactoringMinerJar() throws Exception {
         mvc.perform(get("/api/migration-risk/view/assets/monaco.js"))

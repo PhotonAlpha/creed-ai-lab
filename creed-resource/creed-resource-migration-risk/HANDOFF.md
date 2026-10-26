@@ -63,6 +63,12 @@ verdict whose item **fingerprint** (content minus line numbers) is unchanged (`c
 
 ## Current state
 
+2026-10-27: the diff page covers non-Java files too (line diff; `.vm` side B opens repo2's `.ftl`), so every row
+has both diff buttons. **59 tests pass.**
+2026-10-27: **one record per file** — element-level findings are `items[].parts`; the demo gives 12 file records
+(5 HIGH) with repo2 alone, 12 (4 HIGH) with repo2B, 11 with `skipTests`. **58 tests pass**. Reviews saved on
+element rows do not carry over to file rows (different item keys).
+
 2026-10-26: repo2A + repo2B, `skipTests`, module / test tags, `.vm → .ftl`, global config keys, diff B = repo1
 head → repo2 head, readable diff names. Demo grew `repo2b` (templates as `.ftl`, the test, `config/application.yml`),
 an `invoice.vm` / `receipt.vm`, a test class and a key moved to `application.properties`: 16 items (repo2 alone) /

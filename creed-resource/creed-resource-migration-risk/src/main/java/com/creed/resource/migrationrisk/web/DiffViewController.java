@@ -53,11 +53,17 @@ public class DiffViewController {
             DiffSet set = diffs.diff(in, side);
             if (set.files().isEmpty()) {
                 model.addAttribute("error", side == Side.A
-                        ? "repo1 changed no Java file since the baseline."
-                        : "None of the Java files repo1 changed is in repo2 (same path or same file name).");
+                        ? "repo1 changed no file since the baseline."
+                        : "None of the files repo1 changed is in repo2 (same path, same file name or converted).");
                 return "diff";
             }
             int current = index != null && index >= 0 && index < set.files().size() ? index : set.indexOf(file);
+            if (current < 0) {
+                // Falling back to the first file would show the wrong code under the requested name.
+                model.addAttribute("error", file + " has no diff on this side (a binary file, or repo1 HEAD has no"
+                        + " version of it).");
+                return "diff";
+            }
             model.addAttribute("files", set.files());
             model.addAttribute("current", set.files().get(current));
             model.addAttribute("refactoringCount", set.refactoringCount());

@@ -195,6 +195,16 @@ public class ReleaseStore {
      * evidence/details text — without line numbers, which shift whenever anything above them is edited.
      */
     static String fingerprint(RiskItem item) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(fingerprintText(item).getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** A file record's text includes its parts: any finding in the file that changes resets the file's review. */
+    private static String fingerprintText(RiskItem item) {
         String text = String.join("\u0000",
                 item.level().name(), item.category().name(), item.kind().name(), item.element(),
                 String.valueOf(item.change()), String.valueOf(item.targetState()),
@@ -204,11 +214,9 @@ public class ReleaseStore {
                 String.join("\u0001", item.evidence()),
                 item.details().stream().map(d -> LINE_PREFIX.matcher(d).replaceFirst("$1"))
                         .collect(Collectors.joining("\u0001")));
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        // appended only when present, so element-level items saved before file records keep their prints
+        return item.parts().isEmpty() ? text
+                : text + "\u0002" + item.parts().stream().map(ReleaseStore::fingerprintText).collect(Collectors.joining("\u0003"));
     }
 
     private static String blankToNull(String s) {

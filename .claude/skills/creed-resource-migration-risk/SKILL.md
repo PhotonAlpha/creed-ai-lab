@@ -36,6 +36,10 @@ releases and reviews; the analysis itself is computed per request. Page `/migrat
 - `GlobalConfigAnalyzer`: config compared by **global key** across all `config-files` (`ConfigDiff.globalKeys`:
   bare key for the default profile, `[dev] key`, `[test] key`, `[messages_zh.properties] key`); change = the key's
   value *set* changed. Parsed once per content id. `FileRiskAnalyzer` skips these files (still API rules).
+- `FileRecords`: the API returns **one record per changed file** (`id` = `FILE:<path>`, kind FILE, level /
+  category / target state of the riskiest part); the analyzers' element-level findings are its `parts`. Reviews,
+  counts and carry-over are per file (the fingerprint covers the parts). Asked for: the diff page already shows a
+  file line by line, so a row per method or key was noise. Tests find elements via `$.items[*].parts[...]`.
 - `CodeTags`: `module` (nearest build-file dir) + `test` from the path alone; `skipTests` filters `changes` in
   `withTrees`, so the analysis, RefactoringMiner's input and the diff view all agree.
 - `ReleaseStore` + `domain/Mr*` (Flyway `V1`, `V2` = `repo2b_path`): `mr_release` / `mr_analysis` (result JSON minus items) / `mr_item`
@@ -43,6 +47,10 @@ releases and reviews; the analysis itself is computed per request. Page `/migrat
 - `DiffViewService` + `web/DiffViewController` + `templates/diff.html`: `diffAtDirectories` on the same exported
   subset → `DirComparator` → RefactoringMiner's own `MonacoCore.makeDiffConfig()`; its `web/dist/*.js|css` are
   served from its jar at `/api/migration-risk/view/assets/`. Added / deleted files get a one-sided config.
+  **Non-Java files** (yml, properties, .vm / .ftl ...) get `FileDiff.text`: a JGit histogram line diff in the same
+  MonacoCore config shape (`deleted` / `inserted` ranges, no mappings); side B pairs HEAD's file with repo2's same
+  path, else its converted name (`extension-mappings`). `indexOf` returns -1 for an unknown file and the page says
+  so — falling back to file 0 showed the wrong code under the requested name.
 
 - `AnalysisJobs` + `Progress`: background analyses on their own bounded pool, progress pushed over SSE (`SseEmitter`).
   `Progress.Stage` bands (RESOLVE 0 … MIGRATION 45, JAVA 80 … DONE 100); the job's `Progress` throws

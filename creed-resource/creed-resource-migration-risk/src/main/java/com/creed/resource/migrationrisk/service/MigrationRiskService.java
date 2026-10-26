@@ -309,7 +309,7 @@ public class MigrationRiskService {
         items.addAll(configAnalyzer.analyze(ctx, warnings));
         items.sort(Comparator.comparing(RiskItem::level).thenComparing(RiskItem::category)
                 .thenComparing(RiskItem::element));
-        items = tag(dedupe(items), baseline, head, target);
+        items = FileRecords.group(tag(dedupe(items), baseline, head, target), changes);
 
         long millis = (System.nanoTime() - started) / 1_000_000;
         log.info("{} vs {}: {} changed files, {} upstream / {} migration refactorings, {} items in {} ms",

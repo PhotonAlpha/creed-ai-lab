@@ -105,6 +105,10 @@ several of its dependencies are excluded (Jetty 9, Spring 4.1.6, GitHub/Perforce
 
 ## Options and what the table adds
 
+- **One record per file** — every changed file is one row to review; the methods, config keys and API matches
+  found in it are its `parts` (shown when the row is expanded). The file takes its riskiest part's level. Line
+  by line differences are what the diff views are for.
+
 - **repo2B** — when the migration split repo1 into two repositories, give the second one as `repo2bPath`
   (and `repo2bHead`). repo2 and repo2B are read as one code base: a class, template or config key found in
   either counts as found, and each item's target says `repo2A` or `repo2B`.
