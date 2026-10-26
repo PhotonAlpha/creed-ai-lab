@@ -20,6 +20,7 @@ const { Text, Paragraph } = Typography;
 
 type LevelFilter = 'ALL' | RiskLevel;
 type ReviewFilter = 'ALL' | ReviewStatus;
+type CodeFilter = 'ALL' | 'MAIN' | 'TEST';
 
 /** How many detail lines a row shows before "N more". */
 const DETAIL_LINES = 3;
@@ -40,7 +41,7 @@ const where = (l: Location | null) => (l ? (l.line != null ? `${l.path}:${l.line
 const matchesKeyword = (item: RiskItem, keyword: string) => {
   if (!keyword) return true;
   const k = keyword.toLowerCase();
-  return [item.element, item.upstream?.path, item.target?.path, item.target?.element, item.review?.note,
+  return [item.element, item.module, item.upstream?.path, item.target?.path, item.target?.element, item.review?.note,
     ...item.details, ...item.evidence].some((v) => v?.toLowerCase().includes(k));
 };
 
@@ -72,6 +73,8 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('ALL');
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('ALL');
   const [categories, setCategories] = useState<RiskCategory[]>([]);
+  const [modules, setModules] = useState<string[]>([]);
+  const [codeFilter, setCodeFilter] = useState<CodeFilter>('ALL');
   const [keyword, setKeyword] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [reviewer, setReviewer] = useState(storedReviewer);
@@ -88,13 +91,22 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
     }
   };
 
+  /** Modules present in this run, for the filter; runs saved before tags have none. */
+  const moduleOptions = useMemo(
+    () => [...new Set((analysis?.items ?? []).map((i) => i.module).filter((m): m is string => !!m))].sort(),
+    [analysis],
+  );
+  const hasTests = (analysis?.items ?? []).some((i) => i.test);
+
   const rows = useMemo(
     () => (analysis?.items ?? [])
       .filter((i) => levelFilter === 'ALL' || i.level === levelFilter)
       .filter((i) => reviewFilter === 'ALL' || i.review?.status === reviewFilter)
       .filter((i) => categories.length === 0 || categories.includes(i.category))
+      .filter((i) => modules.length === 0 || (i.module != null && modules.includes(i.module)))
+      .filter((i) => codeFilter === 'ALL' || (codeFilter === 'TEST') === i.test)
       .filter((i) => matchesKeyword(i, keyword.trim())),
-    [analysis, levelFilter, reviewFilter, categories, keyword],
+    [analysis, levelFilter, reviewFilter, categories, modules, codeFilter, keyword],
   );
 
   const submit = async (items: RiskItem[], status: ReviewStatus, note?: string) => {
@@ -138,11 +150,24 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
       dataIndex: 'element',
       width: 380,
       render: (element: string, i) => (
-        <Space size={4} align="start">
-          <Tag>{t(`migrationRisk.kind.${i.kind}` as MessageKey)}</Tag>
-          <Paragraph style={{ margin: 0 }} ellipsis={{ rows: 2, tooltip: element }}>
-            <Text code>{element}</Text>
-          </Paragraph>
+        <Space direction="vertical" size={2}>
+          <Space size={4} align="start">
+            <Tag>{t(`migrationRisk.kind.${i.kind}` as MessageKey)}</Tag>
+            <Paragraph style={{ margin: 0 }} ellipsis={{ rows: 2, tooltip: element }}>
+              <Text code>{element}</Text>
+            </Paragraph>
+          </Space>
+          {(i.module || i.test) && (
+            <Space size={4}>
+              {i.module && (
+                <Tooltip title={t('migrationRisk.filter.module')}>
+                  <Tag color="geekblue" style={{ cursor: 'pointer' }}
+                    onClick={() => setModules([i.module!])}>{i.module}</Tag>
+                </Tooltip>
+              )}
+              {i.test && <Tag color="purple">{t('migrationRisk.tag.test')}</Tag>}
+            </Space>
+          )}
         </Space>
       ),
     },
@@ -179,9 +204,12 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
       width: 300,
       render: (_, i) => (
         <Space direction="vertical" size={2}>
-          {i.targetState && (
-            <Tag color={STATE_COLOR[i.targetState]}>{t(`migrationRisk.state.${i.targetState}` as MessageKey)}</Tag>
-          )}
+          <Space size={4}>
+            {i.targetState && (
+              <Tag color={STATE_COLOR[i.targetState]}>{t(`migrationRisk.state.${i.targetState}` as MessageKey)}</Tag>
+            )}
+            {i.target?.repo && <Tag color="cyan">{i.target.repo}</Tag>}
+          </Space>
           {where(i.target) && (
             <Paragraph style={{ margin: 0 }} ellipsis={{ rows: 2, tooltip: i.target?.element ?? where(i.target) }}>
               <Text type="secondary" style={{ fontSize: 12 }}>{where(i.target)}</Text>
@@ -193,16 +221,19 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
     {
       title: t('migrationRisk.col.diff'),
       key: 'diff',
-      width: 110,
+      width: 160,
       render: (_, i) => analysis && hasDiff(i) && (
-        <Space size={4}>
+        <Space direction="vertical" size={4}>
           <Tooltip title={t('migrationRisk.diff.a')}>
             <Button size="small" icon={<DiffOutlined />} href={diffUrl(analysis.source, 'A', i.upstream?.path)}
-              target="_blank">A</Button>
+              target="_blank">{t('migrationRisk.diff.openA')}</Button>
           </Tooltip>
+          {/* No counterpart in repo2 = nothing to put next to repo1's code. */}
           <Tooltip title={t('migrationRisk.diff.b')}>
-            <Button size="small" icon={<DiffOutlined />}
-              href={diffUrl(analysis.source, 'B', i.target?.path ?? i.upstream?.path)} target="_blank">B</Button>
+            <Button size="small" icon={<DiffOutlined />} disabled={!i.target}
+              href={diffUrl(analysis.source, 'B', i.target?.path ?? i.upstream?.path)} target="_blank">
+              {t('migrationRisk.diff.openB')}
+            </Button>
           </Tooltip>
         </Space>
       ),
@@ -286,6 +317,29 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
           style={{ minWidth: 220 }}
           options={RISK_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) }))}
         />
+        {moduleOptions.length > 0 && (
+          <Select<string[]>
+            mode="multiple"
+            allowClear
+            maxTagCount="responsive"
+            value={modules}
+            onChange={setModules}
+            placeholder={t('migrationRisk.filter.module')}
+            style={{ minWidth: 180 }}
+            options={moduleOptions.map((m) => ({ value: m, label: m }))}
+          />
+        )}
+        {hasTests && (
+          <Segmented<CodeFilter>
+            value={codeFilter}
+            onChange={setCodeFilter}
+            options={[
+              { value: 'ALL', label: t('migrationRisk.filter.allCode') },
+              { value: 'MAIN', label: t('migrationRisk.filter.mainOnly') },
+              { value: 'TEST', label: t('migrationRisk.filter.testOnly') },
+            ]}
+          />
+        )}
         <Input.Search
           allowClear
           placeholder={t('migrationRisk.search')}
@@ -321,7 +375,7 @@ export function ItemsTable({ analysis, loading, onReviewed }: Props) {
         dataSource={rows}
         pagination={{ pageSize: 20, showSizeChanger: true }}
         // Numeric width, not 'max-content': with a fixed-right column the latter collapses the last scrolling column.
-        scroll={{ x: saved ? 1820 : 1570 }}
+        scroll={{ x: saved ? 1870 : 1620 }}
         rowSelection={saved ? { selectedRowKeys: selected, onChange: (keys) => setSelected(keys as string[]) } : undefined}
         expandable={{
           rowExpandable: (i) => i.evidence.length + i.details.length > 0 || i.upstream != null,

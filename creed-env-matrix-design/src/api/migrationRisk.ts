@@ -21,8 +21,10 @@ export const RISK_CATEGORIES = [
   'BOTH_MODIFIED',
   'DELETED_UPSTREAM',
   'UPSTREAM_REFACTORING',
+  'TEMPLATE_CONVERTED',
   'NON_JAVA_FILE',
   'AUTO_SYNC',
+  'CONFIG_IN_SYNC',
   'NEW_CODE',
 ] as const;
 export type RiskCategory = (typeof RISK_CATEGORIES)[number];
@@ -47,6 +49,8 @@ export interface Location {
   path: string;
   line: number | null;
   element: string | null;
+  /** `repo2A` / `repo2B` on a target location when repo2 is two repositories; null otherwise. */
+  repo: string | null;
 }
 
 export interface RiskItem {
@@ -69,6 +73,10 @@ export interface RiskItem {
   details: string[];
   /** Null unless the analysis was saved under a release. */
   review: Review | null;
+  /** repo1 build module (nearest pom.xml / build.gradle directory; `(root)` at the top). Null on runs saved before tags. */
+  module: string | null;
+  /** Test code or test resources. */
+  test: boolean;
 }
 
 export interface CodeLocation {
@@ -117,6 +125,11 @@ export interface AnalysisSource {
   baseline: CommitView | null;
   repo1Head: CommitView | null;
   repo2Head: CommitView | null;
+  /** The second repo2 (repo2B), merged with repo2Path; null for one repo2. */
+  repo2bPath: string | null;
+  repo2bHead: CommitView | null;
+  /** Test code was left out of the comparison. */
+  skipTests: boolean;
 }
 
 export interface MigrationRiskAnalysis {
@@ -141,6 +154,10 @@ export interface AnalysisRequest {
   repo1Head?: string;
   repo2Path: string;
   repo2Head?: string;
+  /** Optional second migrated repository: repo2 + repo2B are compared with repo1 as one code base. */
+  repo2bPath?: string;
+  repo2bHead?: string;
+  skipTests?: boolean;
   /** Saves the result under this release (created on first use); blank = not saved. */
   release?: string;
 }
@@ -150,6 +167,8 @@ export interface DirectoryAnalysisRequest {
   baselinePath: string;
   repo1Path: string;
   repo2Path: string;
+  repo2bPath?: string;
+  skipTests?: boolean;
   release?: string;
 }
 
@@ -161,9 +180,12 @@ export interface MigrationRiskSettings {
     repo1Head: string;
     repo2Path: string;
     repo2Head: string;
+    /** What the demo migration moved into a second repository (templates as .ftl, tests, config/). */
+    repo2bPath: string;
     baselineFolder: string;
     repo1Folder: string;
     repo2Folder: string;
+    repo2bFolder: string;
   } | null;
   allowedRoots: string[];
   apiRules: { id: string; pattern: string; hint: string | null }[];
@@ -200,6 +222,7 @@ export interface AnalysisSummary {
   mode: AnalysisMode;
   repo1Path: string;
   repo2Path: string;
+  repo2bPath: string | null;
   baselineRef: string;
   counts: MigrationRiskAnalysis['counts'];
   review: ReviewProgress;
@@ -287,8 +310,9 @@ export const migrationRiskApi = {
 
 /**
  * The backend's Thymeleaf diff page (RefactoringMiner's side-by-side viewer) for one side of an analysis:
- * A = repo1 baseline → repo1 head, B = repo1 baseline → repo2. Commit ids, not branch names, so a saved
- * analysis keeps showing the code it was computed on. Under /api/migration-risk, so the same proxy serves it.
+ * A = repo1 baseline → repo1 head (the upstream change), B = repo1 head → repo2 head (what the sync has to
+ * bridge). Commit ids, not branch names, so a saved analysis keeps showing the code it was computed on. Under
+ * /api/migration-risk, so the same proxy serves it.
  */
 export function diffUrl(source: AnalysisSource, side: 'A' | 'B', file?: string | null): string {
   const params = source.mode === 'DIRECTORY'
@@ -300,8 +324,16 @@ export function diffUrl(source: AnalysisSource, side: 'A' | 'B', file?: string |
       repo1Head: source.repo1Head?.id,
       repo2Path: source.repo2Path,
       repo2Head: source.repo2Head?.id,
+      repo2bHead: source.repo2bHead?.id,
     };
-  return `${BASE}/view/diff${toQuery({ ...params, side, file: file ?? undefined })}`;
+  return `${BASE}/view/diff${toQuery({
+    ...params,
+    repo2bPath: source.repo2bPath ?? undefined,
+    // the same file subset as the analysis
+    skipTests: source.skipTests ? 'true' : undefined,
+    side,
+    file: file ?? undefined,
+  })}`;
 }
 
 /** SSE stream of a job: `stage`, `progress`, then `done` or `failed`; replayed from the start on reconnect. */

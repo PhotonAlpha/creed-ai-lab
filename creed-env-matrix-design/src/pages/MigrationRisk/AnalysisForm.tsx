@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormInstance } from 'antd';
-import { AutoComplete, Button, Col, Form, Input, Row, Segmented, Space, Tooltip, Typography } from 'antd';
+import { AutoComplete, Button, Col, Form, Input, Row, Segmented, Space, Switch, Tooltip, Typography } from 'antd';
 import { ExperimentOutlined, SearchOutlined } from '@ant-design/icons';
 import { migrationRiskApi } from '../../api/migrationRisk';
 import type { BaselineSuggestion, MigrationRiskSettings, RefsView, ReleaseView } from '../../api/migrationRisk';
@@ -18,10 +18,13 @@ export const EMPTY_FORM: FormValues = {
   repo1Head: 'HEAD',
   repo2Path: '',
   repo2Head: 'HEAD',
+  repo2bPath: '',
+  repo2bHead: 'HEAD',
   baselinePath: '',
+  skipTests: false,
 };
 
-type RepoKey = 'repo1' | 'repo2';
+type RepoKey = 'repo1' | 'repo2' | 'repo2b';
 
 interface Props {
   form: FormInstance<FormValues>;
@@ -35,12 +38,14 @@ interface Props {
 /**
  * Git mode: two repositories, each with its own branch picker (branches, remote branches, tags), and the
  * baseline picked from repo1 — pre-filled with the merge-base of the two selected branches when they share
- * history. Folder mode: three plain directories. Either way, a release name saves the result for review.
+ * history. Folder mode: three plain directories. Either way, an optional repo2B (the migration split repo1 in two)
+ * is merged with repo2, test code can be skipped, and a release name saves the result for review.
  */
 export function AnalysisForm({ form, settings, releases, loading, onAnalyze, onDemo }: Props) {
   const { t } = useI18n();
   const mode = Form.useWatch('mode', form) ?? 'GIT';
-  const [refs, setRefs] = useState<Record<RepoKey, RefsView | null>>({ repo1: null, repo2: null });
+  const repo2b = !!Form.useWatch('repo2bPath', form)?.trim();
+  const [refs, setRefs] = useState<Record<RepoKey, RefsView | null>>({ repo1: null, repo2: null, repo2b: null });
   const [suggestion, setSuggestion] = useState<BaselineSuggestion | null>(null);
   const requestIds = useRef<Record<string, number>>({});
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -103,6 +108,7 @@ export function AnalysisForm({ form, settings, releases, loading, onAnalyze, onD
     if (settings) {
       void loadRefs('repo1');
       void loadRefs('repo2');
+      void loadRefs('repo2b');
       void loadSuggestion();
     }
   }, [settings, loadRefs, loadSuggestion]);
@@ -119,6 +125,7 @@ export function AnalysisForm({ form, settings, releases, loading, onAnalyze, onD
     }
     if ('repo1Path' in changed || 'repo1Head' in changed || 'mode' in changed) schedule('repo1', () => void loadRefs('repo1'));
     if ('repo2Path' in changed || 'repo2Head' in changed || 'mode' in changed) schedule('repo2', () => void loadRefs('repo2'));
+    if ('repo2bPath' in changed || 'repo2bHead' in changed || 'mode' in changed) schedule('repo2b', () => void loadRefs('repo2b'));
     if (['repo1Path', 'repo1Head', 'repo2Path', 'repo2Head', 'mode'].some((k) => k in changed)) {
       schedule('suggestion', () => void loadSuggestion());
     }
@@ -179,7 +186,7 @@ export function AnalysisForm({ form, settings, releases, loading, onAnalyze, onD
     <Form<FormValues> form={form} layout="vertical" initialValues={EMPTY_FORM}
       onValuesChange={onValuesChange} onFinish={onAnalyze}>
       <Row gutter={16} align="bottom">
-        <Col xs={24} lg={10}>
+        <Col xs={24} lg={8}>
           <Form.Item name="mode" label={t('migrationRisk.mode')}>
             <Segmented<FormValues['mode']>
               options={[
@@ -189,27 +196,38 @@ export function AnalysisForm({ form, settings, releases, loading, onAnalyze, onD
             />
           </Form.Item>
         </Col>
-        <Col xs={24} lg={14}>
+        <Col xs={24} lg={12}>
           <Form.Item name="release" label={t('migrationRisk.release')} tooltip={t('migrationRisk.releaseHint')}
             rules={[{ max: 120 }]}>
             <AutoComplete allowClear placeholder={t('migrationRisk.releasePlaceholder')} filterOption={filter}
               options={releases.map((r) => ({ value: r.name, label: r.name }))} />
           </Form.Item>
         </Col>
+        <Col xs={24} lg={4}>
+          <Form.Item name="skipTests" label={t('migrationRisk.skipTests')} tooltip={t('migrationRisk.skipTestsHint')}
+            valuePropName="checked">
+            <Switch />
+          </Form.Item>
+        </Col>
       </Row>
 
       {mode === 'GIT' ? (
         <Row gutter={16}>
-          <Col xs={24} lg={12}>
+          <Col xs={24} lg={8}>
             <Form.Item name="repo1Path" label={t('migrationRisk.repo1Path')} tooltip={t('migrationRisk.repo1PathHint')}
               rules={required}>
               <Input placeholder="/work/repo1" allowClear />
             </Form.Item>
           </Col>
-          <Col xs={24} lg={12}>
+          <Col xs={24} lg={8}>
             <Form.Item name="repo2Path" label={t('migrationRisk.repo2Path')} tooltip={t('migrationRisk.repo2PathHint')}
               rules={required}>
               <Input placeholder="/work/repo2" allowClear />
+            </Form.Item>
+          </Col>
+          <Col xs={24} lg={8}>
+            <Form.Item name="repo2bPath" label={t('migrationRisk.repo2bPath')} tooltip={t('migrationRisk.repo2bPathHint')}>
+              <Input placeholder="/work/repo2b" allowClear />
             </Form.Item>
           </Col>
           <Col xs={24} lg={6}>
@@ -233,23 +251,36 @@ export function AnalysisForm({ form, settings, releases, loading, onAnalyze, onD
                 popupMatchSelectWidth={360} />
             </Form.Item>
           </Col>
+          {repo2b && (
+            <Col xs={24} lg={6}>
+              <Form.Item name="repo2bHead" label={t('migrationRisk.repo2bBranch')} extra={headExtra(refs.repo2b)}>
+                <AutoComplete options={refOptions(refs.repo2b)} filterOption={filter} placeholder="HEAD"
+                  popupMatchSelectWidth={360} />
+              </Form.Item>
+            </Col>
+          )}
         </Row>
       ) : (
         <Row gutter={16}>
-          <Col xs={24} lg={8}>
+          <Col xs={24} lg={6}>
             <Form.Item name="baselinePath" label={t('migrationRisk.folder.baseline')}
               tooltip={t('migrationRisk.folder.baselineHint')} rules={required}>
               <Input placeholder="/work/repo1-at-migration-start" allowClear />
             </Form.Item>
           </Col>
-          <Col xs={24} lg={8}>
+          <Col xs={24} lg={6}>
             <Form.Item name="repo1Path" label={t('migrationRisk.folder.repo1')} rules={required}>
               <Input placeholder="/work/repo1" allowClear />
             </Form.Item>
           </Col>
-          <Col xs={24} lg={8}>
+          <Col xs={24} lg={6}>
             <Form.Item name="repo2Path" label={t('migrationRisk.folder.repo2')} rules={required}>
               <Input placeholder="/work/repo2" allowClear />
+            </Form.Item>
+          </Col>
+          <Col xs={24} lg={6}>
+            <Form.Item name="repo2bPath" label={t('migrationRisk.folder.repo2b')} tooltip={t('migrationRisk.repo2bPathHint')}>
+              <Input placeholder="/work/repo2b" allowClear />
             </Form.Item>
           </Col>
           <Col span={24}>

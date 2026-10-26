@@ -25,8 +25,10 @@ export const CATEGORY_LEVEL: Record<RiskCategory, RiskLevel | null> = {
   BOTH_MODIFIED: 'MEDIUM',
   DELETED_UPSTREAM: 'MEDIUM',
   UPSTREAM_REFACTORING: 'MEDIUM',
+  TEMPLATE_CONVERTED: 'MEDIUM',
   NON_JAVA_FILE: null,
   AUTO_SYNC: 'LOW',
+  CONFIG_IN_SYNC: 'LOW',
   NEW_CODE: 'LOW',
 };
 
@@ -39,11 +41,15 @@ export interface FormValues {
   repo1Head: string;
   repo2Path: string;
   repo2Head: string;
+  /** Optional second migrated repository / folder. */
+  repo2bPath: string;
+  repo2bHead: string;
   baselinePath: string;
+  skipTests: boolean;
 }
 
 export const FORM_FIELDS: (keyof FormValues)[] =
-  ['release', 'repo1Path', 'baseline', 'repo1Head', 'repo2Path', 'repo2Head', 'baselinePath'];
+  ['release', 'repo1Path', 'baseline', 'repo1Head', 'repo2Path', 'repo2Head', 'repo2bPath', 'repo2bHead', 'baselinePath'];
 
 /**
  * Backend `fields` onto the inputs they belong to — a wrong baseline is marked on the baseline input, not

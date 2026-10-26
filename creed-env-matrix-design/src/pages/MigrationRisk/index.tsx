@@ -19,6 +19,7 @@ import {
   Tag,
   Tooltip,
   Typography,
+  theme,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { DiffOutlined, FolderOpenOutlined } from '@ant-design/icons';
@@ -81,9 +82,18 @@ const runLabel = (a: AnalysisSummary, t: ReturnType<typeof useI18n>['t']) =>
     pending: a.review.pending,
   });
 
+/** Stat boxes coloured by what they ask of the reader: red = act, yellow = look, green = done. Design tokens, not CSS. */
+const STAT_TONE: Record<string, 'Error' | 'Warning' | 'Success' | undefined> = {
+  HIGH: 'Error',
+  ATTENTION: 'Error',
+  MEDIUM: 'Warning',
+  SAFE: 'Success',
+};
+
 export function MigrationRiskPage() {
   const { t } = useI18n();
   const { message } = App.useApp();
+  const { token } = theme.useToken();
   const [form] = Form.useForm<FormValues>();
 
   const [settings, setSettings] = useState<MigrationRiskSettings | null>(null);
@@ -129,11 +139,15 @@ export function MigrationRiskPage() {
   const analyze = useCallback(async (v: FormValues) => {
     const release = v.release?.trim() || undefined;
     // A background job followed over SSE: large projects take minutes, the page shows where it is meanwhile.
+    const repo2bPath = v.repo2bPath?.trim() || undefined;
+    const skipTests = !!v.skipTests;
     const result = await show(() => job.run(() => (v.mode === 'DIRECTORY'
-      ? migrationRiskApi.startDirectoryAnalysis({ baselinePath: v.baselinePath, repo1Path: v.repo1Path, repo2Path: v.repo2Path, release })
+      ? migrationRiskApi.startDirectoryAnalysis({
+        baselinePath: v.baselinePath, repo1Path: v.repo1Path, repo2Path: v.repo2Path, repo2bPath, skipTests, release,
+      })
       : migrationRiskApi.startAnalysis({
         repo1Path: v.repo1Path, baseline: v.baseline, repo1Head: v.repo1Head, repo2Path: v.repo2Path,
-        repo2Head: v.repo2Head, release,
+        repo2Head: v.repo2Head, repo2bPath, repo2bHead: repo2bPath ? v.repo2bHead : undefined, skipTests, release,
       }))));
     if (result?.analysisId != null) {
       message.success(t('migrationRisk.saved.done', { release: result.release ?? '' }));
@@ -143,9 +157,16 @@ export function MigrationRiskPage() {
 
   const runDemo = useCallback((mode: FormValues['mode'], demo = settings?.demo) => {
     if (!demo) return;
+    // With repo2B: the demo's templates (.ftl), tests and config/ live there.
     const values: FormValues = mode === 'DIRECTORY'
-      ? { ...EMPTY_FORM, mode, baselinePath: demo.baselineFolder, repo1Path: demo.repo1Folder, repo2Path: demo.repo2Folder }
-      : { ...EMPTY_FORM, mode, repo1Path: demo.repo1Path, baseline: demo.baseline, repo1Head: demo.repo1Head, repo2Path: demo.repo2Path, repo2Head: demo.repo2Head };
+      ? {
+        ...EMPTY_FORM, mode, baselinePath: demo.baselineFolder, repo1Path: demo.repo1Folder, repo2Path: demo.repo2Folder,
+        repo2bPath: demo.repo2bFolder,
+      }
+      : {
+        ...EMPTY_FORM, mode, repo1Path: demo.repo1Path, baseline: demo.baseline, repo1Head: demo.repo1Head,
+        repo2Path: demo.repo2Path, repo2Head: demo.repo2Head, repo2bPath: demo.repo2bPath,
+      };
     form.resetFields();
     form.setFieldsValue(values);
     void analyze(values);
@@ -178,11 +199,13 @@ export function MigrationRiskPage() {
     if (!result) return;
     const s = result.source;
     form.resetFields();
+    const common = { release: result.release ?? '', repo2bPath: s.repo2bPath ?? '', skipTests: !!s.skipTests };
     form.setFieldsValue(s.mode === 'DIRECTORY'
-      ? { ...EMPTY_FORM, mode: 'DIRECTORY', release: result.release ?? '', baselinePath: s.baselinePath ?? '', repo1Path: s.repo1Path, repo2Path: s.repo2Path }
+      ? { ...EMPTY_FORM, ...common, mode: 'DIRECTORY', baselinePath: s.baselinePath ?? '', repo1Path: s.repo1Path, repo2Path: s.repo2Path }
       : {
-        ...EMPTY_FORM, mode: 'GIT', release: result.release ?? '', repo1Path: s.repo1Path, repo2Path: s.repo2Path,
+        ...EMPTY_FORM, ...common, mode: 'GIT', repo1Path: s.repo1Path, repo2Path: s.repo2Path,
         baseline: s.baseline?.revision ?? '', repo1Head: s.repo1Head?.revision ?? 'HEAD', repo2Head: s.repo2Head?.revision ?? 'HEAD',
+        repo2bHead: s.repo2bHead?.revision ?? 'HEAD',
       });
   };
 
@@ -220,10 +243,10 @@ export function MigrationRiskPage() {
     {
       title: t('migrationRisk.col.diff'),
       key: 'diff',
-      width: 90,
+      width: 140,
       render: (_, f) => analysis && f.kind === 'JAVA' && (
         <Button size="small" icon={<DiffOutlined />} target="_blank"
-          href={diffUrl(analysis.source, 'A', f.newPath ?? f.oldPath)}>A</Button>
+          href={diffUrl(analysis.source, 'A', f.newPath ?? f.oldPath)}>{t('migrationRisk.diff.openA')}</Button>
       ),
     },
   ];
@@ -313,22 +336,39 @@ export function MigrationRiskPage() {
                   <Descriptions.Item label={t('migrationRisk.baseline')}><Commit commit={source.baseline} /></Descriptions.Item>
                   <Descriptions.Item label={t('migrationRisk.repo1Branch')}><Commit commit={source.repo1Head} /></Descriptions.Item>
                   <Descriptions.Item label={t('migrationRisk.repo2Branch')}><Commit commit={source.repo2Head} /></Descriptions.Item>
+                  {source.repo2bHead && (
+                    <Descriptions.Item label={t('migrationRisk.repo2bBranch')}>
+                      <Space size={4}><Tag color="cyan">repo2B</Tag><Commit commit={source.repo2bHead} /></Space>
+                    </Descriptions.Item>
+                  )}
                 </>
               ) : (
                 <>
                   <Descriptions.Item label={t('migrationRisk.folder.baseline')}><Text code>{source.baselinePath}</Text></Descriptions.Item>
                   <Descriptions.Item label={t('migrationRisk.folder.repo1')}><Text code>{source.repo1Path}</Text></Descriptions.Item>
                   <Descriptions.Item label={t('migrationRisk.folder.repo2')}><Text code>{source.repo2Path}</Text></Descriptions.Item>
+                  {source.repo2bPath && (
+                    <Descriptions.Item label={t('migrationRisk.folder.repo2b')}><Text code>{source.repo2bPath}</Text></Descriptions.Item>
+                  )}
                 </>
               )}
+              <Descriptions.Item label={t('migrationRisk.tests')}>
+                {source.skipTests
+                  ? <Tag color="purple">{t('migrationRisk.tests.skipped')}</Tag>
+                  : <Text type="secondary">{t('migrationRisk.tests.included')}</Text>}
+              </Descriptions.Item>
               <Descriptions.Item label={t('migrationRisk.analyzedAt')}>
                 {new Date(analysis.analyzedAt).toLocaleString()}
                 <Text type="secondary">&nbsp;({t('migrationRisk.duration', { ms: analysis.durationMillis })})</Text>
               </Descriptions.Item>
               <Descriptions.Item label={t('migrationRisk.diff.title')}>
                 <Space size={4}>
-                  <Button size="small" icon={<DiffOutlined />} href={diffUrl(source, 'A')} target="_blank">{t('migrationRisk.diff.openA')}</Button>
-                  <Button size="small" icon={<DiffOutlined />} href={diffUrl(source, 'B')} target="_blank">{t('migrationRisk.diff.openB')}</Button>
+                  <Tooltip title={t('migrationRisk.diff.a')}>
+                    <Button size="small" icon={<DiffOutlined />} href={diffUrl(source, 'A')} target="_blank">{t('migrationRisk.diff.openA')}</Button>
+                  </Tooltip>
+                  <Tooltip title={t('migrationRisk.diff.b')}>
+                    <Button size="small" icon={<DiffOutlined />} href={diffUrl(source, 'B')} target="_blank">{t('migrationRisk.diff.openB')}</Button>
+                  </Tooltip>
                 </Space>
               </Descriptions.Item>
             </Descriptions>
@@ -380,11 +420,16 @@ export function MigrationRiskPage() {
                 ['SAFE', reviewCount('SAFE'), t('migrationRisk.review.SAFE')],
                 ['ATTENTION', reviewCount('ATTENTION'), t('migrationRisk.review.ATTENTION')],
               ] : []),
-            ] as [string, number, string][]).map(([key, value, title]) => (
-              <Col key={key} xs={12} md={6} xl={analysis?.analysisId != null ? 3 : 6}>
-                <ProCard bordered><Statistic title={title} value={value} /></ProCard>
-              </Col>
-            ))}
+            ] as [string, number, string][]).map(([key, value, title]) => {
+              const tone = STAT_TONE[key];
+              return (
+                <Col key={key} xs={12} md={6} xl={analysis?.analysisId != null ? 3 : 6}>
+                  <ProCard bordered style={tone && { background: token[`color${tone}Bg`], borderColor: token[`color${tone}Border`] }}>
+                    <Statistic title={title} value={value} valueStyle={tone && { color: token[`color${tone}`] }} />
+                  </ProCard>
+                </Col>
+              );
+            })}
           </Row>
         )}
 

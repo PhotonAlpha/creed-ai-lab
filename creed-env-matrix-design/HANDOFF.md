@@ -42,6 +42,10 @@ Complete and verified in a browser against the real backend.
   open the backend's Thymeleaf page `/api/migration-risk/view/diff` (same proxy prefix) with commit ids.
   Analyses run as backend jobs followed over SSE (`useAnalysisJob` + `JobProgressCard`: stage steps, progress
   bar, current file, elapsed time, cancel); the items table has a *Details* column (first 3 lines, coloured).
+  2026-10-26: optional repo2B (path + branch picker; folder too) and a *Skip tests* switch in the form; module
+  select + main/test filter, module / test tags and a `repo2A`/`repo2B` tag on the target in the table; diff buttons
+  named "Upstream change" / "repo1 vs repo2"; stat boxes coloured (HIGH / ATTENTION red, MEDIUM yellow, SAFE green).
+  The demo now runs with repo2B. `npm run typecheck` passes; not seen in a browser.
   `npm run typecheck` and `npm run build` pass; the API (refs, suggestion, save, review, reload, diff HTML) was
   verified through the Vite proxy on a real pair. **Not yet checked in a browser** — the extension could not
   attach to any page this session either.
