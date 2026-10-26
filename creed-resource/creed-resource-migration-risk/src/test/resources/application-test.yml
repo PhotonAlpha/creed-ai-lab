@@ -25,3 +25,7 @@ migration-risk:
   allowed-roots: ${user.dir}/target/migration-risk-work
   demo:
     enabled: true
+  # file:// URLs stand in for a git server: the remote-repository path (clone bare, fetch) without a network.
+  remotes:
+    allow-file-urls: true
+    allowed-hosts: [git.example.com]

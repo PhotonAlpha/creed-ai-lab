@@ -61,6 +61,20 @@ public final class ConfigDiff {
         return lines(pom(before), pom(after), target == null ? null : pom(target));
     }
 
+    /** Every pom key repo1 changed has repo1 HEAD's value in repo2's pom (a removed key: repo2 lacks it too). */
+    public static boolean pomInSync(String before, String after, String target) {
+        if (target == null) {
+            return false;
+        }
+        Map<String, String> was = pom(before);
+        Map<String, String> now = pom(after);
+        Map<String, String> there = pom(target);
+        Set<String> keys = new LinkedHashSet<>(now.keySet());
+        keys.addAll(was.keySet());
+        return keys.stream().filter(k -> !Objects.equals(was.get(k), now.get(k)))
+                .allMatch(k -> Objects.equals(now.get(k), there.get(k)));
+    }
+
     private static List<String> lines(Map<String, String> before, Map<String, String> after, Map<String, String> target) {
         List<String> lines = new ArrayList<>();
         Set<String> keys = new LinkedHashSet<>(after.keySet());

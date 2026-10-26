@@ -3,6 +3,11 @@ package com.creed.resource.migrationrisk.api;
 import com.creed.resource.migrationrisk.api.dto.AnalysisRequest;
 import com.creed.resource.migrationrisk.api.dto.AnalysisResponse;
 import com.creed.resource.migrationrisk.api.dto.DirectoryAnalysisRequest;
+import com.creed.resource.migrationrisk.api.dto.IgnoreRuleView;
+import com.creed.resource.migrationrisk.service.ExportService;
+import com.creed.resource.migrationrisk.service.IgnoreRules;
+import com.creed.resource.migrationrisk.service.JiraIssues;
+import org.springframework.http.HttpHeaders;
 import com.creed.resource.migrationrisk.api.dto.MigrationRiskSettings;
 import com.creed.resource.migrationrisk.api.dto.RefsView;
 import com.creed.resource.migrationrisk.api.dto.ReleaseViews.AnalysisSummary;
@@ -47,10 +52,17 @@ public class MigrationRiskController {
     private final BaselineAdvisor baselines;
     private final ReleaseStore store;
     private final AnalysisJobs jobs;
+    private final IgnoreRules ignoreRules;
+    private final ExportService exporter;
+    private final JiraIssues jira;
 
     public MigrationRiskController(MigrationRiskService service, MigrationRiskProperties properties,
                                    RepositoryGuard guard, ObjectProvider<DemoRepositories> demo,
-                                   BaselineAdvisor baselines, ReleaseStore store, AnalysisJobs jobs) {
+                                   BaselineAdvisor baselines, ReleaseStore store, AnalysisJobs jobs,
+                                   IgnoreRules ignoreRules, ExportService exporter, JiraIssues jira) {
+        this.ignoreRules = ignoreRules;
+        this.exporter = exporter;
+        this.jira = jira;
         this.store = store;
         this.jobs = jobs;
         this.service = service;
@@ -83,7 +95,7 @@ public class MigrationRiskController {
                 guard.roots(),
                 properties.apiRules().stream()
                         .map(r -> new MigrationRiskSettings.Rule(r.id(), r.pattern(), r.hint())).toList(),
-                properties.maxChangedFiles());
+                properties.maxChangedFiles(), jira.mock(), jira.browseUrl(), properties.remotes().allowedHosts());
     }
 
     /** Folder mode: baseline / repo1 / repo2 as three plain directories — no git history involved. */
@@ -168,6 +180,56 @@ public class MigrationRiskController {
         return store.load(id);
     }
 
+    /** What the release's previous run had and this run does not (synced or reverted): the "resolved" list. */
+    @GetMapping("/analyses/{id}/resolved")
+    public List<RiskItem> resolved(@PathVariable long id) {
+        return store.resolved(id);
+    }
+
+    // ---------------------------------------------------------------- ignore rules, export, Jira
+
+    @GetMapping("/ignore-rules")
+    public List<IgnoreRuleView> ignoreRules() {
+        return ignoreRules.list();
+    }
+
+    @PostMapping("/ignore-rules")
+    public IgnoreRuleView addIgnoreRule(@Valid @RequestBody IgnoreRuleView.Create request) {
+        return ignoreRules.add(request);
+    }
+
+    @DeleteMapping("/ignore-rules/{id}")
+    public ResponseEntity<Void> deleteIgnoreRule(@PathVariable long id) {
+        ignoreRules.delete(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * The analysis the page shows, as a sync checklist: {@code format=xlsx} or {@code md}. A POST of the analysis
+     * itself, so an unsaved run exports as well as a saved one.
+     */
+    @PostMapping("/export")
+    public ResponseEntity<byte[]> export(@RequestParam(defaultValue = "xlsx") String format,
+                                         @RequestBody AnalysisResponse analysis) {
+        String name = "migration-sync" + (analysis.release() == null ? "" : "-" + analysis.release().replaceAll("[^\\w.-]", "_"));
+        if (format.equals("md")) {
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + name + ".md\"")
+                    .contentType(new MediaType("text", "markdown", java.nio.charset.StandardCharsets.UTF_8))
+                    .body(exporter.markdown(analysis).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + name + ".xlsx\"")
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(exporter.xlsx(analysis));
+    }
+
+    /** Creates (once) the Jira issue for a saved item; the item comes back with {@code review.jiraKey}. */
+    @PostMapping("/items/{id}/jira")
+    public RiskItem createJira(@PathVariable long id) {
+        return store.createJira(id, jira);
+    }
+
     @GetMapping("/releases")
     public List<ReleaseView> releases() {
         return store.releases();
@@ -178,7 +240,7 @@ public class MigrationRiskController {
         return store.analyses(id);
     }
 
-    /** SAFE = expected; ATTENTION = needs special care when syncing; PENDING = undo. */
+    /** SAFE = expected; ATTENTION = needs special care when syncing; SYNCED = done by hand; PENDING = undo. */
     @PutMapping("/items/{id}/review")
     public RiskItem review(@PathVariable long id, @Valid @RequestBody ReviewRequest request) {
         return store.review(List.of(id), request.status(), request.note(), request.reviewer()).getFirst();

@@ -66,6 +66,14 @@ public record RiskItem(
                 details, review, module, test, parts);
     }
 
+    /** Nothing left to sync: every part (or this finding itself) says repo2 already has repo1 HEAD's state. */
+    public boolean inSync() {
+        return parts.isEmpty() ? SYNCED.contains(category) : parts.stream().allMatch(p -> SYNCED.contains(p.category()));
+    }
+
+    private static final java.util.Set<RiskCategory> SYNCED =
+            java.util.EnumSet.of(RiskCategory.ALREADY_SYNCED, RiskCategory.CONFIG_IN_SYNC);
+
     /** The path the item is about: repo1's, else repo2's. */
     public String path() {
         return upstream != null ? upstream.path() : target != null ? target.path() : null;

@@ -64,7 +64,7 @@ class AnalysisJobsApiTest {
     void jobRunsInTheBackgroundAndKeepsItsResult() throws Exception {
         String view = awaitDone(start("JOB-" + UUID.randomUUID()));
         assertThat(JsonPath.<String>read(view, "$.status")).isEqualTo("DONE");
-        assertThat(JsonPath.<Integer>read(view, "$.result.counts.total")).isEqualTo(12);
+        assertThat(JsonPath.<Integer>read(view, "$.result.counts.total")).isEqualTo(13);
         assertThat(JsonPath.<Object>read(view, "$.result.analysisId")).isNotNull();
         assertThat(JsonPath.<String>read(view, "$.progress.stage")).isEqualTo("DONE");
         assertThat(JsonPath.<Integer>read(view, "$.progress.percent")).isEqualTo(100);
@@ -107,7 +107,7 @@ class AnalysisJobsApiTest {
                                 """.formatted(d.baselineFolder(), d.repo1Folder(), d.repo2Folder())))
                 .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
         String view = awaitDone(JsonPath.read(body, "$.jobId"));
-        assertThat(JsonPath.<Integer>read(view, "$.result.counts.total")).isEqualTo(12);
+        assertThat(JsonPath.<Integer>read(view, "$.result.counts.total")).isEqualTo(13);
         assertThat(JsonPath.<Object>read(view, "$.result.analysisId")).isNull();
     }
 

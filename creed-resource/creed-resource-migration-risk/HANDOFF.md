@@ -40,6 +40,11 @@ Other knobs: `CREED_MIGRATION_RISK_DB_URL|USER|PASSWORD`, `CREED_MIGRATION_RISK_
 | `GET /analyses/{id}` | a saved run, items with their current review |
 | `GET /releases` · `GET /releases/{id}/analyses` | releases with the latest run's counts + review progress; a release's runs, newest first |
 | `PUT /items/{id}/review` `{status, note?, reviewer?}` · `PUT /items/review` `{itemIds[], ...}` | `SAFE` / `ATTENTION` / `PENDING` (undo); `@Version` → 409 `review_conflict` |
+| `GET /analyses/{id}/resolved` | the previous run's items this run no longer has (synced / reverted) |
+| `GET|POST /ignore-rules` · `DELETE /ignore-rules/{id}` | `{pattern (Ant), category?, scope? (repo1 path/URL), note?}`; applied to every later analysis, counted in `warnings` |
+| `POST /export?format=xlsx|md` (body = the analysis) | sync checklist; unsaved analyses export too |
+| `POST /items/{id}/jira` | creates the item's Jira issue once (`review.jiraKey`); mock unless `migration-risk.jira.mock=false` + `base-url` |
+| `GET /view/diff3?...&file=&target=` | **HTML**: baseline / HEAD / repo2 in three Monaco panes, lines marked upstream / migration / both |
 | `GET /view/diff?mode=GIT|DIRECTORY&...&side=A|B&file=` | **HTML** (Thymeleaf): RefactoringMiner's Monaco side-by-side view. A ("Upstream change") = baseline → repo1 head, B ("repo1 vs repo2") = repo1 head → repo2 head (+ `repo2bPath`/`repo2bHead`/`skipTests`); Prev/Next, Overview, Legend; zh/en by `Accept-Language` |
 
 Errors: `{error, message, fields?, time}` — 403 `path_not_allowed`, 400 `invalid_repository` / `validation_failed`,
@@ -62,6 +67,12 @@ when its value set changed, a move between files is not; repo2 in sync → `CONF
 verdict whose item **fingerprint** (content minus line numbers) is unchanged (`carriedOverFrom`).
 
 ## Current state
+
+2026-10-27 (later): sync tracking (`SyncDetector` → `ALREADY_SYNCED`, auto `SYNCED`, delta, resolved, review memory
+with changed parts — Flyway `V3`), config renames (`ConfigRenames`), remote https repos (`RemoteRepositories`,
+`RepositoryLocator`), ignore rules, export (POI), Jira (`JiraIssues`), three-way view, Velocity → FreeMarker drafts,
+diff side B `target=`. Demo: `OrderValidator` (synced in repo2), `spring.redis.*` (renamed in repo2): 13 files.
+**69 tests pass.** Frontend typecheck + build pass; pagination fix not seen in a browser.
 
 2026-10-27: the diff page covers non-Java files too (line diff; `.vm` side B opens repo2's `.ftl`), so every row
 has both diff buttons. **59 tests pass.**

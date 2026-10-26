@@ -68,12 +68,19 @@ public class MigrationRiskService {
     private final JavaRiskAnalyzer javaAnalyzer;
     private final FileRiskAnalyzer fileAnalyzer;
     private final GlobalConfigAnalyzer configAnalyzer;
+    private final SyncDetector syncDetector;
+    private final IgnoreRules ignoreRules;
+    private final RepositoryLocator locator;
     private final Clock clock;
 
     public MigrationRiskService(MigrationRiskProperties properties, RepositoryGuard guard, RefactoringDetector detector,
                                 JavaRiskAnalyzer javaAnalyzer, FileRiskAnalyzer fileAnalyzer,
-                                GlobalConfigAnalyzer configAnalyzer, Clock clock) {
+                                GlobalConfigAnalyzer configAnalyzer, SyncDetector syncDetector, IgnoreRules ignoreRules,
+                                RepositoryLocator locator, Clock clock) {
+        this.ignoreRules = ignoreRules;
+        this.locator = locator;
         this.configAnalyzer = configAnalyzer;
+        this.syncDetector = syncDetector;
         this.properties = properties;
         this.guard = guard;
         this.detector = detector;
@@ -116,9 +123,9 @@ public class MigrationRiskService {
             }
             return;
         }
-        Path repo1Dir = guard.check(in.repo1Path(), "repo1Path");
-        Path repo2Dir = guard.check(in.repo2Path(), "repo2Path");
-        Path repo2bDir = in.repo2bPath() == null ? null : guard.check(in.repo2bPath(), "repo2bPath");
+        Path repo1Dir = locator.repository(in.repo1Path(), "repo1Path");
+        Path repo2Dir = locator.repository(in.repo2Path(), "repo2Path");
+        Path repo2bDir = in.repo2bPath() == null ? null : locator.repository(in.repo2bPath(), "repo2bPath");
         try (Git repo1 = GitRepositories.open(repo1Dir, "repo1Path"); Git repo2 = GitRepositories.open(repo2Dir, "repo2Path");
              Git repo2b = repo2bDir == null ? null : GitRepositories.open(repo2bDir, "repo2bPath")) {
             GitRepositories.resolve(repo1, in.baseline(), "baseline");
@@ -181,9 +188,9 @@ public class MigrationRiskService {
                 in.repo1Head(), in.repo2Path(), in.repo2Head(),
                 in.repo2bPath() == null ? "" : " + " + in.repo2bPath() + " head=" + in.repo2bHead(),
                 in.skipTests() ? " | no tests" : "");
-        Path repo1Dir = guard.check(in.repo1Path(), "repo1Path");
-        Path repo2Dir = guard.check(in.repo2Path(), "repo2Path");
-        Path repo2bDir = in.repo2bPath() == null ? null : guard.check(in.repo2bPath(), "repo2bPath");
+        Path repo1Dir = locator.repository(in.repo1Path(), "repo1Path");
+        Path repo2Dir = locator.repository(in.repo2Path(), "repo2Path");
+        Path repo2bDir = in.repo2bPath() == null ? null : locator.repository(in.repo2bPath(), "repo2bPath");
         // A null resource is legal in try-with-resources (not closed): repo2B is optional.
         try (Git repo1 = GitRepositories.open(repo1Dir, "repo1Path"); Git repo2 = GitRepositories.open(repo2Dir, "repo2Path");
              Git repo2b = repo2bDir == null ? null : GitRepositories.open(repo2bDir, "repo2bPath")) {
@@ -202,10 +209,12 @@ public class MigrationRiskService {
             log.info("baseline {} -> repo1 {}: {} changed files ({} Java); repo2 at {}",
                     baseline.commit().abbreviate(10).name(), head.commit().abbreviate(10).name(), changes.size(),
                     changes.stream().filter(ChangedFile::isJava).count(), target.commit().abbreviate(10).name());
-            Source source = new Source("GIT", null, repo1Dir.toString(), repo2Dir.toString(),
+            // a URL stays a URL: saved runs and the diff view resolve (and fetch) it again
+            Source source = new Source("GIT", null, locator.display(in.repo1Path(), repo1Dir),
+                    locator.display(in.repo2Path(), repo2Dir),
                     commit(in.baseline(), baseline.commit()), commit(in.repo1Head(), head.commit()),
                     commit(in.repo2Head(), target.commit()),
-                    repo2bDir == null ? null : repo2bDir.toString(),
+                    repo2bDir == null ? null : locator.display(in.repo2bPath(), repo2bDir),
                     targetB == null ? null : commit(in.repo2bHead(), targetB.commit()), in.skipTests());
             return work.apply(new Trees(new GitTree(baseline), new GitTree(head),
                     target(new GitTree(target), targetB == null ? null : new GitTree(targetB), warnings), changes,
@@ -307,9 +316,11 @@ public class MigrationRiskService {
         items.addAll(javaAnalyzer.analyze(ctx));
         items.addAll(fileAnalyzer.analyze(ctx));
         items.addAll(configAnalyzer.analyze(ctx, warnings));
+        items = new ArrayList<>(syncDetector.mark(ctx, items));
         items.sort(Comparator.comparing(RiskItem::level).thenComparing(RiskItem::category)
                 .thenComparing(RiskItem::element));
-        items = FileRecords.group(tag(dedupe(items), baseline, head, target), changes);
+        items = ignoreRules.apply(FileRecords.group(tag(dedupe(items), baseline, head, target), changes),
+                source.repo1Path(), warnings);
 
         long millis = (System.nanoTime() - started) / 1_000_000;
         log.info("{} vs {}: {} changed files, {} upstream / {} migration refactorings, {} items in {} ms",

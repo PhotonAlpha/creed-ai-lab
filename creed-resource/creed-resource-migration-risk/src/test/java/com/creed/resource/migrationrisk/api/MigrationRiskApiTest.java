@@ -189,8 +189,8 @@ class MigrationRiskApiTest {
         assertThat(JsonPath.<List<?>>read(analyseDemo(), "$.items[*].parts[?(@.element == 'spring.application.name')]")).isEmpty();
         // both config keys are parts of the one application.yml record; application.properties has none
         Map<String, Object> yml = file(analyseDemo(), "src/main/resources/application.yml");
-        assertThat(JsonPath.<List<String>>read(yml, "$.parts[*].element"))
-                .containsExactly("shop.order.max-items", "shop.order.retry.enabled");
+        assertThat(JsonPath.<List<String>>read(yml, "$.parts[*].element")).containsExactly(
+                "shop.order.max-items", "shop.order.retry.enabled", "spring.redis.host", "spring.redis.port");
         assertThat(yml).containsEntry("level", "HIGH").containsEntry("kind", "FILE");
         assertThat(JsonPath.<List<?>>read(analyseDemo(), "$.items[?(@.element =~ /.*application\\.properties/)]")).isEmpty();
 
@@ -226,6 +226,27 @@ class MigrationRiskApiTest {
         assertThat(paths).doesNotHaveDuplicates();
     }
 
+    /** repo2 got OrderValidator's fix already: the analysis compares repo2 with HEAD too, not only the baseline. */
+    @Test
+    void whatRepo2AlreadyHasIsSynced() throws Exception {
+        Map<String, Object> validator = file(analyseDemo(), "src/main/java/com/acme/shop/order/OrderValidator.java");
+        assertThat(validator).containsEntry("level", "LOW").containsEntry("category", "ALREADY_SYNCED");
+        assertThat(JsonPath.<List<String>>read(validator, "$.parts[0].evidence"))
+                .anyMatch(e -> e.contains("already has repo1 HEAD's version"));
+    }
+
+    /** Boot renamed spring.redis.* to spring.data.redis.*: repo2's new key is found, its value decides. */
+    @Test
+    void renamedConfigKeysAreLookedUpUnderTheirNewName() throws Exception {
+        Map<String, Object> host = item("spring.redis.host");
+        assertThat(host).containsEntry("category", "CONFIG_CHANGED");
+        assertThat(JsonPath.<List<String>>read(host, "$.evidence"))
+                .containsExactly("renamed in Spring Boot: spring.redis.host -> spring.data.redis.host");
+        assertThat(JsonPath.<List<String>>read(host, "$.details"))
+                .contains("repo2 (spring.data.redis.host): localhost @ src/main/resources/application.yml");
+        assertThat(item("spring.redis.port")).containsEntry("category", "CONFIG_IN_SYNC").containsEntry("level", "LOW");
+    }
+
     @Test
     void testCodeIsTagged() throws Exception {
         Map<String, Object> test = item("com.acme.shop.order.OrderServiceTest#unknownOrderIsNotCancelled()");
@@ -253,7 +274,7 @@ class MigrationRiskApiTest {
         assertThat(retry).containsEntry("level", "LOW").containsEntry("category", "CONFIG_IN_SYNC");
         assertThat(JsonPath.<String>read(retry, "$.target.path")).isEqualTo("src/main/resources/config/application.yml");
         assertThat(JsonPath.<String>read(retry, "$.target.repo")).isEqualTo("repo2B");
-        assertThat(JsonPath.<Integer>read(json, "$.counts.total")).isEqualTo(12);
+        assertThat(JsonPath.<Integer>read(json, "$.counts.total")).isEqualTo(13);
         assertThat(JsonPath.<Integer>read(json, "$.counts.high")).isEqualTo(4);
     }
 
@@ -267,7 +288,10 @@ class MigrationRiskApiTest {
         assertThat(JsonPath.<List<String>>read(invoice, "$.details")).containsSubsequence(
                 "- L2: <p>Customer: $invoice.customer</p>",
                 "+ L2: <p>Customer: $!invoice.customer</p>",
-                "+ L3: <p>Due: $invoice.dueDate</p>");
+                "+ L3: <p>Due: $invoice.dueDate</p>",
+                // the added lines drafted in FreeMarker
+                "≈ L2: <p>Customer: ${invoice.customer!}</p>",
+                "≈ L3: <p>Due: ${invoice.dueDate}</p>");
         // a new .vm while repo2 only has .ftl: to be written as FreeMarker
         assertThat(item(json, "src/main/resources/templates/receipt.vm"))
                 .containsEntry("category", "TEMPLATE_CONVERTED").containsEntry("targetState", "ABSENT");
@@ -282,7 +306,7 @@ class MigrationRiskApiTest {
         assertThat(JsonPath.<List<Boolean>>read(json, "$.items[*].test")).isNotEmpty().doesNotContain(true);
         assertThat(JsonPath.<Boolean>read(json, "$.source.skipTests")).isTrue();
         assertThat(JsonPath.<List<String>>read(json, "$.warnings")).contains("1 changed test file(s) skipped (skipTests)");
-        assertThat(JsonPath.<Integer>read(json, "$.counts.total")).isEqualTo(11);
+        assertThat(JsonPath.<Integer>read(json, "$.counts.total")).isEqualTo(12);
     }
 
     @Test
@@ -307,7 +331,7 @@ class MigrationRiskApiTest {
         assertThat(levels).isSortedAccordingTo((a, b) -> List.of("HIGH", "MEDIUM", "LOW").indexOf(a)
                 - List.of("HIGH", "MEDIUM", "LOW").indexOf(b));
         int total = JsonPath.read(json, "$.counts.total");
-        assertThat(total).isEqualTo(levels.size()).isEqualTo(12);
+        assertThat(total).isEqualTo(levels.size()).isEqualTo(13);
         assertThat(JsonPath.<Integer>read(json, "$.counts.high")).isEqualTo(5);
         assertThat(JsonPath.<String>read(json, "$.source.baseline.revision")).isEqualTo(DemoRepositories.BASELINE_TAG);
         assertThat(JsonPath.<List<String>>read(json, "$.warnings")).containsExactly(

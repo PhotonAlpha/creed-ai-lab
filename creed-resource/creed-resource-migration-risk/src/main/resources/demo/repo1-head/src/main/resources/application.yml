@@ -1,5 +1,9 @@
 server:
   port: 8080
+spring:
+  redis:
+    host: redis.internal
+    port: 6380
 management:
   endpoints:
     web:

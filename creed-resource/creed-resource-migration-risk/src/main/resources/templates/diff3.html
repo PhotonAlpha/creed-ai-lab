@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" th:lang="${#locale.language}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${file} + ' — ' + #{diff3.title}">Three-way view</title>
+    <style>
+        :root { --upstream: rgba(46, 160, 67, .28); --migration: rgba(56, 132, 255, .25); --both: rgba(255, 159, 28, .45); }
+        html, body { height: 100%; margin: 0; overflow: hidden; font: 13px system-ui, sans-serif; }
+        .bar { display: flex; align-items: center; gap: 14px; padding: 6px 10px; flex-wrap: wrap; border-bottom: 1px solid #ddd; }
+        .bar .spacer { flex: 1; }
+        .key { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 4px; }
+        .heads { display: flex; font-weight: 600; border-bottom: 1px solid #ddd; }
+        .heads > div { flex: 1; padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .heads small { font-weight: 400; color: #666; }
+        .panes { display: flex; height: calc(100% - 64px); }
+        .panes > div { flex: 1; height: 100%; border-right: 1px solid #ddd; }
+        .mark-upstream { background: var(--upstream); } .mark-migration { background: var(--migration); }
+        .mark-both { background: var(--both); }
+        .err { padding: 24px; color: #b42318; }
+    </style>
+</head>
+<body>
+<div th:if="${error}" class="err" th:text="${error}">error</div>
+<th:block th:unless="${error}">
+<div class="bar">
+    <strong th:text="#{diff3.title}">Three-way view</strong>
+    <code th:text="${file}">file</code>
+    <span class="spacer"></span>
+    <span><span class="key" style="background: var(--upstream)"></span><span th:text="#{diff3.upstream}">changed upstream</span></span>
+    <span><span class="key" style="background: var(--migration)"></span><span th:text="#{diff3.migration}">changed by the migration</span></span>
+    <span><span class="key" style="background: var(--both)"></span><span th:text="#{diff3.both}">changed on both sides</span></span>
+    <label><input type="checkbox" id="sync" checked> <span th:text="#{diff3.sync}">scroll together</span></label>
+</div>
+<div class="heads">
+    <div th:title="${view.baselinePath}"><span th:text="#{diff3.baseline}">repo1 baseline</span> <small th:text="${view.baselinePath} ?: #{diff3.missing}"></small></div>
+    <div th:title="${view.headPath}"><span th:text="#{diff3.head}">repo1 HEAD</span> <small th:text="${view.headPath} ?: #{diff3.missing}"></small></div>
+    <div th:title="${view.targetPath}"><span th:text="#{diff3.repo2}">repo2</span><span th:if="${view.repo}" th:text="' (' + ${view.repo} + ')'"></span>
+        <small th:text="${view.targetPath} ?: #{diff3.missing}"></small></div>
+</div>
+<div class="panes"><div id="pane-0"></div><div id="pane-1"></div><div id="pane-2"></div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
+<script th:utext="'const DATA = ' + ${view.data} + ';'"></script>
+<script>
+    require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
+    require(['vs/editor/editor.main'], function () {
+        const language = (path) => {
+            const ext = (path || '').split('.').pop();
+            return { java: 'java', yml: 'yaml', yaml: 'yaml', xml: 'xml', properties: 'ini', json: 'json', ftl: 'html', vm: 'html', html: 'html', md: 'markdown', sql: 'sql', js: 'javascript', ts: 'typescript' }[ext] || 'plaintext';
+        };
+        const editors = DATA.panes.map((pane, i) => {
+            const editor = monaco.editor.create(document.getElementById('pane-' + i), {
+                value: pane.missing ? '' : pane.content, language: language(pane.path), readOnly: true,
+                automaticLayout: true, minimap: { enabled: false }, scrollBeyondLastLine: false, renderLineHighlight: 'none',
+            });
+            editor.deltaDecorations([], pane.marks.map((m) => ({
+                range: new monaco.Range(m.line, 1, m.line, 1),
+                options: { isWholeLine: true, className: 'mark-' + m.kind },
+            })));
+            return editor;
+        });
+        // scroll together: same scrollTop on the other panes (the files have similar lengths around a change)
+        let syncing = false;
+        editors.forEach((editor) => editor.onDidScrollChange((e) => {
+            if (syncing || !document.getElementById('sync').checked || !e.scrollTopChanged) return;
+            syncing = true;
+            editors.filter((o) => o !== editor).forEach((o) => o.setScrollTop(e.scrollTop));
+            syncing = false;
+        }));
+    });
+</script>
+</th:block>
+</body>
+</html>

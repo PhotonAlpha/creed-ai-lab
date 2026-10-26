@@ -43,6 +43,7 @@ public class DiffViewController {
                        @RequestParam(defaultValue = "A") Side side,
                        @RequestParam(required = false) String file,
                        @RequestParam(required = false) Integer index,
+                       @RequestParam(required = false) String target,
                        Model model) {
         Inputs in = mode == Inputs.Mode.DIRECTORY
                 ? Inputs.folders(baselinePath, repo1Path, repo2Path, repo2bPath, skipTests)
@@ -67,7 +68,15 @@ public class DiffViewController {
             model.addAttribute("files", set.files());
             model.addAttribute("current", set.files().get(current));
             model.addAttribute("refactoringCount", set.refactoringCount());
-            model.addAttribute("config", set.config(current));
+            DiffViewService.FileDiff shownFile = set.files().get(current);
+            if (side == Side.B && shownFile.text() && target != null && !target.isBlank() && !target.equals(shownFile.right())) {
+                // repo2 keeps this file's content elsewhere (a config key in repo2B's config/application.yml)
+                DiffViewService.TextView view = diffs.text(in, shownFile.left() != null ? shownFile.left() : file, target, current);
+                model.addAttribute("current", view.file());
+                model.addAttribute("config", view.config());
+            } else {
+                model.addAttribute("config", set.config(current));
+            }
             UriComponentsBuilder self = UriComponentsBuilder.fromPath("/api/migration-risk/view/diff")
                     .queryParam("mode", mode).queryParam("repo1Path", repo1Path).queryParam("repo2Path", repo2Path);
             if (mode == Inputs.Mode.DIRECTORY) {
@@ -104,6 +113,34 @@ public class DiffViewController {
             model.addAttribute("error", e.getMessage());
         }
         return "diff";
+    }
+
+    /** Three panes: repo1 baseline | repo1 HEAD | repo2, changed lines marked by who changed them. */
+    @GetMapping("/api/migration-risk/view/diff3")
+    public String threeWay(@RequestParam(defaultValue = "GIT") Inputs.Mode mode,
+                           @RequestParam(required = false) String baselinePath,
+                           @RequestParam String repo1Path,
+                           @RequestParam(required = false) String baseline,
+                           @RequestParam(defaultValue = "HEAD") String repo1Head,
+                           @RequestParam String repo2Path,
+                           @RequestParam(defaultValue = "HEAD") String repo2Head,
+                           @RequestParam(required = false) String repo2bPath,
+                           @RequestParam(required = false) String repo2bHead,
+                           @RequestParam(defaultValue = "false") boolean skipTests,
+                           @RequestParam String file,
+                           @RequestParam(required = false) String target,
+                           Model model) {
+        Inputs in = mode == Inputs.Mode.DIRECTORY
+                ? Inputs.folders(baselinePath, repo1Path, repo2Path, repo2bPath, skipTests)
+                : Inputs.git(repo1Path, baseline, repo1Head, repo2Path, repo2Head, repo2bPath, repo2bHead, skipTests);
+        model.addAttribute("file", file);
+        try {
+            model.addAttribute("view", diffs.threeWay(in, file, target));
+        } catch (RuntimeException e) {
+            log.warn("three-way view failed: {}", e.getMessage());
+            model.addAttribute("error", e.getMessage());
+        }
+        return "diff3";
     }
 
     public record FileLink(DiffViewService.FileDiff file, String href) {

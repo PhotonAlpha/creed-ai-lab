@@ -13,6 +13,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.List;
 
 /** One saved risk item and its review. */
 @Entity
@@ -66,11 +67,40 @@ public class MrItem {
     @Column(name = "carried_over_from")
     private Long carriedOverFrom;
 
+    /** Set by the analysis (SYNCED because repo2 matches), not by a reviewer; never carried over. */
+    @Column(name = "review_auto", nullable = false)
+    private boolean reviewAuto;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 10)
+    private Review.Delta delta;
+
+    /** The verdict before the file's content changed; the row is PENDING again. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "previous_status", length = 16)
+    private ReviewStatus previousStatus;
+
+    @Column(name = "previous_note", length = 2000)
+    private String previousNote;
+
+    @Column(name = "previous_reviewer", length = 120)
+    private String previousReviewer;
+
+    /** Part ids new or different since {@link #previousStatus}, newline-separated. */
+    @Column(name = "changed_parts", columnDefinition = "text")
+    private String changedParts;
+
+    @Column(name = "jira_key", length = 40)
+    private String jiraKey;
+
     /** Two reviewers on one item: the second save is a 409, not a silent overwrite. */
     @Version
     private long version;
 
     public Review review() {
-        return new Review(id, reviewStatus, reviewNote, reviewedBy, reviewedAt, carriedOverFrom);
+        return new Review(id, reviewStatus, reviewNote, reviewedBy, reviewedAt, carriedOverFrom, reviewAuto, delta,
+                previousStatus == null ? null : new Review.Previous(previousStatus, previousNote, previousReviewer),
+                changedParts == null || changedParts.isEmpty() ? List.of() : List.of(changedParts.split("\n")),
+                jiraKey);
     }
 }

@@ -59,6 +59,18 @@ releases and reviews; the analysis itself is computed per request. Page `/migrat
 
 ## Rules that are easy to break
 
+- **Sync is HEAD vs repo2; the analyzers compare baseline vs repo2.** `SyncDetector` runs after them and only
+  relabels (`ALREADY_SYNCED`). Auto `SYNCED` reviews (`review_auto`) are never carried over — each run decides again;
+  manual verdicts carry over by fingerprint. The fingerprint ignores a `repo2A` label (single repo2 = repo2A),
+  otherwise adding repo2B to a release resets every review.
+- **Ignore rules apply to file records** (`IgnoreRules.apply` after `FileRecords.group`), and tests share one H2:
+  a test that adds a rule must delete it in `finally`.
+- **Remote URLs: https / file only, hosts allow-listed, credentials from config** — a URL with `user:pass@` is
+  refused. The mirror is bare (`refs/heads/*` = the remote's branches); fetch is throttled by `fetch-interval`
+  because `/refs` is called while the user types.
+- **Pagination on this page is controlled** (page / size / filters in the URL via `useSearchParams`). A literal
+  `pageSize` prop on an antd Table makes the size changer a no-op — use `defaultPageSize` or control it.
+
 - **Diff side B is head → repo2, the analysis's run B is baseline → repo2.** Run B must share its left side with
   run A for the cross-check; a reader porting a change wants repo1's current code on the left. Don't "unify" them.
 - **Config keys must not be named by file** — that is what makes a moved key "no change" and a key repo2B keeps in

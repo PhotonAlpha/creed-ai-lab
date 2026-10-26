@@ -22,10 +22,11 @@ public final class ReleaseViews {
     /** A saved run without its items, for history lists. {@code repo2bPath}: null unless repo2 was two repositories. */
     public record AnalysisSummary(long id, String release, String mode, String repo1Path, String repo2Path, String repo2bPath,
                                   String baselineRef, AnalysisResponse.Counts counts, ReviewProgress review,
-                                  long durationMillis, Instant analyzedAt) {
+                                  long durationMillis, Instant analyzedAt, Long previousAnalysisId) {
     }
 
-    public record ReviewProgress(int pending, int safe, int attention) {
+    /** {@code synced}: SYNCED, automatic or by hand — the sync progress of the run. */
+    public record ReviewProgress(int pending, int safe, int attention, int synced) {
     }
 
     /** One item's new review; {@code note} optional, {@code reviewer} free text (there are no accounts). */

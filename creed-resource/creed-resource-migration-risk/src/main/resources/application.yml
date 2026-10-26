@@ -61,6 +61,30 @@ migration-risk:
   # key repo2 keeps in another file, or in repo2B, is found). Spring's application*/bootstrap* files always count;
   # this regex adds the rest — properties / yml under resources/ or config/, not CI pipelines or Helm charts.
   config-files: '(.*/)?(resources|config)/.*\.(properties|ya?ml)'
+  # Config keys renamed by Spring Boot, on top of the deprecation metadata in Boot's own jars (~260 keys in 4.1.1;
+  # Boot 3.0's renames are no longer there). A key ending in '.' renames the whole prefix. A changed upstream key
+  # whose new name repo2 holds with the new value is CONFIG_IN_SYNC instead of "missing".
+  config-renames:
+    "[spring.redis.]": spring.data.redis.
+    "[spring.data.cassandra.]": spring.cassandra.
+    "[spring.elasticsearch.rest.]": spring.elasticsearch.
+  # Git URLs instead of server paths (git mode): https:// only, cloned bare into <work-dir>/remotes and fetched
+  # again when older than fetch-interval. Hosts must be listed — the URL counterpart of allowed-roots. Tokens
+  # come from the environment, never from the request.
+  remotes:
+    allowed-hosts: ${CREED_MIGRATION_RISK_GIT_HOSTS:github.com}
+    fetch-interval: 1m
+    credentials:
+      - host: ${CREED_MIGRATION_RISK_GIT_HOST:github.com}
+        username: ${CREED_MIGRATION_RISK_GIT_USER:token}
+        password: ${CREED_MIGRATION_RISK_GIT_TOKEN:}
+  # "Create Jira issue" on a reviewed item. mock: keys made up in memory (MIG-101 ...), nothing leaves the process.
+  jira:
+    mock: ${CREED_MIGRATION_RISK_JIRA_MOCK:true}
+    base-url: ${CREED_MIGRATION_RISK_JIRA_URL:}
+    project-key: ${CREED_MIGRATION_RISK_JIRA_PROJECT:MIG}
+    issue-type: Task
+    token: ${CREED_MIGRATION_RISK_JIRA_TOKEN:}
   # Formats the migration converted: a changed x.vm is looked up as x.ftl in repo2 (TEMPLATE_CONVERTED, MEDIUM).
   extension-mappings:
     vm: ftl

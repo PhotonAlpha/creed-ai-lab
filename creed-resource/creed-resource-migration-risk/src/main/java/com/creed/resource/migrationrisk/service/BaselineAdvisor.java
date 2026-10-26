@@ -26,14 +26,14 @@ public class BaselineAdvisor {
     private static final int REF_LIMIT = 200;
     private static final int COMMIT_LIMIT = 30;
 
-    private final RepositoryGuard guard;
+    private final RepositoryLocator locator;
 
-    public BaselineAdvisor(RepositoryGuard guard) {
-        this.guard = guard;
+    public BaselineAdvisor(RepositoryLocator locator) {
+        this.locator = locator;
     }
 
     public RefsView refs(String path, String head) {
-        try (Git git = GitRepositories.open(guard.check(path, "path"), "path")) {
+        try (Git git = GitRepositories.open(locator.repository(path, "path"), "path")) {
             Snapshot resolved = GitRepositories.resolve(git, head, "head");
             List<CommitView> recent = GitRepositories.recentCommits(git.getRepository(), resolved.commit(), COMMIT_LIMIT)
                     .stream().map(c -> MigrationRiskService.commit(c.getName(), c)).toList();
@@ -47,8 +47,8 @@ public class BaselineAdvisor {
     }
 
     public RefsView.Suggestion suggest(String repo1Path, String repo1Head, String repo2Path, String repo2Head) {
-        try (Git repo1 = GitRepositories.open(guard.check(repo1Path, "repo1Path"), "repo1Path");
-             Git repo2 = GitRepositories.open(guard.check(repo2Path, "repo2Path"), "repo2Path")) {
+        try (Git repo1 = GitRepositories.open(locator.repository(repo1Path, "repo1Path"), "repo1Path");
+             Git repo2 = GitRepositories.open(locator.repository(repo2Path, "repo2Path"), "repo2Path")) {
             Snapshot head1 = GitRepositories.resolve(repo1, repo1Head, "repo1Head");
             Snapshot head2 = GitRepositories.resolve(repo2, repo2Head, "repo2Head");
             Optional<ObjectId> base = GitRepositories.mergeBase(repo1.getRepository(), head1.commit(),

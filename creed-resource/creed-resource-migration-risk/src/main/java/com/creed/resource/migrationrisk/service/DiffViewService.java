@@ -134,7 +134,7 @@ public class DiffViewService {
          * MonacoCore's config shape for a non-Java pair: histogram line diff, removed lines marked {@code deleted}
          * on the left, added lines {@code inserted} on the right. No mappings — there is no AST to link.
          */
-        private String textConfig(FileDiff file, TextPair pair) {
+        static String textConfig(FileDiff file, TextPair pair, JsonMapper json) {
             String left = pair.leftText() == null ? "" : pair.leftText();
             String right = pair.rightText() == null ? "" : pair.rightText();
             RawText a = new RawText(left.getBytes(StandardCharsets.UTF_8));
@@ -206,7 +206,7 @@ public class DiffViewService {
         public String config(int index) {
             FileDiff file = files.get(index);
             if (file.text()) {
-                return textConfig(file, texts.get(index));
+                return textConfig(file, texts.get(index), json);
             }
             if (!file.status().equals("MODIFIED")) {
                 return oneSided(file);
@@ -280,6 +280,115 @@ public class DiffViewService {
         }
         List<String> named = target.pathsByFileName().getOrDefault(converted.substring(converted.lastIndexOf('/') + 1), List.of());
         return named.isEmpty() ? null : named.getFirst();
+    }
+
+    /** A file pair rendered on its own, outside the cached set. */
+    public record TextView(FileDiff file, String config) {
+    }
+
+    /**
+     * Side B of a non-Java file against an explicit repo2 file — a config key repo2 keeps in
+     * {@code config/application.yml} of repo2B, say, where the same-path lookup finds nothing. Two file reads, no
+     * RefactoringMiner, so it is not cached.
+     */
+    public TextView text(Inputs in, String headPath, String targetPath, int index) {
+        return analysis.withTrees(in, trees -> {
+            TextPair pair = new TextPair(headPath, targetPath, trees.head().read(headPath).orElse(null),
+                    trees.target().read(targetPath).orElse(null));
+            String status = pair.leftText() == null ? "ADDED" : pair.rightText() == null ? "DELETED" : "MODIFIED";
+            FileDiff file = new FileDiff(index, pair.leftText() == null ? null : headPath,
+                    pair.rightText() == null ? null : targetPath, false, status, true);
+            return new TextView(file, DiffSet.textConfig(file, pair, json));
+        });
+    }
+
+    /**
+     * The three versions of one file side by side — repo1 baseline, repo1 HEAD, repo2 — with whole-line marks:
+     * lines repo1 changed since the baseline ({@code upstream}), lines the migration changed ({@code migration}),
+     * and on the baseline, lines both touched ({@code both}): where a sync needs a real merge.
+     *
+     * @param file   repo1 HEAD's path (or the baseline's, for a file deleted upstream)
+     * @param target repo2's file; null = the same path, else its converted name ({@code extension-mappings})
+     */
+    public ThreeWay threeWay(Inputs in, String file, String target) {
+        return analysis.withTrees(in, trees -> {
+            ChangedFile change = trees.changes().stream()
+                    .filter(f -> file.equals(f.newPath()) || file.equals(f.oldPath())).findFirst().orElse(null);
+            String basePath = change == null ? file : change.oldPath();
+            String headPath = change == null ? file : change.newPath();
+            String targetPath = target != null && !target.isBlank() ? target
+                    : counterpart(trees.target(), headPath != null ? headPath : file);
+            String base = basePath == null ? null : trees.baseline().read(basePath).orElse(null);
+            String head = headPath == null ? null : trees.head().read(headPath).orElse(null);
+            String there = targetPath == null ? null : trees.target().read(targetPath).orElse(null);
+            List<int[]> upstream = changedLines(base, head);
+            List<int[]> migration = changedLines(base, there);
+            List<Map<String, Object>> baseMarks = new ArrayList<>();
+            int baseLines = base == null ? 0 : (int) base.lines().count();
+            for (int line = 1; line <= baseLines; line++) {
+                boolean up = touches(upstream, line);
+                boolean mig = touches(migration, line);
+                if (up || mig) {
+                    baseMarks.add(Map.of("line", line, "kind", up && mig ? "both" : up ? "upstream" : "migration"));
+                }
+            }
+            List<Map<String, Object>> panes = List.of(
+                    pane("baseline", basePath, base, baseMarks),
+                    pane("head", headPath, head, marks(upstream, "upstream")),
+                    pane("repo2", targetPath, there, marks(migration, "migration")));
+            String repo = trees.target() instanceof com.creed.resource.migrationrisk.source.MergedTree merged && targetPath != null
+                    ? merged.origin(targetPath).orElse(null) : null;
+            return new ThreeWay(basePath, headPath, targetPath, repo,
+                    json.writeValueAsString(Map.of("panes", panes)).replace("</", "<\\/"));
+        });
+    }
+
+    public record ThreeWay(String baselinePath, String headPath, String targetPath, String repo, String data) {
+    }
+
+    private static Map<String, Object> pane(String key, String path, String content, List<Map<String, Object>> marks) {
+        Map<String, Object> pane = new LinkedHashMap<>();
+        pane.put("key", key);
+        pane.put("path", path);
+        pane.put("missing", content == null);
+        pane.put("content", content == null ? "" : content);
+        pane.put("marks", marks);
+        return pane;
+    }
+
+    /** Edits of {@code after} against {@code before} as [beginA, endA, beginB, endB], 0-based, end exclusive. */
+    private static List<int[]> changedLines(String before, String after) {
+        if (before == null || after == null) {
+            return List.of();
+        }
+        List<int[]> edits = new ArrayList<>();
+        for (Edit e : new HistogramDiff().diff(RawTextComparator.DEFAULT,
+                new RawText(before.getBytes(StandardCharsets.UTF_8)), new RawText(after.getBytes(StandardCharsets.UTF_8)))) {
+            edits.add(new int[]{e.getBeginA(), e.getEndA(), e.getBeginB(), e.getEndB()});
+        }
+        return edits;
+    }
+
+    /** {@code line} is 1-based; an insertion marks the baseline line it follows, so an added block still shows. */
+    private static boolean touches(List<int[]> edits, int line) {
+        for (int[] e : edits) {
+            int begin = e[0];
+            int end = e[1] == e[0] ? e[0] + 1 : e[1];
+            if (line - 1 >= begin && line - 1 < end) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<Map<String, Object>> marks(List<int[]> edits, String kind) {
+        List<Map<String, Object>> marks = new ArrayList<>();
+        for (int[] e : edits) {
+            for (int line = e[2]; line < e[3]; line++) {
+                marks.add(Map.of("line", line + 1, "kind", kind));
+            }
+        }
+        return marks;
     }
 
     public DiffViewService(MigrationRiskService analysis, MigrationRiskProperties properties, JsonMapper json) {

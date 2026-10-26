@@ -3,7 +3,12 @@ package com.creed.resource.migrationrisk.api.dto;
 import java.util.List;
 
 /** {@code demo} is null when the demo repositories are disabled. */
-public record MigrationRiskSettings(Demo demo, List<String> allowedRoots, List<Rule> apiRules, int maxChangedFiles) {
+/**
+ * {@code jiraMock}: issues are made up in memory; {@code jiraBrowseUrl}: prefix for issue links (null with the mock);
+ * {@code allowedHosts}: hosts whose https:// git URLs are accepted as repositories.
+ */
+public record MigrationRiskSettings(Demo demo, List<String> allowedRoots, List<Rule> apiRules, int maxChangedFiles,
+                                    boolean jiraMock, String jiraBrowseUrl, List<String> allowedHosts) {
 
     /**
      * The git pair (repo1/repo2 + baseline tag), repo2B (the part of the migration that went into a second

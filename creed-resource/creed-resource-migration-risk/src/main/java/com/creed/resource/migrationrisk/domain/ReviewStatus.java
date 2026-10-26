@@ -7,5 +7,10 @@ public enum ReviewStatus {
     /** Expected — the difference is intended (part of the migration, or already handled). */
     SAFE,
     /** Not expected: needs special attention when syncing. */
-    ATTENTION
+    ATTENTION,
+    /**
+     * Done: repo2 has repo1 HEAD's state. Set automatically when an analysis finds the file in sync (review
+     * {@code auto}), or by hand for what cannot be compared (a template re-written in another syntax).
+     */
+    SYNCED
 }

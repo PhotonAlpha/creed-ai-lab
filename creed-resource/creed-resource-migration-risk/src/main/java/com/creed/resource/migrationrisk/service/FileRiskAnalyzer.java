@@ -106,8 +106,9 @@ public class FileRiskAnalyzer {
             }
             List<String> details = new ArrayList<>();
             details.add("repo2 has it as " + found.get() + ": re-write this change in ." + to + " syntax");
-            details.addAll(lineDiff(ctx.text(Side.BASELINE, file.oldPath()).orElse(""),
-                    ctx.text(Side.HEAD, file.newPath()).orElse("")));
+            String head = ctx.text(Side.HEAD, file.newPath()).orElse("");
+            details.addAll(lineDiff(ctx.text(Side.BASELINE, file.oldPath()).orElse(""), head));
+            details.addAll(suggestion(from, to, head, file.addedLines()));
             return Optional.of(RiskItem.of(RiskCategory.TEMPLATE_CONVERTED, ElementKind.FILE, path, change(file),
                     upstream, target, TargetState.RELOCATED, evidence, details));
         }
@@ -118,11 +119,31 @@ public class FileRiskAnalyzer {
             List<String> details = new ArrayList<>();
             details.add("new ." + from + " file; repo2 has no ." + from + " files but uses ." + to + ": write it as ."
                     + to);
-            details.addAll(lineDiff("", ctx.text(Side.HEAD, file.newPath()).orElse("")));
+            String head = ctx.text(Side.HEAD, file.newPath()).orElse("");
+            details.addAll(lineDiff("", head));
+            details.addAll(suggestion(from, to, head, file.addedLines()));
             return Optional.of(RiskItem.of(RiskCategory.TEMPLATE_CONVERTED, ElementKind.FILE, path, change(file),
                     upstream, null, TargetState.ABSENT, evidence, details));
         }
         return Optional.empty();
+    }
+
+    /**
+     * {@code ≈ L3: <p>Due: ${invoice.dueDate}</p>}: the added Velocity lines drafted in FreeMarker syntax — a hint
+     * for the port, not a translation to trust.
+     */
+    private static List<String> suggestion(String from, String to, String head, List<Integer> addedLines) {
+        if (!from.equals("vm") || !to.equals("ftl") || addedLines.isEmpty()) {
+            return List.of();
+        }
+        List<String> converted = VelocityToFreemarker.convert(head.lines().toList());
+        List<String> lines = new ArrayList<>();
+        for (int line : addedLines) {
+            if (line <= converted.size() && lines.size() < MAX_MATCH_LINES && !converted.get(line - 1).isBlank()) {
+                lines.add("≈ L" + line + ": " + converted.get(line - 1).strip());
+            }
+        }
+        return lines;
     }
 
     private static boolean hasExtension(AnalysisContext ctx, String extension) {

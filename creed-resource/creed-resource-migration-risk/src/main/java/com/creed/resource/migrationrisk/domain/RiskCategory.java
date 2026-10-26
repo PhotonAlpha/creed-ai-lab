@@ -35,6 +35,11 @@ public enum RiskCategory {
     NON_JAVA_FILE(null),
     /** LOW — repo2 has the element unchanged since the baseline: the upstream change applies as is. */
     AUTO_SYNC(RiskLevel.LOW),
+    /**
+     * LOW — repo2 already has repo1 HEAD's version (same normalized method / fields, same file content, same pom
+     * values; for API matches: repo2's file no longer uses the replaced API): the change has been synced.
+     */
+    ALREADY_SYNCED(RiskLevel.LOW),
     /** LOW — a config key repo1 changed, and repo2 already holds the new value somewhere (any file, either repo2). */
     CONFIG_IN_SYNC(RiskLevel.LOW),
     /** LOW — new upstream code whose home exists in repo2. */

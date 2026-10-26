@@ -44,16 +44,23 @@ final class FileRecords {
             byFile.computeIfAbsent(Objects.requireNonNullElse(item.path(), item.element()), p -> new ArrayList<>()).add(item);
         }
         List<RiskItem> files = new ArrayList<>();
-        byFile.forEach((path, parts) -> {
-            RiskItem top = parts.getFirst();
-            // where repo2 has the file: the riskiest part that found something
-            Location target = parts.stream().map(RiskItem::target).filter(Objects::nonNull).findFirst()
-                    .map(t -> new Location(t.path(), null, null, t.repo())).orElse(null);
-            files.add(new RiskItem("FILE:" + path, top.level(), top.category(), ElementKind.FILE, path,
-                    changeByPath.getOrDefault(path, top.change()), new Location(path, null, null), target,
-                    top.targetState(), List.of(), List.of(), null, top.module(), top.test(), parts));
-        });
+        byFile.forEach((path, parts) -> files.add(record(path, changeByPath.getOrDefault(path, parts.getFirst().change()), parts)));
         files.sort(Comparator.comparing(RiskItem::level).thenComparing(RiskItem::category).thenComparing(RiskItem::element));
         return files;
+    }
+
+    /** The same file record over fewer parts (an ignore rule took some away). */
+    static RiskItem regroup(RiskItem file, List<RiskItem> parts) {
+        return record(file.element(), file.change(), parts);
+    }
+
+    private static RiskItem record(String path, UpstreamChange change, List<RiskItem> parts) {
+        RiskItem top = parts.getFirst();
+        // where repo2 has the file: the riskiest part that found something
+        Location target = parts.stream().map(RiskItem::target).filter(Objects::nonNull).findFirst()
+                .map(t -> new Location(t.path(), null, null, t.repo())).orElse(null);
+        return new RiskItem("FILE:" + path, top.level(), top.category(), ElementKind.FILE, path, change,
+                new Location(path, null, null), target, top.targetState(), List.of(), List.of(), null, top.module(),
+                top.test(), parts);
     }
 }

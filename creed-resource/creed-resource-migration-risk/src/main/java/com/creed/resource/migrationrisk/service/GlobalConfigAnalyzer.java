@@ -42,9 +42,11 @@ public class GlobalConfigAnalyzer {
     private static final int MAX_FILES = 5;
 
     private final Pattern configFiles;
+    private final ConfigRenames renames;
 
-    public GlobalConfigAnalyzer(MigrationRiskProperties properties) {
+    public GlobalConfigAnalyzer(MigrationRiskProperties properties, ConfigRenames renames) {
         this.configFiles = Pattern.compile(properties.configFiles());
+        this.renames = renames;
     }
 
     public boolean handles(String path) {
@@ -104,7 +106,7 @@ public class GlobalConfigAnalyzer {
                 moved += was.keySet().equals(now.keySet()) ? 0 : 1;
                 continue;
             }
-            items.add(item(key, was, now, oldValues, newValues, target.get(key)));
+            items.add(item(key, was, now, oldValues, newValues, target));
         }
         if (moved > 0) {
             warnings.add(moved + " config key(s) only moved between files upstream, values unchanged: not reported");
@@ -115,7 +117,10 @@ public class GlobalConfigAnalyzer {
     }
 
     private RiskItem item(String key, Map<String, String> was, Map<String, String> now, Set<String> oldValues,
-                          Set<String> newValues, Map<String, String> inTarget) {
+                          Set<String> newValues, Index target) {
+        Map<String, String> inTarget = target.get(key);
+        // Boot renamed the key: what repo2 holds under the new name is the answer (spring.redis -> spring.data.redis)
+        Optional<String> renamed = renames.renamed(key).filter(r -> !target.get(r).isEmpty());
         UpstreamChange change = oldValues.isEmpty() ? UpstreamChange.ADDED
                 : newValues.isEmpty() ? UpstreamChange.DELETED : UpstreamChange.MODIFIED;
         List<String> details = new ArrayList<>();
@@ -130,16 +135,27 @@ public class GlobalConfigAnalyzer {
         List<String> changedIn = files.stream().filter(p -> !Objects.equals(was.get(p), now.get(p))).toList();
         files("repo1: ", changedIn.stream().collect(Collectors.toMap(p -> p,
                 p -> now.containsKey(p) ? now.get(p) : "(removed)", (a, b) -> a, LinkedHashMap::new)), details);
-        if (inTarget.isEmpty()) {
+        if (inTarget.isEmpty() && renamed.isEmpty()) {
             details.add("repo2: missing");
-        } else {
+        } else if (!inTarget.isEmpty()) {
             files("repo2: ", inTarget, details);
         }
-        boolean inSync = new TreeSet<>(inTarget.values()).equals(newValues);
+        List<String> evidence = new ArrayList<>();
+        Map<String, String> renamedInTarget = renamed.map(target::get).orElse(Map.of());
+        if (renamed.isPresent()) {
+            evidence.add("renamed in Spring Boot: " + key + " -> " + renamed.get());
+            files("repo2 (" + renamed.get() + "): ", renamedInTarget, details);
+        }
+        // in sync: the new values under the old name, or under the new name; a removed key: under neither
+        boolean inSync = newValues.isEmpty()
+                ? inTarget.isEmpty() && renamedInTarget.isEmpty()
+                : new TreeSet<>(inTarget.values()).equals(newValues)
+                || (inTarget.isEmpty() && new TreeSet<>(renamedInTarget.values()).equals(newValues));
         String upstreamPath = changedIn.stream().filter(now::containsKey).findFirst().orElse(changedIn.getFirst());
-        Location target = inTarget.isEmpty() ? null : new Location(inTarget.keySet().iterator().next(), null, null);
+        Map<String, String> where = !inTarget.isEmpty() ? inTarget : renamedInTarget;
+        Location location = where.isEmpty() ? null : new Location(where.keySet().iterator().next(), null, null);
         return RiskItem.of(inSync ? RiskCategory.CONFIG_IN_SYNC : RiskCategory.CONFIG_CHANGED, ElementKind.CONFIG, key,
-                change, new Location(upstreamPath, null, null), target, null, List.of(), details);
+                change, new Location(upstreamPath, null, null), location, null, evidence, details);
     }
 
     private static void files(String prefix, Map<String, String> valueByFile, List<String> details) {

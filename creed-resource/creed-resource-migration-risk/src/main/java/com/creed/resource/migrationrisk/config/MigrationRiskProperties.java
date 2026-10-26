@@ -20,6 +20,10 @@ import java.util.regex.Pattern;
  * @param directoryExcludes    folder mode: directory names skipped at any depth (VCS data, build output, IDE files)
  * @param configFiles          regex over repo paths: besides Spring's application* / bootstrap* files (always),
  *                             the properties / yml files whose keys are compared globally
+ * @param configRenames        old config key -> new one, on top of Spring Boot's own metadata; a key ending in
+ *                             {@code .} renames the whole prefix ({@code spring.redis.: spring.data.redis.})
+ * @param remotes              git URLs instead of server paths (cloned bare under work-dir, fetched before use)
+ * @param jira                 where "create Jira issue" goes; {@code mock} keeps it in memory
  * @param extensionMappings    file formats the migration converted ({@code vm: ftl}): a changed {@code x.vm} is
  *                             looked up as {@code x.ftl} in repo2 and reported TEMPLATE_CONVERTED
  */
@@ -33,7 +37,10 @@ public record MigrationRiskProperties(
         List<ApiRule> apiRules,
         List<String> directoryExcludes,
         String configFiles,
+        Map<String, String> configRenames,
         Map<String, String> extensionMappings,
+        Remotes remotes,
+        Jira jira,
         Jobs jobs,
         Demo demo) {
 
@@ -44,8 +51,11 @@ public record MigrationRiskProperties(
         apiRules = apiRules == null ? List.of() : List.copyOf(apiRules);
         directoryExcludes = directoryExcludes == null ? List.of() : List.copyOf(directoryExcludes);
         configFiles = configFiles == null || configFiles.isBlank() ? DEFAULT_CONFIG_FILES : configFiles;
+        configRenames = configRenames == null ? Map.of() : Map.copyOf(configRenames);
         extensionMappings = extensionMappings == null ? Map.of("vm", "ftl") : Map.copyOf(extensionMappings);
         demo = demo == null ? new Demo(true) : demo;
+        remotes = remotes == null ? new Remotes(List.of(), false, java.time.Duration.ofMinutes(1), List.of()) : remotes;
+        jira = jira == null ? new Jira(true, null, "MIG", "Task", null, null) : jira;
         jobs = jobs == null ? new Jobs(2, 10, java.time.Duration.ofMinutes(30)) : jobs;
     }
 
@@ -68,5 +78,36 @@ public record MigrationRiskProperties(
     }
 
     public record Demo(boolean enabled) {
+    }
+
+    /**
+     * Remote repositories: a {@code repo1Path} / {@code repo2Path} that is an {@code https://} (or {@code file://})
+     * URL is cloned bare into {@code <work-dir>/remotes} once and fetched again when older than
+     * {@code fetchInterval}. Only hosts in {@code allowedHosts} — the URL counterpart of {@code allowed-roots}.
+     *
+     * @param allowFileUrls {@code file://} URLs (tests, local mirrors); off by default
+     * @param credentials   per host; the password is a token, from the environment, never from the request
+     */
+    public record Remotes(List<String> allowedHosts, boolean allowFileUrls, java.time.Duration fetchInterval,
+                          List<Credential> credentials) {
+
+        public Remotes {
+            allowedHosts = allowedHosts == null ? List.of() : List.copyOf(allowedHosts);
+            credentials = credentials == null ? List.of() : List.copyOf(credentials);
+            fetchInterval = fetchInterval == null ? java.time.Duration.ofMinutes(1) : fetchInterval;
+        }
+    }
+
+    public record Credential(@NotBlank String host, String username, String password) {
+    }
+
+    /**
+     * Jira (REST API v2). {@code mock}: issues are numbered in memory and nothing leaves the process.
+     *
+     * @param browseUrl prefix for links in the page ({@code https://jira.acme.com/browse/}); default
+     *                  {@code baseUrl + "/browse/"}
+     */
+    public record Jira(boolean mock, String baseUrl, String projectKey, String issueType, String token,
+                       String browseUrl) {
     }
 }

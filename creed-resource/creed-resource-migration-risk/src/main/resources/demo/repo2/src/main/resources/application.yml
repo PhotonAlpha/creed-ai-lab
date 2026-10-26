@@ -5,6 +5,11 @@ spring:
     name: shop
   jackson:
     use-jackson2-defaults: true
+  # Boot 3 renamed spring.redis.* to spring.data.redis.*
+  data:
+    redis:
+      host: localhost
+      port: 6380
 management:
   endpoints:
     web:

@@ -33,6 +33,8 @@ public final class ApiErrors {
                     error(HttpStatus.BAD_REQUEST, "invalid_repository", r.getMessage(), field(r.field(), r.getMessage()));
             case MigrationRiskService.TooManyChangesException t ->
                     error(HttpStatus.UNPROCESSABLE_ENTITY, "too_many_changes", t.getMessage(), null);
+            case com.creed.resource.migrationrisk.service.JiraIssues.JiraException j ->
+                    error(HttpStatus.BAD_GATEWAY, "jira_failed", j.getMessage(), null);
             case ReleaseStore.NotFoundException n -> error(HttpStatus.NOT_FOUND, "not_found", n.getMessage(), null);
             case ObjectOptimisticLockingFailureException o -> error(HttpStatus.CONFLICT, "review_conflict",
                     "the item was reviewed by someone else meanwhile — reload", null);

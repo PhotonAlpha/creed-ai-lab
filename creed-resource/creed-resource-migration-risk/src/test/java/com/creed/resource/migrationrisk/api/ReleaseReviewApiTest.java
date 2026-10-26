@@ -68,7 +68,10 @@ class ReleaseReviewApiTest {
         String first = analyse(release);
         long analysisId = ((Number) JsonPath.read(first, "$.analysisId")).longValue();
         assertThat(JsonPath.<String>read(first, "$.release")).isEqualTo(release);
-        assertThat(JsonPath.<List<String>>read(first, "$.items[*].review.status")).hasSize(12).containsOnly("PENDING");
+        assertThat(JsonPath.<List<String>>read(first, "$.items[*].review.status")).hasSize(13).containsOnly("PENDING", "SYNCED");
+        // repo2 already has OrderValidator's fix: SYNCED by the analysis itself
+        assertThat(JsonPath.<List<Boolean>>read(first,
+                "$.items[?(@.element == 'src/main/java/com/acme/shop/order/OrderValidator.java')].review.auto")).containsExactly(true);
 
         long missing = itemId(first, ORDER_SERVICE);
         long cancel = itemId(first, "src/main/java/com/acme/shop/payment/PaymentClient.java");
@@ -100,6 +103,8 @@ class ReleaseReviewApiTest {
         List<Integer> progress = JsonPath.read(releases,
                 "$[?(@.name == '" + release + "')].latest.review.safe");
         assertThat(progress).containsExactly(2);
+        assertThat(JsonPath.<List<Integer>>read(releases, "$[?(@.name == '" + release + "')].latest.review.synced"))
+                .containsExactly(1);
 
         // re-run: unchanged items keep their verdict, marked as carried over
         String second = analyse(release);
@@ -115,6 +120,60 @@ class ReleaseReviewApiTest {
         long releaseId = ((Number) JsonPath.<List<Object>>read(releases, "$[?(@.name == '" + release + "')].id").getFirst()).longValue();
         mvc.perform(get("/api/migration-risk/releases/{id}/analyses", releaseId))
                 .andExpect(jsonPath("$.length()").value(2));
+    }
+
+    /**
+     * Sync tracking across runs: the second run of a release says what is NEW / CHANGED / SAME, what is resolved,
+     * and a file whose content changed after its review comes back PENDING with that review and the changed parts.
+     */
+    @Test
+    void reRunsTrackDeltaResolvedAndChangedParts() throws Exception {
+        var d = demo.view();
+        String release = "S-" + UUID.randomUUID();
+        String first = analyse(release);
+        long yml = itemId(first, "src/main/resources/application.yml");
+        mvc.perform(put("/api/migration-risk/items/{id}/review", yml).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"SAFE\", \"note\": \"keys checked\", \"reviewer\": \"ethan\"}"))
+                .andExpect(status().isOk());
+        // second run: repo2B added (retry.enabled is found there), tests skipped (OrderServiceTest disappears)
+        String second = mvc.perform(post("/api/migration-risk/analyses").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"repo1Path": "%s", "baseline": "%s", "repo2Path": "%s", "repo2bPath": "%s",
+                                 "skipTests": true, "release": "%s"}
+                                """.formatted(d.repo1Path(), d.baseline(), d.repo2Path(), d.repo2bPath(), release)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String ymlRow = "$.items[?(@.element == 'src/main/resources/application.yml')]";
+        assertThat(JsonPath.<List<String>>read(second, ymlRow + ".review.status")).containsExactly("PENDING");
+        assertThat(JsonPath.<List<String>>read(second, ymlRow + ".review.delta")).containsExactly("CHANGED");
+        assertThat(JsonPath.<List<String>>read(second, ymlRow + ".review.previous.status")).containsExactly("SAFE");
+        assertThat(JsonPath.<List<String>>read(second, ymlRow + ".review.previous.note")).containsExactly("keys checked");
+        // only the key whose state changed is flagged, not the whole file
+        assertThat(JsonPath.<List<List<String>>>read(second, ymlRow + ".review.changedParts").getFirst())
+                .containsExactly("CONFIG_IN_SYNC:CONFIG:shop.order.retry.enabled");
+        assertThat(JsonPath.<List<String>>read(second,
+                "$.items[?(@.element == 'pom.xml')].review.delta")).containsExactly("SAME");
+        long secondId = ((Number) JsonPath.read(second, "$.analysisId")).longValue();
+        mvc.perform(get("/api/migration-risk/analyses/{id}/resolved", secondId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].element").value("src/test/java/com/acme/shop/order/OrderServiceTest.java"));
+        // a reviewer can mark SYNCED by hand (a template re-written in FreeMarker)
+        long vm = itemId(second, "src/main/resources/templates/invoice.vm");
+        mvc.perform(put("/api/migration-risk/items/{id}/review", vm).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"SYNCED\"}"))
+                .andExpect(jsonPath("$.review.status").value("SYNCED"))
+                .andExpect(jsonPath("$.review.auto").value(false));
+    }
+
+    @Test
+    void jiraIssueIsCreatedOncePerItem() throws Exception {
+        String saved = analyse("J-" + UUID.randomUUID());
+        long id = itemId(saved, ORDER_SERVICE);
+        String key = JsonPath.read(mvc.perform(post("/api/migration-risk/items/{id}/jira", id))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.review.jiraKey");
+        assertThat(key).startsWith("MIG-");
+        mvc.perform(post("/api/migration-risk/items/{id}/jira", id))
+                .andExpect(jsonPath("$.review.jiraKey").value(key));
     }
 
     /** repo2B, the target's repo label and the module / test tags survive the round trip through the database. */

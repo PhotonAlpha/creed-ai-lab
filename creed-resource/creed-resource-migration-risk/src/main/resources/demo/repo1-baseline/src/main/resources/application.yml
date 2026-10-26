@@ -3,6 +3,8 @@ server:
 spring:
   application:
     name: shop
+  redis:
+    host: localhost
 management:
   endpoints:
     web:
