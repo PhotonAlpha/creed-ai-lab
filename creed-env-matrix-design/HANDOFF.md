@@ -35,9 +35,8 @@ Complete and verified in a browser against the real backend.
 - **Migration sync risk (`/migration-risk`, 2026-10-25)** — page and menu entry, backend
   `creed-resource-migration-risk` on :18098 via `/api/migration-risk` (`VITE_MIGRATION_RISK_TARGET`; not in the
   node mock). Split into `index.tsx` (settings, saved runs, stats, tabs), `AnalysisForm.tsx` (Git / folder mode,
-  per-repo branch pickers from `GET /refs?path=`, baseline AutoComplete + merge-base from
-  `/baseline-suggestion`, release AutoComplete), `ItemsTable.tsx` (review column, batch review, one page-level
-  note modal, A/B diff links) and `constants.ts`. A demo baseline is cleared when repo1's path changes; backend
+  per-repo branch pickers from `GET /refs?path=`, release AutoComplete), `ItemsTable.tsx` (review column, batch
+  review, one page-level note modal, diff link) and `constants.ts`. Backend
   `fields[]` errors land on their input (`/refs`' `path`/`head` renamed to the repo asked for). The diff links
   open the backend's Thymeleaf page `/api/migration-risk/view/diff` (same proxy prefix) with commit ids.
   Analyses run as backend jobs followed over SSE (`useAnalysisJob` + `JobProgressCard`: stage steps, progress
@@ -52,6 +51,12 @@ Complete and verified in a browser against the real backend.
   controlled, filters + page in the URL); module summary; SYNCED status, delta filter, *Resolved* tab, review memory
   ("was SAFE before it changed · N findings"), Jira per file, ignore-rule panel + per-row "ignore", Excel / Markdown
   export, three-way button, git URL hints.
+  2026-10-28: **no baseline** (backend compares repo1 HEAD with repo2 directly): the form lost the baseline /
+  baseline-folder fields and the merge-base suggestion; one diff button "repo1 vs repo2" (`diffUrl(source, file,
+  target?)`; a repo2-only row opens repo2's path) — side A and the three-way button are gone; one refactorings tab
+  (`analysis.refactorings`); new categories `CONTENT_DIFFERS` / `ONLY_IN_REPO2`, target state `EXTRA`, change labels
+  "only repo1 / differs / only repo2"; old categories kept as `LEGACY_CATEGORIES` so saved runs render. Job stages:
+  `REFACTORINGS` replaces `UPSTREAM` / `MIGRATION`. typecheck + build pass; not seen in a browser.
   `npm run typecheck` and `npm run build` pass; the API (refs, suggestion, save, review, reload, diff HTML) was
   verified through the Vite proxy on a real pair. **Not yet checked in a browser** — the extension could not
   attach to any page this session either.

@@ -5,9 +5,9 @@ import {
 } from 'antd';
 import type { TableColumnsType } from 'antd';
 import {
-  CheckOutlined, DiffOutlined, EditOutlined, PartitionOutlined, StopOutlined, WarningOutlined,
+  CheckOutlined, DiffOutlined, EditOutlined, StopOutlined, WarningOutlined,
 } from '@ant-design/icons';
-import { RISK_CATEGORIES, diff3Url, diffUrl, migrationRiskApi } from '../../api/migrationRisk';
+import { RISK_CATEGORIES, diffUrl, migrationRiskApi } from '../../api/migrationRisk';
 import type {
   Location,
   MigrationRiskAnalysis,
@@ -69,7 +69,7 @@ const partName = (p: RiskItem, file: RiskItem) => (p.element === file.element ? 
  * Every file has a diff: Java as RefactoringMiner's AST diff, anything else (yml, properties, .vm / .ftl ...) as a
  * line diff on the same page. Only a row without a repo1 path (none today) has nothing to open.
  */
-const hasDiff = (i: RiskItem) => i.upstream != null;
+const hasDiff = (i: RiskItem) => i.upstream != null || i.target != null;
 
 const REVIEWER_KEY = 'migration-risk.reviewer';
 const storedReviewer = () => {
@@ -378,27 +378,15 @@ export function ItemsTable({ analysis, settings, loading, onReviewed, onIgnoreRu
     {
       title: t('migrationRisk.col.diff'),
       key: 'diff',
-      width: 170,
+      width: 150,
+      // a file only one side has opens one-sided; repo1's path, else repo2's
       render: (_, i) => analysis && hasDiff(i) && (
-        <Space direction="vertical" size={4}>
-          <Tooltip title={t('migrationRisk.diff.a')}>
-            <Button size="small" icon={<DiffOutlined />} href={diffUrl(analysis.source, 'A', i.upstream?.path)}
-              target="_blank">{t('migrationRisk.diff.openA')}</Button>
-          </Tooltip>
-          {/* No counterpart in repo2 = nothing to put next to repo1's code. */}
-          <Tooltip title={t('migrationRisk.diff.b')}>
-            <Button size="small" icon={<DiffOutlined />} disabled={!i.target}
-              href={diffUrl(analysis.source, 'B', i.upstream?.path, i.target?.path)} target="_blank">
-              {t('migrationRisk.diff.openB')}
-            </Button>
-          </Tooltip>
-          <Tooltip title={t('migrationRisk.diff.threeHint')}>
-            <Button size="small" icon={<PartitionOutlined />} disabled={!i.target}
-              href={diff3Url(analysis.source, i.upstream!.path, i.target?.path)} target="_blank">
-              {t('migrationRisk.diff.three')}
-            </Button>
-          </Tooltip>
-        </Space>
+        <Tooltip title={t('migrationRisk.diff.hint')}>
+          <Button size="small" icon={<DiffOutlined />} target="_blank"
+            href={diffUrl(analysis.source, i.upstream?.path ?? i.target?.path, i.upstream ? i.target?.path : null)}>
+            {t('migrationRisk.diff.open')}
+          </Button>
+        </Tooltip>
       ),
     },
     ...(saved ? [{
@@ -600,7 +588,7 @@ export function ItemsTable({ analysis, settings, loading, onReviewed, onIgnoreRu
           onChange: (p, size) => set(size !== f.size ? { size, page: 1 } : { page: p }),
         }}
         // Numeric width, not 'max-content': with a fixed-right column the latter collapses the last scrolling column.
-        scroll={{ x: saved ? 1960 : 1670 }}
+        scroll={{ x: saved ? 1940 : 1650 }}
         rowSelection={saved ? { selectedRowKeys: selected, onChange: (keys) => setSelected(keys as string[]) } : undefined}
         expandable={{
           // Every finding in the file; line-level differences are the diff page's job.
@@ -632,8 +620,8 @@ export function ItemsTable({ analysis, settings, loading, onReviewed, onIgnoreRu
                     {analysis && p.target && p.target.path !== i.target?.path && (
                       // this finding lives in another repo2 file than the row's: open that one
                       <Button size="small" type="link" icon={<DiffOutlined />} target="_blank"
-                        href={diffUrl(analysis.source, 'B', i.upstream?.path, p.target.path)}>
-                        {t('migrationRisk.diff.openB')}
+                        href={diffUrl(analysis.source, i.upstream?.path, p.target.path)}>
+                        {t('migrationRisk.diff.open')}
                       </Button>
                     )}
                     <Button size="small" type="link" icon={<StopOutlined />}

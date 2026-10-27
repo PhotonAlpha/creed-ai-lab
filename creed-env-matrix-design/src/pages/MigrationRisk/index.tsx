@@ -165,10 +165,10 @@ export function MigrationRiskPage() {
     const skipTests = !!v.skipTests;
     const result = await show(() => job.run(() => (v.mode === 'DIRECTORY'
       ? migrationRiskApi.startDirectoryAnalysis({
-        baselinePath: v.baselinePath, repo1Path: v.repo1Path, repo2Path: v.repo2Path, repo2bPath, skipTests, release,
+        repo1Path: v.repo1Path, repo2Path: v.repo2Path, repo2bPath, skipTests, release,
       })
       : migrationRiskApi.startAnalysis({
-        repo1Path: v.repo1Path, baseline: v.baseline, repo1Head: v.repo1Head, repo2Path: v.repo2Path,
+        repo1Path: v.repo1Path, repo1Head: v.repo1Head, repo2Path: v.repo2Path,
         repo2Head: v.repo2Head, repo2bPath, repo2bHead: repo2bPath ? v.repo2bHead : undefined, skipTests, release,
       }))));
     if (result?.analysisId != null) {
@@ -182,11 +182,11 @@ export function MigrationRiskPage() {
     // With repo2B: the demo's templates (.ftl), tests and config/ live there.
     const values: FormValues = mode === 'DIRECTORY'
       ? {
-        ...EMPTY_FORM, mode, baselinePath: demo.baselineFolder, repo1Path: demo.repo1Folder, repo2Path: demo.repo2Folder,
+        ...EMPTY_FORM, mode, repo1Path: demo.repo1Folder, repo2Path: demo.repo2Folder,
         repo2bPath: demo.repo2bFolder,
       }
       : {
-        ...EMPTY_FORM, mode, repo1Path: demo.repo1Path, baseline: demo.baseline, repo1Head: demo.repo1Head,
+        ...EMPTY_FORM, mode, repo1Path: demo.repo1Path, repo1Head: demo.repo1Head,
         repo2Path: demo.repo2Path, repo2Head: demo.repo2Head, repo2bPath: demo.repo2bPath,
       };
     form.resetFields();
@@ -269,10 +269,10 @@ export function MigrationRiskPage() {
     form.resetFields();
     const common = { release: result.release ?? '', repo2bPath: s.repo2bPath ?? '', skipTests: !!s.skipTests };
     form.setFieldsValue(s.mode === 'DIRECTORY'
-      ? { ...EMPTY_FORM, ...common, mode: 'DIRECTORY', baselinePath: s.baselinePath ?? '', repo1Path: s.repo1Path, repo2Path: s.repo2Path }
+      ? { ...EMPTY_FORM, ...common, mode: 'DIRECTORY', repo1Path: s.repo1Path, repo2Path: s.repo2Path }
       : {
         ...EMPTY_FORM, ...common, mode: 'GIT', repo1Path: s.repo1Path, repo2Path: s.repo2Path,
-        baseline: s.baseline?.revision ?? '', repo1Head: s.repo1Head?.revision ?? 'HEAD', repo2Head: s.repo2Head?.revision ?? 'HEAD',
+        repo1Head: s.repo1Head?.revision ?? 'HEAD', repo2Head: s.repo2Head?.revision ?? 'HEAD',
         repo2bHead: s.repo2bHead?.revision ?? 'HEAD',
       });
   };
@@ -313,8 +313,8 @@ export function MigrationRiskPage() {
       key: 'diff',
       width: 140,
       render: (_, f) => analysis && (
-        <Button size="small" icon={<DiffOutlined />} target="_blank"
-          href={diffUrl(analysis.source, 'A', f.newPath ?? f.oldPath)}>{t('migrationRisk.diff.openA')}</Button>
+        <Button size="small" icon={<DiffOutlined />} target="_blank" disabled={f.change === 'RENAMED'}
+          href={diffUrl(analysis.source, f.newPath ?? f.oldPath)}>{t('migrationRisk.diff.open')}</Button>
       ),
     },
   ];
@@ -399,9 +399,8 @@ export function MigrationRiskPage() {
                   <Tooltip title={t('migrationRisk.saved.notSavedHint')}><Tag>{t('migrationRisk.saved.notSaved')}</Tag></Tooltip>
                 </Descriptions.Item>
               )}
-              {source.mode === 'GIT' && source.baseline && source.repo1Head && source.repo2Head ? (
+              {source.mode === 'GIT' && source.repo1Head && source.repo2Head ? (
                 <>
-                  <Descriptions.Item label={t('migrationRisk.baseline')}><Commit commit={source.baseline} /></Descriptions.Item>
                   <Descriptions.Item label={t('migrationRisk.repo1Branch')}><Commit commit={source.repo1Head} /></Descriptions.Item>
                   <Descriptions.Item label={t('migrationRisk.repo2Branch')}><Commit commit={source.repo2Head} /></Descriptions.Item>
                   {source.repo2bHead && (
@@ -412,7 +411,6 @@ export function MigrationRiskPage() {
                 </>
               ) : (
                 <>
-                  <Descriptions.Item label={t('migrationRisk.folder.baseline')}><Text code>{source.baselinePath}</Text></Descriptions.Item>
                   <Descriptions.Item label={t('migrationRisk.folder.repo1')}><Text code>{source.repo1Path}</Text></Descriptions.Item>
                   <Descriptions.Item label={t('migrationRisk.folder.repo2')}><Text code>{source.repo2Path}</Text></Descriptions.Item>
                   {source.repo2bPath && (
@@ -440,14 +438,9 @@ export function MigrationRiskPage() {
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label={t('migrationRisk.diff.title')}>
-                <Space size={4}>
-                  <Tooltip title={t('migrationRisk.diff.a')}>
-                    <Button size="small" icon={<DiffOutlined />} href={diffUrl(source, 'A')} target="_blank">{t('migrationRisk.diff.openA')}</Button>
-                  </Tooltip>
-                  <Tooltip title={t('migrationRisk.diff.b')}>
-                    <Button size="small" icon={<DiffOutlined />} href={diffUrl(source, 'B')} target="_blank">{t('migrationRisk.diff.openB')}</Button>
-                  </Tooltip>
-                </Space>
+                <Tooltip title={t('migrationRisk.diff.hint')}>
+                  <Button size="small" icon={<DiffOutlined />} href={diffUrl(source)} target="_blank">{t('migrationRisk.diff.open')}</Button>
+                </Tooltip>
               </Descriptions.Item>
             </Descriptions>
           </ProCard>
@@ -526,9 +519,7 @@ export function MigrationRiskPage() {
                       width: 110,
                       render: (_, c) => {
                         const level = CATEGORY_LEVEL[c];
-                        return level
-                          ? <Tag color={LEVEL_COLOR[level]}>{t(`migrationRisk.level.${level}` as MessageKey)}</Tag>
-                          : <Text type="secondary">{t('migrationRisk.rules.lowOrMedium')}</Text>;
+                        return <Tag color={LEVEL_COLOR[level]}>{t(`migrationRisk.level.${level}` as MessageKey)}</Tag>;
                       },
                     },
                     { title: t('migrationRisk.col.category'), key: 'category', width: 200, render: (_, c) => categoryLabel(c) },
@@ -617,18 +608,12 @@ export function MigrationRiskPage() {
                   ),
                 }] : []),
                 {
-                  key: 'upstream',
-                  label: t('migrationRisk.tab.upstream', {
-                    count: (analysis?.upstreamRefactorings ?? []).filter((r) => !structuralOnly || r.structural).length,
+                  key: 'refactorings',
+                  label: t('migrationRisk.tab.refactorings', {
+                    count: (analysis?.refactorings ?? []).filter((r) => !structuralOnly || r.structural).length,
                   }),
-                  children: refactoringTable(analysis?.upstreamRefactorings ?? []),
-                },
-                {
-                  key: 'migration',
-                  label: t('migrationRisk.tab.migration', {
-                    count: (analysis?.migrationRefactorings ?? []).filter((r) => !structuralOnly || r.structural).length,
-                  }),
-                  children: refactoringTable(analysis?.migrationRefactorings ?? []),
+                  // saved baseline runs have none: their lists were upstream / migration
+                  children: refactoringTable(analysis?.refactorings ?? []),
                 },
                 {
                   key: 'files',

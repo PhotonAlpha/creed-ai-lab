@@ -162,18 +162,16 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 支持导出 Excel。
 
 ### 5.7 迁移同步风险（`/migration-risk`）
-- 后端：`creed-resource/creed-resource-migration-risk`；RefactoringMiner（目录比较模式）+ JGit + JDT；结果存 PostgreSQL `migration_risk`。
-- 两种比较方式：**Git**（repo1 / repo2 各自选择分支，基线从 repo1 选；两个仓库有共同历史时自动建议并填入 merge-base）；
-  **文件夹**（基线 / repo1 / repo2 三个普通目录，不需要 git，按磁盘现状读取）。两个仓库不需要共同的 git 历史。
-- 基线 + 两次分析 + 交叉比对：A = repo1@基线 → repo1@HEAD（别的 team 改了什么），B = repo1@基线 → repo2@HEAD（迁移的映射），
-  A 涉及的每个元素到 B 中查去向，按规则分为高 / 中 / 低（规则表见 `README.zh-CN.md` 与页面中的「风险分级规则」）。
-- 非 Java 文件：Spring 配置与 pom.xml 按配置项 / 依赖比较并附上 repo2 中的值；其他文件与 repo2 同路径文件按内容比较；
-  repo1 新增的代码行按可配置的规则（`migration-risk.api-rules`）检查是否使用了需迁移的 API。
-- 填写 **release** 时结果写入数据库并归到该 release；每一项可人工 review：符合预期标记为「安全」，否则「需关注」（可写备注）。
-  同一 release 再次分析时，内容没变的项目沿用上次的结论。留空则只分析不保存。
-- 「对比视图」：后端 Thymeleaf 页面 `/api/migration-risk/view/diff`，即 RefactoringMiner 的左右对比（Monaco）视图；
-  A = 上游改动，B = 迁移后的位置；风险项、变更文件里都有入口。
-- 只比较 repo1 变更过的文件（加上 repo2 同路径、同文件名的文件），整仓比较太慢太占内存。
+- 后端：`creed-resource/creed-resource-migration-risk`；RefactoringMiner（目录比较模式）+ JGit + JDT；结果存 PostgreSQL `migration_risk`（也支持 MySQL：`mysql` profile）。
+- 两种比较方式：**Git**（repo1 / repo2 / 可选 repo2B 各自选择分支）；**文件夹**（repo1 / repo2 / 可选 repo2B 普通目录，不需要 git）。两个仓库不需要共同的 git 历史。
+- **没有基线**：repo1 HEAD 与 repo2（repo2A + repo2B 合并为一个代码库）直接比较。一次 RefactoringMiner 分析（repo1 → repo2）找出移动 / 重命名 / 拆分；
+  Java 按类逐个成员比较（格式、Javadoc、import 不算差异），配置项全局逐个 key 比较，pom 逐个依赖比较，`.vm` 先草拟成 `.ftl` 再比较，Camel XML 路由按 route id 跨文件逐步比较，其他文件逐行比较。
+  规则表见模块 `README.md` 与页面中的「风险分级规则」。详情行按 `git diff repo1 repo2` 的方向：`-` 为 repo1，`+` 为 repo2。
+- repo1 独有行按 `migration-risk.api-rules` 检查需迁移的 API；同一文件中只有 API 命中、没有其他差异时视为迁移的改写，不报告。
+- 填写 **release** 时结果写入数据库并归到该 release；每个文件可人工 review：「安全」/「需关注」/「已同步」（可写备注）。
+  同一 release 再次分析时，内容没变的文件沿用上次的结论。留空则只分析不保存。
+- 「对比视图」：后端 Thymeleaf 页面 `/api/migration-risk/view/diff`，RefactoringMiner 的左右对比（Monaco）视图，左边 repo1、右边 repo2；
+  只有一个按钮「repo1 对比 repo2」。基线时代的「上游改动」视图和三方对比视图已去掉。
 
 ## 6. 命令
 

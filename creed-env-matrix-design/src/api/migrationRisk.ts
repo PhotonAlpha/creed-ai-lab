@@ -10,31 +10,33 @@ const BASE = '/api/migration-risk';
 
 export type RiskLevel = 'HIGH' | 'MEDIUM' | 'LOW';
 
-/** Declared in the backend's order; the level is fixed per category except NON_JAVA_FILE. */
+/** What repo1 HEAD vs repo2 can produce, in the backend's order; the level is fixed per category. */
 export const RISK_CATEGORIES = [
   'TARGET_MISSING',
   'TARGET_SPLIT',
-  'MIGRATION_API',
   'CONFIG_CHANGED',
   'DEPENDENCY_CHANGED',
+  'CONTENT_DIFFERS',
   'RELOCATED',
-  'BOTH_MODIFIED',
-  'DELETED_UPSTREAM',
-  'UPSTREAM_REFACTORING',
+  'MIGRATION_API',
   'TEMPLATE_CONVERTED',
   'NON_JAVA_FILE',
-  'AUTO_SYNC',
+  'ONLY_IN_REPO2',
   'ALREADY_SYNCED',
   'CONFIG_IN_SYNC',
-  'NEW_CODE',
 ] as const;
-export type RiskCategory = (typeof RISK_CATEGORIES)[number];
+/** Categories of the baseline analyses saved before 2026-10-28: still shown, no longer produced. */
+export const LEGACY_CATEGORIES = ['BOTH_MODIFIED', 'DELETED_UPSTREAM', 'UPSTREAM_REFACTORING', 'AUTO_SYNC', 'NEW_CODE'] as const;
+export type RiskCategory = (typeof RISK_CATEGORIES)[number] | (typeof LEGACY_CATEGORIES)[number];
 
-export type ElementKind = 'FILE' | 'CLASS' | 'METHOD' | 'FIELDS' | 'CONFIG' | 'DEPENDENCY';
+/** ROUTE: a Camel XML route, compared by route id across all route files. */
+export type ElementKind = 'FILE' | 'CLASS' | 'METHOD' | 'FIELDS' | 'CONFIG' | 'DEPENDENCY' | 'ROUTE';
+/** ADDED = only repo1 has it, DELETED = only repo2, MODIFIED = both, different (REFACTORED: saved baseline runs). */
 export type UpstreamChange = 'ADDED' | 'MODIFIED' | 'DELETED' | 'REFACTORED';
-export type TargetState = 'UNCHANGED' | 'MODIFIED' | 'RELOCATED' | 'MISSING' | 'SPLIT' | 'ABSENT';
+/** EXTRA = only repo2 has it; ABSENT only on saved baseline runs. */
+export type TargetState = 'UNCHANGED' | 'MODIFIED' | 'RELOCATED' | 'MISSING' | 'SPLIT' | 'EXTRA' | 'ABSENT';
 
-/** SYNCED: repo2 has repo1 HEAD's state — set by the analysis (`auto`) or by hand. */
+/** SYNCED: repo2 has repo1's state — set by the analysis (`auto`) or by hand. */
 export type ReviewStatus = 'PENDING' | 'SAFE' | 'ATTENTION' | 'SYNCED';
 
 /** Against the release's previous run; null for its first run. */
@@ -53,7 +55,7 @@ export interface Review {
   delta: ReviewDelta | null;
   /** The verdict the file had before its content changed (it is PENDING again). */
   previous: { status: ReviewStatus; note: string | null; reviewer: string | null } | null;
-  /** With `previous`: ids of the parts new or different since that verdict. */
+  /** With `previous`: ids of the parts new, different or gone since that verdict. */
   changedParts: string[];
   jiraKey: string | null;
 }
@@ -74,7 +76,7 @@ export interface RiskItem {
   /** `com.acme.OrderService#cancel(String)`, a class name, a file path ... */
   element: string;
   change: UpstreamChange;
-  /** In repo1 (HEAD; the baseline for a deletion). */
+  /** In repo1; null when only repo2 has it. */
   upstream: Location | null;
   /** In repo2, when found. */
   target: Location | null;
@@ -82,7 +84,7 @@ export interface RiskItem {
   targetState: TargetState | null;
   /** RefactoringMiner refactorings / rule hints that decided the level, verbatim. */
   evidence: string[];
-  /** Data lines: changed config keys, dependency versions, matched API lines ... */
+  /** Data lines, read like `git diff repo1 repo2`: `- L4:` repo1's line, `+ L4:` repo2's; config keys, versions ... */
   details: string[];
   /** Null unless the analysis was saved under a release. */
   review: Review | null;
@@ -123,6 +125,7 @@ export interface CommitView {
   time: string;
 }
 
+/** A file that differs: `oldPath` = repo2's, `newPath` = repo1's; ADDED = only repo1, DELETED = only repo2. */
 export interface ChangedFileView {
   change: 'ADDED' | 'MODIFIED' | 'DELETED' | 'RENAMED';
   oldPath: string | null;
@@ -135,12 +138,9 @@ export type AnalysisMode = 'GIT' | 'DIRECTORY';
 
 export interface AnalysisSource {
   mode: AnalysisMode;
-  /** DIRECTORY mode only. */
-  baselinePath: string | null;
   repo1Path: string;
   repo2Path: string;
   /** GIT mode only (null for folders). */
-  baseline: CommitView | null;
   repo1Head: CommitView | null;
   repo2Head: CommitView | null;
   /** The second repo2 (repo2B), merged with repo2Path; null for one repo2. */
@@ -158,17 +158,17 @@ export interface MigrationRiskAnalysis {
   counts: { total: number; high: number; medium: number; low: number };
   /** Riskiest first. */
   items: RiskItem[];
-  upstreamRefactorings: DetectedRefactoring[];
-  migrationRefactorings: DetectedRefactoring[];
+  /** RefactoringMiner repo1 → repo2 over the differing Java files: what repo2 moved, renamed or split. */
+  refactorings: DetectedRefactoring[];
   changedFiles: ChangedFileView[];
   warnings: string[];
   durationMillis: number;
   analyzedAt: string;
 }
 
+/** repo1 HEAD compared with repo2 directly — no baseline. */
 export interface AnalysisRequest {
   repo1Path: string;
-  baseline: string;
   repo1Head?: string;
   repo2Path: string;
   repo2Head?: string;
@@ -180,9 +180,8 @@ export interface AnalysisRequest {
   release?: string;
 }
 
-/** Folder mode: three plain directories, no git involved. */
+/** Folder mode: plain directories, no git involved. */
 export interface DirectoryAnalysisRequest {
-  baselinePath: string;
   repo1Path: string;
   repo2Path: string;
   repo2bPath?: string;
@@ -194,13 +193,11 @@ export interface MigrationRiskSettings {
   /** Null when the backend's demo repositories are disabled. */
   demo: {
     repo1Path: string;
-    baseline: string;
     repo1Head: string;
     repo2Path: string;
     repo2Head: string;
     /** What the demo migration moved into a second repository (templates as .ftl, tests, config/). */
     repo2bPath: string;
-    baselineFolder: string;
     repo1Folder: string;
     repo2Folder: string;
     repo2bFolder: string;
@@ -237,13 +234,6 @@ export interface RefsView {
   recentCommits: CommitView[];
 }
 
-export interface BaselineSuggestion {
-  /** Null when `reason` is NO_SHARED_HISTORY. */
-  baseline: CommitView | null;
-  /** MERGE_BASE: newest commit both heads descend from — the commit the migration branched from. */
-  reason: 'MERGE_BASE' | 'NO_SHARED_HISTORY';
-}
-
 export interface ReviewProgress {
   pending: number;
   safe: number;
@@ -258,7 +248,6 @@ export interface AnalysisSummary {
   repo1Path: string;
   repo2Path: string;
   repo2bPath: string | null;
-  baselineRef: string;
   counts: MigrationRiskAnalysis['counts'];
   review: ReviewProgress;
   durationMillis: number;
@@ -285,7 +274,7 @@ const json = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.strin
 const putJson = (body: unknown): RequestInit => ({ method: 'PUT', body: JSON.stringify(body) });
 
 /** Stages of a background analysis, in order; each owns a band of the overall percentage. */
-export const JOB_STAGES = ['RESOLVE', 'DIFF', 'EXPORT', 'UPSTREAM', 'MIGRATION', 'JAVA', 'FILES', 'SAVE', 'DONE'] as const;
+export const JOB_STAGES = ['RESOLVE', 'DIFF', 'EXPORT', 'REFACTORINGS', 'JAVA', 'FILES', 'SAVE', 'DONE'] as const;
 export type JobStage = (typeof JOB_STAGES)[number];
 
 /** Payload of the SSE `stage` and `progress` events. `done`/`total` only for the looping stages. */
@@ -316,13 +305,6 @@ export const migrationRiskApi = {
   settings: () => requestAt<MigrationRiskSettings>(BASE, '/settings'),
   refs: (path: string, head?: string) =>
     requestAt<RefsView>(BASE, `/refs${toQuery({ path, head: head || undefined })}`),
-  baselineSuggestion: (r: { repo1Path: string; repo1Head?: string; repo2Path: string; repo2Head?: string }) =>
-    requestAt<BaselineSuggestion>(BASE, `/baseline-suggestion${toQuery({
-      repo1Path: r.repo1Path,
-      repo1Head: r.repo1Head || undefined,
-      repo2Path: r.repo2Path,
-      repo2Head: r.repo2Head || undefined,
-    })}`),
   analyze: (request: AnalysisRequest) => requestAt<MigrationRiskAnalysis>(BASE, '/analyses', json(request)),
   /** Background analysis: returns at once; follow `jobEventsUrl(jobId)` (SSE), then fetch `job(jobId)`. */
   startAnalysis: (request: AnalysisRequest) => requestAt<{ jobId: string }>(BASE, '/analyses/jobs', json(request)),
@@ -368,18 +350,17 @@ export const migrationRiskApi = {
 };
 
 /**
- * The backend's Thymeleaf diff page (RefactoringMiner's side-by-side viewer) for one side of an analysis:
- * A = repo1 baseline → repo1 head (the upstream change), B = repo1 head → repo2 head (what the sync has to
- * bridge). Commit ids, not branch names, so a saved analysis keeps showing the code it was computed on. Under
- * /api/migration-risk, so the same proxy serves it.
+ * The backend's Thymeleaf diff page (RefactoringMiner's side-by-side viewer): repo1 HEAD on the left, repo2 (both
+ * repo2s) on the right. Commit ids, not branch names, so a saved analysis keeps showing the code it was computed
+ * on. Under /api/migration-risk, so the same proxy serves it. `target`: the repo2 file to compare with when it is
+ * not at the same path (a config key kept in repo2B's config/).
  */
-export function diffUrl(source: AnalysisSource, side: 'A' | 'B', file?: string | null, target?: string | null): string {
+export function diffUrl(source: AnalysisSource, file?: string | null, target?: string | null): string {
   const params = source.mode === 'DIRECTORY'
-    ? { mode: 'DIRECTORY', baselinePath: source.baselinePath ?? undefined, repo1Path: source.repo1Path, repo2Path: source.repo2Path }
+    ? { mode: 'DIRECTORY', repo1Path: source.repo1Path, repo2Path: source.repo2Path }
     : {
       mode: 'GIT',
       repo1Path: source.repo1Path,
-      baseline: source.baseline?.id,
       repo1Head: source.repo1Head?.id,
       repo2Path: source.repo2Path,
       repo2Head: source.repo2Head?.id,
@@ -390,20 +371,9 @@ export function diffUrl(source: AnalysisSource, side: 'A' | 'B', file?: string |
     repo2bPath: source.repo2bPath ?? undefined,
     // the same file subset as the analysis
     skipTests: source.skipTests ? 'true' : undefined,
-    side,
     file: file ?? undefined,
-    // side B: the repo2 file to compare with, when it is not at the same path (a key kept in repo2B's config/)
-    target: side === 'B' && target && target !== file ? target : undefined,
+    target: target && target !== file ? target : undefined,
   })}`;
-}
-
-/** Three panes — repo1 baseline | repo1 HEAD | repo2 — changed lines marked by who changed them. */
-export function diff3Url(source: AnalysisSource, file: string, target?: string | null): string {
-  const url = new URL(diffUrl(source, 'A', file), window.location.origin);
-  url.pathname = `${BASE}/view/diff3`;
-  url.searchParams.delete('side');
-  if (target && target !== file) url.searchParams.set('target', target);
-  return url.pathname + url.search;
 }
 
 /** SSE stream of a job: `stage`, `progress`, then `done` or `failed`; replayed from the start on reconnect. */

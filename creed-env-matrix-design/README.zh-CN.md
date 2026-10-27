@@ -468,108 +468,39 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
 
 ### 迁移同步风险（`/migration-risk`）
 
-由另一个**独立服务** `creed-resource/creed-resource-migration-risk`（明文 HTTP :18098，无数据库）提供，
-经 Vite 的 `/api/migration-risk` 代理（`VITE_MIGRATION_RISK_TARGET`）。没有 node mock：Java 模块启动时
-生成两个**示例仓库**，页面打开即分析它们。
+由另一个**独立服务** `creed-resource/creed-resource-migration-risk`（明文 HTTP :18098；保存结果用 PostgreSQL、MySQL 或 H2）
+提供，经 Vite 的 `/api/migration-risk` 代理（`VITE_MIGRATION_RISK_TARGET`）。没有 node mock：Java 模块启动时生成**示例仓库**。
 
-适用场景：repo2 是 repo1 的迁移版本（Boot 4 / Jackson 3 / Camel 4），而别的 team 仍在向 repo1 提交。
-填写两个仓库路径（后端所在机器上的路径，且位于 `migration-risk.allowed-roots` 之下）和**基线** ——
-repo1 在迁移开始时（或上次同步时）的 commit。基线输入框会列出 repo1 的标签、分支和最近提交；两个仓库有共同历史时
-（同一个远程仓库的两个克隆），自动建议并填入它们的最近公共祖先（merge-base）。后端以同一个基线跑两次 RefactoringMiner：
+适用场景：repo2 是 repo1 迁移后的版本（Boot 4 / Jackson 3 / Camel 4），另一个 team 还在往 repo1 提交。填写 repo1 和 repo2
+（后端机器上 `migration-risk.allowed-roots` 之下的路径，或 `remotes.allowed-hosts` 中的 https git 地址）各自的分支；迁移把 repo1
+拆成两个仓库时再填 **repo2B**。**没有基线**：repo1 HEAD 与 repo2（repo2A + repo2B 合并为一个代码库）直接比较。
 
-- **A** repo1@基线 → repo1@HEAD：别的 team 改了什么（「A：repo1 的重构」页签）；
-- **B** repo1@基线 → repo2@HEAD：迁移把代码放到了哪里（「B：迁移映射」页签）。
-
-A 涉及的每个类 / 方法 / 字段都到 B 中查去向；非 Java 文件按配置项（Spring 配置、`pom.xml`）或按字节比较。
-结果是一张**风险项**表：
+一次 RefactoringMiner 分析（repo1 → repo2）找出 repo2 移动、重命名、拆分了什么；Java 按类逐个成员比较（格式、Javadoc、import
+不算差异），配置项在所有 properties / yml 中逐个 key 比较，`pom.xml` 逐个依赖比较，Velocity 模板先草拟成 FreeMarker 再比较，
+Camel XML 路由在所有路由文件中按 route id 逐步比较（from、to、filter 等，路由被移到别的文件也能找到），其他文件逐行比较。结果是每个不同的**文件**一行：
 
 | 风险 | 类别 | 含义 |
 |---|---|---|
-| 高 | repo2 中已删除 / 已拆分 | repo1 修改的元素在 repo2 中被删除或拆分，需要人工判断 |
-| 高 | 使用了需迁移的 API | repo1 新增的代码用到 Jackson 2、`javax.*`、Boot 3 的类等（规则可配置） |
-| 高 | 配置变更 / 依赖变更 | `application*.yml`/`.properties`、`pom.xml`，每个配置项都附上 repo2 中的值 |
-| 中 | 已移动 / 重命名 | 元素在 repo2 中换了位置，显示新位置 |
-| 中 | 双方都修改 | 迁移也改了它：需要三方合并 |
-| 中 | repo1 已删除 | repo2 中仍然存在，是否也要删除？ |
-| 中 | repo1 的重构 | repo1 自己做了重命名 / 移动，在 repo2 中做同样的重构 |
-| 低 / 中 | 其他文件 | 与 repo2 同路径文件比较 |
-| 低 | 可直接同步 / 新增代码 | repo2 中未改动（import 除外）/ 新代码在 repo2 中有对应位置 |
+| 高 | repo2 中没有 / repo2 中已拆分 | repo1 有，repo2 哪里都没有 / 只有被抽取或拆分后的版本 |
+| 高 | 配置不同 / 依赖不同 | 配置项在 repo2 中取值不同或不存在；pom 不同 |
+| 中 | 内容不同 | 两边都有这个方法 / 字段 / 类，内容不同 |
+| 中 | 已移动 / 重命名 | repo2 中换了名字或位置，且内容不同 |
+| 中 | 使用了需迁移的 API | repo1 独有的行用到 Jackson 2、`javax.*`、Boot 3 的类等（只在同一文件有其他差异时显示） |
+| 中 | 模板已转换 / 其他文件不同 | `.vm` 对照 repo2 的 `.ftl`；其他文件附逐行差异 |
+| 低 | 仅 repo2 有 / repo2 中相同 / 配置已同步 | 迁移自己新增的；移动后内容相同；改名后的 key 取值相同 |
 
-展开一行可以看到依据（决定风险等级的 RefactoringMiner 重构）和详情（配置项、依赖版本、匹配到的代码行）。
-「只看结构性重构」隐藏迁移产生的大量细节重构（变量重命名、类型变化等）。页面中的「风险分级规则」面板
-列出了同样的规则。
+没有基线时，差异本身说明不了是谁改的 —— 迁移的改写和另一个 team 的新代码都表现为「内容不同」，要靠对比视图判断。
+「详情」按 `git diff repo1 repo2` 的方向：红色 `-` 是 repo1 的行，绿色 `+` 是 repo2 的行。此前保存的（有基线的）分析仍可打开，显示原来的类别。
 
-**分支、文件夹、release、review、对比视图。** *Git* 模式下两个仓库各有自己的分支选择（本地分支、远程分支、标签，并显示当前检出的分支），
-基线建议随所选分支变化。*文件夹* 模式填写三个目录 —— 基线、repo1、repo2 —— 完全不需要 git（按磁盘现状读取，跳过 `target`、`build`、
-`node_modules`、`.idea` 等）。填写 **release** 时结果会保存：每一项都有 review 列 —— ✓ *安全*（符合预期）、⚠ *需关注*（可写备注）、
-或撤回为 *待审* —— 可单条也可对所选行批量操作，并可按结论过滤、查看进度。*已保存的 release* 可重新打开以前的任意一次分析；
-同一 release 再次分析时，没有变化的项目沿用之前的结论（标 ↻）。**A / B** 按钮打开后端的左右对比视图（RefactoringMiner 自己的
-Monaco 视图，由后端经同一代理提供）：A = repo1 改了什么，B = 迁移后放到了哪里。
-
-#### repo1 分支、基线、repo2 分支分别是什么
-
-三者是比较用到的三个时间点：
-
-```
-repo1:  ──●─────────●────●   ← repo1 分支（现在）
-          ↑ 基线      别的 team 的新提交
-           \
-repo2:      ●────●────●──●   ← repo2 分支（现在）
-              迁移的提交
-```
-
-| 输入 | 含义 | 在比较中的作用 |
-|---|---|---|
-| **repo1 分支** | 旧仓库里另一个 team 还在提交的那条分支（如 `master`），取它的最新 commit | A 的终点：「repo1 现在是什么样」 |
-| **基线** | repo1 在迁移开始时（或上次同步时）的 commit，可以是 commit id、标签或分支 | A 和 B **共同的起点**，必须在 repo1 分支的历史上 |
-| **repo2 分支** | 迁移后仓库里的工作分支（如 `develop/spring-boot-4`），取它的最新 commit | B 的终点：「迁移后的代码现在是什么样」 |
-
-- **A = 基线 → repo1 分支**：基线之后别的 team 改了什么，也就是需要同步的内容。
-- **B = 基线 → repo2 分支**：迁移把基线时的代码放到了哪里、改成了什么样，相当于旧元素到新元素的映射表。
-
-A 涉及的每个元素都到 B 里查去向，因此基线决定了「什么算新改动」：
-
-- **基线太早**：迁移开始前已有的改动会被当成新改动，结果中出现大量本不需要同步的项目。
-- **基线太晚**：基线之前、还没同步过来的改动**不会出现在结果里**。这更危险，因为漏掉的改动不会有任何提示。
-- **两个仓库是同一远程仓库的克隆时**，页面会按所选的两个分支自动建议 merge-base（最近公共祖先），这通常就是迁移开始的那个 commit。
-  同步过一次之后，下一次的基线应改为上次同步到的 repo1 commit。
-- **基线不在 repo1 分支的历史上时**，结果顶部会出现警告：这时 A 会混入其他分支的改动。
-
-**文件夹模式中的对应关系**：基线文件夹 = 基线，repo1 文件夹 = repo1 分支，repo2 文件夹 = repo2 分支。
-接口字段分别是 `baseline` / `repo1Head` / `repo2Head`，文件夹模式为 `baselinePath` / `repo1Path` / `repo2Path`。
+**文件夹、release、复核、对比视图。** *文件夹* 模式填写 repo1 / repo2 / repo2B 三个目录，不需要 git（按磁盘现状读取，跳过 `target`、
+`build`、`node_modules`、`.idea` 等）。填写 **release** 后结果会保存：每个文件可复核为「安全」「需关注」（可写备注）「已同步」，
+可单行也可批量；同一 release 重新分析时沿用没变的结论，标记 新增 / 变化 / 不变，repo2 已一致的自动标为已同步，「已解决」页签列出消失的差异。
+只有一个按钮 **repo1 对比 repo2**，打开后端的左右对比视图（RefactoringMiner 的 Monaco 视图）：左边 repo1，右边 repo2。
 
 #### 大项目的进度显示
 
-点击「分析」后，后端以后台任务运行，页面通过 SSE（Server-Sent Events）实时跟进：进度卡片显示各阶段
-（打开仓库 → 计算变更 → 导出文件 → RefactoringMiner A → RefactoringMiner B → 比对 Java → 其他文件 → 保存）、进度条、
-正在比对的文件和已用时间，并可「取消」。RefactoringMiner 单次分析内部没有进度：几百个变更的 Java 文件，这一步就要几分钟，
-卡片上会注明。断线后浏览器会自动重连，后端补发已有阶段，不会丢进度。
-表格新增「详情」列，直接显示每项数据的前几行（配置项、依赖版本、匹配到的代码行；`+` 绿、`-` 红、`~` 橙），更多内容悬停查看。
-
-#### RefactoringMiner 在这里的作用
-
-[RefactoringMiner](https://github.com/tsantalis/RefactoringMiner) 对比同一段 Java 代码的两个版本，找出其中的**重构**：
-类的移动或重命名，方法的重命名、移动、上移、抽取、内联、拆分等，并给出两侧的文件和行号范围；它还能生成 **AST 级别的 diff**。
-它可以直接比较两个目录，不需要 git 历史，所以没有共同历史的 repo1 和 repo2 也能比较。
-
-本工具只在三处用到它，每次都只处理 repo1 改动过的那部分文件：
-
-| 用途 | 调用 | 回答的问题 | 用在哪里 |
-|---|---|---|---|
-| **分析 A**：repo1 基线 → repo1 分支 | `detectAtDirectories` | 别的 team 在 repo1 里做了哪些结构性重构 | 「repo1 的重构」风险项；把移动过的文件前后配对；避免把 repo1 的一次重命名误报成「删除一个方法 + 新增一个方法」 |
-| **分析 B**：repo1 基线 → repo2 分支 | `detectAtDirectories` | 迁移把基线时的每个元素放到了哪里，即**旧元素 → 新元素的映射表** | 「已移动 / 重命名」（给出新位置）、「repo2 中已拆分」（抽取 / 内联 / 拆分 / 合并），以及其他类别查找类时的依据 |
-| **对比视图**：与 A 或 B 相同的两组文件 | `diffAtDirectories` + `MonacoCore` | 哪些代码被新增、删除、修改或移动，移到了哪里 | 后端的 Thymeleaf 左右对比页面 |
-
-例子（示例仓库）：分析 B 报告 `Move Class OrderProcessor → order.processing.OrderProcessor` 和
-`Rename Method handle → process`，并附有行号范围。repo1 对 `OrderProcessor.handle()` 的修改按行号范围对上之后，
-风险项显示的是「现在位于 `processing/OrderProcessor.java:9` 的 `process(orderId String)`」，而不是「方法不存在」。
-
-**它不负责的部分（由本工具自己完成）：**
-- **普通修改。** RefactoringMiner 只报告重构，不报告修改：方法体改了、但没有移动或重命名，它不会输出任何内容。
-  repo1 改了哪些方法和字段、repo2 是否仍是基线版本，由本工具用 JDT 解析后比较规范化的代码得出。
-- 风险分级、非 Java 文件（pom / Spring 配置按配置项比较，其他文件按内容比较）、需迁移 API 的规则检查、git 读取（JGit）、
-  保存与 review。
-- 只有结构性重构会产生风险项。迁移还会产生成百上千条细节重构（变量重命名、类型变化、注解等），它们列在 A / B 页签里，默认隐藏。
+「分析」作为后端任务运行，页面通过 Server-Sent Events 跟踪：打开 → 比较文件 → 导出 → RefactoringMiner → 比较 Java → 其他文件 → 保存，
+带进度条和「取消」。RefactoringMiner 在一次调用结束前不汇报进度 —— 没有基线时它要处理所有不同的 Java 文件，大项目需要几分钟。
 
 ## 6. API
 

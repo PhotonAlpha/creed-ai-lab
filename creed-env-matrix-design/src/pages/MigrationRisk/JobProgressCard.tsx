@@ -12,8 +12,8 @@ const { Text } = Typography;
 /** Shown while a job runs; DONE is not a step of its own — the card disappears with the result. */
 const VISIBLE: JobStage[] = JOB_STAGES.filter((s) => s !== 'DONE');
 
-/** The RefactoringMiner runs are one call each with no progress inside: say so, and let the clock tick. */
-const OPAQUE: JobStage[] = ['UPSTREAM', 'MIGRATION'];
+/** The RefactoringMiner run is one call with no progress inside: say so, and let the clock tick. */
+const OPAQUE: JobStage[] = ['REFACTORINGS'];
 
 const seconds = (ms: number) => `${Math.floor(ms / 1000)}s`;
 

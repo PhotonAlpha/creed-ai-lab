@@ -532,95 +532,45 @@ node mock for it: the Java module mocks Confluence and Jira in-process, so run i
 
 ### Migration sync risk (`/migration-risk`)
 
-Backed by another **separate service**, `creed-resource/creed-resource-migration-risk` (plain HTTP
-:18098, no database), through Vite's `/api/migration-risk` proxy entry (`VITE_MIGRATION_RISK_TARGET`).
-No node mock: the Java module generates two **demo repositories** at startup, and the page opens on them.
+Backed by another **separate service**, `creed-resource/creed-resource-migration-risk` (plain HTTP :18098;
+PostgreSQL, MySQL or H2 for saved runs), through Vite's `/api/migration-risk` proxy entry
+(`VITE_MIGRATION_RISK_TARGET`). No node mock: the Java module generates **demo repositories** at startup.
 
-The situation it serves: repo2 is a migration of repo1 (Boot 4 / Jackson 3 / Camel 4), and another team
-keeps committing to repo1. Give it the two repository paths (on the backend host, under
-`migration-risk.allowed-roots`) and the **baseline** — the repo1 commit the migration started from, or the
-last sync. The baseline field lists repo1's tags, branches and recent commits; when the two repositories share
-history (two clones of one origin) their merge-base is suggested and filled in. It runs RefactoringMiner twice against that one baseline:
+The situation it serves: repo2 is a migration of repo1 (Boot 4 / Jackson 3 / Camel 4), and another team keeps
+committing to repo1. Give it repo1 and repo2 (paths on the backend host under `migration-risk.allowed-roots`, or
+https git URLs from `remotes.allowed-hosts`), each with a branch, and optionally **repo2B** when the migration split
+repo1 in two. There is **no baseline**: repo1 HEAD is compared with repo2 (repo2A + repo2B as one code base) directly.
 
-- **A** repo1@baseline → repo1@HEAD: what the other team changed (tab *A: upstream refactorings*);
-- **B** repo1@baseline → repo2@HEAD: where the migration put things (tab *B: migration mapping*).
-
-Every class / method / field set A touches is then looked up through B, and non-Java files are compared
-key by key (Spring config, `pom.xml`) or byte by byte. The result is one table of **risk items**:
+One RefactoringMiner run repo1 → repo2 finds what repo2 moved, renamed or split; Java classes are compared member by
+member (formatting, Javadoc and imports do not count), config key by key across all properties / yml files, `pom.xml`
+dependency by dependency, Camel XML routes by route id across all route files (step by step — `from`, `to`,
+`filter` ...; a route moved to another file is still found), Velocity templates through a drafted FreeMarker
+conversion, every other file line by line. The result is one row per differing **file**:
 
 | Risk | Category | Meaning |
 |---|---|---|
-| High | Gone in repo2 / Split in repo2 | repo1 changed something repo2 deleted or split — decide by hand |
-| High | Migrated API used | lines repo1 added use Jackson 2, `javax.*`, Boot 3 classes ... (configurable rules) |
-| High | Config changed / Dependencies changed | `application*.yml`/`.properties`, `pom.xml` — each key shown with what repo2 has |
-| Medium | Moved / renamed | the element lives elsewhere in repo2; the new location is shown |
-| Medium | Changed on both sides | the migration changed it too: three-way merge |
-| Medium | Deleted upstream | still in repo2 — delete it there too? |
-| Medium | Upstream refactoring | repo1 renamed / moved it; replay that in repo2 |
-| Low / Medium | Other file | compared with repo2 at the same path |
-| Low | Syncs as is / New code | repo2 has it unchanged (imports aside) / new code with a home in repo2 |
+| High | Missing in repo2 / Split in repo2 | repo1 has it, repo2 has it nowhere / only extracted or split |
+| High | Config differs / Dependencies differ | a key with another value (or none) in repo2; the poms differ |
+| Medium | Content differs | both have the method / fields / class, with different content |
+| Medium | Moved / renamed | repo2 has it under another name or place, and it differs |
+| Medium | Migrated API used | repo1-only lines use Jackson 2, `javax.*`, Boot 3 classes ... (only next to another difference) |
+| Medium | Template converted / Other file differs | `.vm` vs repo2's `.ftl`; any other file, with the line diff |
+| Low | Only in repo2 / Same in repo2 / Config in sync | repo2's own additions; moved but identical; renamed key, same value |
 
-Expand a row for the evidence (the RefactoringMiner refactoring that decided it) and the details (config
-keys, dependency versions, matched lines). *Structural only* hides the hundreds of detail refactorings
-(variable renames, type changes ...) a migration produces. The *How the risk is graded* panel repeats this
-table in the page.
+Without a baseline a difference does not say who made it — the migration's rewrite and the other team's new code
+both read as *Content differs*; the diff shows which. *Details* read like `git diff repo1 repo2`: red `-` is repo1's
+line, green `+` repo2's. Runs saved before the change still open, with their old categories.
 
-**Branches, folders, releases, review, diff.** In *Git* mode each repository has its own branch picker (branches,
-remote branches, tags; the checked-out branch is shown), and the baseline suggestion follows the selected branches.
-*Plain folders* mode takes three directories — baseline, repo1, repo2 — and needs no git at all (files as on disk;
-`target`, `build`, `node_modules`, `.idea` ... skipped). With a **release** name the result is saved: every item
-gets a review column — ✓ *safe* (expected), ⚠ *needs attention* (with a note), or back to *pending* — singly or for
-the selected rows, plus a review filter and progress counters. *Saved releases* reopens any earlier run; re-running a
-release keeps the verdicts of items that did not change (marked ↻). The **A / B** buttons open the backend's
-side-by-side diff (RefactoringMiner's own Monaco viewer, served by the backend through the same proxy): A = what
-repo1 changed, B = where the migration put it.
+**Folders, releases, review, diff.** *Plain folders* mode takes repo1 / repo2 / repo2B directories, no git (files as on
+disk; `target`, `build`, `node_modules`, `.idea` ... skipped). With a **release** name the result is saved: each file
+gets a review — *safe*, *needs attention* (with a note), *synced* — singly or for selected rows; re-running a release
+keeps unchanged verdicts, marks NEW / CHANGED / SAME, sets *synced* automatically where repo2 already matches, and the
+*Resolved* tab lists what disappeared. One button, **repo1 vs repo2**, opens the backend's side-by-side diff
+(RefactoringMiner's Monaco viewer): repo1 left, repo2 right.
 
-#### repo1 branch, baseline, repo2 branch — what each one is
-
-They are the three points in time the comparison uses:
-
-```
-repo1:  ──●─────────●────●   ← repo1 branch (now)
-          ↑ baseline   the other team's new commits
-           \
-repo2:      ●────●────●──●   ← repo2 branch (now)
-              the migration's commits
-```
-
-| Input | What it is | Role in the comparison |
-|---|---|---|
-| **repo1 branch** | the old repository's branch the other team still commits to (e.g. `master`); its newest commit is used | end of A: "what repo1 looks like now" |
-| **Baseline** | repo1's commit when the migration started (or at the last sync) — a commit id, tag or branch | the **shared start** of A and B; must be in the repo1 branch's history |
-| **repo2 branch** | the migrated repository's working branch (e.g. `develop/spring-boot-4`); its newest commit is used | end of B: "what the migrated code looks like now" |
-
-- **A = baseline → repo1 branch**: what the other team changed since — what has to be synced.
-- **B = baseline → repo2 branch**: where the migration put the baseline code and what it made of it — the
-  old element → new element map.
-
-Every element A touches is looked up through B, so the baseline decides what counts as new:
-
-- **Too early** — changes made before the migration started show up as new: lots of items that need no syncing.
-- **Too late** — changes before the baseline that were never synced **do not appear at all**. This is the
-  dangerous direction: nothing tells you they were missed.
-- **Two clones of one origin** — the page suggests the merge-base of the two selected branches, which is normally
-  exactly the commit the migration branched from. After a sync, the next baseline is the repo1 commit synced up to.
-- **A baseline that is not in the repo1 branch's history** raises a warning: A then includes another branch's changes.
-
-**Folder mode**: baseline folder = baseline, repo1 folder = repo1 branch, repo2 folder = repo2 branch.
-API fields: `baseline` / `repo1Head` / `repo2Head`; in folder mode `baselinePath` / `repo1Path` / `repo2Path`.
-
-**Progress for large projects.** *Analyse* runs as a backend job and the page follows it over Server-Sent
-Events: a progress card shows the stages (open → changes → export → RefactoringMiner A → RefactoringMiner B →
-cross-check → other files → save), a progress bar, the file being cross-checked and the elapsed time, with a
-*Cancel* button. A RefactoringMiner run reports nothing until it ends — on a few hundred changed Java files that
-stage alone takes minutes, which the card says. The *Details* column shows the first lines of each item's data
-(changed keys, versions, matched lines; green `+`, red `-`, orange `~`).
-
-**What RefactoringMiner does here.** It is used in three places only: run A (baseline → repo1 branch) finds the
-structural refactorings the other team made; run B (baseline → repo2 branch) is the old element → new element map
-that tells where the migration moved or split each element; and its AST diff drives the side-by-side page. It does
-**not** report plain edits (a changed method body) — those, the risk grading, non-Java files and review are this
-tool's own logic. Full table: `creed-resource/creed-resource-migration-risk/README.md`.
+**Progress for large projects.** *Analyse* runs as a backend job followed over Server-Sent Events: stages open →
+compare → export → RefactoringMiner → Java → other files → save, with a progress bar and *Cancel*. The RefactoringMiner
+run reports nothing until it ends — without a baseline it covers every differing Java file, minutes on a big project.
 
 ## 6. API
 
