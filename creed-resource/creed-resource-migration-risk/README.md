@@ -3,101 +3,88 @@
 Migration sync risk for a codebase that was migrated (Spring Boot 4, Jackson 3, Camel 4 ...) while another
 team keeps committing to the old repository. Page: `/migration-risk` in `creed-env-matrix-design`.
 
-**Inputs** — either **git**: repo1 (old) path + branch, the **baseline** (the repo1 commit the migration started
-from, or the last sync — suggested automatically as the merge-base when the two repositories are clones of one
-origin), repo2 (migrated) path + branch; or **three plain folders**: baseline / repo1 / repo2, no git at all.
-The two repositories need no shared history. Optionally a **release** name: the result is saved, each item can be
-reviewed as *safe* (expected) or *needs attention*, and a re-run of the release keeps the verdicts of unchanged items.
-Every Java file can be opened as RefactoringMiner's side-by-side AST diff (Thymeleaf page, side A = upstream change,
-side B = where the migration put it).
+**Inputs** — either **git**: repo1 (old) path or https URL + branch, repo2 (migrated) path + branch, optionally
+repo2B (+ branch); or **plain folders**: repo1 / repo2 / repo2B, no git at all. The repositories need no shared
+history, and there is **no baseline**: repo1 HEAD is compared with repo2 HEAD directly (repo2A + repo2B read as one
+code base). Optionally a **release** name: the result is saved, each file can be reviewed as *safe* (expected),
+*needs attention* or *synced*, and a re-run of the release keeps the verdicts of unchanged files. Every file can be
+opened in RefactoringMiner's side-by-side viewer (repo1 left, repo2 right).
 
-### repo1 branch, baseline, repo2 branch — what each one is
+**Method**
 
-They are the three points in time the comparison uses:
+1. Every file that differs between repo1 and repo2 (content ids; an identical file at another path is a move,
+   not a difference).
+2. **One RefactoringMiner run, repo1 → repo2**, over the differing Java files (plus repo2 files with the same name):
+   where repo2 moved, renamed, extracted or split repo1's classes and methods.
+3. Java classes compared member by member on JDT-normalized text — formatting, Javadoc and **imports do not count**,
+   so a file whose only difference is `javax.* → jakarta.*` imports reports nothing.
+4. Config compared key by key across all properties / yml files of both repo2s; `pom.xml` dependency by dependency;
+   Camel XML routes by route id; Velocity templates drafted as FreeMarker and diffed with repo2's `.ftl`; any other
+   file (scripts, other XML ...) line by line.
+5. Lines repo1 has and repo2 lacks are checked against `migration-risk.api-rules`; a match **alone** in a file is
+   taken as the migration's own rewrite and dropped, next to another difference it stays as a porting hint.
 
-```
-repo1:  ──●─────────●────●   ← repo1 branch (now)
-          ↑ baseline   the other team's new commits
-           \
-repo2:      ●────●────●──●   ← repo2 branch (now)
-              the migration's commits
-```
-
-| Input | What it is | Role in the comparison |
-|---|---|---|
-| **repo1 branch** | the old repository's branch the other team still commits to (e.g. `master`); its newest commit is used | end of A: "what repo1 looks like now" |
-| **Baseline** | repo1's commit when the migration started (or at the last sync) — a commit id, tag or branch | the **shared start** of A and B; must be in the repo1 branch's history |
-| **repo2 branch** | the migrated repository's working branch (e.g. `develop/spring-boot-4`); its newest commit is used | end of B: "what the migrated code looks like now" |
-
-- **A = baseline → repo1 branch**: what the other team changed since — what has to be synced.
-- **B = baseline → repo2 branch**: where the migration put the baseline code and what it made of it — the
-  old element → new element map.
-
-Every element A touches is looked up through B, so the baseline decides what counts as new:
-
-- **Too early** — changes made before the migration started show up as new: lots of items that need no syncing.
-- **Too late** — changes before the baseline that were never synced **do not appear at all**. This is the
-  dangerous direction: nothing tells you they were missed.
-- **Two clones of one origin** — the page suggests the merge-base of the two selected branches, which is normally
-  exactly the commit the migration branched from. After a sync, the next baseline is the repo1 commit synced up to.
-- **A baseline that is not in the repo1 branch's history** raises a warning: A then includes another branch's changes.
-
-**Folder mode**: baseline folder = baseline, repo1 folder = repo1 branch, repo2 folder = repo2 branch.
-API fields: `baseline` / `repo1Head` / `repo2Head`; in folder mode `baselinePath` / `repo1Path` / `repo2Path`.
-
-**Method** — baseline + two analyses + cross-check:
-
-1. **A** = RefactoringMiner on repo1@baseline → repo1@HEAD: what the other team changed.
-2. **B** = RefactoringMiner on repo1@baseline → repo2@HEAD: an old element → new element map.
-3. Every element A touches is looked up through B; non-Java files are compared key by key (Spring config,
-   `pom.xml`) or byte by byte; lines repo1 added are checked against migration-sensitive API rules.
-
-Comparing repo1@HEAD with repo2@HEAD directly would mix *expected migration differences* with *new upstream
-commits*; the shared baseline separates them.
+**Without a baseline, who made a difference cannot be known**: a method the migration rewrote and a method the
+other team changed look the same — both `CONTENT_DIFFERS`. The diff page shows which. Details lines read like
+`git diff repo1 repo2`: `- L12:` is repo1's line, `+ L12:` repo2's.
 
 | Level | Category | When |
 |---|---|---|
-| HIGH | `TARGET_MISSING` / `TARGET_SPLIT` | repo1 changed something repo2 deleted, or extracted/inlined/split |
-| HIGH | `MIGRATION_API` | added upstream lines use an API the migration replaced (`migration-risk.api-rules`) |
-| HIGH | `CONFIG_CHANGED` / `DEPENDENCY_CHANGED` | `application*.yml`/`.properties` / `pom.xml` changed; each key with repo2's value |
-| MEDIUM | `RELOCATED` | the element is elsewhere in repo2 (new location given) |
-| MEDIUM | `BOTH_MODIFIED` | the migration changed it too — three-way merge |
-| MEDIUM | `DELETED_UPSTREAM` | repo1 deleted it, repo2 still has it |
-| MEDIUM | `UPSTREAM_REFACTORING` | repo1 renamed / moved / extracted it — replay in repo2 |
-| LOW/MEDIUM | `NON_JAVA_FILE` | other files: low if repo2 still has the baseline version |
-| LOW | `AUTO_SYNC` | repo2 has the element unchanged since the baseline (imports aside) |
-| LOW | `NEW_CODE` | new upstream code whose home exists in repo2 |
+| HIGH | `TARGET_MISSING` | repo1 has the class / method / file, repo2 has it nowhere (same path, same name, a move) |
+| HIGH | `TARGET_SPLIT` | repo2 extracted / inlined / split / merged it — no single counterpart |
+| HIGH | `CONFIG_CHANGED` | a config key has another value in repo2, or none (also checked under its Boot new name) |
+| HIGH | `DEPENDENCY_CHANGED` | the poms differ: dependency, managed version, property, parent |
+| MEDIUM | `CONTENT_DIFFERS` | both have the method / fields / class, with different content |
+| MEDIUM | `RELOCATED` | repo2 has it under another class, package or name, and it differs |
+| MEDIUM | `MIGRATION_API` | repo1-only lines use an API the migration replaced — convert while porting |
+| MEDIUM | `TEMPLATE_CONVERTED` | `x.vm` is `x.ftl` in repo2 and differs from the drafted conversion |
+| MEDIUM | `NON_JAVA_FILE` | any other file differs (XML, scripts ...); the line diff in the details |
+| LOW | `ONLY_IN_REPO2` | repo2 has a class / method / file / config key repo1 does not (usually the migration's) |
+| LOW | `ALREADY_SYNCED` | repo2 has the same thing elsewhere: moved / renamed and identical, or a template matching the draft |
+| LOW | `CONFIG_IN_SYNC` | repo2 holds repo1's value under the key's Spring Boot new name |
+
+Runs saved before 2026-10-28 (with a baseline) still load; their categories `BOTH_MODIFIED`, `DELETED_UPSTREAM`,
+`UPSTREAM_REFACTORING`, `AUTO_SYNC`, `NEW_CODE` are shown but no longer produced.
+
+**Camel routes** (`CamelRouteAnalyzer` + `CamelRoutes`): every `.xml` of each tree with a `<route>` under
+`<routes>` / `<camelContext>` / `<routeContext>` (Spring, Blueprint, `camel:` prefix or none) is reduced to
+`route id -> steps`, one normalized line per element — `from uri=direct:order`, `filter`, `  simple: ${body} != null`,
+`  to uri=...` — attributes sorted, namespaces / comments / formatting dropped. A route without an `id` is keyed by
+its `from` uri. Routes are matched by id **across all route files**, so a route the migration moved to another file
+(or to repo2B) is still found:
+
+| Route | Category |
+|---|---|
+| same steps (wherever repo2 keeps it) | not reported |
+| different steps, same file / another file | `CONTENT_DIFFERS` / `RELOCATED` (MEDIUM), details = step diff (`-` repo1, `+` repo2) |
+| only in repo1 | `TARGET_MISSING` (HIGH), details = its steps |
+| only in repo2 | `ONLY_IN_REPO2` (LOW) |
+
+Content outside the routes (beans, `restConfiguration`, the REST DSL, data formats ...) is compared per file and
+reported as `NON_JAVA_FILE`. XML that is not Camel, or does not parse, falls back to the line diff. The Java DSL
+(`RouteBuilder` classes) is Java: compared method by method like any class. The diff page still shows the file
+line by line.
 
 ## What RefactoringMiner does here
 
 [RefactoringMiner](https://github.com/tsantalis/RefactoringMiner) compares two versions of Java code and reports
 the **refactorings** between them — a class moved or renamed, a method renamed, moved, pulled up, extracted,
-inlined, split — each with the exact file and line range on both sides. It also produces an **AST diff**. It works
-on two directories with no git history needed, which is what lets repo1 be compared with a repo2 that does not
-share its history.
-
-This module uses it in exactly three places, always on the exported subset of files repo1 changed:
+inlined, split — each with the exact file and line range on both sides. It works on two directories with no git
+history, which is what lets repo1 be compared with a repo2 that does not share its history.
 
 | Use | Call | What it answers | Feeds |
 |---|---|---|---|
-| **Run A** — repo1 baseline → repo1 head | `detectAtDirectories` | Which structural refactorings the other team made upstream | `UPSTREAM_REFACTORING` items; pairs a moved file's old and new version; stops an upstream rename from showing up as one deleted and one added method |
-| **Run B** — repo1 baseline → repo2 head | `detectAtDirectories` | Where the migration put each baseline element: the **old element → new element map** | `RELOCATED` (moved / renamed method or class, with its new location), `TARGET_SPLIT` (extracted / inlined / split / merged), and the class lookup behind every other category |
-| **Diff view** — the same pair as A or B | `diffAtDirectories` + `MonacoCore.makeDiffConfig()` | Which code was inserted, deleted, updated or moved, and where to | The Thymeleaf side-by-side page (`/api/migration-risk/view/diff`) |
+| **Analysis** — repo1 → repo2 | `detectAtDirectories` | Where repo2 keeps each repo1 class / method that is not at the same place | `RELOCATED` / `ALREADY_SYNCED` (moved / renamed, with the new location), `TARGET_SPLIT`, and the class lookup behind every other category |
+| **Diff view** — the same pair | `diffAtDirectories` + `MonacoCore.makeDiffConfig()` | Which code was inserted, deleted, updated or moved, and where to | The Thymeleaf side-by-side page (`/api/migration-risk/view/diff`) |
 
-Example (demo): run B reports `Move Class OrderProcessor → order.processing.OrderProcessor` and `Rename Method
-handle → process`, with line ranges. The upstream edit to `OrderProcessor.handle()` is matched against that range,
-so the item says "now at `processing/OrderProcessor.java:9`, `process(orderId String)`" instead of "method gone".
+Example (demo): the run reports `Move Class OrderProcessor → order.processing.OrderProcessor` and `Rename Method
+handle → process`. `OrderProcessor.handle()` is compared with repo2's `process()` instead of being reported missing.
 
-**What it does not do — this module does:**
-
-- **Plain modifications.** RefactoringMiner reports refactorings, not edits: a method whose body changed without
-  being moved or renamed does not appear in its output. Which methods and fields repo1 modified, and whether
-  repo2 still has the baseline version, comes from comparing JDT-normalized declarations (`JavaStructure`).
-- **Risk grading** (`JavaRiskAnalyzer`, `FileRiskAnalyzer`), **non-Java files** (`ConfigDiff` for pom / Spring
-  config, content ids for the rest), **migration-API rules**, **git access** (JGit), **persistence and review**.
-- Only structural refactorings drive items (`RefactoringIndex.isStructural`). The migration also produces
-  hundreds of detail refactorings (variable renames, type changes, annotations); they are listed in the page's
-  A / B tabs but hidden by default.
+**What it does not do — this module does:** plain modifications (RefactoringMiner reports refactorings, not edits —
+which methods differ comes from JDT-normalized declarations, `JavaStructure`); grading (`JavaRiskAnalyzer`,
+`FileRiskAnalyzer`, `GlobalConfigAnalyzer`); non-Java files; API rules; git access (JGit); persistence and review.
+Only structural refactorings drive items; the hundreds of detail refactorings a migration produces are listed in
+the page's refactorings tab but hidden by default.
 
 Technical constraints (details in the skill): the version is pinned in the pom (3.1.x = Java 23 bytecode → JDK 25);
 several of its dependencies are excluded (Jetty 9, Spring 4.1.6, GitHub/Perforce clients); its jar's own
@@ -105,42 +92,27 @@ several of its dependencies are excluded (Jetty 9, Spring 4.1.6, GitHub/Perforce
 
 ## Options and what the table adds
 
-- **Sync tracking** — re-run a release as the sync goes on. A finding repo2 already has in repo1 HEAD's form
-  (same method, fields, file, pom values; or the replaced API gone from repo2's file) is `ALREADY_SYNCED`, and a file
-  made only of those is reviewed `SYNCED` automatically. Each file is tagged NEW / CHANGED / SAME against the previous
-  run, and the *Resolved* tab lists what the previous run had and this one does not. A file that changed after its
-  review comes back pending, showing the old verdict and which findings are new or different.
-- **Config renames** — `spring.redis.host` changed upstream is looked up in repo2 as `spring.data.redis.host` too:
-  Spring Boot's own deprecation metadata plus `migration-risk.config-renames` (prefix renames end in `.`).
-- **Remote repositories** — in git mode a repository can be an `https://` URL from `remotes.allowed-hosts`: cloned
-  bare under the work dir, fetched before use; tokens from `remotes.credentials` (environment), never the request.
-- **Ignore rules**, **Excel / Markdown export**, **Jira issue per file** (mocked unless `migration-risk.jira` is set),
-  **three-way view** (baseline | HEAD | repo2, lines marked by who changed them) and FreeMarker drafts (`≈` lines) for
-  changed Velocity templates.
-
-- **One record per file** — every changed file is one row to review; the methods, config keys and API matches
-  found in it are its `parts` (shown when the row is expanded). The file takes its riskiest part's level. Line
-  by line differences are what the diff views are for.
-
-- **repo2B** — when the migration split repo1 into two repositories, give the second one as `repo2bPath`
-  (and `repo2bHead`). repo2 and repo2B are read as one code base: a class, template or config key found in
-  either counts as found, and each item's target says `repo2A` or `repo2B`.
-- **Skip tests** (`skipTests`) — test code (`src/test/**`, `*Test.java`, `*IT.java`, test resources) is left
-  out before anything is compared. Without it, every item still carries a `test` flag and a `module` (nearest
-  directory with a `pom.xml` / `build.gradle`), which the page filters on.
-- **Templates converted by the migration** — a changed `x.vm` that repo2 has as `x.ftl` is `TEMPLATE_CONVERTED`
-  (MEDIUM), with the upstream line diff to port by hand. `migration-risk.extension-mappings` holds the pairs.
-- **Config keys, globally** — every properties / yml file (Spring's `application*` / `bootstrap*`, plus
-  `config-files`) is reduced to keys named without the file: `shop.order.max-items`, `[dev] server.port`. A key
-  moved from `application.yml` to `application.properties` is no change; a key repo2 keeps in another file is
-  found. Each changed key is one item: `CONFIG_CHANGED` (HIGH) or, when repo2 already has the new value,
-  `CONFIG_IN_SYNC` (LOW).
-- **Diff views** — *Upstream change* = repo1 baseline → repo1 HEAD; *repo1 vs repo2* = repo1 HEAD → repo2 HEAD.
+- **One record per file** — every differing file is one row to review; the methods, config keys and API matches
+  in it are its `parts`. The file takes its riskiest part's level. A file only repo2 has is a row too (LOW).
+- **Sync tracking** — re-run a release as the sync goes on. A file made only of `ALREADY_SYNCED` / `CONFIG_IN_SYNC`
+  parts is reviewed `SYNCED` automatically; a difference that disappears is in the *Resolved* tab. Each file is
+  tagged NEW / CHANGED / SAME against the previous run; a file that changed after its review comes back pending with
+  the old verdict and the parts that are new, different or gone.
+- **repo2B** — when the migration split repo1 into two repositories: `repo2bPath` (+ `repo2bHead`). Both are read as
+  one tree; each target says `repo2A` or `repo2B`.
+- **Skip tests** (`skipTests`), **module / test tags**, **config renames** (Boot's deprecation metadata plus
+  `migration-risk.config-renames`), **remote repositories** (`https://` URLs from `remotes.allowed-hosts`), **ignore
+  rules**, **Excel / Markdown export**, **Jira issue per file** (mocked unless `migration-risk.jira` is set).
+- **Database** — PostgreSQL by default (`db/migration`), `h2` profile without Docker, **`mysql` profile** for MySQL 8
+  (`db/migration-mysql`, same versions, MySQL syntax): `create database migration_risk character set utf8mb4 collate
+  utf8mb4_bin`, then `CREED_MIGRATION_RISK_DB_URL` / `_USER` / `_PASSWORD`.
 
 ## Limits
 
-What it cannot tell: behaviour that changed under identical code (Jackson 3's defaults, for example) —
-that is what tests are for. Run notes, API and limits: [`HANDOFF.md`](HANDOFF.md).
+Without a baseline, every file the migration touched differs: on a real project the differing set is most of the
+repository (`max-changed-files`, default 5000), RefactoringMiner runs over all of it, and `CONTENT_DIFFERS` mixes the
+migration's rewrites with new upstream work. Behaviour that changed under identical code (Jackson 3's defaults) is
+invisible — that is what tests are for. Run notes, API and limits: [`HANDOFF.md`](HANDOFF.md).
 
 ## 体验升级
 一、最推荐的三项
@@ -199,9 +171,13 @@ that is what tests are for. Run notes, API and limits: [`HANDOFF.md`](HANDOFF.md
 
 已实现：第一节第 2 项（同步进度跟踪：`ALREADY_SYNCED` / 复核状态 `SYNCED`、与上一次分析的对比 NEW / CHANGED / SAME、"已解决"列表）；第二节的 Boot 配置改名识别、配置项落在 repo2B 另一个文件时的 diff、按文件合并之后的复核记忆；第三节除复核人身份外的全部（按模块汇总、筛选条件和分页放进 URL、三方对比视图、`.vm → .ftl` 转换建议、忽略规则、Excel / Markdown 导出、一键建 Jira）；第四节的远程仓库（https:// git URL）。另修复了页面分页（每页条数切换无效、筛选后停在空页）。
 
+### 去掉基线（2026-10-28）
+
+按要求改为 repo1 HEAD 与 repo2（repo2A + repo2B）直接比较，不再有基线：只跑一次 RefactoringMiner（repo1 → repo2），类别改为描述"哪里不同"（新增 `CONTENT_DIFFERS`、`ONLY_IN_REPO2`），对比视图只剩"repo1 对比 repo2"，三方对比视图和 merge-base 建议随基线一起去掉。上面依赖基线的建议（三方合并、三栏视图、"跳过 repo2 中与基线相同的文件"）因此不再适用。另新增 MySQL 支持（`mysql` profile，`db/migration-mysql`）。
+
 ## TODO
 
-- [ ] **三方合并定风险**（第一节第 1 项）：先在真实项目上核验现有结果，再决定是否实现。
+- [ ] ~~**三方合并定风险**（第一节第 1 项）~~：需要基线作公共祖先，去掉基线后不再适用；如果以后要做，需要把基线作为可选输入加回来。
 - [ ] **复核人身份**：接入 creed-author-server（OAuth2），复核记录用登录身份代替手填的名字。
 - [ ] 第一节第 3 项（按文件内容缓存、跳过不需要的对比、两次运行并行）。
 - [ ] 第二节其余：多模块的全局配置按模块匹配、pom 解析 BOM 实际版本、repo2A / repo2B 同路径文件两份都比。

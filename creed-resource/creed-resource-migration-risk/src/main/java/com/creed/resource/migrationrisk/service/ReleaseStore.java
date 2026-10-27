@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
  * <p>A release is re-analysed as repo1 keeps moving, and nobody should review the same item twice: a new
  * run copies the verdict of the release's previous run for every item whose {@link #fingerprint} did not
  * change. Anything that did change comes back {@code PENDING}, remembering the verdict it had and which of its
- * parts are new or different since — the reviewer looks at those, not at the whole file again.
+ * parts are new, different or gone since — the reviewer looks at those, not at the whole file again.
  *
  * <p>Re-runs also track the sync itself: a file repo2 already matches is SYNCED automatically ({@code auto}, never
  * carried over — the next run decides again), each item is tagged NEW / CHANGED / SAME against the previous run,
@@ -73,7 +73,7 @@ public class ReleaseStore {
     }
 
     @Transactional
-    public AnalysisResponse save(String releaseName, String baselineRef, AnalysisResponse result) {
+    public AnalysisResponse save(String releaseName, AnalysisResponse result) {
         MrRelease release = releases.findByName(releaseName).orElseGet(() -> {
             MrRelease r = new MrRelease();
             r.setName(releaseName);
@@ -93,7 +93,6 @@ public class ReleaseStore {
         run.setRepo2Path(result.source().repo2Path());
         run.setRepo2bPath(result.source().repo2bPath());
         run.setPreviousAnalysisId(previousRun.map(MrAnalysis::getId).orElse(null));
-        run.setBaselineRef(baselineRef);
         run.setTotalItems(result.counts().total());
         run.setHighItems(result.counts().high());
         run.setMediumItems(result.counts().medium());
@@ -123,7 +122,7 @@ public class ReleaseStore {
             if (item.inSync()) {
                 row.setReviewStatus(ReviewStatus.SYNCED);
                 row.setReviewAuto(true);
-                row.setReviewNote("repo2 already has repo1 HEAD's version");
+                row.setReviewNote("repo2 already has repo1's version");
                 row.setReviewedAt(now);
                 synced++;
             } else if (before != null && same && before.getReviewStatus() != ReviewStatus.PENDING && !before.isReviewAuto()) {
@@ -177,10 +176,12 @@ public class ReleaseStore {
         Map<String, String> old = new HashMap<>();
         partsOf(json.readValue(before.getItemJson(), RiskItem.class)).forEach(p -> old.put(p.id(), fingerprintText(p)));
         for (RiskItem part : partsOf(item)) {
-            if (!fingerprintText(part).equals(old.get(part.id()))) {
+            if (!fingerprintText(part).equals(old.remove(part.id()))) {
                 changed.add(part.id());
             }
         }
+        // what the last review saw and is gone now (synced, or the difference disappeared) changed too
+        changed.addAll(old.keySet());
         row.setChangedParts(changed.isEmpty() ? null : String.join("\n", changed));
     }
 
@@ -315,7 +316,6 @@ public class ReleaseStore {
             }
         }
         return new AnalysisSummary(a.getId(), release, a.getMode(), a.getRepo1Path(), a.getRepo2Path(), a.getRepo2bPath(),
-                a.getBaselineRef(),
                 new AnalysisResponse.Counts(a.getTotalItems(), a.getHighItems(), a.getMediumItems(), a.getLowItems()),
                 new ReviewProgress(pending, safe, attention, synced), a.getDurationMs(), a.getAnalyzedAt(),
                 a.getPreviousAnalysisId());

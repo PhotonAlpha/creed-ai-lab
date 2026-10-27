@@ -19,14 +19,14 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * RefactoringMiner's directory mode: two directories holding the "before" and "after" source trees, no
- * git history needed — which is what lets repo1@baseline be compared with repo2, a repository that does not
- * share repo1's history at all.
+ * git history needed — which is what lets repo1 be compared with repo2, a repository that does not share repo1's
+ * history at all.
  */
 @Component
 @Slf4j
 public class RefactoringDetector {
 
-    /** {@code label} names the run in the log ("A upstream", "B migration"). */
+    /** {@code label} names the run in the log ("repo1 -> repo2"). */
     public List<DetectedRefactoring> detect(String label, Path before, Path after) {
         long started = System.nanoTime();
         log.info("RefactoringMiner {}: {} -> {} ...", label, before.getFileName(), after.getFileName());

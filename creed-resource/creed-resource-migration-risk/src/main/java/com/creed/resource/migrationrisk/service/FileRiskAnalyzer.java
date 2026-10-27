@@ -6,7 +6,6 @@ import com.creed.resource.migrationrisk.domain.ElementKind;
 import com.creed.resource.migrationrisk.domain.Location;
 import com.creed.resource.migrationrisk.domain.RiskCategory;
 import com.creed.resource.migrationrisk.domain.RiskItem;
-import com.creed.resource.migrationrisk.domain.RiskLevel;
 import com.creed.resource.migrationrisk.domain.TargetState;
 import com.creed.resource.migrationrisk.domain.UpstreamChange;
 import com.creed.resource.migrationrisk.git.ChangedFile;
@@ -21,17 +20,22 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * Everything RefactoringMiner does not look at: pom.xml, templates repo2 converted to another format, every other
- * non-Java file, and migration-sensitive API usage in the lines repo1 added (any file type). Properties / yml are
- * left to {@link GlobalConfigAnalyzer}, which compares keys across all files instead of file by file.
+ * Everything RefactoringMiner does not look at: pom.xml (dependency by dependency), templates repo2 keeps in another
+ * format, every other non-Java file (line diff; Camel route XML is {@link CamelRouteAnalyzer}'s), and migration-sensitive API usage in repo1's lines that repo2 lacks
+ * (any file type). Properties / yml are left to {@link GlobalConfigAnalyzer}, which compares keys across all files.
+ *
+ * <p>Details lines read like {@code git diff repo1 repo2}, the same direction as the diff page (repo1 left, repo2
+ * right): {@code - L4: } is repo1's line 4 (repo2 lacks it), {@code + L4: } is repo2's line 4 (repo1 lacks it).
  */
 @Component
 public class FileRiskAnalyzer {
@@ -54,101 +58,129 @@ public class FileRiskAnalyzer {
                 e -> e.getKey().toLowerCase(Locale.ROOT), e -> e.getValue().toLowerCase(Locale.ROOT)));
     }
 
-    public List<RiskItem> analyze(AnalysisContext ctx) {
+    /** {@code camelFiles}: Camel route files {@link CamelRouteAnalyzer} compared by route id — no line diff for them. */
+    public List<RiskItem> analyze(AnalysisContext ctx, Set<String> camelFiles) {
         List<RiskItem> items = new ArrayList<>();
-        Map<String, Boolean> targetHasExtension = new HashMap<>();
+        Map<String, Boolean> repo2HasExtension = new HashMap<>();
+        // repo2 files that turned out to be a repo1 file's counterpart (moved, converted): not "only in repo2"
+        Set<String> matched = new HashSet<>();
         int done = 0;
         for (ChangedFile file : ctx.changes()) {
-            ctx.progress().step(Progress.Stage.FILES, done++,
-                    ctx.changes().size(), file.path());
+            ctx.progress().step(Progress.Stage.FILES, done++, ctx.changes().size(), file.path());
             items.addAll(apiUsage(ctx, file));
-            if (file.isJava() || configs.handles(file.path())) {
+            if (file.isJava() || configs.handles(file.path()) || file.newPath() == null
+                    || file.change() == ChangedFile.Change.RENAMED || camelFiles.contains(file.newPath())) {
                 continue;
             }
             if (ConfigDiff.isPom(file.path())) {
-                items.add(config(ctx, file, RiskCategory.DEPENDENCY_CHANGED, ElementKind.DEPENDENCY));
-            } else {
-                Optional<RiskItem> converted = converted(ctx, file, targetHasExtension);
-                (converted.isPresent() ? converted : otherFile(ctx, file)).ifPresent(items::add);
+                pom(ctx, file).ifPresent(items::add);
+                continue;
+            }
+            Optional<RiskItem> converted = converted(ctx, file, repo2HasExtension);
+            converted.map(RiskItem::target).filter(t -> t != null).ifPresent(t -> matched.add(t.path()));
+            (converted.isPresent() ? converted : otherFile(ctx, file, matched)).ifPresent(items::add);
+        }
+        for (ChangedFile file : ctx.changes()) {
+            if (file.newPath() == null && !file.isJava() && !configs.handles(file.path()) && !matched.contains(file.oldPath())
+                    && !camelFiles.contains(file.oldPath())) {
+                Location there = new Location(file.oldPath(), null, null);
+                items.add(RiskItem.of(RiskCategory.ONLY_IN_REPO2, ElementKind.FILE, file.oldPath(), UpstreamChange.DELETED,
+                        null, there, TargetState.EXTRA, List.of(), List.of("only repo2 has this file")));
             }
         }
         return items;
     }
 
+    // ---------------------------------------------------------------- pom.xml
+
+    private Optional<RiskItem> pom(AnalysisContext ctx, ChangedFile file) {
+        String path = file.newPath();
+        Location here = new Location(path, null, null);
+        if (file.oldPath() == null) {
+            return Optional.of(RiskItem.of(RiskCategory.TARGET_MISSING, ElementKind.DEPENDENCY, path, UpstreamChange.ADDED,
+                    here, null, TargetState.MISSING, List.of(), List.of("repo2 has no pom.xml at this path")));
+        }
+        List<String> details;
+        try {
+            details = ConfigDiff.pomLines(ctx.text(Side.REPO1, path).orElse(null), ctx.text(Side.REPO2, file.oldPath()).orElse(null));
+        } catch (RuntimeException e) {
+            // Unparseable on one side (a broken pom): still HIGH, just without dependency detail.
+            details = List.of("could not compare dependencies: " + e.getMessage());
+        }
+        if (details.isEmpty()) {
+            return Optional.empty(); // formatting, comments, or elements outside dependencies / properties / parent
+        }
+        return Optional.of(RiskItem.of(RiskCategory.DEPENDENCY_CHANGED, ElementKind.DEPENDENCY, path,
+                UpstreamChange.MODIFIED, here, new Location(file.oldPath(), null, null), TargetState.MODIFIED,
+                List.of(), details));
+    }
+
+    // ---------------------------------------------------------------- templates in another format
+
     /**
-     * A file whose format repo2 changed — {@code templates/invoice.vm} is {@code templates/invoice.ftl} there.
-     * Byte comparison would call it MISSING; it is found, but the change has to be re-written in the other
-     * syntax, so the item carries the upstream line diff to port. Empty when no mapping applies or repo2 still
-     * has the file under its old name (then it is an ordinary file).
+     * A file repo2 keeps in another format — {@code templates/invoice.vm} is {@code templates/invoice.ftl} there.
+     * repo1's file is drafted in the new syntax ({@link VelocityToFreemarker} for vm -> ftl) and that draft is diffed
+     * with repo2's file, whitespace ignored: no difference means repo2 has it, else the lines to port. Empty when no
+     * mapping applies or repo2 has the file under its old name (then it is an ordinary file).
      */
-    private Optional<RiskItem> converted(AnalysisContext ctx, ChangedFile file, Map<String, Boolean> targetHasExtension) {
-        String path = file.path();
+    private Optional<RiskItem> converted(AnalysisContext ctx, ChangedFile file, Map<String, Boolean> repo2HasExtension) {
+        String path = file.newPath();
         int dot = path.lastIndexOf('.');
-        if (dot < 0 || dot < path.lastIndexOf('/')) {
+        if (dot < 0 || dot < path.lastIndexOf('/') || file.oldPath() != null) {
             return Optional.empty();
         }
         String from = path.substring(dot + 1).toLowerCase(Locale.ROOT);
         String to = conversions.get(from);
-        if (to == null || ctx.contentId(Side.TARGET, path).isPresent()) {
+        if (to == null) {
             return Optional.empty();
         }
         String counterpart = path.substring(0, dot + 1) + to;
-        Optional<String> found = ctx.contentId(Side.TARGET, counterpart).isPresent() ? Optional.of(counterpart)
-                : closest(ctx.targetPathsNamed(counterpart.substring(counterpart.lastIndexOf('/') + 1)), counterpart);
-        Location upstream = new Location(path, null, null);
+        Optional<String> found = ctx.contentId(Side.REPO2, counterpart).isPresent() ? Optional.of(counterpart)
+                : closest(ctx.repo2PathsNamed(counterpart.substring(counterpart.lastIndexOf('/') + 1)), counterpart);
+        Location here = new Location(path, null, null);
         List<String> evidence = List.of("." + from + " -> ." + to + " (migration-risk.extension-mappings)");
+        String mine = ctx.text(Side.REPO1, path).orElse("");
+        String draft = draft(from, to, mine);
         if (found.isPresent()) {
-            Location target = new Location(found.get(), null, null);
-            if (file.change() == ChangedFile.Change.DELETED) {
-                return Optional.of(RiskItem.of(RiskCategory.DELETED_UPSTREAM, ElementKind.FILE, path,
-                        UpstreamChange.DELETED, upstream, target, TargetState.RELOCATED, evidence,
-                        List.of("repo2 has it as " + found.get() + ": delete it there too?")));
+            List<String> diff = lineDiff(draft, 1, ctx.text(Side.REPO2, found.get()).orElse(""), 1,
+                    RawTextComparator.WS_IGNORE_ALL);
+            Location there = new Location(found.get(), null, null);
+            if (diff.isEmpty()) {
+                return Optional.of(RiskItem.of(RiskCategory.ALREADY_SYNCED, ElementKind.FILE, path,
+                        UpstreamChange.MODIFIED, here, there, TargetState.RELOCATED, evidence,
+                        List.of("repo2's " + found.get() + " matches this file drafted in ." + to + " syntax")));
             }
             List<String> details = new ArrayList<>();
-            details.add("repo2 has it as " + found.get() + ": re-write this change in ." + to + " syntax");
-            String head = ctx.text(Side.HEAD, file.newPath()).orElse("");
-            details.addAll(lineDiff(ctx.text(Side.BASELINE, file.oldPath()).orElse(""), head));
-            details.addAll(suggestion(from, to, head, file.addedLines()));
-            return Optional.of(RiskItem.of(RiskCategory.TEMPLATE_CONVERTED, ElementKind.FILE, path, change(file),
-                    upstream, target, TargetState.RELOCATED, evidence, details));
+            details.add("repo2 has it as " + found.get() + ": - = this file drafted in ." + to + " syntax, + = repo2's");
+            details.addAll(diff);
+            return Optional.of(RiskItem.of(RiskCategory.TEMPLATE_CONVERTED, ElementKind.FILE, path,
+                    UpstreamChange.MODIFIED, here, there, TargetState.RELOCATED, evidence, details));
         }
-        // A new upstream template in a format repo2 dropped entirely: it has to be written in the new one.
-        boolean converts = targetHasExtension.computeIfAbsent(to, ext -> hasExtension(ctx, ext))
-                && !targetHasExtension.computeIfAbsent(from, ext -> hasExtension(ctx, ext));
-        if (file.change() == ChangedFile.Change.ADDED && converts) {
-            List<String> details = new ArrayList<>();
-            details.add("new ." + from + " file; repo2 has no ." + from + " files but uses ." + to + ": write it as ."
-                    + to);
-            String head = ctx.text(Side.HEAD, file.newPath()).orElse("");
-            details.addAll(lineDiff("", head));
-            details.addAll(suggestion(from, to, head, file.addedLines()));
-            return Optional.of(RiskItem.of(RiskCategory.TEMPLATE_CONVERTED, ElementKind.FILE, path, change(file),
-                    upstream, null, TargetState.ABSENT, evidence, details));
+        // A template in a format repo2 dropped entirely: it has to be written in the new one.
+        boolean converts = repo2HasExtension.computeIfAbsent(to, ext -> hasExtension(ctx, ext))
+                && !repo2HasExtension.computeIfAbsent(from, ext -> hasExtension(ctx, ext));
+        if (!converts) {
+            return Optional.empty();
         }
-        return Optional.empty();
+        List<String> details = new ArrayList<>();
+        details.add("repo2 has no ." + from + " files but uses ." + to + ": write it as ." + to + " (draft below)");
+        details.addAll(lineDiff(draft, 1, "", 1, RawTextComparator.DEFAULT).stream()
+                .map(l -> l.startsWith("- ") ? "≈ " + l.substring(2) : l).toList());
+        return Optional.of(RiskItem.of(RiskCategory.TEMPLATE_CONVERTED, ElementKind.FILE, path, UpstreamChange.ADDED,
+                here, null, TargetState.MISSING, evidence, details));
     }
 
-    /**
-     * {@code ≈ L3: <p>Due: ${invoice.dueDate}</p>}: the added Velocity lines drafted in FreeMarker syntax — a hint
-     * for the port, not a translation to trust.
-     */
-    private static List<String> suggestion(String from, String to, String head, List<Integer> addedLines) {
-        if (!from.equals("vm") || !to.equals("ftl") || addedLines.isEmpty()) {
-            return List.of();
+    /** repo1's text in the target syntax where a converter exists; unchanged otherwise. */
+    private static String draft(String from, String to, String text) {
+        if (!from.equals("vm") || !to.equals("ftl")) {
+            return text;
         }
-        List<String> converted = VelocityToFreemarker.convert(head.lines().toList());
-        List<String> lines = new ArrayList<>();
-        for (int line : addedLines) {
-            if (line <= converted.size() && lines.size() < MAX_MATCH_LINES && !converted.get(line - 1).isBlank()) {
-                lines.add("≈ L" + line + ": " + converted.get(line - 1).strip());
-            }
-        }
-        return lines;
+        return String.join("\n", VelocityToFreemarker.convert(text.lines().toList())) + "\n";
     }
 
     private static boolean hasExtension(AnalysisContext ctx, String extension) {
         String suffix = "." + extension;
-        return ctx.paths(Side.TARGET).stream().anyMatch(p -> p.toLowerCase(Locale.ROOT).endsWith(suffix));
+        return ctx.paths(Side.REPO2).stream().anyMatch(p -> p.toLowerCase(Locale.ROOT).endsWith(suffix));
     }
 
     /** The same-named candidate sharing the longest directory tail with {@code path}. */
@@ -167,21 +199,65 @@ public class FileRiskAnalyzer {
         return n;
     }
 
-    /** {@code - L4: old} / {@code + L4: new} per changed line (histogram diff), capped like API matches. */
-    static List<String> lineDiff(String before, String after) {
-        RawText a = new RawText(before.getBytes(StandardCharsets.UTF_8));
-        RawText b = new RawText(after.getBytes(StandardCharsets.UTF_8));
+    // ---------------------------------------------------------------- any other file
+
+    /**
+     * Same path: the line diff. Only in repo1: the nearest same-named repo2 file (the migration moved it) — identical
+     * is synced, different is diffed — else TARGET_MISSING.
+     */
+    private Optional<RiskItem> otherFile(AnalysisContext ctx, ChangedFile file, Set<String> matched) {
+        String path = file.newPath();
+        Location here = new Location(path, null, null);
+        String mine = ctx.text(Side.REPO1, path).orElse(null);
+        if (file.oldPath() != null) {
+            String theirs = ctx.text(Side.REPO2, file.oldPath()).orElse(null);
+            return Optional.of(RiskItem.of(RiskCategory.NON_JAVA_FILE, ElementKind.FILE, path, UpstreamChange.MODIFIED,
+                    here, new Location(file.oldPath(), null, null), TargetState.MODIFIED, List.of(),
+                    mine == null || theirs == null ? List.of("binary file: content differs")
+                            : lineDiff(mine, 1, theirs, 1, RawTextComparator.DEFAULT)));
+        }
+        Optional<String> moved = closest(ctx.repo2PathsNamed(path.substring(path.lastIndexOf('/') + 1)), path)
+                .filter(p -> !ctx.paths(Side.REPO1).contains(p)); // repo1's own file at that path is no move
+        if (moved.isEmpty()) {
+            return Optional.of(RiskItem.of(RiskCategory.TARGET_MISSING, ElementKind.FILE, path, UpstreamChange.ADDED,
+                    here, null, TargetState.MISSING, List.of(), List.of("repo2 has no file with this name")));
+        }
+        matched.add(moved.get());
+        Location there = new Location(moved.get(), null, null);
+        List<String> evidence = List.of("same file name in repo2: " + moved.get());
+        if (ctx.contentId(Side.REPO1, path).equals(ctx.contentId(Side.REPO2, moved.get()))) {
+            return Optional.of(RiskItem.of(RiskCategory.ALREADY_SYNCED, ElementKind.FILE, path, UpstreamChange.MODIFIED,
+                    here, there, TargetState.RELOCATED, evidence, List.of("repo2 has it at " + moved.get() + ", identical")));
+        }
+        String theirs = ctx.text(Side.REPO2, moved.get()).orElse(null);
+        return Optional.of(RiskItem.of(RiskCategory.NON_JAVA_FILE, ElementKind.FILE, path, UpstreamChange.MODIFIED,
+                here, there, TargetState.RELOCATED, evidence,
+                mine == null || theirs == null ? List.of("binary file: content differs")
+                        : lineDiff(mine, 1, theirs, 1, RawTextComparator.DEFAULT)));
+    }
+
+    // ---------------------------------------------------------------- line diffs
+
+    /** {@code - L4: repo1's line} / {@code + L4: repo2's line} per changed line (histogram diff), capped. */
+    static List<String> lineDiff(String repo1, int repo1FirstLine, String repo2, int repo2FirstLine) {
+        return lineDiff(repo1, repo1FirstLine, repo2, repo2FirstLine, RawTextComparator.DEFAULT);
+    }
+
+    static List<String> lineDiff(String repo1, int repo1FirstLine, String repo2, int repo2FirstLine,
+                                 RawTextComparator comparator) {
+        RawText a = new RawText(repo1.getBytes(StandardCharsets.UTF_8));
+        RawText b = new RawText(repo2.getBytes(StandardCharsets.UTF_8));
         List<String> lines = new ArrayList<>();
         int count = 0;
-        for (Edit edit : new HistogramDiff().diff(RawTextComparator.DEFAULT, a, b)) {
+        for (Edit edit : new HistogramDiff().diff(comparator, a, b)) {
             for (int i = edit.getBeginA(); i < edit.getEndA(); i++) {
                 if (count++ < MAX_MATCH_LINES) {
-                    lines.add("- L" + (i + 1) + ": " + a.getString(i).strip());
+                    lines.add("- L" + (repo1FirstLine + i) + ": " + a.getString(i).strip());
                 }
             }
             for (int i = edit.getBeginB(); i < edit.getEndB(); i++) {
                 if (count++ < MAX_MATCH_LINES) {
-                    lines.add("+ L" + (i + 1) + ": " + b.getString(i).strip());
+                    lines.add("+ L" + (repo2FirstLine + i) + ": " + b.getString(i).strip());
                 }
             }
         }
@@ -191,61 +267,14 @@ public class FileRiskAnalyzer {
         return lines;
     }
 
-    private RiskItem config(AnalysisContext ctx, ChangedFile file, RiskCategory category, ElementKind kind) {
-        String before = ctx.text(Side.BASELINE, file.oldPath()).orElse(null);
-        String after = ctx.text(Side.HEAD, file.newPath()).orElse(null);
-        String target = ctx.text(Side.TARGET, file.path()).orElse(null);
-        List<String> details;
-        try {
-            details = ConfigDiff.pomLines(before, after, target);
-        } catch (RuntimeException e) {
-            // Unparseable on one side (a templated yml, a broken pom): still HIGH, just without key detail.
-            details = List.of("could not compare keys: " + e.getMessage());
-        }
-        if (details.isEmpty()) {
-            details = List.of("formatting or comments only");
-        }
-        return RiskItem.of(category, kind, file.path(), change(file), new Location(file.path(), null, null),
-                target == null ? null : new Location(file.path(), null, null), null, List.of(), details);
-    }
+    // ---------------------------------------------------------------- API rules
 
-    /** Byte comparison with repo2 at the same path: identical means the upstream version can simply be copied. */
-    private Optional<RiskItem> otherFile(AnalysisContext ctx, ChangedFile file) {
-        Optional<String> inTarget = ctx.contentId(Side.TARGET, file.path());
-        Location upstream = new Location(file.path(), null, null);
-        Location target = inTarget.isPresent() ? upstream : null;
-        if (file.change() == ChangedFile.Change.DELETED) {
-            return inTarget.map(id -> RiskItem.of(RiskCategory.DELETED_UPSTREAM, ElementKind.FILE, file.path(),
-                    UpstreamChange.DELETED, upstream, target, TargetState.UNCHANGED, List.of(), List.of()));
-        }
-        if (file.change() == ChangedFile.Change.ADDED) {
-            return Optional.of(inTarget.isPresent()
-                    ? item(RiskLevel.MEDIUM, file, upstream, target, TargetState.MODIFIED,
-                    "repo2 already has a file at this path")
-                    : item(RiskLevel.LOW, file, upstream, null, TargetState.ABSENT, "new file"));
-        }
-        if (inTarget.isEmpty()) {
-            return Optional.of(item(RiskLevel.MEDIUM, file, upstream, null, TargetState.MISSING,
-                    "not at this path in repo2 — moved or deleted by the migration"));
-        }
-        boolean unchanged = inTarget.equals(ctx.contentId(Side.BASELINE, file.oldPath()));
-        return Optional.of(unchanged
-                ? item(RiskLevel.LOW, file, upstream, target, TargetState.UNCHANGED, "repo2 still has the baseline version")
-                : item(RiskLevel.MEDIUM, file, upstream, target, TargetState.MODIFIED, "repo2 changed this file too"));
-    }
-
-    private static RiskItem item(RiskLevel level, ChangedFile file, Location upstream, Location target,
-                                 TargetState state, String detail) {
-        return RiskItem.of(level, RiskCategory.NON_JAVA_FILE, ElementKind.FILE, file.path(), change(file),
-                upstream, target, state, List.of(), List.of(detail));
-    }
-
-    /** Only lines repo1 added since the baseline: code repo2 already migrated is not flagged again. */
+    /** Only repo1's lines that repo2's same-path file lacks (every line of a file only repo1 has). */
     private List<RiskItem> apiUsage(AnalysisContext ctx, ChangedFile file) {
-        if (file.change() == ChangedFile.Change.DELETED || file.addedLines().isEmpty() || rules.isEmpty()) {
+        if (file.newPath() == null || file.addedLines().isEmpty() || rules.isEmpty()) {
             return List.of();
         }
-        Optional<String> text = ctx.text(Side.HEAD, file.newPath());
+        Optional<String> text = ctx.text(Side.REPO1, file.newPath());
         if (text.isEmpty()) {
             return List.of();
         }
@@ -269,18 +298,10 @@ public class FileRiskAnalyzer {
             if (first != null) {
                 String hint = rule.rule().hint() == null ? rule.rule().id() : rule.rule().id() + ": " + rule.rule().hint();
                 items.add(RiskItem.of(RiskCategory.MIGRATION_API, ElementKind.FILE,
-                        file.newPath() + " [" + rule.rule().id() + "]", change(file),
+                        file.newPath() + " [" + rule.rule().id() + "]", UpstreamChange.MODIFIED,
                         new Location(file.newPath(), first, null), null, null, List.of(hint), matches));
             }
         }
         return items;
-    }
-
-    private static UpstreamChange change(ChangedFile file) {
-        return switch (file.change()) {
-            case ADDED -> UpstreamChange.ADDED;
-            case DELETED -> UpstreamChange.DELETED;
-            case MODIFIED, RENAMED -> UpstreamChange.MODIFIED;
-        };
     }
 }

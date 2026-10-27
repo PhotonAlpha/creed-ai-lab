@@ -34,13 +34,8 @@ import java.util.TreeSet;
 import java.util.UUID;
 
 /**
- * RefactoringMiner's AST diff for one side of an analysis, in the shape its own Monaco viewer renders:
- * side {@code A} = repo1 baseline -> repo1 head (what to sync), side {@code B} = repo1 head -> repo2 head (what the
- * sync has to bridge: the upstream code next to where the migration put it). Same file subset as the analysis.
- *
- * <p>Side B is <em>not</em> the analysis's second RefactoringMiner run (baseline -> repo2): that one shares its
- * left side with run A so the two can be cross-checked, which is right for deciding a level but wrong for reading —
- * a reviewer porting a change wants repo1's current code on the left, not the baseline's.
+ * RefactoringMiner's AST diff of an analysis — repo1 on the left, repo2 (both repo2s) on the right — in the shape its
+ * own Monaco viewer renders. Same file subset as the analysis.
  *
  * <p>The viewer config comes from RefactoringMiner's {@link MonacoCore#makeDiffConfig()} unchanged, so the page
  * shows exactly what RefactoringMiner's web diff shows (moved / updated / deleted / inserted, "moved to file",
@@ -50,11 +45,10 @@ import java.util.UUID;
 @Slf4j
 public class DiffViewService {
 
-    public enum Side { A, B }
-
     /**
      * One file in the diff, for navigation. {@code status}: MODIFIED (a pair RefactoringMiner mapped), ADDED (only
-     * on the right — a new upstream file on side A) or DELETED (only on the left); the last two have one empty side.
+     * on the right — only repo2 has it) or DELETED (only on the left — only repo1 has it); the last two have one
+     * empty side.
      * {@code text}: a non-Java file (config, template ...) shown as a plain line diff — RefactoringMiner reads Java only.
      */
     public record FileDiff(int index, String left, String right, boolean moved, String status, boolean text) {
@@ -64,7 +58,7 @@ public class DiffViewService {
     record TextPair(String left, String right, String leftText, String rightText) {
     }
 
-    /** All file pairs of one side; {@link #config} renders one of them. */
+    /** All file pairs; {@link #config} renders one of them. */
     public static final class DiffSet {
         private final DirComparator comparator;
         private final ProjectASTDiff project;
@@ -83,8 +77,7 @@ public class DiffViewService {
                 ASTDiff d = comparator.getASTDiff(i);
                 list.add(new FileDiff(i, d.getSrcPath(), d.getDstPath(), comparator.isMoveDiff(i), "MODIFIED", false));
             }
-            // DirComparator only lists mapped pairs; a file that exists on one side only would be invisible, and
-            // on side A every file of a new upstream module is exactly that.
+            // DirComparator only lists mapped pairs; a file that exists on one side only would be invisible.
             for (String path : new TreeSet<>(comparator.getAddedFilesName())) {
                 list.add(new FileDiff(list.size(), null, path, false, "ADDED", false));
             }
@@ -222,7 +215,7 @@ public class DiffViewService {
     private final MigrationRiskService analysis;
     private final MigrationRiskProperties properties;
     private final JsonMapper json;
-    /** Paging through files re-requests the same side; computing it again each time would redo the AST diff. */
+    /** Paging through files re-requests the same set; computing it again each time would redo the AST diff. */
     private final Map<String, DiffSet> cache = Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, DiffSet> eldest) {
@@ -231,35 +224,30 @@ public class DiffViewService {
     });
 
     /**
-     * The non-Java files of the change set: A = baseline -> HEAD of each; B = HEAD -> repo2's counterpart — the same
-     * path, else the converted one ({@code x.vm} -> {@code x.ftl}, by {@code extension-mappings}) at the same path or
-     * the nearest same-named file. Binary files have no text on either side and are left out.
+     * The non-Java files that differ: repo1's file next to repo2's — the same path, else the converted one
+     * ({@code x.vm} -> {@code x.ftl}, by {@code extension-mappings}) or the nearest same-named file; a file only repo2
+     * has is shown on the right alone. Binary files have no text on either side and are left out.
      */
-    private List<TextPair> textPairs(MigrationRiskService.Trees trees, Side side) {
+    private List<TextPair> textPairs(MigrationRiskService.Trees trees) {
         List<TextPair> pairs = new ArrayList<>();
         for (ChangedFile f : trees.changes()) {
-            if (f.isJava()) {
-                continue;
-            }
-            if (side == Side.A) {
-                String before = f.oldPath() == null ? null : trees.baseline().read(f.oldPath()).orElse(null);
-                String after = f.newPath() == null ? null : trees.head().read(f.newPath()).orElse(null);
-                if (before != null || after != null) {
-                    pairs.add(new TextPair(f.oldPath() != null ? f.oldPath() : f.newPath(),
-                            f.newPath() != null ? f.newPath() : f.oldPath(), before, after));
-                }
+            if (f.isJava() || f.change() == ChangedFile.Change.RENAMED) {
                 continue;
             }
             if (f.newPath() == null) {
-                continue; // deleted upstream: no HEAD version to put next to repo2's
-            }
-            String head = trees.head().read(f.newPath()).orElse(null);
-            if (head == null) {
+                String there = trees.repo2().read(f.oldPath()).orElse(null);
+                if (there != null) {
+                    pairs.add(new TextPair(f.oldPath(), f.oldPath(), null, there));
+                }
                 continue;
             }
-            String counterpart = counterpart(trees.target(), f.newPath());
-            pairs.add(new TextPair(f.newPath(), counterpart != null ? counterpart : f.newPath(), head,
-                    counterpart == null ? null : trees.target().read(counterpart).orElse(null)));
+            String mine = trees.repo1().read(f.newPath()).orElse(null);
+            if (mine == null) {
+                continue;
+            }
+            String counterpart = f.oldPath() != null ? f.oldPath() : counterpart(trees.repo2(), f.newPath());
+            pairs.add(new TextPair(f.newPath(), counterpart != null ? counterpart : f.newPath(), mine,
+                    counterpart == null ? null : trees.repo2().read(counterpart).orElse(null)));
         }
         return pairs;
     }
@@ -271,14 +259,11 @@ public class DiffViewService {
         int dot = path.lastIndexOf('.');
         String to = dot < 0 || dot < path.lastIndexOf('/') ? null
                 : properties.extensionMappings().get(path.substring(dot + 1).toLowerCase(Locale.ROOT));
-        if (to == null) {
-            return null;
+        String name = to == null ? path : path.substring(0, dot + 1) + to;
+        if (target.contentId(name).isPresent()) {
+            return name;
         }
-        String converted = path.substring(0, dot + 1) + to;
-        if (target.contentId(converted).isPresent()) {
-            return converted;
-        }
-        List<String> named = target.pathsByFileName().getOrDefault(converted.substring(converted.lastIndexOf('/') + 1), List.of());
+        List<String> named = target.pathsByFileName().getOrDefault(name.substring(name.lastIndexOf('/') + 1), List.of());
         return named.isEmpty() ? null : named.getFirst();
     }
 
@@ -287,108 +272,19 @@ public class DiffViewService {
     }
 
     /**
-     * Side B of a non-Java file against an explicit repo2 file — a config key repo2 keeps in
+     * A non-Java file against an explicit repo2 file — a config key repo2 keeps in
      * {@code config/application.yml} of repo2B, say, where the same-path lookup finds nothing. Two file reads, no
      * RefactoringMiner, so it is not cached.
      */
     public TextView text(Inputs in, String headPath, String targetPath, int index) {
         return analysis.withTrees(in, trees -> {
-            TextPair pair = new TextPair(headPath, targetPath, trees.head().read(headPath).orElse(null),
-                    trees.target().read(targetPath).orElse(null));
+            TextPair pair = new TextPair(headPath, targetPath, trees.repo1().read(headPath).orElse(null),
+                    trees.repo2().read(targetPath).orElse(null));
             String status = pair.leftText() == null ? "ADDED" : pair.rightText() == null ? "DELETED" : "MODIFIED";
             FileDiff file = new FileDiff(index, pair.leftText() == null ? null : headPath,
                     pair.rightText() == null ? null : targetPath, false, status, true);
             return new TextView(file, DiffSet.textConfig(file, pair, json));
         });
-    }
-
-    /**
-     * The three versions of one file side by side — repo1 baseline, repo1 HEAD, repo2 — with whole-line marks:
-     * lines repo1 changed since the baseline ({@code upstream}), lines the migration changed ({@code migration}),
-     * and on the baseline, lines both touched ({@code both}): where a sync needs a real merge.
-     *
-     * @param file   repo1 HEAD's path (or the baseline's, for a file deleted upstream)
-     * @param target repo2's file; null = the same path, else its converted name ({@code extension-mappings})
-     */
-    public ThreeWay threeWay(Inputs in, String file, String target) {
-        return analysis.withTrees(in, trees -> {
-            ChangedFile change = trees.changes().stream()
-                    .filter(f -> file.equals(f.newPath()) || file.equals(f.oldPath())).findFirst().orElse(null);
-            String basePath = change == null ? file : change.oldPath();
-            String headPath = change == null ? file : change.newPath();
-            String targetPath = target != null && !target.isBlank() ? target
-                    : counterpart(trees.target(), headPath != null ? headPath : file);
-            String base = basePath == null ? null : trees.baseline().read(basePath).orElse(null);
-            String head = headPath == null ? null : trees.head().read(headPath).orElse(null);
-            String there = targetPath == null ? null : trees.target().read(targetPath).orElse(null);
-            List<int[]> upstream = changedLines(base, head);
-            List<int[]> migration = changedLines(base, there);
-            List<Map<String, Object>> baseMarks = new ArrayList<>();
-            int baseLines = base == null ? 0 : (int) base.lines().count();
-            for (int line = 1; line <= baseLines; line++) {
-                boolean up = touches(upstream, line);
-                boolean mig = touches(migration, line);
-                if (up || mig) {
-                    baseMarks.add(Map.of("line", line, "kind", up && mig ? "both" : up ? "upstream" : "migration"));
-                }
-            }
-            List<Map<String, Object>> panes = List.of(
-                    pane("baseline", basePath, base, baseMarks),
-                    pane("head", headPath, head, marks(upstream, "upstream")),
-                    pane("repo2", targetPath, there, marks(migration, "migration")));
-            String repo = trees.target() instanceof com.creed.resource.migrationrisk.source.MergedTree merged && targetPath != null
-                    ? merged.origin(targetPath).orElse(null) : null;
-            return new ThreeWay(basePath, headPath, targetPath, repo,
-                    json.writeValueAsString(Map.of("panes", panes)).replace("</", "<\\/"));
-        });
-    }
-
-    public record ThreeWay(String baselinePath, String headPath, String targetPath, String repo, String data) {
-    }
-
-    private static Map<String, Object> pane(String key, String path, String content, List<Map<String, Object>> marks) {
-        Map<String, Object> pane = new LinkedHashMap<>();
-        pane.put("key", key);
-        pane.put("path", path);
-        pane.put("missing", content == null);
-        pane.put("content", content == null ? "" : content);
-        pane.put("marks", marks);
-        return pane;
-    }
-
-    /** Edits of {@code after} against {@code before} as [beginA, endA, beginB, endB], 0-based, end exclusive. */
-    private static List<int[]> changedLines(String before, String after) {
-        if (before == null || after == null) {
-            return List.of();
-        }
-        List<int[]> edits = new ArrayList<>();
-        for (Edit e : new HistogramDiff().diff(RawTextComparator.DEFAULT,
-                new RawText(before.getBytes(StandardCharsets.UTF_8)), new RawText(after.getBytes(StandardCharsets.UTF_8)))) {
-            edits.add(new int[]{e.getBeginA(), e.getEndA(), e.getBeginB(), e.getEndB()});
-        }
-        return edits;
-    }
-
-    /** {@code line} is 1-based; an insertion marks the baseline line it follows, so an added block still shows. */
-    private static boolean touches(List<int[]> edits, int line) {
-        for (int[] e : edits) {
-            int begin = e[0];
-            int end = e[1] == e[0] ? e[0] + 1 : e[1];
-            if (line - 1 >= begin && line - 1 < end) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static List<Map<String, Object>> marks(List<int[]> edits, String kind) {
-        List<Map<String, Object>> marks = new ArrayList<>();
-        for (int[] e : edits) {
-            for (int line = e[2]; line < e[3]; line++) {
-                marks.add(Map.of("line", line + 1, "kind", kind));
-            }
-        }
-        return marks;
     }
 
     public DiffViewService(MigrationRiskService analysis, MigrationRiskProperties properties, JsonMapper json) {
@@ -401,8 +297,8 @@ public class DiffViewService {
      * Keyed by the inputs as given. Use commit ids (the analysis response has them) rather than branch names
      * for anything that should not change under the reader; folders are re-read only on a cache miss.
      */
-    public DiffSet diff(Inputs in, Side side) {
-        String key = in + "|" + side;
+    public DiffSet diff(Inputs in) {
+        String key = in.toString();
         DiffSet cached = cache.get(key);
         if (cached != null) {
             return cached;
@@ -410,16 +306,13 @@ public class DiffViewService {
         DiffSet computed = analysis.withTrees(in, trees -> {
             Path workspace = properties.workDir().resolve("view-" + UUID.randomUUID());
             try {
-                Exported exported = analysis.export(workspace, trees.baseline(), trees.head(), trees.target(),
-                        trees.changes(), new ArrayList<>());
-                Path left = side == Side.A ? exported.before() : exported.upstream();
-                Path right = side == Side.A ? exported.upstream() : exported.target();
+                Exported exported = analysis.export(workspace, trees.repo1(), trees.repo2(), trees.changes(),
+                        new ArrayList<>());
                 long started = System.nanoTime();
                 ProjectASTDiff project = new GitHistoryRefactoringMinerImpl()
-                        .diffAtDirectories(left.toRealPath(), right.toRealPath());
-                DiffSet set = new DiffSet(new DirComparator(project, diffs -> diffs), project,
-                        textPairs(trees, side), json);
-                log.info("diff view {}: {} file pairs, {} refactorings in {} ms", side, set.files().size(),
+                        .diffAtDirectories(exported.repo1().toRealPath(), exported.repo2().toRealPath());
+                DiffSet set = new DiffSet(new DirComparator(project, diffs -> diffs), project, textPairs(trees), json);
+                log.info("diff view: {} file pairs, {} refactorings in {} ms", set.files().size(),
                         set.refactoringCount(), (System.nanoTime() - started) / 1_000_000);
                 return set;
             } catch (IOException e) {

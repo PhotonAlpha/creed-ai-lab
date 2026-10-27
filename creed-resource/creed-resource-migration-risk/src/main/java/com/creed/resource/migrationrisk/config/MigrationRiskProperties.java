@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 /**
  * @param allowedRoots         repositories are opened only under one of these (resolved to real paths)
  * @param workDir              scratch space for the exported comparison trees
- * @param maxChangedFiles      upstream ranges with more changed files are refused
+ * @param maxChangedFiles      more differing files than this between repo1 and repo2 are refused
  * @param maxCandidatesPerName how many same-named repo2 files are pulled in to catch a moved class
  * @param directoryExcludes    folder mode: directory names skipped at any depth (VCS data, build output, IDE files)
  * @param configFiles          regex over repo paths: besides Spring's application* / bootstrap* files (always),
@@ -69,7 +69,7 @@ public record MigrationRiskProperties(
     public record Jobs(@Min(1) int concurrency, @Min(0) int queue, java.time.Duration retention) {
     }
 
-    /** One migration-sensitive API: an added upstream line matching {@code pattern} is flagged HIGH. */
+    /** One migration-sensitive API: a repo1 line repo2 lacks matching {@code pattern} is flagged MIGRATION_API. */
     public record ApiRule(@NotBlank String id, @NotBlank String pattern, String hint) {
 
         public Pattern compiled() {

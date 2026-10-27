@@ -12,8 +12,8 @@ import java.util.Set;
 
 /**
  * One RefactoringMiner run, indexed by what was there <em>before</em>: "the method at lines 6-12 of
- * {@code OrderProcessor.java}" -> where it went. Built once for the upstream run and once for the migration
- * run; both share the baseline tree, so a "before" location means the same code in both.
+ * {@code OrderProcessor.java}" -> where it went. "Before" is repo1, "after" is repo2: the index answers where repo2
+ * keeps a repo1 method or class that is not at the same place.
  *
  * <p>Methods are matched by file and overlapping line range rather than by signature: RefactoringMiner
  * prints signatures as {@code public handle(orderId String) : String}, a format nothing else here uses,
@@ -24,7 +24,7 @@ public final class RefactoringIndex {
     /** The method now lives elsewhere, intact: renamed, moved to another class, pulled up / pushed down. */
     static final Set<String> METHOD_RELOCATIONS = Set.of(
             "RENAME_METHOD", "MOVE_OPERATION", "MOVE_AND_RENAME_OPERATION", "PULL_UP_OPERATION", "PUSH_DOWN_OPERATION");
-    /** The method's code was redistributed: there is no single place to apply an upstream edit to. */
+    /** The method's code was redistributed: there is no single counterpart to sync into. */
     static final Set<String> METHOD_SPLITS = Set.of(
             "EXTRACT_OPERATION", "EXTRACT_AND_MOVE_OPERATION", "INLINE_OPERATION", "MOVE_AND_INLINE_OPERATION",
             "SPLIT_OPERATION", "MERGE_OPERATION");

@@ -54,7 +54,7 @@ public final class ApiErrors {
         return new ApiError(status, body);
     }
 
-    /** The page marks the input the failure belongs to — a wrong baseline is not a wrong repository. */
+    /** The page marks the input the failure belongs to — a wrong branch is not a wrong repository. */
     static List<Map<String, String>> field(String field, String message) {
         return field == null ? null : List.of(Map.of("field", field, "message", message));
     }

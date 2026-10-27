@@ -49,26 +49,28 @@ class ConfigDiffTest {
 
     @Test
     void pomDependenciesManagedVersionsAndScopes() {
-        String before = """
-                <project><dependencies>
-                  <dependency><groupId>g</groupId><artifactId>a</artifactId></dependency>
-                </dependencies></project>
-                """;
-        String after = """
+        String repo1 = """
                 <project><dependencies>
                   <dependency><groupId>g</groupId><artifactId>a</artifactId><version>2</version></dependency>
                   <dependency><groupId>g</groupId><artifactId>t</artifactId><version>1</version><scope>test</scope></dependency>
                 </dependencies></project>
                 """;
-        assertThat(ConfigDiff.pomLines(before, after, before)).containsExactly(
-                "~ dependency g:a: managed -> 2  (repo2: managed)",
-                "+ dependency g:t = 1 (test)  (repo2: missing)");
+        String repo2 = """
+                <project><dependencies>
+                  <dependency><groupId>g</groupId><artifactId>a</artifactId></dependency>
+                  <dependency><groupId>g</groupId><artifactId>new</artifactId><version>4</version></dependency>
+                </dependencies></project>
+                """;
+        assertThat(ConfigDiff.pomLines(repo1, repo2)).containsExactly(
+                "~ dependency g:a: 2  (repo2: managed)",
+                "- dependency g:t = 1 (test)  (repo2: missing)",
+                "+ dependency g:new = 4");
     }
 
     @Test
     void pomWithADoctypeIsRefused() {
         assertThatThrownBy(() -> ConfigDiff.pomLines(
-                "<!DOCTYPE p [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><project>&x;</project>", "<project/>", null))
+                "<!DOCTYPE p [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><project>&x;</project>", "<project/>"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

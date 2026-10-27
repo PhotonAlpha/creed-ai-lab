@@ -13,7 +13,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
-class DirectoryDiffTest {
+class TreeDiffTest {
 
     @TempDir
     Path tmp;
@@ -44,7 +44,7 @@ class DirectoryDiffTest {
         write(b, "y/Empty.txt", "");
         write(b, "target/Build.class", "b");
 
-        List<ChangedFile> changes = DirectoryDiff.diff(new DirectoryTree(a, Set.of("target")),
+        List<ChangedFile> changes = TreeDiff.diff(new DirectoryTree(a, Set.of("target")),
                 new DirectoryTree(b, Set.of("target")));
 
         assertThat(changes).extracting(ChangedFile::change, ChangedFile::oldPath, ChangedFile::newPath).containsExactly(

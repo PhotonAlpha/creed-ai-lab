@@ -18,33 +18,21 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 /**
- * The Java half: every class / method / field set repo1 changed since the baseline, looked up in repo2.
+ * The Java half: every class of a Java file that differs, looked up in repo2 and compared member by member.
  *
- * <p>For each element the question is the same — where is the baseline version of it in repo2, and is it
- * still the baseline version? In order:
- * <ol>
- *   <li>the migration run extracted / inlined / split the method -> {@code TARGET_SPLIT};</li>
- *   <li>it renamed or moved the method -> {@code RELOCATED};</li>
- *   <li>otherwise find the class (the migration's class moves, then the same path, then a file with the
- *       same name) and the method by signature in it: identical -> {@code AUTO_SYNC}, different ->
- *       {@code BOTH_MODIFIED}, absent -> {@code TARGET_MISSING}.</li>
- * </ol>
+ * <p>For a repo1 class: where is it in repo2 — RefactoringMiner's class move, the same path, a file with the same
+ * name — and then per method: identical (normalized: formatting, Javadoc and imports do not count) -> nothing;
+ * different -> {@code CONTENT_DIFFERS}; not there -> RefactoringMiner's method move ({@code RELOCATED}, or
+ * {@code ALREADY_SYNCED} when the moved method is identical), its extract / inline ({@code TARGET_SPLIT}), else
+ * {@code TARGET_MISSING}. What only repo2 has is {@code ONLY_IN_REPO2}. A class found nowhere is {@code TARGET_MISSING}.
  */
 @Component
 public class JavaRiskAnalyzer {
-
-    /** Where the baseline version of an element is in repo2, and in what state. */
-    private record Outcome(RiskCategory category, TargetState state, Location target,
-                           List<String> evidence, List<String> details) {
-    }
 
     /** A class found (or not) in repo2. */
     private record ClassLookup(TypeInfo type, String qualifiedName, String path, boolean relocated,
@@ -60,328 +48,212 @@ public class JavaRiskAnalyzer {
     }
 
     public List<RiskItem> analyze(AnalysisContext ctx) {
+        List<ChangedFile> java = ctx.changes().stream().filter(ChangedFile::isJava).toList();
         List<RiskItem> items = new ArrayList<>();
-        items.addAll(upstreamRefactorings(ctx));
-
-        List<ChangedFile> javaChanges = ctx.changes().stream().filter(ChangedFile::isJava).toList();
-        Map<String, String> pairs = new LinkedHashMap<>();
-        Set<String> added = new LinkedHashSet<>();
-        Set<String> deleted = new LinkedHashSet<>();
-        for (ChangedFile f : javaChanges) {
-            switch (f.change()) {
-                case MODIFIED, RENAMED -> pairs.put(f.oldPath(), f.newPath());
-                case ADDED -> added.add(f.newPath());
-                case DELETED -> deleted.add(f.oldPath());
-            }
-        }
-        // git's rename detection gives up once a moved file also changed a lot; the upstream run still knows
-        // the class moved. Pair those files so their methods are compared instead of reported as one
-        // deleted and one added class.
-        for (ClassMove move : ctx.upstream().classMoves().values()) {
-            String from = move.refactoring().before().stream().map(CodeLocation::path)
-                    .filter(deleted::contains).findFirst().orElse(null);
-            if (from != null && added.contains(move.path())) {
-                pairs.put(from, move.path());
-                deleted.remove(from);
-                added.remove(move.path());
-            }
-        }
-
-        int total = pairs.size() + deleted.size() + added.size();
+        // repo2 files some repo1 class was found in: a file only repo2 has is not "extra" when it is where a class went
+        Set<String> matched = new HashSet<>();
         int done = 0;
-        for (Map.Entry<String, String> pair : pairs.entrySet()) {
-            ctx.progress().step(Progress.Stage.JAVA, done++, total, pair.getValue());
-            items.addAll(comparePair(ctx, pair.getKey(), pair.getValue()));
-        }
-        for (String path : deleted) {
-            ctx.progress().step(Progress.Stage.JAVA, done++, total, path);
-            ctx.structure(Side.BASELINE, path).ifPresent(s -> s.topLevelTypes()
-                    .forEach(t -> deletedClass(ctx, t, path).ifPresent(items::add)));
-        }
-        for (String path : added) {
-            ctx.progress().step(Progress.Stage.JAVA, done++, total, path);
-            ctx.structure(Side.HEAD, path).ifPresent(s -> s.topLevelTypes()
-                    .forEach(t -> items.add(addedClass(ctx, t, path))));
-        }
-        return items;
-    }
-
-    // ---------------------------------------------------------------- upstream refactorings
-
-    /**
-     * One item per structural refactoring repo1 itself made. The element is the baseline one; its repo2
-     * state says whether the refactoring can be replayed there as is.
-     */
-    private List<RiskItem> upstreamRefactorings(AnalysisContext ctx) {
-        List<RiskItem> items = new ArrayList<>();
-        for (DetectedRefactoring r : ctx.upstream().refactorings()) {
-            if (!r.structural() || r.before().isEmpty()) {
+        for (ChangedFile f : java) {
+            if (f.newPath() == null) {
                 continue;
             }
-            CodeLocation before = r.before().getFirst();
-            CodeLocation after = r.after().isEmpty() ? null : r.after().getFirst();
-            Location upstream = after == null ? null : new Location(after.path(), after.startLine(), after.element());
-
-            Optional<Map.Entry<TypeInfo, MethodInfo>> method = before.kind().equals("METHOD_DECLARATION")
-                    ? methodAt(ctx, before) : Optional.empty();
-            String element;
-            ElementKind kind;
-            Outcome outcome;
-            if (method.isPresent()) {
-                TypeInfo type = method.get().getKey();
-                MethodInfo m = method.get().getValue();
-                element = type.qualifiedName() + "#" + m.key();
-                kind = ElementKind.METHOD;
-                outcome = locateMethod(ctx, type, m, before.path());
-            } else {
-                element = before.element();
-                kind = ElementKind.CLASS;
-                ClassLookup c = locateClass(ctx, before.element(), before.path());
-                outcome = c.found()
-                        ? new Outcome(null, c.relocated() ? TargetState.RELOCATED : TargetState.UNCHANGED,
-                        c.location(), c.evidence(), List.of())
-                        : missingClass(c);
+            ctx.progress().step(Progress.Stage.JAVA, done++, java.size(), f.newPath());
+            items.addAll(compareFile(ctx, f.newPath(), f.oldPath(), matched));
+        }
+        for (ChangedFile f : java) {
+            if (f.newPath() != null || matched.contains(f.oldPath())) {
+                continue;
             }
-            RiskCategory category = outcome.state() == TargetState.MISSING || outcome.state() == TargetState.SPLIT
-                    ? outcome.category() : RiskCategory.UPSTREAM_REFACTORING;
-            List<String> evidence = new ArrayList<>();
-            evidence.add("upstream: " + r.description());
-            evidence.addAll(outcome.evidence());
-            items.add(RiskItem.of(category, kind, element, UpstreamChange.REFACTORED, upstream, outcome.target(),
-                    outcome.state(), evidence, outcome.details()));
+            ctx.progress().step(Progress.Stage.JAVA, done++, java.size(), f.oldPath());
+            ctx.structure(Side.REPO2, f.oldPath()).ifPresent(s -> s.topLevelTypes().forEach(t -> items.add(
+                    RiskItem.of(RiskCategory.ONLY_IN_REPO2, ElementKind.CLASS, t.qualifiedName(), UpstreamChange.DELETED,
+                            null, new Location(f.oldPath(), t.startLine(), t.qualifiedName()), TargetState.EXTRA,
+                            List.of(), List.of("only repo2 has this class")))));
         }
         return items;
     }
 
-    private static Optional<Map.Entry<TypeInfo, MethodInfo>> methodAt(AnalysisContext ctx, CodeLocation at) {
-        return ctx.structure(Side.BASELINE, at.path()).flatMap(s -> s.types().values().stream()
-                .flatMap(t -> t.methods().values().stream()
-                        .filter(m -> at.overlaps(at.path(), m.startLine(), m.endLine()))
-                        .map(m -> Map.entry(t, m)))
-                .findFirst());
-    }
-
-    // ---------------------------------------------------------------- a modified file
-
-    private List<RiskItem> comparePair(AnalysisContext ctx, String oldPath, String newPath) {
-        Optional<JavaStructure> before = ctx.structure(Side.BASELINE, oldPath);
-        Optional<JavaStructure> after = ctx.structure(Side.HEAD, newPath);
-        if (before.isEmpty() || after.isEmpty()) {
+    /** {@code repo2Path}: repo2's file at the same path (or an exact rename); null when repo2 has none there. */
+    private List<RiskItem> compareFile(AnalysisContext ctx, String path, String repo2Path, Set<String> matched) {
+        Optional<JavaStructure> mine = ctx.structure(Side.REPO1, path);
+        if (mine.isEmpty()) {
             return List.of();
         }
+        Optional<JavaStructure> theirs = ctx.structure(Side.REPO2, repo2Path);
         List<RiskItem> items = new ArrayList<>();
-        Set<String> mappedHeadTypes = new HashSet<>();
-        for (TypeInfo baseType : before.get().types().values()) {
-            Optional<TypeInfo> headType = counterpart(ctx, baseType, before.get(), after.get());
-            if (headType.isEmpty()) {
-                deletedClass(ctx, baseType, oldPath).ifPresent(items::add);
+        Set<String> seen = new HashSet<>();
+        for (TypeInfo type : mine.get().types().values()) {
+            Optional<TypeInfo> same = theirs.flatMap(t -> counterpart(ctx, type, mine.get(), t));
+            ClassLookup c = same.map(t -> new ClassLookup(t, t.qualifiedName(), repo2Path, false, false, List.<String>of()))
+                    .orElseGet(() -> locateClass(ctx, type.qualifiedName(), path));
+            if (!c.found()) {
+                // a nested class goes with its outer one: report only what is missing at the top
+                if (type.topLevel() || !missingOuter(ctx, type, mine.get(), path)) {
+                    items.add(missingClass(type, path, c));
+                }
                 continue;
             }
-            mappedHeadTypes.add(headType.get().qualifiedName());
-            items.addAll(compareType(ctx, baseType, oldPath, headType.get(), newPath));
+            matched.add(c.path());
+            seen.add(c.path() + "#" + c.qualifiedName());
+            items.addAll(compareType(ctx, type, path, c));
         }
-        for (TypeInfo headType : after.get().types().values()) {
-            if (!mappedHeadTypes.contains(headType.qualifiedName())) {
-                items.add(addedClass(ctx, headType, newPath));
-            }
-        }
+        // classes in repo2's same-path file that no repo1 class matched
+        theirs.ifPresent(t -> t.topLevelTypes().stream()
+                .filter(other -> !seen.contains(repo2Path + "#" + other.qualifiedName()))
+                .forEach(other -> items.add(RiskItem.of(RiskCategory.ONLY_IN_REPO2, ElementKind.CLASS,
+                        other.qualifiedName(), UpstreamChange.DELETED, new Location(path, null, null),
+                        new Location(repo2Path, other.startLine(), other.qualifiedName()), TargetState.EXTRA, List.of(),
+                        List.of("only repo2 has this class in this file")))));
         return items;
     }
 
-    /** The head version of a baseline type: same name, an upstream class move, or the file's only top-level type. */
-    private static Optional<TypeInfo> counterpart(AnalysisContext ctx, TypeInfo baseType,
-                                                  JavaStructure before, JavaStructure after) {
-        Optional<TypeInfo> same = after.type(baseType.qualifiedName());
+    private boolean missingOuter(AnalysisContext ctx, TypeInfo nested, JavaStructure mine, String path) {
+        String outer = nested.qualifiedName().substring(0, nested.qualifiedName().lastIndexOf('.'));
+        return mine.type(outer).isPresent() && !locateClass(ctx, outer, path).found();
+    }
+
+    /** repo2's version of a repo1 type in the same-path file: same name, a class move, or the file's only top-level type. */
+    private static Optional<TypeInfo> counterpart(AnalysisContext ctx, TypeInfo type, JavaStructure mine, JavaStructure theirs) {
+        Optional<TypeInfo> same = theirs.type(type.qualifiedName());
         if (same.isPresent()) {
             return same;
         }
-        Optional<TypeInfo> moved = ctx.upstream().classMove(baseType.qualifiedName())
-                .flatMap(m -> after.type(m.qualifiedName()));
+        Optional<TypeInfo> moved = ctx.refactorings().classMove(type.qualifiedName())
+                .flatMap(m -> theirs.type(m.qualifiedName()));
         if (moved.isPresent()) {
             return moved;
         }
-        if (baseType.topLevel() && before.topLevelTypes().size() == 1 && after.topLevelTypes().size() == 1) {
-            return Optional.of(after.topLevelTypes().getFirst());
+        if (type.topLevel() && mine.topLevelTypes().size() == 1 && theirs.topLevelTypes().size() == 1) {
+            return Optional.of(theirs.topLevelTypes().getFirst());
         }
         return Optional.empty();
     }
 
-    private List<RiskItem> compareType(AnalysisContext ctx, TypeInfo baseType, String oldPath,
-                                       TypeInfo headType, String newPath) {
+    private static RiskItem missingClass(TypeInfo type, String path, ClassLookup c) {
+        Location at = new Location(path, type.startLine(), type.qualifiedName());
+        return c.split()
+                ? RiskItem.of(RiskCategory.TARGET_SPLIT, ElementKind.CLASS, type.qualifiedName(), UpstreamChange.ADDED,
+                at, null, TargetState.SPLIT, c.evidence(), List.of())
+                : RiskItem.of(RiskCategory.TARGET_MISSING, ElementKind.CLASS, type.qualifiedName(), UpstreamChange.ADDED,
+                at, null, TargetState.MISSING, c.evidence(), List.of("the class is not in repo2"));
+    }
+
+    // ---------------------------------------------------------------- one class, member by member
+
+    private List<RiskItem> compareType(AnalysisContext ctx, TypeInfo type, String path, ClassLookup c) {
         List<RiskItem> items = new ArrayList<>();
-        for (MethodInfo base : baseType.methods().values()) {
-            Optional<MethodInfo> head = headType.method(base.key());
-            String element = headType.qualifiedName() + "#" + base.key();
-            if (head.isPresent()) {
-                if (!head.get().normalized().equals(base.normalized())) {
-                    Outcome o = locateMethod(ctx, baseType, base, oldPath);
-                    items.add(RiskItem.of(o.category(), ElementKind.METHOD, element, UpstreamChange.MODIFIED,
-                            new Location(newPath, head.get().startLine(), element), o.target(), o.state(),
-                            o.evidence(), o.details()));
+        TypeInfo there = c.type();
+        String text = ctx.text(Side.REPO1, path).orElse("");
+        String thereText = ctx.text(Side.REPO2, c.path()).orElse("");
+        boolean differs = false;
+        for (MethodInfo m : type.methods().values()) {
+            String element = type.qualifiedName() + "#" + m.key();
+            Location at = new Location(path, m.startLine(), element);
+            Optional<MethodInfo> same = there.method(m.key());
+            if (same.isPresent()) {
+                if (!same.get().normalized().equals(m.normalized())) {
+                    differs = true;
+                    items.add(RiskItem.of(RiskCategory.CONTENT_DIFFERS, ElementKind.METHOD, element,
+                            UpstreamChange.MODIFIED, at, new Location(c.path(), same.get().startLine(),
+                                    c.qualifiedName() + "#" + m.key()), TargetState.MODIFIED, c.evidence(),
+                            FileRiskAnalyzer.lineDiff(lines(text, m), m.startLine(),
+                                    lines(thereText, same.get()), same.get().startLine())));
                 }
-            } else if (!ctx.upstream().coversBefore(oldPath, base.startLine(), base.endLine())) {
-                deletedMethod(ctx, baseType, base, oldPath).ifPresent(items::add);
+                continue;
+            }
+            differs = true;
+            items.add(elsewhere(ctx, type, m, path, c, element, at));
+        }
+        for (MethodInfo m : there.methods().values()) {
+            if (type.method(m.key()).isEmpty() && !type.hasMethodNamed(m.name())
+                    && !ctx.refactorings().coversAfter(c.path(), m.startLine(), m.endLine())) {
+                differs = true;
+                String element = type.qualifiedName() + "#" + m.key();
+                items.add(RiskItem.of(RiskCategory.ONLY_IN_REPO2, ElementKind.METHOD, element, UpstreamChange.DELETED,
+                        new Location(path, type.startLine(), element),
+                        new Location(c.path(), m.startLine(), c.qualifiedName() + "#" + m.key()), TargetState.EXTRA,
+                        c.evidence(), List.of("only repo2 has this method")));
             }
         }
-        for (MethodInfo head : headType.methods().values()) {
-            if (baseType.method(head.key()).isEmpty()
-                    && !ctx.upstream().coversAfter(newPath, head.startLine(), head.endLine())) {
-                items.add(addedMethod(ctx, baseType, oldPath, headType, head, newPath));
-            }
+        if (!type.fields().equals(there.fields())) {
+            differs = true;
+            List<String> details = new ArrayList<>();
+            type.fields().stream().filter(f -> !there.fields().contains(f)).forEach(f -> details.add("- " + f));
+            there.fields().stream().filter(f -> !type.fields().contains(f)).forEach(f -> details.add("+ " + f));
+            items.add(RiskItem.of(c.relocated() ? RiskCategory.RELOCATED : RiskCategory.CONTENT_DIFFERS,
+                    ElementKind.FIELDS, type.qualifiedName(), UpstreamChange.MODIFIED,
+                    new Location(path, type.startLine(), type.qualifiedName()), c.location(),
+                    c.relocated() ? TargetState.RELOCATED : TargetState.MODIFIED, c.evidence(), details));
         }
-        if (!baseType.fields().equals(headType.fields())) {
-            items.add(changedFields(ctx, baseType, oldPath, headType, newPath));
+        if (c.relocated()) {
+            // one line for the class itself: where it went, and whether anything in it still differs
+            items.add(RiskItem.of(differs ? RiskCategory.RELOCATED : RiskCategory.ALREADY_SYNCED, ElementKind.CLASS,
+                    type.qualifiedName(), UpstreamChange.MODIFIED,
+                    new Location(path, type.startLine(), type.qualifiedName()), c.location(), TargetState.RELOCATED,
+                    c.evidence(), List.of(differs ? "repo2 has this class at " + c.path() + ", with differences"
+                            : "repo2 has this class at " + c.path() + ", identical")));
         }
         return items;
     }
 
-    // ---------------------------------------------------------------- element kinds
-
-    private Optional<RiskItem> deletedMethod(AnalysisContext ctx, TypeInfo baseType, MethodInfo base, String path) {
-        Outcome o = locateMethod(ctx, baseType, base, path);
-        if (o.state() == TargetState.MISSING || o.state() == TargetState.SPLIT) {
-            return Optional.empty(); // already gone from repo2 as well: nothing to sync
+    /** A repo1 method its class's repo2 version does not declare by that signature. */
+    private RiskItem elsewhere(AnalysisContext ctx, TypeInfo type, MethodInfo m, String path, ClassLookup c,
+                               String element, Location at) {
+        Optional<Move> split = ctx.refactorings().methodSplit(path, m.startLine(), m.endLine());
+        if (split.isPresent()) {
+            return RiskItem.of(RiskCategory.TARGET_SPLIT, ElementKind.METHOD, element, UpstreamChange.MODIFIED, at,
+                    location(split.get().after()), TargetState.SPLIT,
+                    List.of("repo2: " + split.get().refactoring().description()), List.of());
         }
-        String element = baseType.qualifiedName() + "#" + base.key();
-        return Optional.of(RiskItem.of(RiskCategory.DELETED_UPSTREAM, ElementKind.METHOD, element,
-                UpstreamChange.DELETED, new Location(path, base.startLine(), element), o.target(), o.state(),
-                o.evidence(), o.details()));
-    }
-
-    private RiskItem addedMethod(AnalysisContext ctx, TypeInfo baseType, String oldPath,
-                                 TypeInfo headType, MethodInfo head, String newPath) {
-        String element = headType.qualifiedName() + "#" + head.key();
-        Location upstream = new Location(newPath, head.startLine(), element);
-        ClassLookup c = locateClass(ctx, baseType.qualifiedName(), oldPath);
-        if (!c.found()) {
-            Outcome o = missingClass(c);
-            return RiskItem.of(o.category(), ElementKind.METHOD, element, UpstreamChange.ADDED, upstream, null,
-                    o.state(), o.evidence(), List.of("the class it was added to is not in repo2"));
+        Optional<Move> moved = ctx.refactorings().methodRelocation(path, m.startLine(), m.endLine());
+        if (moved.isPresent()) {
+            CodeLocation after = moved.get().after();
+            Optional<MethodInfo> there = after == null ? Optional.empty() : methodAt(ctx, after);
+            boolean same = there.isPresent() && there.get().normalized()
+                    .replace(there.get().name() + "(", "(").equals(m.normalized().replace(m.name() + "(", "("));
+            return RiskItem.of(same ? RiskCategory.ALREADY_SYNCED : RiskCategory.RELOCATED, ElementKind.METHOD, element,
+                    UpstreamChange.MODIFIED, at, location(after), TargetState.RELOCATED,
+                    List.of("repo2: " + moved.get().refactoring().description()),
+                    same ? List.of() : there.map(t -> FileRiskAnalyzer.lineDiff(
+                            lines(ctx.text(Side.REPO1, path).orElse(""), m), m.startLine(),
+                            lines(ctx.text(Side.REPO2, after.path()).orElse(""), t), t.startLine())).orElse(List.of()));
         }
-        Optional<MethodInfo> existing = c.type().method(head.key());
-        if (existing.isPresent()) {
-            return RiskItem.of(RiskCategory.BOTH_MODIFIED, ElementKind.METHOD, element, UpstreamChange.ADDED,
-                    upstream, new Location(c.path(), existing.get().startLine(), c.qualifiedName() + "#" + head.key()),
-                    TargetState.MODIFIED, c.evidence(), List.of("repo2 already declares a method with this signature"));
+        if (c.type().hasMethodNamed(m.name())) {
+            List<String> overloads = c.type().methods().values().stream()
+                    .filter(o -> o.name().equals(m.name())).map(MethodInfo::key).toList();
+            return RiskItem.of(RiskCategory.CONTENT_DIFFERS, ElementKind.METHOD, element, UpstreamChange.MODIFIED, at,
+                    c.location(), TargetState.MODIFIED, c.evidence(),
+                    List.of("signature differs in repo2: " + String.join(", ", overloads)));
         }
-        return RiskItem.of(c.relocated() ? RiskCategory.RELOCATED : RiskCategory.NEW_CODE, ElementKind.METHOD,
-                element, UpstreamChange.ADDED, upstream, c.location(),
-                c.relocated() ? TargetState.RELOCATED : TargetState.ABSENT, c.evidence(), List.of());
-    }
-
-    private RiskItem changedFields(AnalysisContext ctx, TypeInfo baseType, String oldPath,
-                                   TypeInfo headType, String newPath) {
-        String element = headType.qualifiedName();
-        List<String> details = new ArrayList<>();
-        headType.fields().stream().filter(f -> !baseType.fields().contains(f)).forEach(f -> details.add("+ " + f));
-        baseType.fields().stream().filter(f -> !headType.fields().contains(f)).forEach(f -> details.add("- " + f));
-        Location upstream = new Location(newPath, headType.startLine(), element);
-        ClassLookup c = locateClass(ctx, baseType.qualifiedName(), oldPath);
-        if (!c.found()) {
-            Outcome o = missingClass(c);
-            return RiskItem.of(o.category(), ElementKind.FIELDS, element, UpstreamChange.MODIFIED, upstream, null,
-                    o.state(), o.evidence(), details);
-        }
-        boolean unchanged = c.type().fields().equals(baseType.fields());
-        RiskCategory category = !unchanged ? RiskCategory.BOTH_MODIFIED
-                : c.relocated() ? RiskCategory.RELOCATED : RiskCategory.AUTO_SYNC;
-        TargetState state = !unchanged ? TargetState.MODIFIED
-                : c.relocated() ? TargetState.RELOCATED : TargetState.UNCHANGED;
-        return RiskItem.of(category, ElementKind.FIELDS, element, UpstreamChange.MODIFIED, upstream, c.location(),
-                state, c.evidence(), details);
-    }
-
-    private Optional<RiskItem> deletedClass(AnalysisContext ctx, TypeInfo baseType, String path) {
-        ClassLookup c = locateClass(ctx, baseType.qualifiedName(), path);
-        if (!c.found()) {
-            return Optional.empty();
-        }
-        return Optional.of(RiskItem.of(RiskCategory.DELETED_UPSTREAM, ElementKind.CLASS, baseType.qualifiedName(),
-                UpstreamChange.DELETED, new Location(path, baseType.startLine(), baseType.qualifiedName()),
-                c.location(), c.relocated() ? TargetState.RELOCATED : TargetState.UNCHANGED, c.evidence(), List.of()));
-    }
-
-    private RiskItem addedClass(AnalysisContext ctx, TypeInfo headType, String path) {
-        Location upstream = new Location(path, headType.startLine(), headType.qualifiedName());
-        Optional<TypeInfo> existing = ctx.structure(Side.TARGET, path).flatMap(s -> s.type(headType.qualifiedName()));
-        if (existing.isPresent()) {
-            return RiskItem.of(RiskCategory.BOTH_MODIFIED, ElementKind.CLASS, headType.qualifiedName(),
-                    UpstreamChange.ADDED, upstream, new Location(path, existing.get().startLine(), headType.qualifiedName()),
-                    TargetState.MODIFIED, List.of(), List.of("repo2 already has a class with this name at this path"));
-        }
-        return RiskItem.of(RiskCategory.NEW_CODE, ElementKind.CLASS, headType.qualifiedName(), UpstreamChange.ADDED,
-                upstream, null, TargetState.ABSENT, List.of(), List.of());
+        return RiskItem.of(RiskCategory.TARGET_MISSING, ElementKind.METHOD, element, UpstreamChange.ADDED, at,
+                c.location(), TargetState.MISSING, c.evidence(), List.of("the class is in repo2, the method is not"));
     }
 
     // ---------------------------------------------------------------- repo2 lookups
 
-    /** Where the baseline method {@code base} of {@code baseType} (in {@code path}) is in repo2. */
-    private Outcome locateMethod(AnalysisContext ctx, TypeInfo baseType, MethodInfo base, String path) {
-        Optional<Move> split = ctx.migration().methodSplit(path, base.startLine(), base.endLine());
-        if (split.isPresent()) {
-            return new Outcome(RiskCategory.TARGET_SPLIT, TargetState.SPLIT, location(split.get().after()),
-                    List.of("migration: " + split.get().refactoring().description()), List.of());
-        }
-        Optional<Move> moved = ctx.migration().methodRelocation(path, base.startLine(), base.endLine());
-        if (moved.isPresent()) {
-            return new Outcome(RiskCategory.RELOCATED, TargetState.RELOCATED, location(moved.get().after()),
-                    List.of("migration: " + moved.get().refactoring().description()), List.of());
-        }
-        ClassLookup c = locateClass(ctx, baseType.qualifiedName(), path);
-        if (!c.found()) {
-            return missingClass(c);
-        }
-        Optional<MethodInfo> target = c.type().method(base.key());
-        if (target.isPresent()) {
-            Location at = new Location(c.path(), target.get().startLine(), c.qualifiedName() + "#" + base.key());
-            if (target.get().normalized().equals(base.normalized())) {
-                return c.relocated()
-                        ? new Outcome(RiskCategory.RELOCATED, TargetState.RELOCATED, at, c.evidence(), List.of())
-                        : new Outcome(RiskCategory.AUTO_SYNC, TargetState.UNCHANGED, at, c.evidence(), List.of());
-            }
-            return new Outcome(RiskCategory.BOTH_MODIFIED, TargetState.MODIFIED, at, c.evidence(),
-                    List.of("repo2 changed this method since the baseline"));
-        }
-        if (c.type().hasMethodNamed(base.name())) {
-            List<String> overloads = c.type().methods().values().stream()
-                    .filter(m -> m.name().equals(base.name())).map(MethodInfo::key).toList();
-            return new Outcome(RiskCategory.BOTH_MODIFIED, TargetState.MODIFIED, c.location(), c.evidence(),
-                    List.of("signature differs in repo2: " + String.join(", ", overloads)));
-        }
-        return new Outcome(RiskCategory.TARGET_MISSING, TargetState.MISSING, c.location(), c.evidence(),
-                List.of("the class is in repo2, the method is not"));
-    }
-
-    private static Outcome missingClass(ClassLookup c) {
-        return c.split()
-                ? new Outcome(RiskCategory.TARGET_SPLIT, TargetState.SPLIT, null, c.evidence(), List.of())
-                : new Outcome(RiskCategory.TARGET_MISSING, TargetState.MISSING, null, c.evidence(),
-                List.of("the class is not in repo2"));
-    }
-
     /**
-     * The migration run's class moves first (they are what RefactoringMiner proved), then the same path,
-     * then any repo2 file with the same file name — which catches a package move RefactoringMiner did not
-     * report because only part of the class came along.
+     * RefactoringMiner's class moves first (what it proved), then the same path, then any repo2 file with the same
+     * file name — which catches a package move RefactoringMiner did not report because only part of the class
+     * came along.
      */
-    private ClassLookup locateClass(AnalysisContext ctx, String qualifiedName, String baselinePath) {
-        Optional<ClassMove> move = ctx.migration().classMove(qualifiedName);
+    private ClassLookup locateClass(AnalysisContext ctx, String qualifiedName, String path) {
+        Optional<ClassMove> move = ctx.refactorings().classMove(qualifiedName);
         if (move.isPresent()) {
             ClassMove m = move.get();
-            Optional<TypeInfo> type = ctx.structure(Side.TARGET, m.path()).flatMap(s -> s.type(m.qualifiedName()));
+            Optional<TypeInfo> type = ctx.structure(Side.REPO2, m.path()).flatMap(s -> s.type(m.qualifiedName()));
             if (type.isPresent()) {
                 return new ClassLookup(type.get(), m.qualifiedName(), m.path(), true, false,
-                        List.of("migration: " + m.refactoring().description()));
+                        List.of("repo2: " + m.refactoring().description()));
             }
         }
-        Optional<TypeInfo> samePath = ctx.structure(Side.TARGET, baselinePath).flatMap(s -> s.type(qualifiedName));
+        Optional<TypeInfo> samePath = ctx.structure(Side.REPO2, path).flatMap(s -> s.type(qualifiedName));
         if (samePath.isPresent()) {
-            return new ClassLookup(samePath.get(), qualifiedName, baselinePath, false, false, List.of());
+            return new ClassLookup(samePath.get(), qualifiedName, path, false, false, List.of());
         }
-        String fileName = baselinePath.substring(baselinePath.lastIndexOf('/') + 1);
+        String fileName = path.substring(path.lastIndexOf('/') + 1);
         String simpleName = RefactoringIndex.simpleName(qualifiedName);
-        for (String candidate : ctx.targetPathsNamed(fileName)) {
-            Optional<JavaStructure> s = ctx.structure(Side.TARGET, candidate);
+        for (String candidate : ctx.repo2PathsNamed(fileName)) {
+            Optional<JavaStructure> s = ctx.structure(Side.REPO2, candidate);
             Optional<TypeInfo> exact = s.flatMap(st -> st.type(qualifiedName));
             if (exact.isPresent()) {
                 return new ClassLookup(exact.get(), qualifiedName, candidate, true, false,
@@ -395,9 +267,25 @@ public class JavaRiskAnalyzer {
                                 + " (not reported as a move: check it is the same class)"));
             }
         }
-        Optional<DetectedRefactoring> split = ctx.migration().classSplit(qualifiedName);
+        Optional<DetectedRefactoring> split = ctx.refactorings().classSplit(qualifiedName);
         return new ClassLookup(null, qualifiedName, null, false, split.isPresent(),
-                split.map(r -> List.of("migration: " + r.description())).orElse(List.of()));
+                split.map(r -> List.of("repo2: " + r.description())).orElse(List.of()));
+    }
+
+    /** The repo2 method RefactoringMiner points at (its own names cannot be looked up: match by line range). */
+    private static Optional<MethodInfo> methodAt(AnalysisContext ctx, CodeLocation at) {
+        return ctx.structure(Side.REPO2, at.path()).flatMap(s -> s.types().values().stream()
+                .flatMap(t -> t.methods().values().stream())
+                .filter(m -> at.overlaps(at.path(), m.startLine(), m.endLine()))
+                .findFirst());
+    }
+
+    /** The method's own lines of its file, for a line diff. */
+    private static String lines(String text, MethodInfo m) {
+        List<String> all = text.lines().toList();
+        int from = Math.max(0, m.startLine() - 1);
+        int to = Math.min(all.size(), m.endLine());
+        return from >= to ? "" : String.join("\n", all.subList(from, to)) + "\n";
     }
 
     private static Location location(CodeLocation at) {

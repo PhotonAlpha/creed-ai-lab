@@ -16,7 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
-/** The Thymeleaf diff page renders RefactoringMiner's viewer config for both sides, in both modes. */
+/** The Thymeleaf diff page renders RefactoringMiner's viewer config, repo1 vs repo2, in both modes. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -29,11 +29,11 @@ class DiffViewTest {
     DemoRepositories demo;
 
     @Test
-    void sideBComparesRepo1HeadWithWhereTheMigrationMovedTheMethod() throws Exception {
+    void repo1IsComparedWithWhereRepo2MovedTheMethod() throws Exception {
         var d = demo.view();
         mvc.perform(get("/api/migration-risk/view/diff")
-                        .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
-                        .param("side", "B").param("file", "src/main/java/com/acme/shop/order/OrderProcessor.java")
+                        .param("repo1Path", d.repo1Path()).param("repo2Path", d.repo2Path())
+                        .param("file", "src/main/java/com/acme/shop/order/OrderProcessor.java")
                         .header("Accept-Language", "en"))
                 .andExpect(status().isOk())
                 .andExpect(view().name("diff"))
@@ -41,19 +41,18 @@ class DiffViewTest {
                         containsString("mymonaco({"),
                         containsString("src/main/java/com/acme/shop/order/processing/OrderProcessor.java"),
                         containsString("handle renamed to process"),
-                        containsString("repo1 vs repo2: repo1 HEAD → repo2 HEAD"),
-                        // the left side is repo1 HEAD (with the upstream edit), not the baseline
+                        containsString("repo1 HEAD (left) vs repo2 HEAD (right)"),
                         containsString("orderId.trim().replace("),
                         containsString("left-container-"),
                         containsString("/api/migration-risk/view/assets/monaco.js"))));
     }
 
     @Test
-    void sideAShowsTheUpstreamChangeWithPrevNext() throws Exception {
+    void prevNextPageThroughTheFiles() throws Exception {
         var d = demo.view();
         mvc.perform(get("/api/migration-risk/view/diff")
-                        .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
-                        .param("side", "A").param("index", "0").header("Accept-Language", "zh-CN"))
+                        .param("repo1Path", d.repo1Path()).param("repo2Path", d.repo2Path())
+                        .param("index", "0").header("Accept-Language", "zh-CN"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(allOf(
                         containsString("mymonaco({"),
@@ -61,60 +60,57 @@ class DiffViewTest {
                         containsString("index=1"))));
     }
 
-    /** RefactoringMiner only pairs modified files; a new upstream file is shown one-sided, whole file inserted. */
+    /** RefactoringMiner only pairs files present on both sides; a file only repo1 has is shown one-sided. */
     @Test
-    void anAddedFileIsShownOneSided() throws Exception {
+    void aFileOnlyRepo1HasIsShownOneSided() throws Exception {
         var d = demo.view();
         mvc.perform(get("/api/migration-risk/view/diff")
-                        .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
-                        .param("side", "A").param("file", "src/main/java/com/acme/shop/report/SalesReport.java")
+                        .param("repo1Path", d.repo1Path()).param("repo2Path", d.repo2Path())
+                        .param("file", "src/main/java/com/acme/shop/report/SalesReport.java")
                         .header("Accept-Language", "en"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(allOf(
-                        containsString("\"kind\":\"inserted\""),
-                        containsString("\"file\":\"src/main/java/com/acme/shop/report/SalesReport.java\""),
-                        containsString("new file"))));
+                        containsString("\"kind\":\"deleted\""),
+                        containsString("\"file\":\"src/main/java/com/acme/shop/report/SalesReport.java\""))));
     }
 
     @Test
     void folderModeRendersToo() throws Exception {
         var d = demo.view();
         mvc.perform(get("/api/migration-risk/view/diff").param("mode", "DIRECTORY")
-                        .param("baselinePath", d.baselineFolder()).param("repo1Path", d.repo1Folder())
-                        .param("repo2Path", d.repo2Folder()).param("side", "B"))
+                        .param("repo1Path", d.repo1Folder()).param("repo2Path", d.repo2Folder()))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("mymonaco({")));
     }
 
-    /** RefactoringMiner reads Java only; config and templates get a plain line diff in the same viewer. */
+    /** RefactoringMiner reads Java only; config, templates and Camel routes get a plain line diff in the same viewer. */
     @Test
-    void configAndTemplatesGetALineDiff() throws Exception {
+    void configTemplatesAndRoutesGetALineDiff() throws Exception {
         var d = demo.view();
-        // repo1 HEAD's application.yml next to repo2's
         mvc.perform(get("/api/migration-risk/view/diff")
-                        .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
-                        .param("side", "B").param("file", "src/main/resources/application.yml"))
+                        .param("repo1Path", d.repo1Path()).param("repo2Path", d.repo2Path())
+                        .param("file", "src/main/resources/application.yml"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(allOf(containsString("max-items: 20"), containsString("max-items: 10"),
                         containsString("\"kind\":\"inserted\""), containsString("\"kind\":\"deleted\""))));
+        mvc.perform(get("/api/migration-risk/view/diff")
+                        .param("repo1Path", d.repo1Path()).param("repo2Path", d.repo2Path())
+                        .param("file", "src/main/resources/camel/order-route.xml"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(allOf(containsString("CamelHttpMethod"), containsString("<filter>"))));
         // with repo2B, invoice.vm is put next to its FreeMarker version
         mvc.perform(get("/api/migration-risk/view/diff")
-                        .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
+                        .param("repo1Path", d.repo1Path()).param("repo2Path", d.repo2Path())
                         .param("repo2bPath", d.repo2bPath())
-                        .param("side", "B").param("file", "src/main/resources/templates/invoice.vm"))
+                        .param("file", "src/main/resources/templates/invoice.vm"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(allOf(containsString("src/main/resources/templates/invoice.ftl"),
                         containsString("<#list invoice.lines as line>"), containsString("$!invoice.customer"))));
-        // the upstream change of a template
+        // a file without a diff is an error, not silently the first file
         mvc.perform(get("/api/migration-risk/view/diff")
-                        .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
-                        .param("side", "A").param("file", "src/main/resources/templates/invoice.vm"))
-                .andExpect(content().string(containsString("Due: $invoice.dueDate")));
-        // a file the side does not have is an error, not silently the first file
-        mvc.perform(get("/api/migration-risk/view/diff")
-                        .param("repo1Path", d.repo1Path()).param("baseline", d.baseline()).param("repo2Path", d.repo2Path())
-                        .param("side", "B").param("file", "no/such/file.txt"))
-                .andExpect(content().string(containsString("no/such/file.txt has no diff on this side")));
+                        .param("repo1Path", d.repo1Path()).param("repo2Path", d.repo2Path())
+                        .param("file", "no/such/file.txt"))
+                .andExpect(content().string(containsString("no/such/file.txt has no diff")));
     }
 
     @Test
@@ -126,8 +122,7 @@ class DiffViewTest {
 
     @Test
     void aBadPathIsShownOnThePage() throws Exception {
-        mvc.perform(get("/api/migration-risk/view/diff").param("repo1Path", "/").param("baseline", "HEAD")
-                        .param("repo2Path", "/"))
+        mvc.perform(get("/api/migration-risk/view/diff").param("repo1Path", "/").param("repo2Path", "/"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(allOf(containsString("outside migration-risk.allowed-roots"),
                         not(containsString("mymonaco({")))));

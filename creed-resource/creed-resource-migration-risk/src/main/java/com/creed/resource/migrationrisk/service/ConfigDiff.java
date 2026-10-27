@@ -26,8 +26,8 @@ import java.util.regex.Pattern;
 
 /**
  * Key-level reading of the files RefactoringMiner cannot read and Boot 4 changes most: properties / yml (as
- * global key names, see {@link #globalKeys} and {@link GlobalConfigAnalyzer}) and {@code pom.xml} (diffed per file,
- * each changed key looked up in repo2's pom — a key repo2 does not have is the "renamed in Boot 4" case).
+ * global key names, see {@link #globalKeys} and {@link GlobalConfigAnalyzer}) and {@code pom.xml} (dependencies,
+ * managed versions, properties and the parent, compared with repo2's pom at the same path).
  */
 public final class ConfigDiff {
 
@@ -54,50 +54,26 @@ public final class ConfigDiff {
     }
 
     /**
-     * pom keys, {@code + key = value}, {@code - key}, {@code ~ key: old -> new}, each followed by what repo2 has:
-     * {@code (repo2: value)} or {@code (repo2: missing)}. {@code target} null = repo2 has no such file.
+     * pom keys that differ, read like {@code git diff repo1 repo2}: {@code - key = value  (repo2: missing)} (only
+     * repo1 has it), {@code + key = value} (only repo2), {@code ~ key: repo1's  (repo2: repo2's)}.
      */
-    public static List<String> pomLines(String before, String after, String target) {
-        return lines(pom(before), pom(after), target == null ? null : pom(target));
-    }
-
-    /** Every pom key repo1 changed has repo1 HEAD's value in repo2's pom (a removed key: repo2 lacks it too). */
-    public static boolean pomInSync(String before, String after, String target) {
-        if (target == null) {
-            return false;
-        }
-        Map<String, String> was = pom(before);
-        Map<String, String> now = pom(after);
-        Map<String, String> there = pom(target);
-        Set<String> keys = new LinkedHashSet<>(now.keySet());
-        keys.addAll(was.keySet());
-        return keys.stream().filter(k -> !Objects.equals(was.get(k), now.get(k)))
-                .allMatch(k -> Objects.equals(now.get(k), there.get(k)));
-    }
-
-    private static List<String> lines(Map<String, String> before, Map<String, String> after, Map<String, String> target) {
+    public static List<String> pomLines(String repo1, String repo2) {
+        Map<String, String> mine = pom(repo1);
+        Map<String, String> theirs = pom(repo2);
         List<String> lines = new ArrayList<>();
-        Set<String> keys = new LinkedHashSet<>(after.keySet());
-        keys.addAll(before.keySet());
+        Set<String> keys = new LinkedHashSet<>(mine.keySet());
+        keys.addAll(theirs.keySet());
         for (String key : keys) {
-            String old = before.get(key);
-            String now = after.get(key);
-            if (Objects.equals(old, now)) {
+            String here = mine.get(key);
+            String there = theirs.get(key);
+            if (Objects.equals(here, there)) {
                 continue;
             }
-            String change = old == null ? "+ " + key + " = " + now
-                    : now == null ? "- " + key
-                    : "~ " + key + ": " + old + " -> " + now;
-            lines.add(change + "  " + inTarget(target, key));
+            lines.add(there == null ? "- " + key + " = " + here + "  (repo2: missing)"
+                    : here == null ? "+ " + key + " = " + there
+                    : "~ " + key + ": " + here + "  (repo2: " + there + ")");
         }
         return lines;
-    }
-
-    private static String inTarget(Map<String, String> target, String key) {
-        if (target == null) {
-            return "(repo2: no such file)";
-        }
-        return target.containsKey(key) ? "(repo2: " + target.get(key) + ")" : "(repo2: missing)";
     }
 
     // ---------------------------------------------------------------- global keys

@@ -5,6 +5,7 @@ import com.creed.resource.migrationrisk.domain.ElementKind;
 import com.creed.resource.migrationrisk.domain.Location;
 import com.creed.resource.migrationrisk.domain.RiskCategory;
 import com.creed.resource.migrationrisk.domain.RiskItem;
+import com.creed.resource.migrationrisk.domain.TargetState;
 import com.creed.resource.migrationrisk.domain.UpstreamChange;
 import com.creed.resource.migrationrisk.git.ChangedFile;
 import com.creed.resource.migrationrisk.service.AnalysisContext.Side;
@@ -13,26 +14,22 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
  * Config compared key by key across <em>every</em> properties / yml file of each tree, not file by file.
  *
- * <p>A file-by-file diff answers the wrong question twice: a key repo1 moved from {@code application.yml} into
- * {@code application.properties} (or into another module, or under {@code config/}) reads as one removal plus one
- * addition, and a key repo2 keeps in a different file than repo1 — or in repo2B — reads as "missing". Here each
- * tree is reduced to {@code key -> {file -> value}} (keys named by {@link ConfigDiff#globalKeys}), and a key is an
- * upstream change only when its <em>set of values</em> changed between the baseline and HEAD. repo2 is then
- * asked the same way: does it hold exactly the new values, in any file of either repo2?
+ * <p>A file-by-file diff answers the wrong question: a key repo2 keeps in {@code application.properties} instead of
+ * {@code application.yml} (or in another module, under {@code config/}, in repo2B) reads as one removal plus one
+ * addition. Here each tree is reduced to {@code key -> {file -> value}} (keys named by {@link ConfigDiff#globalKeys}),
+ * and a key differs only when its <em>set of values</em> differs between repo1 and repo2 (both repo2s). A key repo1 has
+ * and repo2 holds only under its Spring Boot new name ({@link ConfigRenames}) is compared under that name.
  */
 @Component
 @Slf4j
@@ -65,97 +62,81 @@ public class GlobalConfigAnalyzer {
         List<ChangedFile> changed = ctx.changes().stream()
                 .filter(f -> handles(f.newPath()) || handles(f.oldPath())).toList();
         if (changed.isEmpty()) {
-            return List.of();
+            return List.of(); // every config file identical on both sides: so are the keys
         }
         ctx.progress().stage(Progress.Stage.FILES, "comparing config keys across all properties / yml files");
-        // Unchanged files have the same content id on both repo1 sides: parse each content once.
         Map<String, Object> parsed = new HashMap<>();
-        Index before = index(ctx, Side.BASELINE, parsed);
-        Index after = index(ctx, Side.HEAD, parsed);
-        Index target = index(ctx, Side.TARGET, parsed);
-        if (!target.unparseable().isEmpty()) {
-            warnings.add(target.unparseable().size() + " repo2 config file(s) could not be parsed and were left out of the"
-                    + " key comparison, e.g. " + target.unparseable().keySet().iterator().next());
+        Index mine = index(ctx, Side.REPO1, parsed);
+        Index theirs = index(ctx, Side.REPO2, parsed);
+        if (!theirs.unparseable().isEmpty()) {
+            warnings.add(theirs.unparseable().size() + " repo2 config file(s) could not be parsed and were left out of the"
+                    + " key comparison, e.g. " + theirs.unparseable().keySet().iterator().next());
         }
 
         List<RiskItem> items = new ArrayList<>();
         for (ChangedFile f : changed) {
-            String path = f.newPath() != null ? f.newPath() : f.oldPath();
-            // TreeMap: get(null) throws, and an added file has no old path.
-            String error = f.newPath() != null ? after.unparseable().get(f.newPath()) : null;
-            if (error == null && f.oldPath() != null) {
-                error = before.unparseable().get(f.oldPath());
-            }
+            String error = f.newPath() == null ? null : mine.unparseable().get(f.newPath());
             if (error != null) {
                 // A templated yml, a broken file: still HIGH, just without key detail.
-                items.add(RiskItem.of(RiskCategory.CONFIG_CHANGED, ElementKind.CONFIG, path, change(f),
-                        new Location(path, null, null), null, null, List.of(),
+                items.add(RiskItem.of(RiskCategory.CONFIG_CHANGED, ElementKind.CONFIG, f.newPath(), UpstreamChange.MODIFIED,
+                        new Location(f.newPath(), null, null), null, null, List.of(),
                         List.of("could not compare keys: " + error)));
             }
         }
 
-        Set<String> keys = new TreeSet<>(before.keys().keySet());
-        keys.addAll(after.keys().keySet());
-        int moved = 0;
+        // repo2 keys that are the new name of a repo1 key: compared there, not "only in repo2"
+        Set<String> renamedTo = new TreeSet<>();
+        for (String key : mine.keys().keySet()) {
+            if (theirs.get(key).isEmpty()) {
+                renames.renamed(key).filter(r -> !theirs.get(r).isEmpty() && mine.get(r).isEmpty()).ifPresent(renamedTo::add);
+            }
+        }
+        Set<String> keys = new TreeSet<>(mine.keys().keySet());
+        keys.addAll(theirs.keys().keySet());
         for (String key : keys) {
-            Map<String, String> was = before.get(key);
-            Map<String, String> now = after.get(key);
-            Set<String> oldValues = new TreeSet<>(was.values());
-            Set<String> newValues = new TreeSet<>(now.values());
-            if (oldValues.equals(newValues)) {
-                moved += was.keySet().equals(now.keySet()) ? 0 : 1;
+            Map<String, String> here = mine.get(key);
+            Map<String, String> there = theirs.get(key);
+            if (new TreeSet<>(here.values()).equals(new TreeSet<>(there.values())) || renamedTo.contains(key)) {
                 continue;
             }
-            items.add(item(key, was, now, oldValues, newValues, target));
+            items.add(here.isEmpty() ? onlyInRepo2(key, there) : item(key, here, there, theirs));
         }
-        if (moved > 0) {
-            warnings.add(moved + " config key(s) only moved between files upstream, values unchanged: not reported");
-        }
-        log.info("config keys: {} baseline / {} head / {} repo2, {} changed, {} moved", before.keys().size(),
-                after.keys().size(), target.keys().size(), items.size(), moved);
+        log.info("config keys: {} repo1 / {} repo2, {} differ", mine.keys().size(), theirs.keys().size(), items.size());
         return items;
     }
 
-    private RiskItem item(String key, Map<String, String> was, Map<String, String> now, Set<String> oldValues,
-                          Set<String> newValues, Index target) {
-        Map<String, String> inTarget = target.get(key);
+    private RiskItem item(String key, Map<String, String> here, Map<String, String> there, Index theirs) {
+        Set<String> values = new TreeSet<>(here.values());
         // Boot renamed the key: what repo2 holds under the new name is the answer (spring.redis -> spring.data.redis)
-        Optional<String> renamed = renames.renamed(key).filter(r -> !target.get(r).isEmpty());
-        UpstreamChange change = oldValues.isEmpty() ? UpstreamChange.ADDED
-                : newValues.isEmpty() ? UpstreamChange.DELETED : UpstreamChange.MODIFIED;
+        Optional<String> renamed = there.isEmpty() ? renames.renamed(key).filter(r -> !theirs.get(r).isEmpty())
+                : Optional.empty();
+        Map<String, String> found = renamed.map(theirs::get).orElse(there);
         List<String> details = new ArrayList<>();
-        details.add(switch (change) {
-            case ADDED -> "+ " + key + " = " + String.join(", ", newValues);
-            case DELETED -> "- " + key;
-            default -> "~ " + key + ": " + String.join(", ", oldValues) + " -> " + String.join(", ", newValues);
-        });
-        // Where repo1 changed it: files whose value differs (a key that stayed put in one file is not news).
-        Set<String> files = new TreeSet<>(was.keySet());
-        files.addAll(now.keySet());
-        List<String> changedIn = files.stream().filter(p -> !Objects.equals(was.get(p), now.get(p))).toList();
-        files("repo1: ", changedIn.stream().collect(Collectors.toMap(p -> p,
-                p -> now.containsKey(p) ? now.get(p) : "(removed)", (a, b) -> a, LinkedHashMap::new)), details);
-        if (inTarget.isEmpty() && renamed.isEmpty()) {
-            details.add("repo2: missing");
-        } else if (!inTarget.isEmpty()) {
-            files("repo2: ", inTarget, details);
-        }
+        details.add(found.isEmpty() ? "- " + key + " = " + String.join(", ", values) + "  (repo2: missing)"
+                : "~ " + key + ": " + String.join(", ", values) + "  (repo2: " + String.join(", ", new TreeSet<>(found.values())) + ")");
+        files("repo1: ", here, details);
         List<String> evidence = new ArrayList<>();
-        Map<String, String> renamedInTarget = renamed.map(target::get).orElse(Map.of());
         if (renamed.isPresent()) {
             evidence.add("renamed in Spring Boot: " + key + " -> " + renamed.get());
-            files("repo2 (" + renamed.get() + "): ", renamedInTarget, details);
+            files("repo2 (" + renamed.get() + "): ", found, details);
+        } else {
+            files("repo2: ", found, details);
         }
-        // in sync: the new values under the old name, or under the new name; a removed key: under neither
-        boolean inSync = newValues.isEmpty()
-                ? inTarget.isEmpty() && renamedInTarget.isEmpty()
-                : new TreeSet<>(inTarget.values()).equals(newValues)
-                || (inTarget.isEmpty() && new TreeSet<>(renamedInTarget.values()).equals(newValues));
-        String upstreamPath = changedIn.stream().filter(now::containsKey).findFirst().orElse(changedIn.getFirst());
-        Map<String, String> where = !inTarget.isEmpty() ? inTarget : renamedInTarget;
-        Location location = where.isEmpty() ? null : new Location(where.keySet().iterator().next(), null, null);
+        boolean inSync = renamed.isPresent() && new TreeSet<>(found.values()).equals(values);
+        Location location = found.isEmpty() ? null : new Location(found.keySet().iterator().next(), null, null);
         return RiskItem.of(inSync ? RiskCategory.CONFIG_IN_SYNC : RiskCategory.CONFIG_CHANGED, ElementKind.CONFIG, key,
-                change, new Location(upstreamPath, null, null), location, null, evidence, details);
+                found.isEmpty() ? UpstreamChange.ADDED : UpstreamChange.MODIFIED,
+                new Location(here.keySet().iterator().next(), null, null), location,
+                found.isEmpty() ? TargetState.MISSING : renamed.isPresent() ? TargetState.RELOCATED : TargetState.MODIFIED,
+                evidence, details);
+    }
+
+    private static RiskItem onlyInRepo2(String key, Map<String, String> there) {
+        List<String> details = new ArrayList<>();
+        details.add("+ " + key + " = " + String.join(", ", new TreeSet<>(there.values())));
+        files("repo2: ", there, details);
+        return RiskItem.of(RiskCategory.ONLY_IN_REPO2, ElementKind.CONFIG, key, UpstreamChange.DELETED, null,
+                new Location(there.keySet().iterator().next(), null, null), TargetState.EXTRA, List.of(), details);
     }
 
     private static void files(String prefix, Map<String, String> valueByFile, List<String> details) {
@@ -204,11 +185,4 @@ public class GlobalConfigAnalyzer {
         return new Index(keys, unparseable);
     }
 
-    private static UpstreamChange change(ChangedFile file) {
-        return switch (file.change()) {
-            case ADDED -> UpstreamChange.ADDED;
-            case DELETED -> UpstreamChange.DELETED;
-            case MODIFIED, RENAMED -> UpstreamChange.MODIFIED;
-        };
-    }
 }

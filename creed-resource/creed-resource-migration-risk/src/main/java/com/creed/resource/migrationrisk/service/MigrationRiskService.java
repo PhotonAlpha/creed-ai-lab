@@ -10,16 +10,17 @@ import com.creed.resource.migrationrisk.api.dto.AnalysisResponse.Source;
 import com.creed.resource.migrationrisk.config.MigrationRiskProperties;
 import com.creed.resource.migrationrisk.domain.DetectedRefactoring;
 import com.creed.resource.migrationrisk.domain.Location;
+import com.creed.resource.migrationrisk.domain.RiskCategory;
 import com.creed.resource.migrationrisk.domain.RiskItem;
 import com.creed.resource.migrationrisk.domain.RiskLevel;
 import com.creed.resource.migrationrisk.git.ChangedFile;
 import com.creed.resource.migrationrisk.git.GitRepositories;
 import com.creed.resource.migrationrisk.git.GitRepositories.Snapshot;
-import com.creed.resource.migrationrisk.source.DirectoryDiff;
 import com.creed.resource.migrationrisk.source.DirectoryTree;
 import com.creed.resource.migrationrisk.source.GitTree;
 import com.creed.resource.migrationrisk.source.MergedTree;
 import com.creed.resource.migrationrisk.source.SourceTree;
+import com.creed.resource.migrationrisk.source.TreeDiff;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -34,6 +35,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -42,25 +45,24 @@ import java.util.UUID;
 import java.util.function.Function;
 
 /**
- * Baseline + two RefactoringMiner runs + cross-check.
+ * repo1 HEAD compared with repo2 directly — repo2 being one repository or two (repo2A + repo2B, read as one tree).
  *
- * <p>Comparing repo1@HEAD with repo2@HEAD directly would mix two kinds of difference — what the migration
- * changed on purpose (every Jackson import, every Camel 4 API) and what the other team committed since —
- * and only the second needs syncing. Anchoring both runs on repo1@baseline separates them: the upstream
- * run says what to sync, the migration run says where each of those things went.
+ * <p>No baseline: every difference between the two code bases is reported, the migration's own rewrites included.
+ * What keeps that readable: methods and fields are compared on their normalized text (imports, formatting and
+ * Javadoc do not count), config key by key across all files, Camel XML routes by route id, a class / file repo2
+ * moved is found by RefactoringMiner or by file name, and an API-rule match alone in a file is taken as the
+ * migration's rewrite, not reported.
  *
- * <p>Only the files repo1 changed (plus repo2's files at the same paths, plus repo2 files with the same
- * name to catch moved classes) are exported for RefactoringMiner: whole repositories make it slow and
- * memory-hungry, and nothing outside the change set can affect the answer.
- *
- * <p>repo2 may be two repositories (the migration split repo1): repo2A and repo2B are then read as one
- * {@link MergedTree}, so every lookup searches both and each item's {@code target.repo} says where it was found.
- * Config is compared key by key across all files ({@link GlobalConfigAnalyzer}), and test code can be left out of
- * the whole comparison ({@code skipTests}).
+ * <p>Only the files that differ are exported for RefactoringMiner (repo1's version, repo2's, and repo2 files with
+ * the same name to catch moved classes): whole repositories make it slow and memory-hungry.
  */
 @Service
 @Slf4j
 public class MigrationRiskService {
+
+    /** Parts that are no work: an API match beside only these is the migration's own rewrite. */
+    private static final Set<RiskCategory> NO_WORK = EnumSet.of(RiskCategory.ALREADY_SYNCED, RiskCategory.CONFIG_IN_SYNC,
+            RiskCategory.ONLY_IN_REPO2, RiskCategory.MIGRATION_API);
 
     private final MigrationRiskProperties properties;
     private final RepositoryGuard guard;
@@ -68,19 +70,19 @@ public class MigrationRiskService {
     private final JavaRiskAnalyzer javaAnalyzer;
     private final FileRiskAnalyzer fileAnalyzer;
     private final GlobalConfigAnalyzer configAnalyzer;
-    private final SyncDetector syncDetector;
+    private final CamelRouteAnalyzer camelAnalyzer;
     private final IgnoreRules ignoreRules;
     private final RepositoryLocator locator;
     private final Clock clock;
 
     public MigrationRiskService(MigrationRiskProperties properties, RepositoryGuard guard, RefactoringDetector detector,
                                 JavaRiskAnalyzer javaAnalyzer, FileRiskAnalyzer fileAnalyzer,
-                                GlobalConfigAnalyzer configAnalyzer, SyncDetector syncDetector, IgnoreRules ignoreRules,
-                                RepositoryLocator locator, Clock clock) {
+                                GlobalConfigAnalyzer configAnalyzer, CamelRouteAnalyzer camelAnalyzer,
+                                IgnoreRules ignoreRules, RepositoryLocator locator, Clock clock) {
+        this.camelAnalyzer = camelAnalyzer;
         this.ignoreRules = ignoreRules;
         this.locator = locator;
         this.configAnalyzer = configAnalyzer;
-        this.syncDetector = syncDetector;
         this.properties = properties;
         this.guard = guard;
         this.detector = detector;
@@ -89,18 +91,18 @@ public class MigrationRiskService {
         this.clock = clock;
     }
 
-    /** Git mode: three commits — repo1's baseline and head, repo2's head. */
+    /** Git mode: repo1's head and repo2's (and repo2B's). */
     public AnalysisResponse analyze(AnalysisRequest request) {
         return analyze(inputs(request), Progress.NONE);
     }
 
     public static Inputs inputs(AnalysisRequest r) {
-        return Inputs.git(r.repo1Path(), r.baseline(), r.repo1Head(), r.repo2Path(), r.repo2Head(), r.repo2bPath(),
-                r.repo2bHead(), r.skipTests());
+        return Inputs.git(r.repo1Path(), r.repo1Head(), r.repo2Path(), r.repo2Head(), r.repo2bPath(), r.repo2bHead(),
+                r.skipTests());
     }
 
     public static Inputs inputs(DirectoryAnalysisRequest r) {
-        return Inputs.folders(r.baselinePath(), r.repo1Path(), r.repo2Path(), r.repo2bPath(), r.skipTests());
+        return Inputs.folders(r.repo1Path(), r.repo2Path(), r.repo2bPath(), r.skipTests());
     }
 
     /** Either mode, reporting to {@code progress} (a background job) or to nobody. */
@@ -111,11 +113,10 @@ public class MigrationRiskService {
 
     /**
      * The cheap part of an analysis, run before a background job is accepted: paths allowed, repositories
-     * open, revisions resolve. A wrong baseline is answered at once (with its field), not as a failed job.
+     * open, revisions resolve. A wrong branch is answered at once (with its field), not as a failed job.
      */
     public void validate(Inputs in) {
         if (in.mode() == Inputs.Mode.DIRECTORY) {
-            guard.check(in.baselinePath(), "baselinePath");
             guard.check(in.repo1Path(), "repo1Path");
             guard.check(in.repo2Path(), "repo2Path");
             if (in.repo2bPath() != null) {
@@ -128,7 +129,6 @@ public class MigrationRiskService {
         Path repo2bDir = in.repo2bPath() == null ? null : locator.repository(in.repo2bPath(), "repo2bPath");
         try (Git repo1 = GitRepositories.open(repo1Dir, "repo1Path"); Git repo2 = GitRepositories.open(repo2Dir, "repo2Path");
              Git repo2b = repo2bDir == null ? null : GitRepositories.open(repo2bDir, "repo2bPath")) {
-            GitRepositories.resolve(repo1, in.baseline(), "baseline");
             GitRepositories.resolve(repo1, in.repo1Head(), "repo1Head");
             GitRepositories.resolve(repo2, in.repo2Head(), "repo2Head");
             if (repo2b != null) {
@@ -137,19 +137,15 @@ public class MigrationRiskService {
         }
     }
 
-    /**
-     * Folder mode: three plain directories, no git needed — what is on disk, uncommitted edits included.
-     * The baseline folder is still required: without it a difference between repo1 and repo2 cannot be told
-     * apart as "the migration changed this on purpose" or "repo1 changed this since".
-     */
+    /** Folder mode: plain directories, no git needed — what is on disk, uncommitted edits included. */
     public AnalysisResponse analyzeDirectories(DirectoryAnalysisRequest request) {
         return analyze(inputs(request), Progress.NONE);
     }
 
     /**
-     * Opens the three versions an analysis compares, computes repo1's changes since the baseline, and hands
-     * them to {@code work} — git repositories stay open exactly as long as it runs. The analysis and the diff
-     * view both start here, so they always look at the same files.
+     * Opens the versions an analysis compares, computes the files that differ, and hands them to {@code work} — git
+     * repositories stay open exactly as long as it runs. The analysis and the diff view both start here, so they
+     * always look at the same files.
      */
     public <T> T withTrees(Inputs in, Function<Trees, T> work) {
         return withTrees(in, Progress.NONE, work);
@@ -157,35 +153,27 @@ public class MigrationRiskService {
 
     public <T> T withTrees(Inputs in, Progress progress, Function<Trees, T> work) {
         List<String> warnings = new ArrayList<>();
-        progress.stage(Progress.Stage.RESOLVE, in.mode() == Inputs.Mode.DIRECTORY ? "reading the three folders"
+        progress.stage(Progress.Stage.RESOLVE, in.mode() == Inputs.Mode.DIRECTORY ? "reading the folders"
                 : "opening repo1 and repo2, resolving revisions");
         if (in.mode() == Inputs.Mode.DIRECTORY) {
-            log.info("analysis (folders): baseline={} | repo1={} | repo2={}{}{}", in.baselinePath(), in.repo1Path(),
-                    in.repo2Path(), in.repo2bPath() == null ? "" : " + " + in.repo2bPath(), in.skipTests() ? " | no tests" : "");
-            Path baselineDir = guard.check(in.baselinePath(), "baselinePath");
+            log.info("analysis (folders): repo1={} | repo2={}{}{}", in.repo1Path(), in.repo2Path(),
+                    in.repo2bPath() == null ? "" : " + " + in.repo2bPath(), in.skipTests() ? " | no tests" : "");
             Path repo1Dir = guard.check(in.repo1Path(), "repo1Path");
             Path repo2Dir = guard.check(in.repo2Path(), "repo2Path");
             Path repo2bDir = in.repo2bPath() == null ? null : guard.check(in.repo2bPath(), "repo2bPath");
             Set<String> excludes = Set.copyOf(properties.directoryExcludes());
-            DirectoryTree baseline = new DirectoryTree(baselineDir, excludes);
-            DirectoryTree head = new DirectoryTree(repo1Dir, excludes);
-            SourceTree target = target(new DirectoryTree(repo2Dir, excludes),
+            DirectoryTree repo1 = new DirectoryTree(repo1Dir, excludes);
+            SourceTree repo2 = target(new DirectoryTree(repo2Dir, excludes),
                     repo2bDir == null ? null : new DirectoryTree(repo2bDir, excludes), warnings);
-            if (baselineDir.equals(repo1Dir)) {
-                warnings.add("the baseline folder is repo1 itself: there is nothing upstream to compare");
+            if (repo1Dir.equals(repo2Dir)) {
+                warnings.add("repo1 and repo2 are the same folder: there is nothing to compare");
             }
-            progress.stage(Progress.Stage.DIFF, "comparing " + baseline.paths().size() + " baseline files with "
-                    + head.paths().size() + " repo1 files");
-            List<ChangedFile> changes = withoutTests(in, DirectoryDiff.diff(baseline, head), warnings);
-            log.info("baseline folder -> repo1 folder: {} changed files ({} Java) out of {} / {} files; repo2 has {}",
-                    changes.size(), changes.stream().filter(ChangedFile::isJava).count(), baseline.paths().size(),
-                    head.paths().size(), target.paths().size());
-            Source source = new Source("DIRECTORY", baselineDir.toString(), repo1Dir.toString(), repo2Dir.toString(),
-                    null, null, null, repo2bDir == null ? null : repo2bDir.toString(), null, in.skipTests());
-            return work.apply(new Trees(baseline, head, target, changes, warnings, source));
+            Source source = new Source("DIRECTORY", repo1Dir.toString(), repo2Dir.toString(), null, null,
+                    repo2bDir == null ? null : repo2bDir.toString(), null, in.skipTests());
+            return work.apply(new Trees(repo1, repo2, changes(in, repo1, repo2, progress, warnings), warnings, source));
         }
-        log.info("analysis (git): repo1={} baseline={} head={} | repo2={} head={}{}{}", in.repo1Path(), in.baseline(),
-                in.repo1Head(), in.repo2Path(), in.repo2Head(),
+        log.info("analysis (git): repo1={} head={} | repo2={} head={}{}{}", in.repo1Path(), in.repo1Head(),
+                in.repo2Path(), in.repo2Head(),
                 in.repo2bPath() == null ? "" : " + " + in.repo2bPath() + " head=" + in.repo2bHead(),
                 in.skipTests() ? " | no tests" : "");
         Path repo1Dir = locator.repository(in.repo1Path(), "repo1Path");
@@ -194,32 +182,31 @@ public class MigrationRiskService {
         // A null resource is legal in try-with-resources (not closed): repo2B is optional.
         try (Git repo1 = GitRepositories.open(repo1Dir, "repo1Path"); Git repo2 = GitRepositories.open(repo2Dir, "repo2Path");
              Git repo2b = repo2bDir == null ? null : GitRepositories.open(repo2bDir, "repo2bPath")) {
-            Snapshot baseline = GitRepositories.resolve(repo1, in.baseline(), "baseline");
             Snapshot head = GitRepositories.resolve(repo1, in.repo1Head(), "repo1Head");
             Snapshot target = GitRepositories.resolve(repo2, in.repo2Head(), "repo2Head");
             Snapshot targetB = repo2b == null ? null : GitRepositories.resolve(repo2b, in.repo2bHead(), "repo2bHead");
-            if (!GitRepositories.isAncestor(repo1.getRepository(), baseline.commit(), head.commit())) {
-                warnings.add("baseline " + baseline.commit().abbreviate(10).name() + " is not an ancestor of repo1 "
-                        + in.repo1Head() + ": the upstream diff includes changes from another branch");
-            }
-            progress.stage(Progress.Stage.DIFF, "git diff " + baseline.commit().abbreviate(10).name() + ".."
-                    + head.commit().abbreviate(10).name());
-            List<ChangedFile> changes = withoutTests(in,
-                    GitRepositories.diff(repo1.getRepository(), baseline.commit(), head.commit()), warnings);
-            log.info("baseline {} -> repo1 {}: {} changed files ({} Java); repo2 at {}",
-                    baseline.commit().abbreviate(10).name(), head.commit().abbreviate(10).name(), changes.size(),
-                    changes.stream().filter(ChangedFile::isJava).count(), target.commit().abbreviate(10).name());
             // a URL stays a URL: saved runs and the diff view resolve (and fetch) it again
-            Source source = new Source("GIT", null, locator.display(in.repo1Path(), repo1Dir),
-                    locator.display(in.repo2Path(), repo2Dir),
-                    commit(in.baseline(), baseline.commit()), commit(in.repo1Head(), head.commit()),
+            Source source = new Source("GIT", locator.display(in.repo1Path(), repo1Dir),
+                    locator.display(in.repo2Path(), repo2Dir), commit(in.repo1Head(), head.commit()),
                     commit(in.repo2Head(), target.commit()),
                     repo2bDir == null ? null : locator.display(in.repo2bPath(), repo2bDir),
                     targetB == null ? null : commit(in.repo2bHead(), targetB.commit()), in.skipTests());
-            return work.apply(new Trees(new GitTree(baseline), new GitTree(head),
-                    target(new GitTree(target), targetB == null ? null : new GitTree(targetB), warnings), changes,
+            SourceTree repo1Tree = new GitTree(head);
+            SourceTree repo2Tree = target(new GitTree(target), targetB == null ? null : new GitTree(targetB), warnings);
+            return work.apply(new Trees(repo1Tree, repo2Tree, changes(in, repo1Tree, repo2Tree, progress, warnings),
                     warnings, source));
         }
+    }
+
+    /** Every file that differs, repo2 -> repo1 (old = repo2's path, new = repo1's). */
+    private static List<ChangedFile> changes(Inputs in, SourceTree repo1, SourceTree repo2, Progress progress,
+                                             List<String> warnings) {
+        progress.stage(Progress.Stage.DIFF, "comparing " + repo1.paths().size() + " repo1 files with "
+                + repo2.paths().size() + " repo2 files");
+        List<ChangedFile> changes = withoutTests(in, TreeDiff.diff(repo2, repo1), warnings);
+        log.info("repo1 vs repo2: {} files differ ({} Java) out of {} / {} files", changes.size(),
+                changes.stream().filter(ChangedFile::isJava).count(), repo1.paths().size(), repo2.paths().size());
+        return changes;
     }
 
     /** repo2 as the analysis reads it: one tree, or repo2A + repo2B merged into one. */
@@ -253,12 +240,9 @@ public class MigrationRiskService {
     public static final String REPO2A = "repo2A";
     public static final String REPO2B = "repo2B";
 
-    /**
-     * What to compare: three git revisions over two repositories, or three folders — repo2 optionally being two
-     * repositories ({@code repo2bPath}, null for one).
-     */
-    public record Inputs(Mode mode, String baselinePath, String repo1Path, String baseline, String repo1Head,
-                         String repo2Path, String repo2Head, String repo2bPath, String repo2bHead, boolean skipTests) {
+    /** What to compare: two git revisions (repo1, repo2), or two folders — repo2 optionally being two ({@code repo2bPath}). */
+    public record Inputs(Mode mode, String repo1Path, String repo1Head, String repo2Path, String repo2Head,
+                         String repo2bPath, String repo2bHead, boolean skipTests) {
 
         public enum Mode { GIT, DIRECTORY }
 
@@ -268,28 +252,24 @@ public class MigrationRiskService {
                     : repo2bHead == null || repo2bHead.isBlank() ? "HEAD" : repo2bHead.trim();
         }
 
-        public static Inputs git(String repo1Path, String baseline, String repo1Head, String repo2Path, String repo2Head,
+        public static Inputs git(String repo1Path, String repo1Head, String repo2Path, String repo2Head,
                                  String repo2bPath, String repo2bHead, boolean skipTests) {
-            return new Inputs(Mode.GIT, null, repo1Path, baseline, repo1Head, repo2Path, repo2Head, repo2bPath,
-                    repo2bHead, skipTests);
+            return new Inputs(Mode.GIT, repo1Path, repo1Head, repo2Path, repo2Head, repo2bPath, repo2bHead, skipTests);
         }
 
-        public static Inputs folders(String baselinePath, String repo1Path, String repo2Path, String repo2bPath,
-                                     boolean skipTests) {
-            return new Inputs(Mode.DIRECTORY, baselinePath, repo1Path, null, null, repo2Path, null, repo2bPath, null,
-                    skipTests);
+        public static Inputs folders(String repo1Path, String repo2Path, String repo2bPath, boolean skipTests) {
+            return new Inputs(Mode.DIRECTORY, repo1Path, null, repo2Path, null, repo2bPath, null, skipTests);
         }
     }
 
-    /** The three opened versions and repo1's changes between the first two. */
-    public record Trees(SourceTree baseline, SourceTree head, SourceTree target, List<ChangedFile> changes,
-                        List<String> warnings, Source source) {
+    /** The opened versions and the files that differ between them. */
+    public record Trees(SourceTree repo1, SourceTree repo2, List<ChangedFile> changes, List<String> warnings,
+                        Source source) {
     }
 
     private AnalysisResponse run(Trees trees, long started, Progress progress) {
-        SourceTree baseline = trees.baseline();
-        SourceTree head = trees.head();
-        SourceTree target = trees.target();
+        SourceTree repo1 = trees.repo1();
+        SourceTree repo2 = trees.repo2();
         List<ChangedFile> changes = trees.changes();
         List<String> warnings = trees.warnings();
         Source source = trees.source();
@@ -297,122 +277,136 @@ public class MigrationRiskService {
             throw new TooManyChangesException(changes.size(), properties.maxChangedFiles());
         }
         if (changes.isEmpty()) {
-            warnings.add("repo1 has no changes since the baseline");
+            warnings.add("repo1 and repo2 are identical");
         }
-        RefactoringIndex upstream;
-        RefactoringIndex migration;
+        RefactoringIndex refactorings;
         Path workspace = properties.workDir().resolve(UUID.randomUUID().toString());
         try {
-            Runs runs = detect(workspace, baseline, head, target, changes, warnings, progress);
-            upstream = new RefactoringIndex(runs.upstream());
-            migration = new RefactoringIndex(runs.migration());
+            refactorings = new RefactoringIndex(detect(workspace, repo1, repo2, changes, warnings, progress));
         } finally {
             FileSystemUtils.deleteRecursively(workspace.toFile());
         }
 
-        AnalysisContext ctx = new AnalysisContext(baseline, head, target, changes, target.pathsByFileName(),
-                upstream, migration, progress, source.skipTests());
+        AnalysisContext ctx = new AnalysisContext(repo1, repo2, changes, refactorings, progress, source.skipTests());
         List<RiskItem> items = new ArrayList<>();
         items.addAll(javaAnalyzer.analyze(ctx));
-        items.addAll(fileAnalyzer.analyze(ctx));
+        CamelRouteAnalyzer.Result camel = camelAnalyzer.analyze(ctx, warnings);
+        items.addAll(camel.items());
+        items.addAll(fileAnalyzer.analyze(ctx, camel.files()));
         items.addAll(configAnalyzer.analyze(ctx, warnings));
-        items = new ArrayList<>(syncDetector.mark(ctx, items));
+        items = withoutLoneApiMatches(items, warnings);
         items.sort(Comparator.comparing(RiskItem::level).thenComparing(RiskItem::category)
                 .thenComparing(RiskItem::element));
-        items = ignoreRules.apply(FileRecords.group(tag(dedupe(items), baseline, head, target), changes),
-                source.repo1Path(), warnings);
+        items = FileRecords.group(tag(dedupe(items), repo1, repo2), changes);
+        Set<String> reported = new HashSet<>(items.stream().map(RiskItem::element).toList());
+        long moved = changes.stream().filter(f -> f.change() == ChangedFile.Change.RENAMED).count();
+        long silent = changes.stream().filter(f -> f.change() != ChangedFile.Change.RENAMED)
+                .filter(f -> !reported.contains(f.path())).count();
+        if (moved > 0) {
+            warnings.add(moved + " file(s) only moved, content identical: not reported");
+        }
+        if (silent > 0) {
+            warnings.add(silent + " differing file(s) have nothing to report: imports, formatting, comments, Camel"
+                    + " routes kept in another file, or the migration's own API rewrite only");
+        }
+        items = ignoreRules.apply(items, source.repo1Path(), warnings);
 
         long millis = (System.nanoTime() - started) / 1_000_000;
-        log.info("{} vs {}: {} changed files, {} upstream / {} migration refactorings, {} items in {} ms",
+        log.info("{} vs {}: {} differing files, {} refactorings, {} items in {} ms",
                 Path.of(source.repo1Path()).getFileName(), Path.of(source.repo2Path()).getFileName(), changes.size(),
-                upstream.refactorings().size(), migration.refactorings().size(), items.size(), millis);
-        return new AnalysisResponse(null, null, source, counts(items), items, upstream.refactorings(), migration.refactorings(),
+                refactorings.refactorings().size(), items.size(), millis);
+        return new AnalysisResponse(null, null, source, counts(items), items, refactorings.refactorings(),
                 changes.stream().map(this::view).toList(), warnings, millis, Instant.now(clock));
     }
 
-    /** Module + test tags from repo1's paths; with two repo2s, which one each target was found in. */
-    private static List<RiskItem> tag(List<RiskItem> items, SourceTree baseline, SourceTree head, SourceTree target) {
-        Set<String> repo1Paths = new LinkedHashSet<>(head.paths());
-        repo1Paths.addAll(baseline.paths());
-        CodeTags tags = new CodeTags(repo1Paths);
+    /**
+     * An API-rule match is the old API on repo1's side of a difference. Next to another difference in the file it is a
+     * porting hint; alone (a file whose only difference is {@code javax -> jakarta} imports, say) it is the
+     * migration's own rewrite, and reporting it would flag every migrated file.
+     */
+    private static List<RiskItem> withoutLoneApiMatches(List<RiskItem> items, List<String> warnings) {
+        Set<String> work = new HashSet<>();
+        items.stream().filter(i -> !NO_WORK.contains(i.category())).map(RiskItem::path).forEach(work::add);
+        List<RiskItem> kept = new ArrayList<>();
+        int dropped = 0;
+        for (RiskItem i : items) {
+            if (i.category() == RiskCategory.MIGRATION_API && !work.contains(i.path())) {
+                dropped++;
+            } else {
+                kept.add(i);
+            }
+        }
+        if (dropped > 0) {
+            log.info("{} API-rule match(es) alone in their file: taken as the migration's rewrite", dropped);
+        }
+        return kept;
+    }
+
+    /** Module + test tags from the path; with two repo2s, which one each target was found in. */
+    private static List<RiskItem> tag(List<RiskItem> items, SourceTree repo1, SourceTree repo2) {
+        Set<String> paths = new LinkedHashSet<>(repo1.paths());
+        paths.addAll(repo2.paths()); // a file only repo2 has still belongs to a module
+        CodeTags tags = new CodeTags(paths);
         return items.stream().map(i -> {
             Location t = i.target();
-            if (t != null && target instanceof MergedTree merged) {
+            if (t != null && repo2 instanceof MergedTree merged) {
                 t = t.inRepo(merged.origin(t.path()).orElse(null));
             }
             return i.tagged(tags.module(i.path()), CodeTags.isTest(i.path()), t);
         }).toList();
     }
 
-    /**
-     * Exports the three comparison trees and runs RefactoringMiner on (before, upstream) and
-     * (before, target). Both runs share {@code before}, so their "before" locations are the same code.
-     */
-    private Runs detect(Path workspace, SourceTree baseline, SourceTree head, SourceTree target,
-                        List<ChangedFile> changes, List<String> warnings, Progress progress) {
-        List<ChangedFile> java = changes.stream().filter(ChangedFile::isJava).toList();
-        if (java.isEmpty()) {
-            return new Runs(List.of(), List.of());
+    /** Exports the differing Java files of both sides and runs RefactoringMiner repo1 -> repo2 on them. */
+    private List<DetectedRefactoring> detect(Path workspace, SourceTree repo1, SourceTree repo2,
+                                             List<ChangedFile> changes, List<String> warnings, Progress progress) {
+        long java = changes.stream().filter(ChangedFile::isJava).count();
+        if (java == 0) {
+            return List.of();
         }
-        progress.stage(Progress.Stage.EXPORT, "exporting " + java.size() + " changed Java files and their repo2 candidates");
-        Exported exported = export(workspace, baseline, head, target, changes, warnings);
-        progress.stage(Progress.Stage.UPSTREAM, "RefactoringMiner A: repo1 baseline -> repo1 head (" + java.size() + " files)");
-        List<DetectedRefactoring> upstream = detector.detect("A upstream", exported.before(), exported.upstream());
-        progress.stage(Progress.Stage.MIGRATION, "RefactoringMiner B: repo1 baseline -> repo2");
-        List<DetectedRefactoring> migration = detector.detect("B migration", exported.before(), exported.target());
-        return new Runs(upstream, migration);
+        progress.stage(Progress.Stage.EXPORT, "exporting " + java + " differing Java files and their repo2 candidates");
+        Exported exported = export(workspace, repo1, repo2, changes, warnings);
+        progress.stage(Progress.Stage.REFACTORINGS, "RefactoringMiner: repo1 -> repo2 (" + java + " files)");
+        return detector.detect("repo1 -> repo2", exported.repo1(), exported.repo2());
     }
 
-    private record Runs(List<DetectedRefactoring> upstream, List<DetectedRefactoring> migration) {
-    }
-
-    /** The three comparison directories under one workspace. */
-    public record Exported(Path before, Path upstream, Path target) {
+    /** The two comparison directories under one workspace. */
+    public record Exported(Path repo1, Path repo2) {
     }
 
     /**
-     * Writes what RefactoringMiner compares: the changed Java files at the baseline ({@code before}) and at
-     * repo1's head ({@code upstream}), and repo2's files at the same paths plus same-named files elsewhere
-     * ({@code target}, to catch moved classes). Whole repositories would make it slow and memory-hungry.
+     * Writes what RefactoringMiner compares: repo1's version of every differing Java file, and repo2's — the same
+     * path, a file only repo2 has, and repo2 files with the same name as a repo1 one (to catch moved classes).
      */
-    public Exported export(Path workspace, SourceTree baseline, SourceTree head, SourceTree target,
-                           List<ChangedFile> changes, List<String> warnings) {
-        Map<String, List<String>> targetByName = target.pathsByFileName();
-        Set<String> beforePaths = new LinkedHashSet<>();
-        Set<String> upstreamPaths = new LinkedHashSet<>();
-        Set<String> targetPaths = new LinkedHashSet<>();
+    public Exported export(Path workspace, SourceTree repo1, SourceTree repo2, List<ChangedFile> changes,
+                           List<String> warnings) {
+        Map<String, List<String>> repo2ByName = repo2.pathsByFileName();
+        Set<String> repo1Paths = new LinkedHashSet<>();
+        Set<String> repo2Paths = new LinkedHashSet<>();
         for (ChangedFile f : changes.stream().filter(ChangedFile::isJava).toList()) {
             if (f.oldPath() != null) {
-                beforePaths.add(f.oldPath());
+                repo2Paths.add(f.oldPath());
             }
-            if (f.newPath() != null) {
-                upstreamPaths.add(f.newPath());
+            if (f.newPath() == null) {
+                continue;
             }
-            for (String path : new String[]{f.oldPath(), f.newPath()}) {
-                if (path == null) {
-                    continue;
-                }
-                targetPaths.add(path); // exported only if repo2 has it
-                List<String> sameName = targetByName.getOrDefault(path.substring(path.lastIndexOf('/') + 1), List.of());
-                if (sameName.size() > properties.maxCandidatesPerName()) {
-                    warnings.add(sameName.size() + " files named " + path.substring(path.lastIndexOf('/') + 1)
-                            + " in repo2; only " + properties.maxCandidatesPerName() + " compared for a moved class");
-                }
-                sameName.stream().limit(properties.maxCandidatesPerName()).forEach(targetPaths::add);
+            repo1Paths.add(f.newPath());
+            String name = f.newPath().substring(f.newPath().lastIndexOf('/') + 1);
+            List<String> sameName = repo2ByName.getOrDefault(name, List.of());
+            if (sameName.size() > properties.maxCandidatesPerName()) {
+                warnings.add(sameName.size() + " files named " + name + " in repo2; only "
+                        + properties.maxCandidatesPerName() + " compared for a moved class");
             }
+            sameName.stream().limit(properties.maxCandidatesPerName()).forEach(repo2Paths::add);
         }
-        Path before = mkdirs(workspace.resolve("before"));
-        Path upstream = mkdirs(workspace.resolve("upstream"));
-        Path migrated = mkdirs(workspace.resolve("target"));
-        baseline.export(beforePaths, before);
-        head.export(upstreamPaths, upstream);
-        target.export(targetPaths, migrated);
-        log.info("exported {} baseline / {} upstream / {} repo2 candidate paths to {}", beforePaths.size(),
-                upstreamPaths.size(), targetPaths.size(), workspace);
-        return new Exported(before, upstream, migrated);
+        Path left = mkdirs(workspace.resolve("repo1"));
+        Path right = mkdirs(workspace.resolve("repo2"));
+        repo1.export(repo1Paths, left);
+        repo2.export(repo2Paths, right);
+        log.info("exported {} repo1 / {} repo2 paths to {}", repo1Paths.size(), repo2Paths.size(), workspace);
+        return new Exported(left, right);
     }
 
-    /** The same element can surface twice (e.g. an upstream refactoring and a modification of it): keep the riskier. */
+    /** The same element can surface twice (e.g. a moved method found twice): keep the riskier. */
     private static List<RiskItem> dedupe(List<RiskItem> sorted) {
         Set<String> seen = new LinkedHashSet<>();
         return sorted.stream().filter(i -> seen.add(i.id())).toList();
@@ -448,8 +442,8 @@ public class MigrationRiskService {
 
     public static class TooManyChangesException extends RuntimeException {
         public TooManyChangesException(int changed, int max) {
-            super(changed + " files changed between the baseline and HEAD (limit " + max
-                    + ", migration-risk.max-changed-files): choose a later baseline");
+            super(changed + " files differ between repo1 and repo2 (limit " + max
+                    + ", migration-risk.max-changed-files): narrow it with skipTests or an ignore rule, or raise the limit");
         }
     }
 }

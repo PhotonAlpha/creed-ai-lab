@@ -22,7 +22,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import com.creed.resource.migrationrisk.service.BaselineAdvisor;
+import com.creed.resource.migrationrisk.service.RepositoryRefs;
 import com.creed.resource.migrationrisk.config.MigrationRiskProperties;
 import com.creed.resource.migrationrisk.demo.DemoRepositories;
 import com.creed.resource.migrationrisk.service.MigrationRiskService;
@@ -49,7 +49,7 @@ public class MigrationRiskController {
     private final MigrationRiskProperties properties;
     private final RepositoryGuard guard;
     private final ObjectProvider<DemoRepositories> demo;
-    private final BaselineAdvisor baselines;
+    private final RepositoryRefs refs;
     private final ReleaseStore store;
     private final AnalysisJobs jobs;
     private final IgnoreRules ignoreRules;
@@ -58,7 +58,7 @@ public class MigrationRiskController {
 
     public MigrationRiskController(MigrationRiskService service, MigrationRiskProperties properties,
                                    RepositoryGuard guard, ObjectProvider<DemoRepositories> demo,
-                                   BaselineAdvisor baselines, ReleaseStore store, AnalysisJobs jobs,
+                                   RepositoryRefs refs, ReleaseStore store, AnalysisJobs jobs,
                                    IgnoreRules ignoreRules, ExportService exporter, JiraIssues jira) {
         this.ignoreRules = ignoreRules;
         this.exporter = exporter;
@@ -69,22 +69,13 @@ public class MigrationRiskController {
         this.properties = properties;
         this.guard = guard;
         this.demo = demo;
-        this.baselines = baselines;
+        this.refs = refs;
     }
 
     /** One repository's current branch, branches, tags and the recent commits of {@code head}. */
     @GetMapping("/refs")
     public RefsView refs(@RequestParam String path, @RequestParam(defaultValue = "HEAD") String head) {
-        return baselines.refs(path, head);
-    }
-
-    /** The merge-base of the two selected heads when the repositories share history. */
-    @GetMapping("/baseline-suggestion")
-    public RefsView.Suggestion baselineSuggestion(@RequestParam String repo1Path,
-                                                  @RequestParam(defaultValue = "HEAD") String repo1Head,
-                                                  @RequestParam String repo2Path,
-                                                  @RequestParam(defaultValue = "HEAD") String repo2Head) {
-        return baselines.suggest(repo1Path, repo1Head, repo2Path, repo2Head);
+        return refs.refs(path, head);
     }
 
     @GetMapping("/settings")
@@ -98,11 +89,11 @@ public class MigrationRiskController {
                 properties.maxChangedFiles(), jira.mock(), jira.browseUrl(), properties.remotes().allowedHosts());
     }
 
-    /** Folder mode: baseline / repo1 / repo2 as three plain directories — no git history involved. */
+    /** Folder mode: repo1 / repo2 (/ repo2B) as plain directories — no git history involved. */
     @PostMapping("/analyses/directories")
     public AnalysisResponse analyzeDirectories(@Valid @RequestBody DirectoryAnalysisRequest request) {
         AnalysisResponse result = service.analyzeDirectories(request);
-        return request.release() == null ? result : store.save(request.release(), request.baselinePath(), result);
+        return request.release() == null ? result : store.save(request.release(), result);
     }
 
     /**
@@ -112,23 +103,22 @@ public class MigrationRiskController {
     @PostMapping("/analyses")
     public AnalysisResponse analyze(@Valid @RequestBody AnalysisRequest request) {
         AnalysisResponse result = service.analyze(request);
-        return request.release() == null ? result
-                : store.save(request.release(), result.source().baseline().id(), result);
+        return request.release() == null ? result : store.save(request.release(), result);
     }
 
     // ---------------------------------------------------------------- background analyses + SSE progress
 
     /**
      * Starts a git-mode analysis in the background: 202 + {@code jobId}, then follow
-     * {@code GET /analyses/jobs/{jobId}/events}. Paths and revisions are checked first, so a wrong baseline is
+     * {@code GET /analyses/jobs/{jobId}/events}. Paths and revisions are checked first, so a wrong branch is
      * still an immediate 400 on its field rather than a failed job.
      */
     @PostMapping("/analyses/jobs")
     public ResponseEntity<Map<String, String>> startAnalysis(@Valid @RequestBody AnalysisRequest request) {
         MigrationRiskService.Inputs in = MigrationRiskService.inputs(request);
         service.validate(in);
-        String id = jobs.start("git " + request.repo1Path() + " @ " + request.baseline() + " vs " + request.repo2Path(),
-                progress -> save(request.release(), request.baseline(), service.analyze(in, progress), progress));
+        String id = jobs.start("git " + request.repo1Path() + " vs " + request.repo2Path(),
+                progress -> save(request.release(), service.analyze(in, progress), progress));
         return ResponseEntity.accepted().body(Map.of("jobId", id));
     }
 
@@ -136,18 +126,17 @@ public class MigrationRiskController {
     public ResponseEntity<Map<String, String>> startDirectoryAnalysis(@Valid @RequestBody DirectoryAnalysisRequest request) {
         MigrationRiskService.Inputs in = MigrationRiskService.inputs(request);
         service.validate(in);
-        String id = jobs.start("folders " + request.baselinePath() + " | " + request.repo1Path() + " | " + request.repo2Path(),
-                progress -> save(request.release(), request.baselinePath(), service.analyze(in, progress), progress));
+        String id = jobs.start("folders " + request.repo1Path() + " | " + request.repo2Path(),
+                progress -> save(request.release(), service.analyze(in, progress), progress));
         return ResponseEntity.accepted().body(Map.of("jobId", id));
     }
 
-    private AnalysisResponse save(String release, String baselineRef, AnalysisResponse result, Progress progress) {
+    private AnalysisResponse save(String release, AnalysisResponse result, Progress progress) {
         if (release == null) {
             return result;
         }
         progress.stage(Progress.Stage.SAVE, "saving under release " + release);
-        String ref = result.source().baseline() != null ? result.source().baseline().id() : baselineRef;
-        return store.save(release, ref, result);
+        return store.save(release, result);
     }
 
     /**

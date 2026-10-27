@@ -6,29 +6,23 @@ import com.creed.resource.migrationrisk.git.GitRepositories;
 import com.creed.resource.migrationrisk.git.GitRepositories.Snapshot;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
-import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
-import java.util.Optional;
 
-/**
- * Helps pick the branches and the baseline: one repository's refs at a time (so a wrong repo2 path never
- * hides repo1's branches), and — when the two repositories share history, i.e. two clones of one origin —
- * the merge-base of the two selected heads, which is exactly "the repo1 commit the migration branched from".
- */
+/** Helps pick the branches: one repository's refs at a time, so a wrong repo2 path never hides repo1's branches. */
 @Service
-public class BaselineAdvisor {
+public class RepositoryRefs {
 
     private static final int REF_LIMIT = 200;
     private static final int COMMIT_LIMIT = 30;
 
     private final RepositoryLocator locator;
 
-    public BaselineAdvisor(RepositoryLocator locator) {
+    public RepositoryRefs(RepositoryLocator locator) {
         this.locator = locator;
     }
 
@@ -43,23 +37,6 @@ public class BaselineAdvisor {
                     GitRepositories.refNames(git.getRepository(), Constants.R_REMOTES, REF_LIMIT),
                     GitRepositories.refNames(git.getRepository(), Constants.R_TAGS, REF_LIMIT),
                     recent);
-        }
-    }
-
-    public RefsView.Suggestion suggest(String repo1Path, String repo1Head, String repo2Path, String repo2Head) {
-        try (Git repo1 = GitRepositories.open(locator.repository(repo1Path, "repo1Path"), "repo1Path");
-             Git repo2 = GitRepositories.open(locator.repository(repo2Path, "repo2Path"), "repo2Path")) {
-            Snapshot head1 = GitRepositories.resolve(repo1, repo1Head, "repo1Head");
-            Snapshot head2 = GitRepositories.resolve(repo2, repo2Head, "repo2Head");
-            Optional<ObjectId> base = GitRepositories.mergeBase(repo1.getRepository(), head1.commit(),
-                    repo2.getRepository(), head2.commit());
-            if (base.isEmpty()) {
-                return new RefsView.Suggestion(null, "NO_SHARED_HISTORY");
-            }
-            // The merge-base is an ancestor of repo1's head, so repo1 always has it.
-            Snapshot baseline = GitRepositories.resolve(repo1, base.get().name(), "baseline");
-            return new RefsView.Suggestion(MigrationRiskService.commit(baseline.commit().abbreviate(10).name(),
-                    baseline.commit()), "MERGE_BASE");
         }
     }
 

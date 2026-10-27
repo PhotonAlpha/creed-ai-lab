@@ -10,39 +10,31 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Everything one analysis reads, with the three trees it compares:
- * {@link Side#BASELINE} (repo1 where the migration started), {@link Side#HEAD} (repo1 now) and
- * {@link Side#TARGET} (repo2 now) — git commits or plain folders. Files are read on demand, parsed at most once.
+ * Everything one analysis reads: {@link Side#REPO1} (repo1 now) and {@link Side#REPO2} (repo2 now — repo2A + repo2B
+ * as one tree), git commits or plain folders, the files that differ between them, and RefactoringMiner's
+ * repo1 -> repo2 run. Files are read on demand, parsed at most once.
  */
 public final class AnalysisContext {
 
-    public enum Side { BASELINE, HEAD, TARGET }
+    public enum Side { REPO1, REPO2 }
 
-    private final SourceTree baseline;
-    private final SourceTree head;
-    private final SourceTree target;
+    private final SourceTree repo1;
+    private final SourceTree repo2;
     private final List<ChangedFile> changes;
-    private final Map<String, List<String>> targetPathsByName;
-    private final RefactoringIndex upstream;
-    private final RefactoringIndex migration;
+    private final RefactoringIndex refactorings;
     private final Progress progress;
     private final boolean skipTests;
     private final Map<String, Optional<String>> texts = new HashMap<>();
     private final Map<String, Optional<JavaStructure>> structures = new HashMap<>();
 
-    public AnalysisContext(SourceTree baseline, SourceTree head, SourceTree target, List<ChangedFile> changes,
-                           Map<String, List<String>> targetPathsByName,
-                           RefactoringIndex upstream, RefactoringIndex migration, Progress progress,
-                           boolean skipTests) {
+    public AnalysisContext(SourceTree repo1, SourceTree repo2, List<ChangedFile> changes,
+                           RefactoringIndex refactorings, Progress progress, boolean skipTests) {
+        this.repo1 = repo1;
+        this.repo2 = repo2;
+        this.changes = changes;
+        this.refactorings = refactorings;
         this.progress = progress;
         this.skipTests = skipTests;
-        this.baseline = baseline;
-        this.head = head;
-        this.target = target;
-        this.changes = changes;
-        this.targetPathsByName = targetPathsByName;
-        this.upstream = upstream;
-        this.migration = migration;
     }
 
     public Progress progress() {
@@ -59,18 +51,14 @@ public final class AnalysisContext {
         return tree(side).paths();
     }
 
+    /** {@code diff(repo2, repo1)}: old = repo2's path, new = repo1's. */
     public List<ChangedFile> changes() {
         return changes;
     }
 
-    /** repo1@baseline -> repo1@HEAD: what the other team refactored. */
-    public RefactoringIndex upstream() {
-        return upstream;
-    }
-
-    /** repo1@baseline -> repo2@HEAD: where the migration put things. */
-    public RefactoringIndex migration() {
-        return migration;
+    /** repo1 -> repo2: where repo2 has repo1's classes and methods when not at the same place. */
+    public RefactoringIndex refactorings() {
+        return refactorings;
     }
 
     public Optional<String> text(Side side, String path) {
@@ -92,16 +80,12 @@ public final class AnalysisContext {
         return path == null ? Optional.empty() : tree(side).contentId(path);
     }
 
-    /** repo2 paths whose file name is {@code fileName}, for finding a class the migration moved. */
-    public List<String> targetPathsNamed(String fileName) {
-        return targetPathsByName.getOrDefault(fileName, List.of());
+    /** repo2 paths whose file name is {@code fileName}, for finding a class or file the migration moved. */
+    public List<String> repo2PathsNamed(String fileName) {
+        return repo2.pathsByFileName().getOrDefault(fileName, List.of());
     }
 
     private SourceTree tree(Side side) {
-        return switch (side) {
-            case BASELINE -> baseline;
-            case HEAD -> head;
-            case TARGET -> target;
-        };
+        return side == Side.REPO1 ? repo1 : repo2;
     }
 }

@@ -6,6 +6,7 @@ import org.eclipse.jgit.diff.HistogramDiff;
 import org.eclipse.jgit.diff.RawText;
 import org.eclipse.jgit.diff.RawTextComparator;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -19,16 +20,20 @@ import java.util.Set;
 import java.util.stream.IntStream;
 
 /**
- * {@code git diff} for two folders: added / deleted / modified by content id, a deleted and an added file
- * with identical content paired as a rename, and the added line numbers from JGit's histogram diff — the
- * same algorithm {@code git diff} uses, so both modes flag the same lines.
+ * {@code git diff} for any two trees — two commits of unrelated repositories, two folders, or a commit and a merged
+ * repo2: added / deleted / modified by content id (git blob ids in every kind of tree), a deleted and an added file
+ * with identical content paired as a rename, and the added line numbers from JGit's histogram diff — the algorithm
+ * {@code git diff} uses.
+ *
+ * <p>The analysis calls it as {@code diff(repo2, repo1)}: ADDED = only repo1 has the file, DELETED = only repo2,
+ * MODIFIED = both, different, and the "added" lines are the lines of repo1's file that repo2's lacks.
  */
-public final class DirectoryDiff {
+public final class TreeDiff {
 
-    private DirectoryDiff() {
+    private TreeDiff() {
     }
 
-    public static List<ChangedFile> diff(DirectoryTree from, DirectoryTree to) {
+    public static List<ChangedFile> diff(SourceTree from, SourceTree to) {
         Set<String> all = new LinkedHashSet<>(from.paths());
         all.addAll(to.paths());
         List<String> deleted = new ArrayList<>();
@@ -67,14 +72,15 @@ public final class DirectoryDiff {
         return files;
     }
 
-    private static List<Integer> addedLines(DirectoryTree from, String oldPath, DirectoryTree to, String newPath) {
-        byte[] after = to.bytes(newPath).orElse(new byte[0]);
-        if (RawText.isBinary(after)) {
+    /** Binary files read as absent (no text), so they get no line numbers. */
+    private static List<Integer> addedLines(SourceTree from, String oldPath, SourceTree to, String newPath) {
+        String after = to.read(newPath).orElse(null);
+        if (after == null) {
             return List.of();
         }
-        byte[] before = from == null ? new byte[0] : from.bytes(oldPath).orElse(new byte[0]);
-        RawText a = new RawText(before);
-        RawText b = new RawText(after);
+        String before = from == null ? "" : from.read(oldPath).orElse("");
+        RawText a = new RawText(before.getBytes(StandardCharsets.UTF_8));
+        RawText b = new RawText(after.getBytes(StandardCharsets.UTF_8));
         List<Integer> lines = new ArrayList<>();
         for (Edit edit : new HistogramDiff().diff(RawTextComparator.DEFAULT, a, b)) {
             IntStream.range(edit.getBeginB(), edit.getEndB()).forEach(line -> lines.add(line + 1));

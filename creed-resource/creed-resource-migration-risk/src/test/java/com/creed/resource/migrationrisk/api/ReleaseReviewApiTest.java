@@ -38,8 +38,8 @@ class ReleaseReviewApiTest {
         var d = demo.view();
         return mvc.perform(post("/api/migration-risk/analyses").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"repo1Path": "%s", "baseline": "%s", "repo2Path": "%s", "release": "%s"}
-                                """.formatted(d.repo1Path(), d.baseline(), d.repo2Path(), release)))
+                                {"repo1Path": "%s", "repo2Path": "%s", "release": "%s"}
+                                """.formatted(d.repo1Path(), d.repo2Path(), release)))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
     }
@@ -56,8 +56,8 @@ class ReleaseReviewApiTest {
         var d = demo.view();
         mvc.perform(post("/api/migration-risk/analyses").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"repo1Path": "%s", "baseline": "%s", "repo2Path": "%s"}
-                                """.formatted(d.repo1Path(), d.baseline(), d.repo2Path())))
+                                {"repo1Path": "%s", "repo2Path": "%s"}
+                                """.formatted(d.repo1Path(), d.repo2Path())))
                 .andExpect(jsonPath("$.analysisId").doesNotExist())
                 .andExpect(jsonPath("$.items[0].review").doesNotExist());
     }
@@ -69,9 +69,9 @@ class ReleaseReviewApiTest {
         long analysisId = ((Number) JsonPath.read(first, "$.analysisId")).longValue();
         assertThat(JsonPath.<String>read(first, "$.release")).isEqualTo(release);
         assertThat(JsonPath.<List<String>>read(first, "$.items[*].review.status")).hasSize(13).containsOnly("PENDING", "SYNCED");
-        // repo2 already has OrderValidator's fix: SYNCED by the analysis itself
+        // repo2 has InvoiceService's renamed method, identical: SYNCED by the analysis itself
         assertThat(JsonPath.<List<Boolean>>read(first,
-                "$.items[?(@.element == 'src/main/java/com/acme/shop/order/OrderValidator.java')].review.auto")).containsExactly(true);
+                "$.items[?(@.element == 'src/main/java/com/acme/shop/invoice/InvoiceService.java')].review.auto")).containsExactly(true);
 
         long missing = itemId(first, ORDER_SERVICE);
         long cancel = itemId(first, "src/main/java/com/acme/shop/payment/PaymentClient.java");
@@ -95,7 +95,7 @@ class ReleaseReviewApiTest {
         // a reload shows the reviews; the release list shows the progress
         String loaded = mvc.perform(get("/api/migration-risk/analyses/{id}", analysisId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.upstreamRefactorings.length()").value(1))
+                .andExpect(jsonPath("$.refactorings.length()").value(6))
                 .andReturn().getResponse().getContentAsString();
         assertThat(JsonPath.<List<String>>read(loaded,
                 "$.items[?(@.review.status == 'SAFE')].element")).hasSize(2);
@@ -138,18 +138,18 @@ class ReleaseReviewApiTest {
         // second run: repo2B added (retry.enabled is found there), tests skipped (OrderServiceTest disappears)
         String second = mvc.perform(post("/api/migration-risk/analyses").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"repo1Path": "%s", "baseline": "%s", "repo2Path": "%s", "repo2bPath": "%s",
+                                {"repo1Path": "%s", "repo2Path": "%s", "repo2bPath": "%s",
                                  "skipTests": true, "release": "%s"}
-                                """.formatted(d.repo1Path(), d.baseline(), d.repo2Path(), d.repo2bPath(), release)))
+                                """.formatted(d.repo1Path(), d.repo2Path(), d.repo2bPath(), release)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String ymlRow = "$.items[?(@.element == 'src/main/resources/application.yml')]";
         assertThat(JsonPath.<List<String>>read(second, ymlRow + ".review.status")).containsExactly("PENDING");
         assertThat(JsonPath.<List<String>>read(second, ymlRow + ".review.delta")).containsExactly("CHANGED");
         assertThat(JsonPath.<List<String>>read(second, ymlRow + ".review.previous.status")).containsExactly("SAFE");
         assertThat(JsonPath.<List<String>>read(second, ymlRow + ".review.previous.note")).containsExactly("keys checked");
-        // only the key whose state changed is flagged, not the whole file
+        // only the key whose state changed is flagged (repo2B has it: no longer a difference), not the whole file
         assertThat(JsonPath.<List<List<String>>>read(second, ymlRow + ".review.changedParts").getFirst())
-                .containsExactly("CONFIG_IN_SYNC:CONFIG:shop.order.retry.enabled");
+                .containsExactly("CONFIG_CHANGED:CONFIG:shop.order.retry.enabled");
         assertThat(JsonPath.<List<String>>read(second,
                 "$.items[?(@.element == 'pom.xml')].review.delta")).containsExactly("SAME");
         long secondId = ((Number) JsonPath.read(second, "$.analysisId")).longValue();
@@ -183,8 +183,8 @@ class ReleaseReviewApiTest {
         String release = "B-" + UUID.randomUUID();
         String saved = mvc.perform(post("/api/migration-risk/analyses").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"repo1Path": "%s", "baseline": "%s", "repo2Path": "%s", "repo2bPath": "%s", "release": "%s"}
-                                """.formatted(d.repo1Path(), d.baseline(), d.repo2Path(), d.repo2bPath(), release)))
+                                {"repo1Path": "%s", "repo2Path": "%s", "repo2bPath": "%s", "release": "%s"}
+                                """.formatted(d.repo1Path(), d.repo2Path(), d.repo2bPath(), release)))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         long analysisId = ((Number) JsonPath.read(saved, "$.analysisId")).longValue();
@@ -221,15 +221,10 @@ class ReleaseReviewApiTest {
         var d = demo.view();
         mvc.perform(post("/api/migration-risk/analyses/directories").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"baselinePath": "%s", "repo1Path": "%s", "repo2Path": "%s", "release": "%s"}
-                                """.formatted(d.baselineFolder(), d.repo1Folder(), d.repo2Folder(), "F-" + UUID.randomUUID())))
+                                {"repo1Path": "%s", "repo2Path": "%s", "release": "%s"}
+                                """.formatted(d.repo1Folder(), d.repo2Folder(), "F-" + UUID.randomUUID())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.analysisId").exists())
                 .andExpect(jsonPath("$.source.mode").value("DIRECTORY"));
-    }
-
-    @Test
-    void demoBaselineTagIsStillTheBaseline() {
-        assertThat(DemoRepositories.BASELINE_TAG).isEqualTo("migration-baseline");
     }
 }

@@ -1,17 +1,19 @@
 package com.creed.resource.migrationrisk.domain;
 
-/** What repo2 holds for the element, compared with repo1's baseline version of it. */
+/** What repo2 holds for repo1's element. */
 public enum TargetState {
-    /** Same normalized declaration as at the baseline — the migration did not touch it. */
+    /** The same content (after normalization: formatting, Javadoc, imports do not count). */
     UNCHANGED,
-    /** Present, but the migration changed it. */
+    /** Present, with different content. */
     MODIFIED,
-    /** Present under another class, package or name. */
+    /** Present under another class, package, name or path. */
     RELOCATED,
     /** Not found. */
     MISSING,
-    /** Extracted from, inlined, split or merged by the migration. */
+    /** Extracted from, inlined, split or merged. */
     SPLIT,
-    /** Nothing at that place yet — the element is new upstream. */
+    /** Only repo2 has it. */
+    EXTRA,
+    /** Baseline analyses only: nothing there yet, the element was new upstream. */
     ABSENT
 }

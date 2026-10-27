@@ -23,17 +23,16 @@ import java.time.ZoneOffset;
 import java.util.stream.Stream;
 
 /**
- * Two generated repositories that exercise every risk category, so the page and the tests have something
- * to analyse without real checkouts:
+ * Generated repositories that exercise every risk category, so the page and the tests have something to analyse
+ * without real checkouts:
  * <ul>
- *   <li>{@code repo1}: {@code demo/repo1-baseline} committed and tagged {@value #BASELINE_TAG}, then
- *       {@code demo/repo1-head} committed on top — the other team's work;</li>
- *   <li>{@code repo2}: {@code demo/repo2}, the baseline migrated to Boot 4 / Jackson 3 (no shared history);</li>
+ *   <li>{@code repo1}: {@code demo/repo1} — the other team's code base, still on Boot 3 / Jackson 2;</li>
+ *   <li>{@code repo2}: {@code demo/repo2}, an older state of it migrated to Boot 4 / Jackson 3 (no shared history);</li>
  *   <li>{@code repo2b}: {@code demo/repo2b}, what the migration moved into a second repository — the FreeMarker
  *       templates (converted from Velocity), the tests and a {@code config/application.yml}. Analysed with repo2
  *       only, those are what repo2 "lacks"; with repo2B added, they are found.</li>
  * </ul>
- * The same three versions are also written as plain folders under {@code demo/folders/} for folder mode.
+ * The same versions are also written as plain folders under {@code demo/folders/} for folder mode.
  * Rebuilt at every start under {@code <work-dir>/demo}. Fixed authors and commit times make the commit ids
  * identical on every run.
  */
@@ -41,8 +40,6 @@ import java.util.stream.Stream;
 @ConditionalOnProperty(value = "migration-risk.demo.enabled", matchIfMissing = true)
 @Slf4j
 public class DemoRepositories {
-
-    public static final String BASELINE_TAG = "migration-baseline";
 
     private final Path repo1;
     private final Path repo2;
@@ -58,9 +55,7 @@ public class DemoRepositories {
         try {
             FileSystemUtils.deleteRecursively(root);
             try (Git git = Git.init().setDirectory(repo1.toFile()).setInitialBranch("main").call()) {
-                commit(git, "demo/repo1-baseline", "Order service before the Boot 4 migration", "2026-01-05T09:00:00Z");
-                git.tag().setName(BASELINE_TAG).call();
-                commit(git, "demo/repo1-head", "Upstream: cancel reason, retry config, sales report", "2026-03-02T15:30:00Z");
+                commit(git, "demo/repo1", "Order service: cancel reason, retry config, sales report", "2026-03-02T15:30:00Z");
             }
             try (Git git = Git.init().setDirectory(repo2.toFile()).setInitialBranch("main").call()) {
                 commit(git, "demo/repo2", "Migrate to Spring Boot 4 / Jackson 3", "2026-02-10T11:00:00Z");
@@ -68,8 +63,7 @@ public class DemoRepositories {
             try (Git git = Git.init().setDirectory(repo2b.toFile()).setInitialBranch("main").call()) {
                 commit(git, "demo/repo2b", "Templates (FreeMarker), tests and shared config", "2026-02-12T10:00:00Z");
             }
-            copyFolder("demo/repo1-baseline", folders.resolve("baseline"));
-            copyFolder("demo/repo1-head", folders.resolve("repo1"));
+            copyFolder("demo/repo1", folders.resolve("repo1"));
             copyFolder("demo/repo2", folders.resolve("repo2"));
             copyFolder("demo/repo2b", folders.resolve("repo2b"));
             log.info("demo repositories ready under {}", root);
@@ -112,8 +106,7 @@ public class DemoRepositories {
     }
 
     public MigrationRiskSettings.Demo view() {
-        return new MigrationRiskSettings.Demo(repo1.toString(), BASELINE_TAG, "HEAD", repo2.toString(), "HEAD",
-                repo2b.toString(), folders.resolve("baseline").toString(), folders.resolve("repo1").toString(),
-                folders.resolve("repo2").toString(), folders.resolve("repo2b").toString());
+        return new MigrationRiskSettings.Demo(repo1.toString(), "HEAD", repo2.toString(), "HEAD", repo2b.toString(),
+                folders.resolve("repo1").toString(), folders.resolve("repo2").toString(), folders.resolve("repo2b").toString());
     }
 }

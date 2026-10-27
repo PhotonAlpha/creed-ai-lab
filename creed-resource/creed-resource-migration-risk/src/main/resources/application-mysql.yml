@@ -1,0 +1,11 @@
+# MySQL 8 instead of PostgreSQL: the same tables from db/migration-mysql (MySQL syntax, same versions).
+#   mvn -pl creed-resource/creed-resource-migration-risk spring-boot:run -Dspring-boot.run.profiles=mysql ...
+# Create the database once (utf8mb4): create database migration_risk character set utf8mb4 collate utf8mb4_bin;
+spring:
+  datasource:
+    url: "${CREED_MIGRATION_RISK_DB_URL:jdbc:mysql://127.0.0.1:3306/migration_risk?serverTimezone=UTC&characterEncoding=UTF-8}"
+    username: "${CREED_MIGRATION_RISK_DB_USER:migration_risk}"
+    password: "${CREED_MIGRATION_RISK_DB_PASSWORD:}"
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    locations: classpath:db/migration-mysql

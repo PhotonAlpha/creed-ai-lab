@@ -43,9 +43,9 @@ migration-risk:
   allowed-roots: ${CREED_MIGRATION_RISK_ROOTS:${user.home}}
   # Per-analysis scratch space (the exported file subsets RefactoringMiner compares); deleted afterwards.
   work-dir: ${CREED_MIGRATION_RISK_WORK_DIR:${java.io.tmpdir}/creed-migration-risk}
-  # An upstream range bigger than this is refused (422 too_many_changes): RefactoringMiner's memory and
-  # time grow with the files it parses. Narrow the baseline instead.
-  max-changed-files: ${CREED_MIGRATION_RISK_MAX_FILES:2000}
+  # More differing files than this is refused (422 too_many_changes): RefactoringMiner's memory and time grow with
+  # the files it parses. Without a baseline every file the migration touched differs, so this counts whole repos.
+  max-changed-files: ${CREED_MIGRATION_RISK_MAX_FILES:5000}
   # A file with the same name elsewhere in repo2 is copied into the comparison so RefactoringMiner can see a
   # moved class; common names (package-info.java, Utils.java) are capped at this many candidates.
   max-candidates-per-name: 5
@@ -62,8 +62,8 @@ migration-risk:
   # this regex adds the rest — properties / yml under resources/ or config/, not CI pipelines or Helm charts.
   config-files: '(.*/)?(resources|config)/.*\.(properties|ya?ml)'
   # Config keys renamed by Spring Boot, on top of the deprecation metadata in Boot's own jars (~260 keys in 4.1.1;
-  # Boot 3.0's renames are no longer there). A key ending in '.' renames the whole prefix. A changed upstream key
-  # whose new name repo2 holds with the new value is CONFIG_IN_SYNC instead of "missing".
+  # Boot 3.0's renames are no longer there). A key ending in '.' renames the whole prefix. A repo1 key repo2
+  # holds only under its new name, with repo1's value, is CONFIG_IN_SYNC instead of "missing".
   config-renames:
     "[spring.redis.]": spring.data.redis.
     "[spring.data.cassandra.]": spring.cassandra.
@@ -85,11 +85,13 @@ migration-risk:
     project-key: ${CREED_MIGRATION_RISK_JIRA_PROJECT:MIG}
     issue-type: Task
     token: ${CREED_MIGRATION_RISK_JIRA_TOKEN:}
-  # Formats the migration converted: a changed x.vm is looked up as x.ftl in repo2 (TEMPLATE_CONVERTED, MEDIUM).
+  # Formats the migration converted: repo1's x.vm is looked up as x.ftl in repo2 and compared through a drafted
+  # conversion (TEMPLATE_CONVERTED, MEDIUM; ALREADY_SYNCED when the draft matches).
   extension-mappings:
     vm: ftl
-  # Added upstream lines matching one of these are flagged HIGH (MIGRATION_API): code written against an API
-  # the migration replaced. Java regex, matched per line.
+  # repo1 lines that repo2 lacks matching one of these are flagged MIGRATION_API (MEDIUM): code written against an
+  # API the migration replaced, to convert while porting. A match alone in its file is the migration's own rewrite
+  # and is not reported. Java regex, matched per line.
   api-rules:
     - id: jackson2
       pattern: 'com\.fasterxml\.jackson\.(databind|core|datatype|dataformat)\.'

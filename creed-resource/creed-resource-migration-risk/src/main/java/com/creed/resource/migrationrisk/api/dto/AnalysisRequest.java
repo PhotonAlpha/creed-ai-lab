@@ -4,8 +4,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 /**
- * @param repo1Path  the repository the other team keeps committing to (a path on the server)
- * @param baseline   the repo1 commit the migration started from — or last synced at; any revision git accepts
+ * Git mode: repo1's head compared with repo2's (repo2A + repo2B as one code base), no baseline.
+ *
+ * @param repo1Path  the repository the other team keeps committing to (a path on the server, or an https URL)
  * @param repo1Head  defaults to {@code HEAD}
  * @param repo2Path  the migrated repository
  * @param repo2Head  defaults to {@code HEAD}
@@ -18,7 +19,6 @@ import jakarta.validation.constraints.Size;
  */
 public record AnalysisRequest(
         @NotBlank String repo1Path,
-        @NotBlank String baseline,
         String repo1Head,
         @NotBlank String repo2Path,
         String repo2Head,
@@ -32,7 +32,6 @@ public record AnalysisRequest(
         repo2Head = repo2Head == null || repo2Head.isBlank() ? "HEAD" : repo2Head.trim();
         repo2bPath = repo2bPath == null || repo2bPath.isBlank() ? null : repo2bPath.trim();
         repo2bHead = repo2bPath == null ? null : repo2bHead == null || repo2bHead.isBlank() ? "HEAD" : repo2bHead.trim();
-        baseline = baseline == null ? null : baseline.trim();
         release = release == null || release.isBlank() ? null : release.trim();
     }
 }

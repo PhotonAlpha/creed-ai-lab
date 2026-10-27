@@ -7,4 +7,12 @@
             <to uri="bean:orderService?method=placeOrder"/>
         </filter>
     </route>
+    <route id="order-audit">
+        <from uri="seda:audit"/>
+        <to uri="log:audit?level=INFO"/>
+    </route>
+    <route id="order-cancel">
+        <from uri="direct:cancel"/>
+        <to uri="bean:orderService?method=cancelOrder"/>
+    </route>
 </routes>

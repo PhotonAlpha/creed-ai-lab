@@ -59,8 +59,10 @@ final class FileRecords {
         // where repo2 has the file: the riskiest part that found something
         Location target = parts.stream().map(RiskItem::target).filter(Objects::nonNull).findFirst()
                 .map(t -> new Location(t.path(), null, null, t.repo())).orElse(null);
+        // a file only repo2 has: no repo1 location (the page offers no repo1 side for it)
+        Location here = parts.stream().anyMatch(p -> p.upstream() != null) ? new Location(path, null, null) : null;
         return new RiskItem("FILE:" + path, top.level(), top.category(), ElementKind.FILE, path, change,
-                new Location(path, null, null), target, top.targetState(), List.of(), List.of(), null, top.module(),
+                here, target, top.targetState(), List.of(), List.of(), null, top.module(),
                 top.test(), parts);
     }
 }

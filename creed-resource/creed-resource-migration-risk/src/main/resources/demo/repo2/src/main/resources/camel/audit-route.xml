@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- moved out of order-route.xml by the migration; prefix and attribute order differ, the route does not -->
+<camel:routes xmlns:camel="http://camel.apache.org/schema/spring">
+  <camel:route id="order-audit">
+    <camel:from uri="seda:audit" />
+    <camel:to   uri="log:audit?level=INFO" />
+  </camel:route>
+</camel:routes>

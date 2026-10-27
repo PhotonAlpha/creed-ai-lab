@@ -2,8 +2,8 @@ package com.creed.resource.migrationrisk.service;
 
 /**
  * Where a running analysis is. Each stage owns a fixed band of the overall percentage; inside a band only the
- * stages that loop over files ({@link Stage#JAVA}, {@link Stage#FILES}) report steps. The two RefactoringMiner
- * runs are one opaque call each — no callback inside — so their bands jump from start to end; a UI shows them
+ * stages that loop over files ({@link Stage#JAVA}, {@link Stage#FILES}) report steps. The RefactoringMiner
+ * run is one opaque call — no callback inside — so its band jumps from start to end; a UI shows them
  * as "running" with elapsed time.
  *
  * <p>A job's implementation also cancels: {@link #stage} and {@link #step} throw {@link CancelledException}
@@ -12,7 +12,7 @@ package com.creed.resource.migrationrisk.service;
 public interface Progress {
 
     enum Stage {
-        RESOLVE(0), DIFF(5), EXPORT(10), UPSTREAM(15), MIGRATION(45), JAVA(80), FILES(94), SAVE(97), DONE(100);
+        RESOLVE(0), DIFF(5), EXPORT(15), REFACTORINGS(20), JAVA(80), FILES(94), SAVE(97), DONE(100);
 
         private final int start;
 

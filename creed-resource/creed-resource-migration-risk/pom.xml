@@ -145,6 +145,16 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- The `mysql` profile: MySQL 8 with its own scripts (db/migration-mysql). Both Boot-managed. -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
         <!-- Runtime, not test: the `h2` profile runs the module without Docker (file database in work-dir). -->
         <dependency>
             <groupId>com.h2database</groupId>

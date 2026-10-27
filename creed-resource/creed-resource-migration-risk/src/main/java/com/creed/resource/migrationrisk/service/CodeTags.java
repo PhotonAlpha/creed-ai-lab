@@ -22,7 +22,7 @@ public final class CodeTags {
     private final TreeSet<String> moduleDirs = new TreeSet<>((a, b) -> a.length() != b.length()
             ? Integer.compare(b.length(), a.length()) : a.compareTo(b));
 
-    /** {@code paths}: every file of repo1 (baseline and head together, so a deleted module still has a name). */
+    /** {@code paths}: every file of repo1 and repo2, so a file only repo2 has still gets its module. */
     public CodeTags(Collection<String> paths) {
         for (String path : paths) {
             int slash = path.lastIndexOf('/');

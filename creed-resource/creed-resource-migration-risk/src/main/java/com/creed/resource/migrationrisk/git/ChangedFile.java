@@ -3,12 +3,13 @@ package com.creed.resource.migrationrisk.git;
 import java.util.List;
 
 /**
- * One file in {@code git diff baseline..head}, with rename detection.
+ * One file that differs between two trees ({@link com.creed.resource.migrationrisk.source.TreeDiff}). The analysis
+ * diffs repo2 -> repo1, so {@code old} is repo2's side and {@code new} is repo1's.
  *
- * @param oldPath    null for an addition
- * @param newPath    null for a deletion
- * @param addedLines 1-based line numbers in the new version that the diff adds; empty for a deletion,
- *                   every line for an addition or a binary file's absence
+ * @param oldPath    repo2's path; null when only repo1 has the file ({@code ADDED})
+ * @param newPath    repo1's path; null when only repo2 has it ({@code DELETED})
+ * @param addedLines 1-based line numbers of repo1's file that repo2's lacks; empty when only repo2 has the file,
+ *                   every line when only repo1 has it
  */
 public record ChangedFile(Change change, String oldPath, String newPath, List<Integer> addedLines) {
 

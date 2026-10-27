@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** Ignore rules, export, remote repositories and the extra diff views. */
+/** Ignore rules, export, remote repositories and the diff view's explicit repo2 file. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -44,8 +44,8 @@ class WorkflowApiTest {
     private String demoBody() {
         var d = demo.view();
         return """
-                {"repo1Path": "%s", "baseline": "%s", "repo2Path": "%s", "repo2bPath": "%s"}
-                """.formatted(d.repo1Path(), d.baseline(), d.repo2Path(), d.repo2bPath());
+                {"repo1Path": "%s", "repo2Path": "%s", "repo2bPath": "%s"}
+                """.formatted(d.repo1Path(), d.repo2Path(), d.repo2bPath());
     }
 
     @Test
@@ -54,7 +54,7 @@ class WorkflowApiTest {
                 .content("{\"pattern\": \"**/templates/*.vm\", \"note\": \"templates are ported separately\"}"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.id").toString();
         String category = JsonPath.read(mvc.perform(post("/api/migration-risk/ignore-rules").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"pattern\": \"**/report/*.java\", \"category\": \"NEW_CODE\"}"))
+                .content("{\"pattern\": \"**/report/*.java\", \"category\": \"TARGET_MISSING\"}"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.id").toString();
         try {
             String json = analyse(demoBody());
@@ -78,7 +78,7 @@ class WorkflowApiTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Disposition", containsString("migration-sync.md")))
                 .andExpect(content().string(allOf(containsString("# Migration sync checklist"),
-                        containsString("## HIGH (4)"),
+                        containsString("## HIGH (6)"),
                         containsString("- [ ] `src/main/java/com/acme/shop/order/OrderService.java` — TARGET_MISSING"))));
         byte[] xlsx = mvc.perform(post("/api/migration-risk/export").contentType(MediaType.APPLICATION_JSON).content(json))
                 .andExpect(status().isOk())
@@ -92,36 +92,25 @@ class WorkflowApiTest {
         var d = demo.view();
         String repo1 = Path.of(d.repo1Path()).toUri().toString();
         String json = analyse("""
-                {"repo1Path": "%s", "baseline": "%s", "repo2Path": "%s"}
-                """.formatted(repo1, d.baseline(), d.repo2Path()));
+                {"repo1Path": "%s", "repo2Path": "%s"}
+                """.formatted(repo1, d.repo2Path()));
         assertThat(JsonPath.<String>read(json, "$.source.repo1Path")).isEqualTo(repo1);
         assertThat(JsonPath.<Integer>read(json, "$.counts.total")).isEqualTo(13);
         mvc.perform(get("/api/migration-risk/refs").param("path", repo1))
-                .andExpect(jsonPath("$.tags[0]").value(DemoRepositories.BASELINE_TAG));
+                .andExpect(jsonPath("$.currentBranch").value("main"));
         mvc.perform(post("/api/migration-risk/analyses").contentType(MediaType.APPLICATION_JSON).content("""
-                        {"repo1Path": "https://elsewhere.example.org/x.git", "baseline": "HEAD", "repo2Path": "%s"}
+                        {"repo1Path": "https://elsewhere.example.org/x.git", "repo2Path": "%s"}
                         """.formatted(d.repo2Path())))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.fields[0].field").value("repo1Path"));
     }
 
+    /** A config key repo2B keeps in another file: the diff opens that file when the page names it. */
     @Test
-    void threeWayViewMarksWhoChangedWhat() throws Exception {
+    void theDiffCanBePointedAtAnotherRepo2File() throws Exception {
         var d = demo.view();
-        mvc.perform(get("/api/migration-risk/view/diff3").param("repo1Path", d.repo1Path()).param("baseline", d.baseline())
-                        .param("repo2Path", d.repo2Path()).param("file", "src/main/java/com/acme/shop/payment/PaymentClient.java")
-                        .header("Accept-Language", "en"))
-                .andExpect(status().isOk())
-                .andExpect(content().string(allOf(containsString("Three-way view"), containsString("\"kind\":\"upstream\""),
-                        containsString("\"kind\":\"migration\""), containsString("amount must be positive"))));
-    }
-
-    /** A config key repo2B keeps in another file: the B diff opens that file when the page names it. */
-    @Test
-    void sideBCanBePointedAtAnotherRepo2File() throws Exception {
-        var d = demo.view();
-        mvc.perform(get("/api/migration-risk/view/diff").param("repo1Path", d.repo1Path()).param("baseline", d.baseline())
-                        .param("repo2Path", d.repo2Path()).param("repo2bPath", d.repo2bPath()).param("side", "B")
+        mvc.perform(get("/api/migration-risk/view/diff").param("repo1Path", d.repo1Path())
+                        .param("repo2Path", d.repo2Path()).param("repo2bPath", d.repo2bPath())
                         .param("file", "src/main/resources/application.yml")
                         .param("target", "src/main/resources/config/application.yml"))
                 .andExpect(status().isOk())

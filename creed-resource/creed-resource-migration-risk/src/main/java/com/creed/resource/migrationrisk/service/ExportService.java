@@ -73,8 +73,9 @@ public class ExportService {
         Source s = analysis.source();
         md.append("# Migration sync checklist").append(analysis.release() == null ? "" : " — " + analysis.release()).append("\n\n");
         md.append("- repo1: `").append(s.repo1Path()).append('`')
-                .append(s.baseline() != null ? " baseline `" + s.baseline().shortId() + "` → HEAD `" + s.repo1Head().shortId() + "`" : "")
+                .append(s.repo1Head() != null ? " `" + s.repo1Head().shortId() + "`" : "")
                 .append("\n- repo2: `").append(s.repo2Path()).append('`')
+                .append(s.repo2Head() != null ? " `" + s.repo2Head().shortId() + "`" : "")
                 .append(s.repo2bPath() != null ? " + `" + s.repo2bPath() + "`" : "").append("\n")
                 .append("- ").append(analysis.counts().total()).append(" files: ").append(analysis.counts().high())
                 .append(" HIGH, ").append(analysis.counts().medium()).append(" MEDIUM, ").append(analysis.counts().low())

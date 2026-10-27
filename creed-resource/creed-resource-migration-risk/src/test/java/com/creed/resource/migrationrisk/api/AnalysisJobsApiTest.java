@@ -39,8 +39,8 @@ class AnalysisJobsApiTest {
         var d = demo.view();
         String body = mvc.perform(post("/api/migration-risk/analyses/jobs").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"repo1Path": "%s", "baseline": "%s", "repo2Path": "%s", "release": "%s"}
-                                """.formatted(d.repo1Path(), d.baseline(), d.repo2Path(), release)))
+                                {"repo1Path": "%s", "repo2Path": "%s", "release": "%s"}
+                                """.formatted(d.repo1Path(), d.repo2Path(), release)))
                 .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
         return JsonPath.read(body, "$.jobId");
@@ -82,20 +82,20 @@ class AnalysisJobsApiTest {
         String stream = mvc.perform(asyncDispatch(async)).andReturn().getResponse().getContentAsString();
         assertThat(stream)
                 .contains("event:stage", "\"stage\":\"RESOLVE\"", "\"stage\":\"DIFF\"", "\"stage\":\"EXPORT\"",
-                        "\"stage\":\"UPSTREAM\"", "\"stage\":\"MIGRATION\"", "\"stage\":\"SAVE\"", "\"stage\":\"DONE\"",
+                        "\"stage\":\"REFACTORINGS\"", "\"stage\":\"SAVE\"", "\"stage\":\"DONE\"",
                         "event:done");
-        assertThat(stream.indexOf("\"stage\":\"UPSTREAM\"")).isLessThan(stream.indexOf("\"stage\":\"MIGRATION\""));
+        assertThat(stream.indexOf("\"stage\":\"EXPORT\"")).isLessThan(stream.indexOf("\"stage\":\"REFACTORINGS\""));
     }
 
     @Test
-    void aWrongBaselineIsRefusedBeforeAnyJobStarts() throws Exception {
+    void aWrongBranchIsRefusedBeforeAnyJobStarts() throws Exception {
         var d = demo.view();
         mvc.perform(post("/api/migration-risk/analyses/jobs").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"repo1Path": "%s", "baseline": "no-such-tag", "repo2Path": "%s"}
+                                {"repo1Path": "%s", "repo2Path": "%s", "repo2Head": "no-such-branch"}
                                 """.formatted(d.repo1Path(), d.repo2Path())))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.fields[0].field").value("baseline"));
+                .andExpect(jsonPath("$.fields[0].field").value("repo2Head"));
     }
 
     @Test
@@ -103,8 +103,8 @@ class AnalysisJobsApiTest {
         var d = demo.view();
         String body = mvc.perform(post("/api/migration-risk/analyses/directories/jobs").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"baselinePath": "%s", "repo1Path": "%s", "repo2Path": "%s"}
-                                """.formatted(d.baselineFolder(), d.repo1Folder(), d.repo2Folder())))
+                                {"repo1Path": "%s", "repo2Path": "%s"}
+                                """.formatted(d.repo1Folder(), d.repo2Folder())))
                 .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
         String view = awaitDone(JsonPath.read(body, "$.jobId"));
         assertThat(JsonPath.<Integer>read(view, "$.result.counts.total")).isEqualTo(13);
