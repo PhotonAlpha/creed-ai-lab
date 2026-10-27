@@ -251,6 +251,13 @@ every page, half-empty ones included, and carries its own centred page counter. 
     or the two brand PNGs breaks that module's build**, not just this one's.
 - **Environment Inspector** — REST + Thymeleaf views over a standalone `ConfigurableEnvironment`
   replay. **Use the `env-inspector` skill for anything in this feature.**
+- **Mail connection probe** (`com.creed.report.mail`) — `POST /api/mail/probe?mode=batch|sequential|concurrent&count=N&to=…`
+  sends **real** mail through `spring.mail.*` (smtp.qq.com:465, `ssl.enabled: true`) and reports how
+  many SMTP connections `JavaMailSenderImpl` opened and how many at once. Requests in
+  `.support/http-client/creed-report.http`; findings and source evidence in
+  `docs/javamail-connections.md` (+ `.zh-CN.md`); `JavaMailSenderConnectionTest` proves the same against
+  an in-process fake SMTP server. Password comes from **`CREED_MAIL_PASSWORD`** (QQ authorization
+  code) — unset means `MailAuthenticationException` in each `results[].error`, not a 500.
 
 ## Landmines
 

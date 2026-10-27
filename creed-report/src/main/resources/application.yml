@@ -19,6 +19,23 @@ spring:
   # No spring.messages.* here: com.creed.report.config.MessageSourceConfig defines the
   # 'messageSource' bean (one per domain, chained), so MessageSourceAutoConfiguration backs off
   # and these properties would be silently ignored. Basenames/encoding live in that class.
+  mail:
+    host: smtp.qq.com
+    port: 465
+    protocol: smtp
+    username: ethan.caoq@foxmail.com
+    # QQ Mail authorization code (not the account password); never commit it here.
+    password: ${CREED_MAIL_PASSWORD:}
+    # 465 is implicit TLS: without this the client waits for a plain-text greeting that never comes.
+    # (For 587 use properties.mail.smtp.starttls.enable instead, and leave this off.)
+    ssl:
+      enabled: true
+    properties:
+      # JavaMail's default is no timeout at all: a wrong port/SSL setting hangs instead of failing.
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
+
   profiles:
     group:
       "default":
@@ -44,6 +61,9 @@ home:
 
 creed:
   report:
+    # /api/mail/probe sends REAL mail; this caps one call (a typo of 500 is 500 mails).
+    mail-probe:
+      max-messages: "${CREED_REPORT_MAIL_PROBE_MAX:10}"
     pdf:
       # Fonts registered for PDF export (Spring resource patterns or plain file paths).
       # Bundled: Noto Sans (Latin) + Noto Sans SC/TC (Chinese), picked per locale by the
@@ -79,6 +99,12 @@ creed:
 logging:
   level:
     org.springframework.boot.context.config.ConfigDataEnvironment: trace
+    # JavaMail's own log, bridged JUL -> Logback by Boot (so it carries thread name + timestamp,
+    # unlike mail.debug=true, which prints to System.out). One "connected to host" line per SMTP
+    # connection; the protocol logger adds every command, incl. the QUIT that closes it.
+    # AUTH stays hidden (mail.debug.auth defaults to false). DATA lines include the message body.
+    org.eclipse.angus.mail.smtp: debug
+    org.eclipse.angus.mail.smtp.protocol: trace
 
 management:
   endpoints:

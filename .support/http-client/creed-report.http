@@ -64,3 +64,34 @@ Accept: application/json
 # inspects a hypothetical launch)
 GET http://localhost:48080/report/actuator/env
 Accept: application/json
+
+# ---------------------------------------------------------------------------------------------
+# JavaMailSender connection probe — sends REAL mail through spring.mail.* (smtp.qq.com:465, SSL).
+# Compare "connections" / "maxConcurrentConnections" in the response, and the [client] OPEN/CLOSE
+# lines in the app log (thread name + transport id + active count).
+#   batch      : one thread, send(msg1..msgN) once  -> connections=1, max=1
+#   sequential : one thread, send(msg) N times      -> connections=N, max=1
+#   concurrent : N threads, send(msg) each          -> connections=N, max>1 (usually N)
+# count is 1..creed.report.mail-probe.max-messages (10). Change @mailTo to your own mailbox.
+# ---------------------------------------------------------------------------------------------
+@mailTo = ethan.caoq@foxmail.com
+
+### mail probe — single thread, ONE send(msg x3): one connection carries all three
+POST http://localhost:48080/report/api/mail/probe?mode=batch&count=3&to={{mailTo}}
+Accept: application/json
+
+### mail probe — single thread, send(msg) three times: three connections, never overlapping
+POST http://localhost:48080/report/api/mail/probe?mode=sequential&count=3&to={{mailTo}}
+Accept: application/json
+
+### mail probe — three threads released together: three connections open AT THE SAME TIME
+POST http://localhost:48080/report/api/mail/probe?mode=concurrent&count=3&to={{mailTo}}
+Accept: application/json
+
+### mail probe — bad mode -> 400
+POST http://localhost:48080/report/api/mail/probe?mode=pooled&count=3&to={{mailTo}}
+Accept: application/json
+
+### mail probe — count over the cap -> 400 (nothing is sent)
+POST http://localhost:48080/report/api/mail/probe?mode=concurrent&count=50&to={{mailTo}}
+Accept: application/json

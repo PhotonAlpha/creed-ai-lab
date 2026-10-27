@@ -140,6 +140,16 @@ Standalone **Spring MVC + Thymeleaf** reporting/visualization app. Plain HTTP `9
   leaves and `unescape()` them instead; and a `String` request body without a charset decodes by the
   converter's default (ISO-8859-1 in plain Spring / standalone MockMvc, UTF-8 only under Boot's
   converter config) — the controller takes `byte[]` and defaults to UTF-8 itself.
+- **Mail connection probe** — package `com.creed.report.mail` (`POST /api/mail/probe`), doc
+  `docs/javamail-connections.md`. **`JavaMailSenderImpl` opens one SMTP connection per `send(...)`
+  call and closes it before returning** — no pool, nothing kept between calls — so a loop of
+  `send(msg)` pays TCP+TLS+AUTH every time, N threads open N connections at once with no cap, and the
+  only built-in reuse is passing several messages to one `send`. The probe builds a fresh
+  `ConnectionCountingMailSender` per call on **Boot's** `Session` (`setSession(bootSender.getSession())`),
+  so it sees the app's `spring.mail.ssl.*`/`properties.*` and leaves the app's `mailSender` alone.
+  Mail landmines: port 465 needs `spring.mail.ssl.enabled: true` (plain `smtp` there waits for a
+  greeting that never comes); JavaMail has **no timeouts by default**, so a wrong port/SSL hangs —
+  the `mail.smtp.*timeout` properties in application.yml are what turn that into an error.
 - **Environment Inspector** — `controller/EnvironmentInspectionController` (REST: `GET /api/environment`, `/api/environment/rendered`) + `controller/EnvironmentViewController` (Thymeleaf: `GET /environment`, `/environment/rendered`), backed by `service/EnvironmentInspectionService`. Models `EnvironmentSnapshot`, `PropertySourceView`, `PropertyEntry`, `RenderedEnvironment`. **For anything in this feature, use the [[env-inspector]] skill** — it has the full requirements/design (replays Spring Boot's config-loading pipeline standalone, renders effective properties to YAML/.properties).
 
 ### Previewing a PDF template
