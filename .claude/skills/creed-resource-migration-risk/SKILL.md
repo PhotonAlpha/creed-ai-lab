@@ -114,6 +114,15 @@ releases and reviews; the analysis itself is computed per request. Page `/migrat
 - Export only differing files (repo1's version, repo2's, + repo2 same-name files capped by
   `max-candidates-per-name`): whole repos are slow and memory-hungry. Without a baseline that is still most of a
   migrated repo — `max-changed-files` defaults to 5000.
+- **Narrowed before parsing** (`MigrationRiskService.run`): whole-file ignore rules (`IgnoreRules.Active.files`) and
+  cosmetic Java files (`JavaTokens.sameCode`: same tokens without imports / comments / whitespace; package and
+  annotations count) leave `ctx.changes()` and the export; `max-changed-files` counts what is left. Safe because a
+  cosmetic file has every member repo2's same-path file has — nothing can have moved into or out of it. An ignored
+  file's **repo2 side stays exported**: a non-ignored repo1 class that moved there must still be RELOCATED, not
+  TARGET_MISSING. The response's `changedFiles` and the diff view still see the full change set; the warnings count
+  cosmetic files as "nothing to report" and pre-dropped files in the one ignore-rules warning.
+- `GitTree.read` opens the walk's blob id (`GitRepositories.read(repo, ObjectId)`), not `TreeWalk.forPath` — the
+  cosmetic check reads both sides of every differing Java file, in parallel (trees must stay thread-safe for reads).
 - `GitTree` caches `blobIds` from one walk: comparing whole trees asks every path's id, and a `TreeWalk.forPath`
   per path was quadratic.
 - `RepositoryGuard` creates the work dir **before** `toRealPath()` — otherwise the demo root resolves to

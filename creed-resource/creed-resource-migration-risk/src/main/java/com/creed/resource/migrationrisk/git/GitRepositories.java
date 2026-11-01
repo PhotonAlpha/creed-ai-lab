@@ -2,8 +2,8 @@ package com.creed.resource.migrationrisk.git;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.diff.RawText;
+import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
-import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
@@ -104,8 +104,16 @@ public final class GitRepositories {
             if (walk == null) {
                 return Optional.empty();
             }
-            ObjectLoader loader = repository.open(walk.getObjectId(0));
-            byte[] bytes = loader.getBytes();
+            return read(repository, walk.getObjectId(0));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** A blob's text; empty when it is binary. */
+    public static Optional<String> read(Repository repository, ObjectId blob) {
+        try {
+            byte[] bytes = repository.open(blob, Constants.OBJ_BLOB).getBytes();
             return RawText.isBinary(bytes) ? Optional.empty() : Optional.of(new String(bytes, StandardCharsets.UTF_8));
         } catch (IOException e) {
             throw new UncheckedIOException(e);

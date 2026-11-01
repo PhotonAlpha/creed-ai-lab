@@ -44,7 +44,8 @@ migration-risk:
   # Per-analysis scratch space (the exported file subsets RefactoringMiner compares); deleted afterwards.
   work-dir: ${CREED_MIGRATION_RISK_WORK_DIR:${java.io.tmpdir}/creed-migration-risk}
   # More differing files than this is refused (422 too_many_changes): RefactoringMiner's memory and time grow with
-  # the files it parses. Without a baseline every file the migration touched differs, so this counts whole repos.
+  # the files it parses. Counted after whole-file ignore rules and after Java files that differ only in imports,
+  # comments or formatting are taken out (they are not parsed at all).
   max-changed-files: ${CREED_MIGRATION_RISK_MAX_FILES:5000}
   # A file with the same name elsewhere in repo2 is copied into the comparison so RefactoringMiner can see a
   # moved class; common names (package-info.java, Utils.java) are capped at this many candidates.

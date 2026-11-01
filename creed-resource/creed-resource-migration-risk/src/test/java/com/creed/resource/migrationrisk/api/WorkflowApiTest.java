@@ -9,9 +9,12 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.util.FileSystemUtils;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.allOf;
@@ -115,5 +118,61 @@ class WorkflowApiTest {
                         .param("target", "src/main/resources/config/application.yml"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("src/main/resources/config/application.yml")));
+    }
+
+    /**
+     * What is taken out before parsing: a file that differs only in imports / formatting (javax -> jakarta) and a file
+     * a whole-file ignore rule drops. Neither yields a record; the warnings still count both.
+     */
+    @Test
+    void cosmeticAndIgnoredFilesLeaveBeforeTheAnalysis() throws Exception {
+        Path root = Path.of(System.getProperty("user.dir"), "target", "migration-risk-work", "prefilter-" + UUID.randomUUID());
+        String pkg = "src/main/java/com/acme/";
+        write(root.resolve("a/" + pkg + "Cosmetic.java"), """
+                package com.acme;
+                import javax.servlet.http.HttpServletRequest;
+                public class Cosmetic {
+                    // old
+                    String id(HttpServletRequest r) { return r.getParameter("id"); }
+                }
+                """);
+        write(root.resolve("b/" + pkg + "Cosmetic.java"), """
+                package com.acme;
+
+                import jakarta.servlet.http.HttpServletRequest;
+
+                public class Cosmetic {
+                    String id(HttpServletRequest r) {
+                        return r.getParameter("id");
+                    }
+                }
+                """);
+        write(root.resolve("a/" + pkg + "Changed.java"), "package com.acme;\npublic class Changed { int n() { return 1; } }\n");
+        write(root.resolve("b/" + pkg + "Changed.java"), "package com.acme;\npublic class Changed { int n() { return 2; } }\n");
+        write(root.resolve("a/" + pkg + "generated/Gen.java"), "package com.acme.generated;\npublic class Gen { int a; }\n");
+        write(root.resolve("b/" + pkg + "generated/Gen.java"), "package com.acme.generated;\npublic class Gen { long a; }\n");
+        String rule = JsonPath.read(mvc.perform(post("/api/migration-risk/ignore-rules").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"pattern\": \"**/generated/**\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.id").toString();
+        try {
+            String json = mvc.perform(post("/api/migration-risk/analyses/directories").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"repo1Path\": \"%s\", \"repo2Path\": \"%s\"}".formatted(root.resolve("a"), root.resolve("b"))))
+                    .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            assertThat(JsonPath.<List<String>>read(json, "$.items[*].element")).containsExactly(pkg + "Changed.java");
+            assertThat(JsonPath.<List<String>>read(json, "$.warnings")).containsExactlyInAnyOrder(
+                    "1 differing file(s) have nothing to report: imports, formatting, comments, Camel routes kept in"
+                            + " another file, or the migration's own API rewrite only",
+                    "ignore rules left out 1 file(s) and 0 finding(s) of kept files");
+            // the response still lists every differing file
+            assertThat(JsonPath.<List<String>>read(json, "$.changedFiles[*].newPath")).hasSize(3);
+        } finally {
+            mvc.perform(delete("/api/migration-risk/ignore-rules/{id}", rule)).andExpect(status().isNoContent());
+            FileSystemUtils.deleteRecursively(root);
+        }
+    }
+
+    private static void write(Path file, String text) throws Exception {
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, text);
     }
 }

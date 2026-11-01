@@ -55,7 +55,10 @@ carry `fields[0].field` (`repo1Path`, `repo2Head`, `path`, ...) so the page mark
 ## How it decides
 
 `TreeDiff.diff(repo2, repo1)` over whole trees (content ids; old = repo2's path, new = repo1's; identical content at
-another path = RENAMED, not reported). One RefactoringMiner run **repo1 → repo2** over the differing Java files +
+another path = RENAMED, not reported). Before parsing, two kinds of files leave the analysis: what a whole-file
+ignore rule matches (its repo2 side stays in RefactoringMiner's input, as a move target), and Java files that are the
+same token for token once imports, comments and whitespace are gone (`JavaTokens`; still counted in "nothing to
+report"). `max-changed-files` counts what is left. One RefactoringMiner run **repo1 → repo2** over the differing Java files +
 repo2 same-name files (`RefactoringIndex`: before = repo1, after = repo2). `JavaRiskAnalyzer`, per repo1 class: find it
 in repo2 (class move, same path, same file name; else `TARGET_MISSING` / `TARGET_SPLIT`), then per method: same
 normalized text → nothing; different → `CONTENT_DIFFERS` (line diff of the method); not there → RM split
@@ -69,6 +72,11 @@ an API match alone in its file (the migration's own rewrite). Details read like 
 `+` = repo2), the same direction as the diff page.
 
 ## Current state
+
+2026-11-02: **large repos** — cosmetic-only Java files (imports / comments / formatting, i.e. most of a javax →
+jakarta migration) and whole-file ignore rules are taken out before RefactoringMiner and JDT; `GitTree.read` opens the
+cached blob id instead of a `TreeWalk.forPath` per file. Output on the demo unchanged. Frontend: *Swap repo1 / repo2*
+button (disabled with a repo2B). **71 tests pass.** Not yet measured on a real 5000+ file pair.
 
 2026-10-28: **baseline removed** (asked for): repo1 HEAD vs repo2 directly, one RM run, categories `CONTENT_DIFFERS` /
 `ONLY_IN_REPO2` new (`BOTH_MODIFIED` / `DELETED_UPSTREAM` / `UPSTREAM_REFACTORING` / `AUTO_SYNC` / `NEW_CODE` kept only so

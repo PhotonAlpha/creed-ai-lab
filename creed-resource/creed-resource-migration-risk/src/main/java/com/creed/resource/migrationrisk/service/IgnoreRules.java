@@ -4,6 +4,7 @@ import com.creed.resource.migrationrisk.api.dto.IgnoreRuleView;
 import com.creed.resource.migrationrisk.domain.MrIgnoreRule;
 import com.creed.resource.migrationrisk.domain.MrIgnoreRuleRepository;
 import com.creed.resource.migrationrisk.domain.RiskItem;
+import com.creed.resource.migrationrisk.git.ChangedFile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.AntPathMatcher;
@@ -16,7 +17,8 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Persistent "don't show me this" rules, applied to every analysis (saved or not) after its file records are built:
+ * Persistent "don't show me this" rules, applied to every analysis (saved or not) after its file records are built
+ * (whole-file rules also before the analysis, see {@link Active}):
  * a rule without a category drops the matching files, a rule with one drops that category's findings from them (a
  * file left with no findings is dropped too). What was dropped is counted in a warning, never silently.
  */
@@ -56,44 +58,73 @@ public class IgnoreRules {
         rules.deleteById(id);
     }
 
-    /** {@code repo1Path}: as the analysis source names it (path or URL), for scoped rules. */
+    /** The rules that apply to one analysis ({@code repo1Path}: as its source names it, path or URL), loaded once. */
     @Transactional(readOnly = true)
-    public List<RiskItem> apply(List<RiskItem> files, String repo1Path, List<String> warnings) {
-        List<MrIgnoreRule> active = rules.findAll().stream()
-                .filter(r -> r.getScope() == null || r.getScope().equals(repo1Path)).toList();
-        if (active.isEmpty()) {
-            return files;
+    public Active active(String repo1Path) {
+        return new Active(rules.findAll().stream()
+                .filter(r -> r.getScope() == null || r.getScope().equals(repo1Path)).toList(), matcher);
+    }
+
+    /**
+     * One analysis' rules, used twice: {@link #files} takes the whole-file rules' files out of the change set before
+     * anything is parsed (an ignored file must not cost RefactoringMiner time), {@link #apply} runs every rule on the
+     * file records. One warning counts both.
+     */
+    public static final class Active {
+
+        private final List<MrIgnoreRule> rules;
+        private final AntPathMatcher matcher;
+        private int droppedEarly;
+
+        private Active(List<MrIgnoreRule> rules, AntPathMatcher matcher) {
+            this.rules = rules;
+            this.matcher = matcher;
         }
-        List<RiskItem> kept = new ArrayList<>();
-        int droppedFiles = 0;
-        int droppedFindings = 0;
-        for (RiskItem file : files) {
-            List<MrIgnoreRule> matching = active.stream().filter(r -> matcher.match(r.getPattern(), file.element())).toList();
-            if (matching.isEmpty()) {
-                kept.add(file);
-                continue;
+
+        /** The changes a category-less rule drops — matched on the path its file record would carry. */
+        public List<ChangedFile> files(List<ChangedFile> changes) {
+            List<MrIgnoreRule> whole = rules.stream().filter(r -> r.getCategory() == null).toList();
+            if (whole.isEmpty()) {
+                return List.of();
             }
-            if (matching.stream().anyMatch(r -> r.getCategory() == null)) {
-                droppedFiles++;
-                continue;
-            }
-            List<RiskItem> parts = (file.parts().isEmpty() ? List.of(file) : file.parts()).stream()
-                    .filter(p -> matching.stream().noneMatch(r -> r.getCategory() == p.category())).toList();
-            int before = file.parts().isEmpty() ? 1 : file.parts().size();
-            droppedFindings += before - parts.size();
-            if (parts.isEmpty()) {
-                droppedFiles++;
-            } else if (parts.size() == before) {
-                kept.add(file);
-            } else {
-                kept.add(FileRecords.regroup(file, parts));
-            }
+            List<ChangedFile> ignored = changes.stream()
+                    .filter(f -> whole.stream().anyMatch(r -> matcher.match(r.getPattern(), f.path()))).toList();
+            droppedEarly += ignored.size();
+            return ignored;
         }
-        if (droppedFiles + droppedFindings > 0) {
-            warnings.add("ignore rules left out " + droppedFiles + " file(s) and " + droppedFindings
-                    + " finding(s) of kept files");
+
+        public List<RiskItem> apply(List<RiskItem> files, List<String> warnings) {
+            List<RiskItem> kept = new ArrayList<>();
+            int droppedFiles = droppedEarly;
+            int droppedFindings = 0;
+            for (RiskItem file : files) {
+                List<MrIgnoreRule> matching = rules.stream().filter(r -> matcher.match(r.getPattern(), file.element())).toList();
+                if (matching.isEmpty()) {
+                    kept.add(file);
+                    continue;
+                }
+                if (matching.stream().anyMatch(r -> r.getCategory() == null)) {
+                    droppedFiles++;
+                    continue;
+                }
+                List<RiskItem> parts = (file.parts().isEmpty() ? List.of(file) : file.parts()).stream()
+                        .filter(p -> matching.stream().noneMatch(r -> r.getCategory() == p.category())).toList();
+                int before = file.parts().isEmpty() ? 1 : file.parts().size();
+                droppedFindings += before - parts.size();
+                if (parts.isEmpty()) {
+                    droppedFiles++;
+                } else if (parts.size() == before) {
+                    kept.add(file);
+                } else {
+                    kept.add(FileRecords.regroup(file, parts));
+                }
+            }
+            if (droppedFiles + droppedFindings > 0) {
+                warnings.add("ignore rules left out " + droppedFiles + " file(s) and " + droppedFindings
+                        + " finding(s) of kept files");
+            }
+            return kept;
         }
-        return kept;
     }
 
     private static IgnoreRuleView view(MrIgnoreRule r) {

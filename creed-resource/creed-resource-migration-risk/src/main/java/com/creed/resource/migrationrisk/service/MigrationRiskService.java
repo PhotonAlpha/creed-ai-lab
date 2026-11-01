@@ -40,6 +40,8 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -273,21 +275,30 @@ public class MigrationRiskService {
         List<ChangedFile> changes = trees.changes();
         List<String> warnings = trees.warnings();
         Source source = trees.source();
-        if (changes.size() > properties.maxChangedFiles()) {
-            throw new TooManyChangesException(changes.size(), properties.maxChangedFiles());
-        }
         if (changes.isEmpty()) {
             warnings.add("repo1 and repo2 are identical");
+        }
+        // Narrowed before anything is parsed: what an ignore rule drops whole, and Java files that differ only in
+        // imports, comments or formatting (they would yield nothing). The limit counts what is left.
+        IgnoreRules.Active ignore = ignoreRules.active(source.repo1Path());
+        List<ChangedFile> ignored = ignore.files(changes);
+        List<ChangedFile> kept = without(changes, ignored);
+        List<ChangedFile> analysed = withoutCosmetic(kept, repo1, repo2);
+        if (analysed.size() > properties.maxChangedFiles()) {
+            throw new TooManyChangesException(analysed.size(), properties.maxChangedFiles());
         }
         RefactoringIndex refactorings;
         Path workspace = properties.workDir().resolve(UUID.randomUUID().toString());
         try {
-            refactorings = new RefactoringIndex(detect(workspace, repo1, repo2, changes, warnings, progress));
+            // an ignored file's repo2 side stays in: a class repo1 moved there must still be found as moved
+            List<String> ignoredRepo2 = ignored.stream().filter(ChangedFile::isJava).map(ChangedFile::oldPath)
+                    .filter(Objects::nonNull).toList();
+            refactorings = new RefactoringIndex(detect(workspace, repo1, repo2, analysed, ignoredRepo2, warnings, progress));
         } finally {
             FileSystemUtils.deleteRecursively(workspace.toFile());
         }
 
-        AnalysisContext ctx = new AnalysisContext(repo1, repo2, changes, refactorings, progress, source.skipTests());
+        AnalysisContext ctx = new AnalysisContext(repo1, repo2, analysed, refactorings, progress, source.skipTests());
         List<RiskItem> items = new ArrayList<>();
         items.addAll(javaAnalyzer.analyze(ctx));
         CamelRouteAnalyzer.Result camel = camelAnalyzer.analyze(ctx, warnings);
@@ -299,8 +310,9 @@ public class MigrationRiskService {
                 .thenComparing(RiskItem::element));
         items = FileRecords.group(tag(dedupe(items), repo1, repo2), changes);
         Set<String> reported = new HashSet<>(items.stream().map(RiskItem::element).toList());
-        long moved = changes.stream().filter(f -> f.change() == ChangedFile.Change.RENAMED).count();
-        long silent = changes.stream().filter(f -> f.change() != ChangedFile.Change.RENAMED)
+        long moved = kept.stream().filter(f -> f.change() == ChangedFile.Change.RENAMED).count();
+        // cosmetic Java files count here: "nothing to report" is what analysing them would have said
+        long silent = kept.stream().filter(f -> f.change() != ChangedFile.Change.RENAMED)
                 .filter(f -> !reported.contains(f.path())).count();
         if (moved > 0) {
             warnings.add(moved + " file(s) only moved, content identical: not reported");
@@ -309,7 +321,7 @@ public class MigrationRiskService {
             warnings.add(silent + " differing file(s) have nothing to report: imports, formatting, comments, Camel"
                     + " routes kept in another file, or the migration's own API rewrite only");
         }
-        items = ignoreRules.apply(items, source.repo1Path(), warnings);
+        items = ignore.apply(items, warnings);
 
         long millis = (System.nanoTime() - started) / 1_000_000;
         log.info("{} vs {}: {} differing files, {} refactorings, {} items in {} ms",
@@ -342,6 +354,36 @@ public class MigrationRiskService {
         return kept;
     }
 
+    private static List<ChangedFile> without(List<ChangedFile> changes, List<ChangedFile> dropped) {
+        if (dropped.isEmpty()) {
+            return changes;
+        }
+        Set<ChangedFile> out = new HashSet<>(dropped);
+        return changes.stream().filter(f -> !out.contains(f)).toList();
+    }
+
+    /**
+     * Java files both sides have whose code is the same once imports, comments and whitespace are gone
+     * ({@link JavaTokens}): RefactoringMiner would find nothing in them and every member would compare equal.
+     * Out of the analysis like an identical file; reading them is far cheaper than parsing them.
+     */
+    private static List<ChangedFile> withoutCosmetic(List<ChangedFile> changes, SourceTree repo1, SourceTree repo2) {
+        List<ChangedFile> kept = changes.parallelStream()
+                .filter(f -> !(f.change() == ChangedFile.Change.MODIFIED && f.isJava() && cosmetic(f, repo1, repo2)))
+                .toList();
+        if (kept.size() < changes.size()) {
+            log.info("{} Java file(s) differ only in imports, comments or formatting: not analysed",
+                    changes.size() - kept.size());
+        }
+        return kept;
+    }
+
+    private static boolean cosmetic(ChangedFile f, SourceTree repo1, SourceTree repo2) {
+        Optional<String> mine = repo1.read(f.newPath());
+        Optional<String> theirs = repo2.read(f.oldPath());
+        return mine.isPresent() && theirs.isPresent() && JavaTokens.sameCode(mine.get(), theirs.get());
+    }
+
     /** Module + test tags from the path; with two repo2s, which one each target was found in. */
     private static List<RiskItem> tag(List<RiskItem> items, SourceTree repo1, SourceTree repo2) {
         Set<String> paths = new LinkedHashSet<>(repo1.paths());
@@ -358,13 +400,14 @@ public class MigrationRiskService {
 
     /** Exports the differing Java files of both sides and runs RefactoringMiner repo1 -> repo2 on them. */
     private List<DetectedRefactoring> detect(Path workspace, SourceTree repo1, SourceTree repo2,
-                                             List<ChangedFile> changes, List<String> warnings, Progress progress) {
+                                             List<ChangedFile> changes, List<String> extraRepo2, List<String> warnings,
+                                             Progress progress) {
         long java = changes.stream().filter(ChangedFile::isJava).count();
         if (java == 0) {
             return List.of();
         }
         progress.stage(Progress.Stage.EXPORT, "exporting " + java + " differing Java files and their repo2 candidates");
-        Exported exported = export(workspace, repo1, repo2, changes, warnings);
+        Exported exported = export(workspace, repo1, repo2, changes, extraRepo2, warnings);
         progress.stage(Progress.Stage.REFACTORINGS, "RefactoringMiner: repo1 -> repo2 (" + java + " files)");
         return detector.detect("repo1 -> repo2", exported.repo1(), exported.repo2());
     }
@@ -379,9 +422,15 @@ public class MigrationRiskService {
      */
     public Exported export(Path workspace, SourceTree repo1, SourceTree repo2, List<ChangedFile> changes,
                            List<String> warnings) {
+        return export(workspace, repo1, repo2, changes, List.of(), warnings);
+    }
+
+    /** {@code extraRepo2}: repo2 paths to export on top, without their repo1 side (an ignored file's). */
+    private Exported export(Path workspace, SourceTree repo1, SourceTree repo2, List<ChangedFile> changes,
+                            List<String> extraRepo2, List<String> warnings) {
         Map<String, List<String>> repo2ByName = repo2.pathsByFileName();
         Set<String> repo1Paths = new LinkedHashSet<>();
-        Set<String> repo2Paths = new LinkedHashSet<>();
+        Set<String> repo2Paths = new LinkedHashSet<>(extraRepo2);
         for (ChangedFile f : changes.stream().filter(ChangedFile::isJava).toList()) {
             if (f.oldPath() != null) {
                 repo2Paths.add(f.oldPath());

@@ -39,8 +39,9 @@ public final class GitTree implements SourceTree {
 
     @Override
     public Optional<String> read(String path) {
-        return path == null || !ids().containsKey(path) ? Optional.empty()
-                : GitRepositories.read(snapshot.repository(), snapshot.commit(), path);
+        // by the walk's blob id: a TreeWalk.forPath per read re-parses the trees from the root every time
+        ObjectId id = path == null ? null : ids().get(path);
+        return id == null ? Optional.empty() : GitRepositories.read(snapshot.repository(), id);
     }
 
     @Override
