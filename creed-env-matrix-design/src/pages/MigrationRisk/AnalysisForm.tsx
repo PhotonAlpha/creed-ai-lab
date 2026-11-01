@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormInstance } from 'antd';
 import { AutoComplete, Button, Col, Form, Input, Row, Segmented, Space, Switch, Tooltip, Typography } from 'antd';
-import { ExperimentOutlined, SearchOutlined } from '@ant-design/icons';
+import { ExperimentOutlined, SearchOutlined, SwapOutlined } from '@ant-design/icons';
 import { migrationRiskApi } from '../../api/migrationRisk';
 import type { MigrationRiskSettings, RefsView, ReleaseView } from '../../api/migrationRisk';
 import { useI18n } from '../../locales';
@@ -96,6 +96,19 @@ export function AnalysisForm({ form, settings, releases, loading, onAnalyze, onD
     if ('repo1Path' in changed || 'repo1Head' in changed || 'mode' in changed) schedule('repo1', () => void loadRefs('repo1'));
     if ('repo2Path' in changed || 'repo2Head' in changed || 'mode' in changed) schedule('repo2', () => void loadRefs('repo2'));
     if ('repo2bPath' in changed || 'repo2bHead' in changed || 'mode' in changed) schedule('repo2b', () => void loadRefs('repo2b'));
+  };
+
+  /**
+   * repo1 <-> repo2, paths and branches. setFieldsValue fires no onValuesChange, so the refs reload here. Not with a
+   * repo2B: it belongs to repo2's side (repo2A + repo2B merged), repo1 has no second slot to take it.
+   */
+  const swap = () => {
+    const fields: ('repo1Path' | 'repo1Head' | 'repo2Path' | 'repo2Head')[] = ['repo1Path', 'repo1Head', 'repo2Path', 'repo2Head'];
+    const v = form.getFieldsValue(fields);
+    form.setFieldsValue({ repo1Path: v.repo2Path, repo1Head: v.repo2Head, repo2Path: v.repo1Path, repo2Head: v.repo1Head });
+    form.setFields(fields.map((name) => ({ name, errors: [] })));
+    void loadRefs('repo1');
+    void loadRefs('repo2');
   };
 
   const refOptions = (r: RefsView | null) => {
@@ -222,6 +235,11 @@ export function AnalysisForm({ form, settings, releases, loading, onAnalyze, onD
         <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={loading}>
           {t('migrationRisk.analyze')}
         </Button>
+        <Tooltip title={t(repo2b ? 'migrationRisk.swapDisabled' : 'migrationRisk.swapHint')}>
+          <Button icon={<SwapOutlined />} onClick={swap} disabled={loading || repo2b}>
+            {t('migrationRisk.swap')}
+          </Button>
+        </Tooltip>
         {settings?.demo && (
           <Tooltip title={t('migrationRisk.demoHint')}>
             <Button icon={<ExperimentOutlined />} onClick={() => onDemo(mode)} disabled={loading}>
