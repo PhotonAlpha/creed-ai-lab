@@ -41,9 +41,9 @@ public class ThreadPoolConfig {
     @Bean(name = TASK_EXECUTOR)
     public ThreadPoolTaskExecutor taskExecutor() {
         ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
-        taskExecutor.setCorePoolSize(5);
-        taskExecutor.setMaxPoolSize(10);
-        taskExecutor.setQueueCapacity(10);
+        taskExecutor.setCorePoolSize(40);
+        taskExecutor.setMaxPoolSize(160);
+        taskExecutor.setQueueCapacity(100);
         taskExecutor.setKeepAliveSeconds(2000);
         taskExecutor.setThreadNamePrefix("Asy-");
         taskExecutor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());

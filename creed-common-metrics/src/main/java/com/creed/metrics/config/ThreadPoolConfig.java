@@ -31,11 +31,12 @@ public class ThreadPoolConfig {
 
     @Bean(name = TASK_EXECUTOR)
     public ThreadPoolTaskExecutor taskExecutor() {
+
         ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
-        taskExecutor.setCorePoolSize(20);
-        taskExecutor.setMaxPoolSize(80);
-        taskExecutor.setQueueCapacity(10);
-        taskExecutor.setKeepAliveSeconds(2000);
+        taskExecutor.setCorePoolSize(40);
+        taskExecutor.setMaxPoolSize(160);
+        taskExecutor.setQueueCapacity(100);
+        taskExecutor.setKeepAliveSeconds(180);
         taskExecutor.setThreadNamePrefix("Asy-");
         taskExecutor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         taskExecutor.setWaitForTasksToCompleteOnShutdown(true);

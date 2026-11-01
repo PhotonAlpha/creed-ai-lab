@@ -26,7 +26,9 @@ Nothing to run. It is a dependency:
   `service.instance.id = ${spring.application.name}:${server.port}`).
 - **`ActuatorMetricsLogger`** — scheduled `@Async` job that reads the `MetricsEndpoint` and logs
   metric snapshots.
-- **`config/ThreadPoolConfig`** — shared `ThreadPoolTaskExecutor`.
+- **`config/ThreadPoolConfig`** — shared `ThreadPoolTaskExecutor` (bean `myTask`, 40/160/100,
+  `CallerRunsPolicy`). How many Tomcat threads caller-run actually takes (one per request, never more)
+  is measured in `docs/thread-pool-caller-runs.md`.
 - **`logback-spring.xml`** — shared logging config including the OTel appender wiring.
 
 Consumers: all five resource servers, `creed-author-server`, `creed-gateway-partner`, `creed-simple-metrics`.
