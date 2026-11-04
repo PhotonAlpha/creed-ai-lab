@@ -1,0 +1,136 @@
+# DefectDojo —— 本地漏洞管理，在 UI 上导入 Veracode XML（Scan type "Veracode Scan"）查看数据流转。
+# creed-resource-veracode 不调用它；两边可以用同一份 XML（.support/veracode/veracode-detailedreport-example.xml）。
+#
+# 启动:   docker compose -f .support/defectdojo/docker-compose.yml up -d      (首次约 3–5 分钟: 建库 + 加载 fixtures)
+# API key(可选，用 curl 导入时): .support/defectdojo/bootstrap.sh  -> tmp/defectdojo.env
+# 日志:   docker compose -f .support/defectdojo/docker-compose.yml logs -f initializer uwsgi
+# 停止:   docker compose -f .support/defectdojo/docker-compose.yml down
+# 清库:   down -v 只删 media 卷；PostgreSQL 数据在宿主机
+#         /Users/ethan/Desktop/workspace/database/defectdojo-postgresql，需手动删除才会清空
+#
+# UI:  http://localhost:8380/   (容器内 nginx 8080；宿主机 8080 是 creed-gateway，故映射到 8380)
+# API: http://localhost:8380/api/v2/   (Swagger: /api/v2/oa3/swagger-ui/)
+# 账号: admin / defectdojo_pw   (仅本地测试；DD_ADMIN_PASSWORD 只在首次初始化时生效)
+#
+# 基于 DefectDojo 3.4.202 官方 docker-compose.yml，改动:
+#   - 镜像直接从 Docker Hub 拉取（官方默认经 registry.defectdojo.com，会记录每次拉取的 IP / 客户端）
+#   - 版本固定 3.4.202，不用 latest
+#   - PostgreSQL / Redis 复用本机已有的 postgres:15-alpine / redis:7-alpine（官方为 postgres 18 / valkey 9），
+#     都不暴露 Redis 端口（宿主机 6379 是 creed-redis）
+#   - 不挂 extra_settings；admin 密码固定（官方随机生成并打印在 initializer 日志里）
+x-dojo-env: &dojo-env
+  DD_DATABASE_URL: postgresql://defectdojo:defectdojo_pw@postgres:5432/defectdojo
+  DD_CELERY_BROKER_URL: redis://redis:6379/0
+  DD_CACHE_URL: redis://redis:6379/1
+  # 仅本地: 官方 compose 里的默认值，生产必须换成随机值
+  DD_SECRET_KEY: "hhZCp@D28z!n@NED*yB!ROMt+WzsY*iq"
+  DD_CREDENTIAL_AES_256_KEY: "&91a*agLqesc*0DJ+2*bAbsUZfR*4nLw"
+  DD_DATABASE_READINESS_TIMEOUT: "60"
+
+x-dojo-image: &dojo-image docker.io/defectdojo/defectdojo-django:${DD_VERSION:-3.4.202}
+
+x-dojo-depends: &dojo-depends
+  initializer:
+    condition: service_completed_successfully
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_started
+
+services:
+  nginx:
+    image: docker.io/defectdojo/defectdojo-nginx:${DD_VERSION:-3.4.202}
+    container_name: creed-defectdojo-nginx
+    depends_on:
+      uwsgi:
+        condition: service_started
+    environment:
+      NGINX_METRICS_ENABLED: "false"
+      DD_UWSGI_HOST: uwsgi
+      DD_UWSGI_PORT: "3031"
+    volumes:
+      - defectdojo_media:/usr/share/nginx/html/media
+    ports:
+      - "8380:8080"
+    restart: unless-stopped
+
+  uwsgi:
+    image: *dojo-image
+    container_name: creed-defectdojo-uwsgi
+    depends_on: *dojo-depends
+    entrypoint: ['/wait-for-it.sh', 'postgres:5432', '-t', '30', '--', '/entrypoint-uwsgi.sh']
+    environment:
+      <<: *dojo-env
+      DD_DEBUG: "False"
+      DD_ALLOWED_HOSTS: "*"
+    volumes:
+      - defectdojo_media:/app/media
+    restart: unless-stopped
+
+  celerybeat:
+    image: *dojo-image
+    container_name: creed-defectdojo-celerybeat
+    depends_on: *dojo-depends
+    entrypoint: ['/wait-for-it.sh', 'postgres:5432', '-t', '30', '--', '/entrypoint-celery-beat.sh']
+    environment: *dojo-env
+    restart: unless-stopped
+
+  # 导入 / 去重 / 通知等异步任务都在这里执行
+  celeryworker:
+    image: *dojo-image
+    container_name: creed-defectdojo-celeryworker
+    depends_on: *dojo-depends
+    entrypoint: ['/wait-for-it.sh', 'postgres:5432', '-t', '30', '--', '/entrypoint-celery-worker.sh']
+    environment: *dojo-env
+    volumes:
+      - defectdojo_media:/app/media
+    restart: unless-stopped
+
+  # 一次性: migrate + fixtures + 建 admin，成功退出后其余服务才启动
+  initializer:
+    image: *dojo-image
+    container_name: creed-defectdojo-initializer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ['/wait-for-it.sh', 'postgres:5432', '--', '/entrypoint-initializer.sh']
+    environment:
+      <<: *dojo-env
+      DD_ADMIN_USER: admin
+      DD_ADMIN_MAIL: admin@defectdojo.local
+      DD_ADMIN_PASSWORD: defectdojo_pw
+      DD_ADMIN_FIRST_NAME: Admin
+      DD_ADMIN_LAST_NAME: User
+      DD_INITIALIZE: "true"
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: creed-defectdojo-db
+    environment:
+      POSTGRES_DB: defectdojo
+      POSTGRES_USER: defectdojo
+      POSTGRES_PASSWORD: defectdojo_pw
+    ports:
+      # 5432 = Artifactory、5433 = SonarQube 的 PostgreSQL:
+      #   psql -h localhost -p 5434 -U defectdojo   (密码 defectdojo_pw)
+      - "5434:5432"
+    volumes:
+      # DB 文件落在宿主机目录，与 artifactory/sonarqube 的持久化约定一致
+      - /Users/ethan/Desktop/workspace/database/defectdojo-postgresql:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U defectdojo -d defectdojo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: creed-defectdojo-redis
+    volumes:
+      - defectdojo_redis:/data
+    restart: unless-stopped
+
+volumes:
+  defectdojo_media: {}
+  defectdojo_redis: {}

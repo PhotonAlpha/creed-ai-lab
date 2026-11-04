@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example Veracode detailed report (export schema 1.0, report_format_version 1.5) for local testing - not a real scan.
+  App creed-shop, version 2.4.0: the mock Jira (project CREED) has that version but no issue for it, so every finding
+  is MISSING and can be created from the /veracode page.
+
+    tomcat-embed-core 10.1.30    CVE-2024-50379  Very High
+    h2 2.1.210                   CVE-2022-23221  Very High
+    spring-web 6.1.3             CVE-2024-22243  High
+    commons-compress 1.24.0      CVE-2024-25710  High    + CVE-2024-26308 Medium   (two CVEs, one component)
+    netty-codec-http2 4.1.97     CVE-2023-44487  High
+    jackson-databind 2.13.3/.4   CVE-2022-42003  High    (one CVE, two versions -> one finding)
+    guava 31.1-jre               CVE-2023-2976   High    mitigated -> skipped (DefectDojo: mitigated)
+    okio 3.4.0                   SRCCLR-SID-38021 Medium  (no CVE: advisory id is the title)
+
+  -> 8 findings in creed-resource-veracode; the static flaw below is ignored there. DefectDojo's "Veracode Scan"
+  parser reads all of it (10 SCA findings + 1 static); last_update_time, recommendations/para and
+  mitigations/mitigation/@date are attributes it requires.
+-->
+<detailedreport xmlns="https://www.veracode.com/schema/reports/export/1.0" report_format_version="1.5"
+                account_id="12345" app_name="creed-shop" app_id="1876601" analysis_id="23456900"
+                static_analysis_unit_id="34567999" sandbox_id="" first_build_submitted_date="2026-11-03 07:40:12 UTC"
+                version="2.4.0" build_id="45679120" submitter="ci-veracode" platform="Not Specified"
+                assurance_level="4" business_criticality="4" generation_date="2026-11-04 09:15:00 UTC"
+                veracode_level="VL1" total_flaws="1" flaws_not_mitigated="1" teams="creed" life_cycle_stage="Development"
+                is_latest_build="true" last_update_time="2026-11-04 09:15:00 UTC" policy_name="Creed Default"
+                policy_version="3" policy_compliance_status="Did Not Pass" policy_rules_status="Did Not Pass"
+                grace_period_expired="false" scan_overdue="false">
+  <static-analysis rating="B" score="90" submitted_date="2026-11-04 08:00:00 UTC" published_date="2026-11-04 09:10:00 UTC"
+                   version="2.4.0" analysis_size_bytes="2345678" engine_version="20261101">
+    <modules><module name="creed-shop.jar" compiler="JAVAC_21" os="Java J2SE 21" architecture="JVM" loc="84210"
+                     score="90" numflawssev0="0" numflawssev1="0" numflawssev2="0" numflawssev3="1" numflawssev4="0" numflawssev5="0"/></modules>
+  </static-analysis>
+  <severity level="3">
+    <category categoryid="18" categoryname="Information Leakage" pcirelated="false">
+      <recommendations>
+        <para text="Do not return internal exception details to the client.">
+          <bulletitem text="Log the stack trace server-side and answer with a generic error body."/>
+        </para>
+      </recommendations>
+      <cwe cweid="209" cwename="Generation of Error Message Containing Sensitive Information">
+        <staticflaws>
+          <flaw severity="3" categoryname="Generation of Error Message Containing Sensitive Information" count="1"
+                issueid="7" module="creed-shop.jar" type="printStackTrace" description="Exception stack trace written to the HTTP response."
+                cweid="209" remediationeffort="2" exploitLevel="0" categoryid="18" pcirelated="false"
+                date_first_occurrence="2026-11-03 08:00:00 UTC" remediation_status="New" cia_impact="ppn"
+                grace_period_expires="2026-12-03 08:00:00 UTC" affects_policy_compliance="false"
+                mitigation_status="none" mitigation_status_desc="Not Mitigated" sourcefile="OrderErrorHandler.java" line="42"
+                sourcefilepath="com/creed/shop/web/" scope="com.creed.shop.web.OrderErrorHandler"
+                functionprototype="org.springframework.http.ResponseEntity handle(java.lang.Exception)"
+                functionrelativelocation="15"/>
+        </staticflaws>
+      </cwe>
+    </category>
+  </severity>
+  <software_composition_analysis third_party_components="64" violate_policy="true" components_violated_policy="5"
+                                 blacklisted_components="0" sca_service_available="true">
+    <vulnerable_components>
+      <component component_id="s1-tomcat" file_name="tomcat-embed-core-10.1.30.jar" sha1="1e1b0f6d2c7a1b3e2d4f5a6b7c8d9e0f1a2b3c4d"
+                 vulnerabilities="1" max_cvss_score="9.8" version="10.1.30" library="tomcat-embed-core" vendor="org.apache.tomcat.embed"
+                 library_id="maven:org.apache.tomcat.embed:tomcat-embed-core:10.1.30" component_affects_policy_compliance="true"
+                 new="true" blacklisted="false">
+        <file_paths><file_path value="creed-shop.jar#zip:BOOT-INF/lib/tomcat-embed-core-10.1.30.jar"/></file_paths>
+        <vulnerabilities>
+          <vulnerability cve_id="CVE-2024-50379" cvss_score="9.8" severity="5" cwe_id="CWE-367" first_found_date="2026-11-03 08:10:00 UTC"
+                         cve_summary="Apache Tomcat JSP compilation is exposed to a TOCTOU race condition on case insensitive file systems. With the default servlet write-enabled, it can lead to remote code execution."
+                         severity_desc="Very High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
+        </vulnerabilities>
+      </component>
+      <component component_id="s2-h2" file_name="h2-2.1.210.jar" sha1="2f2c1a7e3d8b2c4f3e5a6b7c8d9e0f1a2b3c4d5e"
+                 vulnerabilities="1" max_cvss_score="9.8" version="2.1.210" library="h2" vendor="com.h2database"
+                 component_affects_policy_compliance="true" new="false" blacklisted="false">
+        <file_paths><file_path value="creed-shop.jar#zip:BOOT-INF/lib/h2-2.1.210.jar"/></file_paths>
+        <vulnerabilities>
+          <vulnerability cve_id="CVE-2022-23221" cvss_score="9.8" severity="5" cwe_id="CWE-94"
+                         cve_summary="H2 Console allows remote attackers to execute arbitrary code via a jdbc:h2:mem JDBC URL containing the IGNORE_UNKNOWN_SETTINGS=TRUE;FORBID_CREATION=FALSE;INIT= substring."
+                         severity_desc="Very High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
+        </vulnerabilities>
+      </component>
+      <component component_id="s3-spring-web" file_name="spring-web-6.1.3.jar" sha1="3a3d2b8f4e9c3d5a4f6b7c8d9e0f1a2b3c4d5e6f"
+                 vulnerabilities="1" max_cvss_score="8.1" version="6.1.3" library="spring-web" vendor="org.springframework"
+                 component_affects_policy_compliance="true" new="false" blacklisted="false">
+        <file_paths><file_path value="creed-shop.jar#zip:BOOT-INF/lib/spring-web-6.1.3.jar"/></file_paths>
+        <vulnerabilities>
+          <vulnerability cve_id="CVE-2024-22243" cvss_score="8.1" severity="4" cwe_id="CWE-601"
+                         cve_summary="Applications that use UriComponentsBuilder to parse an externally provided URL and perform validation checks on its host may be vulnerable to an open redirect or SSRF attack."
+                         severity_desc="High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
+        </vulnerabilities>
+      </component>
+      <component component_id="s4-commons-compress" file_name="commons-compress-1.24.0.jar" sha1="4b4e3c9a5f0d4e6b5a7c8d9e0f1a2b3c4d5e6f7a"
+                 vulnerabilities="2" max_cvss_score="8.1" version="1.24.0" library="commons-compress" vendor="org.apache.commons"
+                 component_affects_policy_compliance="true" new="false" blacklisted="false">
+        <file_paths><file_path value="creed-shop.jar#zip:BOOT-INF/lib/commons-compress-1.24.0.jar"/></file_paths>
+        <vulnerabilities>
+          <vulnerability cve_id="CVE-2024-25710" cvss_score="8.1" severity="4" cwe_id="CWE-835"
+                         cve_summary="Loop with unreachable exit condition in Apache Commons Compress: a crafted DUMP file makes the reader loop forever."
+                         severity_desc="High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
+          <vulnerability cve_id="CVE-2024-26308" cvss_score="5.5" severity="3" cwe_id="CWE-770"
+                         cve_summary="Allocation of resources without limits in Apache Commons Compress: a crafted Pack200 file causes an OutOfMemoryError."
+                         severity_desc="Medium" mitigation="false" vulnerability_affects_policy_compliance="false"/>
+        </vulnerabilities>
+      </component>
+      <component component_id="s5-netty-http2" file_name="netty-codec-http2-4.1.97.Final.jar" sha1="5c5f4d0b6a1e5f7c6b8d9e0f1a2b3c4d5e6f7a8b"
+                 vulnerabilities="1" max_cvss_score="7.5" version="4.1.97.Final" library="netty-codec-http2" vendor="io.netty"
+                 component_affects_policy_compliance="true" new="false" blacklisted="false">
+        <file_paths><file_path value="creed-shop.jar#zip:BOOT-INF/lib/netty-codec-http2-4.1.97.Final.jar"/></file_paths>
+        <vulnerabilities>
+          <vulnerability cve_id="CVE-2023-44487" cvss_score="7.5" severity="4" cwe_id="CWE-400"
+                         cve_summary="The HTTP/2 protocol allows a denial of service because request cancellation can reset many streams quickly (Rapid Reset)."
+                         severity_desc="High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
+        </vulnerabilities>
+      </component>
+      <component component_id="s6-jackson-2133" file_name="jackson-databind-2.13.3.jar" sha1="6d6a5e1c7b2f6a8d7c9e0f1a2b3c4d5e6f7a8b9c"
+                 vulnerabilities="1" max_cvss_score="7.5" version="2.13.3" library="jackson-databind" vendor="com.fasterxml.jackson.core"
+                 component_affects_policy_compliance="true" new="false" blacklisted="false">
+        <file_paths><file_path value="creed-shop.jar#zip:BOOT-INF/lib/jackson-databind-2.13.3.jar"/></file_paths>
+        <vulnerabilities>
+          <vulnerability cve_id="CVE-2022-42003" cvss_score="7.5" severity="4" cwe_id="CWE-502"
+                         cve_summary="In FasterXML jackson-databind, resource exhaustion can occur because of a lack of a check in primitive value deserializers to avoid deep wrapper array nesting, when the UNWRAP_SINGLE_VALUE_ARRAYS feature is enabled."
+                         severity_desc="High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
+        </vulnerabilities>
+      </component>
+      <component component_id="s7-jackson-2134" file_name="jackson-databind-2.13.4.jar" sha1="7e7b6f2d8c3a7b9e8d0f1a2b3c4d5e6f7a8b9c0d"
+                 vulnerabilities="1" max_cvss_score="7.5" version="2.13.4" library="jackson-databind" vendor="com.fasterxml.jackson.core"
+                 component_affects_policy_compliance="true" new="false" blacklisted="false">
+        <file_paths><file_path value="creed-shop-batch.jar#zip:BOOT-INF/lib/jackson-databind-2.13.4.jar"/></file_paths>
+        <vulnerabilities>
+          <vulnerability cve_id="CVE-2022-42003" cvss_score="7.5" severity="4" cwe_id="CWE-502"
+                         cve_summary="In FasterXML jackson-databind, resource exhaustion can occur because of a lack of a check in primitive value deserializers to avoid deep wrapper array nesting, when the UNWRAP_SINGLE_VALUE_ARRAYS feature is enabled."
+                         severity_desc="High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
+        </vulnerabilities>
+      </component>
+      <component component_id="s8-guava" file_name="guava-31.1-jre.jar" sha1="8f8c7a3e9d4b8c0f9e1a2b3c4d5e6f7a8b9c0d1e"
+                 vulnerabilities="1" max_cvss_score="7.1" version="31.1-jre" library="guava" vendor="com.google.guava"
+                 component_affects_policy_compliance="false" new="false" blacklisted="false">
+        <file_paths><file_path value="creed-shop.jar#zip:BOOT-INF/lib/guava-31.1-jre.jar"/></file_paths>
+        <vulnerabilities>
+          <vulnerability cve_id="CVE-2023-2976" cvss_score="7.1" severity="4" cwe_id="CWE-552"
+                         cve_summary="Use of FileBackedOutputStream in Guava before 32.0.0 on Unix systems creates a temporary directory that other users and applications can access."
+                         severity_desc="High" mitigation="true" vulnerability_affects_policy_compliance="false">
+            <mitigations>
+              <mitigation action="Mitigate by Environment" description="FileBackedOutputStream is never used; the container runs as a single non-root user."
+                          user="security-lead" date="2026-11-04 08:30:00 UTC"/>
+            </mitigations>
+          </vulnerability>
+        </vulnerabilities>
+      </component>
+      <component component_id="s9-okio" file_name="okio-jvm-3.4.0.jar" sha1="9a9d8b4f0e5c9d1a0f2b3c4d5e6f7a8b9c0d1e2f"
+                 vulnerabilities="1" max_cvss_score="5.3" version="3.4.0" library="okio-jvm" vendor="com.squareup.okio"
+                 component_affects_policy_compliance="false" new="true" blacklisted="false">
+        <file_paths><file_path value="creed-shop.jar#zip:BOOT-INF/lib/okio-jvm-3.4.0.jar"/></file_paths>
+        <vulnerabilities>
+          <vulnerability cve_id="SRCCLR-SID-38021" cvss_score="5.3" severity="3" cwe_id="CWE-400"
+                         cve_summary="Denial of service: a crafted GZIP stream makes the source buffer grow without bound."
+                         severity_desc="Medium" mitigation="false" vulnerability_affects_policy_compliance="false"/>
+        </vulnerabilities>
+      </component>
+    </vulnerable_components>
+  </software_composition_analysis>
+</detailedreport>
