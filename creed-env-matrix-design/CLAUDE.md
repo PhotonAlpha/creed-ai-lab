@@ -59,7 +59,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   连 mock 或 `dev` profile 需要 `VITE_API_TARGET=http://localhost:3001`。
   `/api/env-matrix/splunk` 单独代理到 `VITE_SPLUNK_TARGET`（`.env`：BFF `http://localhost:3002`）。
 - Veracode 分析：`/api/veracode` 单独代理到 `VITE_VERACODE_TARGET`（`.env`：`http://localhost:18097`，
-  `creed-resource-veracode`，明文 HTTP，Confluence 与 Jira 在后端进程内 mock）。
+  `creed-resource-veracode`，明文 HTTP，Jira 在后端进程内 mock，自带示例 Veracode XML）。
 - 迁移同步风险：`/api/migration-risk` 单独代理到 `VITE_MIGRATION_RISK_TARGET`（`.env`：`http://localhost:18098`，
   `creed-resource-migration-risk`，明文 HTTP，后端自带示例仓库）。
 - Splunk 会话代理：Node BFF（`server/bff.js`），审计默认存内存，开关 `SPLUNK_AUDIT_STORE=pg` / `mysql` 时写入 PostgreSQL / MySQL。
@@ -155,10 +155,15 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   （记录自身的 Secret Key + 表单中属性键相同那一行的 IV 和 salt）或删除。
 
 ### 5.6 Veracode 分析（`/veracode`）
-- 后端：`creed-resource/creed-resource-veracode`；调用 Confluence page 与 Jira 使用 Spring `@HttpExchange`，本地先 mock。
-- 从 Confluence 读取 Veracode 报告表格，按 CVE（无 CVE 时按标题）+ affect version 在 Jira 中查找是否存在：
-  存在则列出 Jira 编号与状态；不存在则可按需创建（单行 / 所选 / 全部缺失，或分析时自动创建）。
-- 也可以上传文件分析（.html / .csv / .xlsx / .xls，表头规则与 Confluence 表格相同）。
+- 后端：`creed-resource/creed-resource-veracode`；调用 Jira 使用 Spring `@HttpExchange`，本地先 mock。Jira 客户端**不校验证书和主机名**（按需求）。
+- 报告来源**只有上传的 Veracode 详细报告（XML）**，只读取 SCA 部分（不再读取 Confluence 页面）；影响版本默认取报告根节点 `version`，可在上传前手工指定。
+- 按 CVE（无 CVE 时按公告编号）+ affect version 在 Jira 中查找是否存在：
+  存在则列出 Jira 编号、状态、优先级、经办人；不存在则可按需创建（单行 / 所选 / 全部缺失，或分析时自动创建）。
+- 按 Jira 标题模糊匹配：CVE 出现在标题任意位置即可（忽略大小写和 `-` `_` 空格，但不会匹配更长的编号）；无 CVE 时标题的每个词都出现即可，不论顺序。
+- 创建 Jira 使用**用户自己的访问令牌**：页面「Jira 令牌」中配置并「测试连接」（显示令牌对应的用户、是否能访问项目），
+  默认存 sessionStorage，勾选「记住」存 localStorage；随请求以 `X-Jira-Token` 发给后端，后端不保存。未配置时创建按钮不可用。
+- 创建的 Jira 标题按 `veracode.jira.summary-template`，默认 `{project} {component} {cve}`，`{project}` 为报告的 Veracode 应用名 `app_name`（如 `creed-platform spring-beans 5.3.17 CVE-2022-22965`）。
+- 表格可按关联 Jira 的属性过滤（状态 / 优先级 / 经办人 / 影响版本，多选），搜索框对 CVE、标题、组件、Jira 号与 Jira 标题做模糊匹配。
 - 支持导出 Excel。
 
 ### 5.7 迁移同步风险（`/migration-risk`）

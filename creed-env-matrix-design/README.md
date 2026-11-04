@@ -512,23 +512,27 @@ Records saved under the earlier rules (`SHA-256(Secret Key + randomkey)` with a 
 
 Backed by a **different service**, `creed-resource/creed-resource-veracode` (plain HTTP :18097, no
 database), reached through Vite's `/api/veracode` proxy entry (`VITE_VERACODE_TARGET`). There is no
-node mock for it: the Java module mocks Confluence and Jira in-process, so run it for this page.
+node mock for it: the Java module mocks Jira in-process and bundles a sample Veracode XML, so run it for this page.
 
-- **Analyse** reads the report table from a Confluence page (default page id from the backend) and looks
-  every finding up in Jira by **CVE (or title, when there is none) + affects version**. Each row shows
-  *In Jira* with the issue key(s) and status, or *Missing*.
-- A version the Jira project does not have is tagged *Version not in Jira*: nothing is searched for it
-  and it cannot be created until the version exists.
-- **Create** per row, *Create selected* or *Create all missing*. The backend re-reads the page and
-  re-checks Jira first, so a second click answers "already in Jira" instead of filing a duplicate.
-  *Create missing Jira issues automatically* does the same as part of the analysis (with a confirm).
-- **Upload file** analyses a report file instead of a page: `.html`/`.htm` (e.g. a Confluence page saved
-  from the browser), `.csv` (`,` `;` or tab; UTF-8, or GB18030 as Excel on Chinese Windows writes it),
-  `.xlsx`/`.xls` (every sheet; the header may sit below title rows). Same column headers as the page.
-  The backend keeps the parsed file in memory for 2 h, so create/export/*Re-check Jira* work on it; after
-  a restart it has to be uploaded again. Limit 10 MB.
+- **Upload a report**: drop the **Detailed Report (XML)** downloaded from the Veracode platform; only its SCA
+  (software composition analysis) section is read — one record per vulnerability of every vulnerable component.
+  The component shows as "library version", the title is the vulnerability summary's first sentence, an advisory
+  without a CVE (`SRCCLR-SID-…`) is titled by its id. Mitigated vulnerabilities are skipped with a notice.
+  Limit 50 MB. In mock mode, *Sample report* analyses the bundled one.
+- **Affects version**: Jira's Affects Version defaults to the report root's `version` (scan / build name); when
+  that is not a release number, enter *Affects version* before uploading.
+- **Analyse** looks every finding up in Jira by **CVE (or advisory id) + affects version**, matching issue titles
+  loosely. Each row shows *In Jira* with key, status, priority and assignee, or *Missing*. A version the Jira
+  project does not have is tagged *Version not in Jira*: nothing is searched for it and it cannot be created.
+- **Jira token**: issues are created with your own access token (*Jira token*, with *Test connection*).
+- **Create** per row, *Create selected* or *Create all missing*; the title is `<Veracode app> <component> <CVE>`.
+  The backend re-reads the upload and re-checks Jira first, so a second click answers "already in Jira" instead
+  of filing a duplicate. *Create missing Jira issues automatically* does it as part of the analysis (with a confirm).
+- The backend keeps the parsed report in memory for 2 h; create / export / *Re-check Jira* work on that upload,
+  and after a restart it has to be uploaded again.
+- **Filters**: Jira status / priority / assignee / affects version; the search box fuzzy-matches CVE, title,
+  component, Jira key and Jira title.
 - **Export Excel** downloads a fresh analysis (sheet *Findings* + sheet *Source*).
-- The analysis is never auto-created on page load — that would write to Jira without anyone asking.
 
 ### Migration sync risk (`/migration-risk`)
 

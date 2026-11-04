@@ -12,6 +12,7 @@ import {
   Popconfirm,
   Row,
   Segmented,
+  Select,
   Space,
   Statistic,
   Table,
@@ -21,9 +22,11 @@ import {
   Upload,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { CloudDownloadOutlined, InboxOutlined, PlusCircleOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { CloudDownloadOutlined, ExperimentOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
-import type { Analysis, CreateResult, Finding, FindingStatus, ReportSource, VeracodeSettings } from '../../api/veracode';
+import type { Analysis, CreateResult, Finding, FindingStatus, IssueRef, JiraConnection, VeracodeSettings } from '../../api/veracode';
+import { JiraTokenModal } from './JiraTokenModal';
+import { jiraTokenStore } from './jiraToken';
 import { ApiError } from '../../api/client';
 import { useI18n } from '../../locales';
 import type { MessageKey } from '../../locales';
@@ -31,10 +34,6 @@ import type { MessageKey } from '../../locales';
 const { Text, Paragraph } = Typography;
 
 type StatusFilter = 'ALL' | FindingStatus;
-type SourceMode = 'page' | 'upload';
-
-/** Follow-up requests name the report the analysis on screen came from — the page, or the upload id. */
-const sourceOf = (a: Analysis): ReportSource => (a.page.source === 'UPLOAD' ? { uploadId: a.page.id } : { pageId: a.page.id });
 
 /** Veracode's scale, highest first; anything else sorts last. Same order as the backend's `Severity`. */
 const SEVERITY_RANK: Record<string, number> = {
@@ -54,20 +53,52 @@ const STATUS_COLOR: Record<FindingStatus, string> = { EXISTS: 'success', MISSING
 /** Only a missing finding whose version exists in Jira can be created — the server would refuse the rest. */
 const creatable = (f: Finding) => f.status === 'MISSING' && f.jiraVersion != null;
 
+/** Lower case, every run of non-letters/digits one space — so `CVE-2021-44228`, `cve 2021 44228` and `CVE_2021_44228` read alike. */
+const fuzzy = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+/**
+ * Fuzzy, like the backend's title match: every word of the keyword appears somewhere in the finding or in
+ * its Jira issues' titles (summaries) and keys, in any order, as part of a word.
+ */
 const matchesKeyword = (f: Finding, keyword: string) => {
-  if (!keyword) return true;
-  const k = keyword.toLowerCase();
-  return [f.cve, f.title, f.affectedVersion, ...f.components, ...f.issues.map((i) => i.key)]
-    .some((v) => v?.toLowerCase().includes(k));
+  const words = fuzzy(keyword).split(' ').filter(Boolean);
+  if (words.length === 0) return true;
+  const text = ` ${fuzzy([f.cve, f.title, f.affectedVersion, ...f.components,
+    ...f.issues.flatMap((i) => [i.key, i.summary])].filter(Boolean).join(' '))} `;
+  return words.every((w) => text.includes(w));
 };
+
+/** Filters on the Jira issues' own attributes. Empty = not filtered; a finding passes when one issue matches all. */
+interface JiraFilters {
+  status: string[];
+  priority: string[];
+  assignee: string[];
+  version: string[];
+}
+const NO_JIRA_FILTERS: JiraFilters = { status: [], priority: [], assignee: [], version: [] };
+/** The assignee option for an unassigned issue — not a name Jira can return. */
+const UNASSIGNED = '\u0000unassigned';
+
+const issueMatches = (i: IssueRef, j: JiraFilters) =>
+  (j.status.length === 0 || j.status.includes(i.status ?? ''))
+  && (j.priority.length === 0 || j.priority.includes(i.priority ?? ''))
+  && (j.assignee.length === 0 || j.assignee.includes(i.assignee ?? UNASSIGNED))
+  && (j.version.length === 0 || i.versions.some((v) => j.version.includes(v)));
+
+const matchesJira = (f: Finding, j: JiraFilters) =>
+  (j.status.length + j.priority.length + j.assignee.length + j.version.length === 0)
+  || f.issues.some((i) => issueMatches(i, j));
+
+const distinct = (values: (string | null)[]) =>
+  [...new Set(values.filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b));
 
 export function VeracodePage() {
   const { t } = useI18n();
   const { message, modal } = App.useApp();
 
   const [settings, setSettings] = useState<VeracodeSettings | null>(null);
-  const [mode, setMode] = useState<SourceMode>('page');
-  const [pageId, setPageId] = useState('');
+  /** Overrides the report's `version` as Jira's Affects Version; blank = the report's. */
+  const [versionOverride, setVersionOverride] = useState('');
   const [autoCreate, setAutoCreate] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(false);
@@ -76,7 +107,15 @@ export function VeracodePage() {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [keyword, setKeyword] = useState('');
+  const [jiraFilters, setJiraFilters] = useState<JiraFilters>(NO_JIRA_FILTERS);
   const [selected, setSelected] = useState<string[]>([]);
+
+  const [jiraToken, setJiraToken] = useState(() => jiraTokenStore.load());
+  const [connection, setConnection] = useState<JiraConnection | null>(null);
+  const [tokenOpen, setTokenOpen] = useState(false);
+  const token = jiraToken.token || undefined;
+  /** Creating is refused server-side without the user's token; the buttons say so first. */
+  const canCreate = !settings?.requireUserToken || !!token;
 
   /** Guards against an older analysis resolving after a newer one (StrictMode double mount, fast clicks). */
   const requestId = useRef(0);
@@ -90,6 +129,7 @@ export function VeracodePage() {
       if (current !== requestId.current) return;
       setAnalysis(result);
       setSelected([]);
+      setJiraFilters(NO_JIRA_FILTERS);
       if (auto && result.counts.created > 0) {
         message.success(t('veracode.createdCount', { count: result.counts.created }));
       }
@@ -103,45 +143,66 @@ export function VeracodePage() {
   }, [message, t]);
 
   const analyze = useCallback(
-    (source: ReportSource, auto: boolean) => run(() => veracodeApi.analyze(source, auto), auto),
-    [run],
+    (uploadId: string, auto: boolean) => run(() => veracodeApi.analyze(uploadId, auto, token), auto),
+    [run, token],
   );
+
+  /** A token saved earlier is tested once on load, so the toolbar can name its user. */
+  useEffect(() => {
+    if (!jiraToken.token) return;
+    veracodeApi.testConnection(jiraToken.token).then(setConnection).catch(() => setConnection(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const saveToken = (value: string, remember: boolean, tested: JiraConnection | null) => {
+    jiraTokenStore.save(value, remember);
+    setJiraToken({ token: value, remember });
+    setConnection(tested);
+    setTokenOpen(false);
+    if (!tested) {
+      veracodeApi.testConnection(value).then(setConnection).catch(() => setConnection(null));
+    }
+  };
+
+  const clearToken = () => {
+    jiraTokenStore.clear();
+    setJiraToken({ token: '', remember: false });
+    setConnection(null);
+    setTokenOpen(false);
+  };
+
+  /** The server's "no token" answer opens the dialog instead of a bare error. */
+  const tokenMissing = (e: unknown) => e instanceof ApiError && e.body?.error === 'jira_token_required';
+
+  /** Auto-create asks first — an upload trigger cannot sit inside a Popconfirm the way a button can. */
+  const confirmed = (send: () => void) => {
+    if (autoCreate && canCreate) {
+      modal.confirm({ title: t('veracode.autoCreateConfirm', { project: settings?.projectKey ?? '' }), onOk: send });
+    } else {
+      send();
+    }
+  };
+  const options = () => ({ affectedVersion: versionOverride, autoCreate: autoCreate && canCreate });
 
   /**
    * `false` keeps antd's Upload from posting the file itself; the page sends it so the result lands in
-   * the same request-id guard as a page analysis. Auto-create asks first — the Upload trigger cannot sit
-   * inside a Popconfirm the way the Analyse button does.
+   * the same request-id guard as a re-analysis.
    */
   const beforeUpload = (file: File) => {
-    const send = () => run(() => veracodeApi.analyzeUpload(file, autoCreate), autoCreate);
-    if (autoCreate) {
-      modal.confirm({
-        title: t('veracode.autoCreateConfirm', { project: settings?.projectKey ?? '' }),
-        onOk: send,
-      });
-    } else {
-      void send();
-    }
+    confirmed(() => void run(() => veracodeApi.analyzeUpload(file, options(), token), options().autoCreate));
     return false;
   };
 
-  useEffect(() => {
-    veracodeApi.settings()
-      .then((s) => {
-        setSettings(s);
-        const initial = s.defaultPageId ?? '';
-        setPageId(initial);
-        // Never auto-create on page load: that would write to Jira without anyone asking.
-        if (initial) void analyze({ pageId: initial }, false);
-      })
-      .catch((e: Error) => setError(e.message));
-  }, [analyze]);
+  const analyzeSample = () =>
+    confirmed(() => void run(() => veracodeApi.analyzeSample(options(), token), options().autoCreate));
 
-  const pageIdValid = /^\d{1,20}$/.test(pageId.trim());
+  useEffect(() => {
+    veracodeApi.settings().then(setSettings).catch((e: Error) => setError(e.message));
+  }, []);
 
   /**
    * Applies per-row outcomes to the rows on screen instead of re-analysing: the answer already says
-   * which issue each finding now has, and a second round trip to Confluence and Jira adds nothing.
+   * which issue each finding now has, and a second round trip to Jira adds nothing.
    */
   const applyResults = (results: CreateResult[]) => {
     const byId = new Map(results.map((r) => [r.findingId, r]));
@@ -189,9 +250,10 @@ export function VeracodePage() {
     if (!analysis || ids.length === 0) return;
     setCreating(true);
     try {
-      const { results } = await veracodeApi.createIssues(sourceOf(analysis), ids);
+      const { results } = await veracodeApi.createIssues(analysis.report.id, ids, token);
       applyResults(results);
     } catch (e) {
+      if (tokenMissing(e)) setTokenOpen(true);
       message.error((e as Error).message);
     } finally {
       setCreating(false);
@@ -202,7 +264,7 @@ export function VeracodePage() {
     if (!analysis) return;
     setExporting(true);
     try {
-      const { blob, filename } = await veracodeApi.exportXlsx(sourceOf(analysis));
+      const { blob, filename } = await veracodeApi.exportXlsx(analysis.report.id, token);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -219,9 +281,21 @@ export function VeracodePage() {
   const rows = useMemo(
     () => (analysis?.findings ?? [])
       .filter((f) => statusFilter === 'ALL' || f.status === statusFilter)
+      .filter((f) => matchesJira(f, jiraFilters))
       .filter((f) => matchesKeyword(f, keyword.trim())),
-    [analysis, statusFilter, keyword],
+    [analysis, statusFilter, keyword, jiraFilters],
   );
+  const issues = useMemo(() => (analysis?.findings ?? []).flatMap((f) => f.issues), [analysis]);
+  const filterOptions = useMemo(() => ({
+    status: distinct(issues.map((i) => i.status)).map((v) => ({ value: v, label: v })),
+    priority: distinct(issues.map((i) => i.priority)).map((v) => ({ value: v, label: v })),
+    assignee: [
+      ...distinct(issues.map((i) => i.assignee)).map((v) => ({ value: v, label: v })),
+      ...(issues.some((i) => !i.assignee) ? [{ value: UNASSIGNED, label: t('veracode.jira.unassigned') }] : []),
+    ],
+    version: distinct(issues.flatMap((i) => i.versions)).map((v) => ({ value: v, label: v })),
+  }), [issues, t]);
+  const jiraFilterCount = Object.values(jiraFilters).filter((v) => v.length > 0).length;
   const missingCreatable = (analysis?.findings ?? []).filter(creatable).map((f) => f.id);
 
   const columns: TableColumnsType<Finding> = [
@@ -291,14 +365,16 @@ export function VeracodePage() {
     {
       title: t('veracode.col.jira'),
       dataIndex: 'issues',
-      width: 200,
+      width: 260,
       render: (_, f) => (
         <Space direction="vertical" size={0}>
           {f.issues.map((i) => (
             <Tooltip key={i.key} title={i.summary}>
-              <Space size={4}>
+              <Space size={4} wrap>
                 <a href={i.url} target="_blank" rel="noreferrer">{i.key}</a>
                 {i.status && <Text type="secondary">{i.status}</Text>}
+                {i.priority && <Tag>{i.priority}</Tag>}
+                <Text type="secondary">{i.assignee ?? t('veracode.jira.unassigned')}</Text>
               </Space>
             </Tooltip>
           ))}
@@ -310,14 +386,18 @@ export function VeracodePage() {
       key: 'actions',
       width: 120,
       fixed: 'right',
-      render: (_, f) => creatable(f) && (
+      render: (_, f) => creatable(f) && (canCreate ? (
         <Popconfirm
           title={t('veracode.createOneConfirm', { project: analysis?.projectKey ?? '' })}
           onConfirm={() => create([f.id])}
         >
           <Button size="small" icon={<PlusCircleOutlined />} loading={creating}>{t('veracode.createOne')}</Button>
         </Popconfirm>
-      ),
+      ) : (
+        <Tooltip title={t('veracode.token.needed')}>
+          <Button size="small" icon={<KeyOutlined />} onClick={() => setTokenOpen(true)}>{t('veracode.createOne')}</Button>
+        </Tooltip>
+      )),
     },
   ];
 
@@ -328,81 +408,88 @@ export function VeracodePage() {
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <ProCard bordered>
           <Space wrap align="center">
-            <Segmented<SourceMode>
-              value={mode}
-              onChange={setMode}
-              options={[
-                { value: 'page', label: t('veracode.source.page') },
-                { value: 'upload', label: t('veracode.source.upload') },
-              ]}
-            />
-            {mode === 'page' && (
+            <Tooltip title={t('veracode.versionOverrideHint')}>
               <Input
-                  value={pageId}
-                  onChange={(e) => setPageId(e.target.value)}
-                  onPressEnter={() => pageIdValid && !autoCreate && analyze({ pageId: pageId.trim() }, false)}
-                  status={pageId && !pageIdValid ? 'error' : undefined}
-                  placeholder={t('veracode.pageId')}
-                  style={{ width: 200 }}
-                  allowClear
-                />
-            )}
-            <Checkbox checked={autoCreate} onChange={(e) => setAutoCreate(e.target.checked)}>
-              {t('veracode.autoCreate')}
-            </Checkbox>
-            {mode === 'page' && (autoCreate ? (
-              <Popconfirm
-                title={t('veracode.autoCreateConfirm', { project: settings?.projectKey ?? '' })}
-                onConfirm={() => analyze({ pageId: pageId.trim() }, true)}
-                disabled={!pageIdValid}
-              >
-                <Button type="primary" icon={<SearchOutlined />} loading={loading} disabled={!pageIdValid}>
-                  {t('veracode.analyze')}
-                </Button>
-              </Popconfirm>
-            ) : (
-              <Button
-                type="primary"
-                icon={<SearchOutlined />}
-                loading={loading}
-                disabled={!pageIdValid}
-                onClick={() => analyze({ pageId: pageId.trim() }, false)}
-              >
-                {t('veracode.analyze')}
-              </Button>
-            ))}
-            {analysis?.page.source === 'UPLOAD' && mode === 'upload' && (
+                value={versionOverride}
+                onChange={(e) => setVersionOverride(e.target.value)}
+                placeholder={t('veracode.versionOverride')}
+                style={{ width: 220 }}
+                allowClear
+              />
+            </Tooltip>
+            <Tooltip title={canCreate ? undefined : t('veracode.token.needed')}>
+              <Checkbox checked={autoCreate && canCreate} disabled={!canCreate} onChange={(e) => setAutoCreate(e.target.checked)}>
+                {t('veracode.autoCreate')}
+              </Checkbox>
+            </Tooltip>
+            {analysis && (
               <Tooltip title={t('veracode.reanalyzeHint')}>
-                <Button icon={<ReloadOutlined />} loading={loading} onClick={() => analyze(sourceOf(analysis), false)}>
+                <Button icon={<ReloadOutlined />} loading={loading} onClick={() => analyze(analysis.report.id, false)}>
                   {t('veracode.reanalyze')}
                 </Button>
               </Tooltip>
             )}
             {settings?.mock && (
+              <Tooltip title={t('veracode.sampleHint')}>
+                <Button icon={<ExperimentOutlined />} loading={loading} onClick={analyzeSample}>
+                  {t('veracode.sample')}
+                </Button>
+              </Tooltip>
+            )}
+            <Tooltip title={connection?.message ?? t('veracode.token.buttonHint')}>
+              <Button icon={<KeyOutlined />} onClick={() => setTokenOpen(true)}>
+                {t('veracode.token.button')}
+                {!token
+                  ? <Tag color="default" style={{ marginInlineEnd: 0 }}>{t('veracode.token.unset')}</Tag>
+                  : connection?.ok
+                    ? <Tag color="success" style={{ marginInlineEnd: 0 }}>{connection.displayName ?? connection.user}</Tag>
+                    : connection
+                      ? <Tag color="error" style={{ marginInlineEnd: 0 }}>{t('veracode.token.bad')}</Tag>
+                      : <Tag color="processing" style={{ marginInlineEnd: 0 }}>{t('veracode.token.set')}</Tag>}
+              </Button>
+            </Tooltip>
+            {settings?.mock && (
               <Tooltip title={t('veracode.mockHint')}><Tag color="purple">{t('veracode.mock')}</Tag></Tooltip>
             )}
           </Space>
-          {mode === 'upload' && (
-            <Upload.Dragger
-              accept={UPLOAD_ACCEPT}
-              maxCount={1}
-              showUploadList={false}
-              beforeUpload={beforeUpload}
-              disabled={loading}
-              style={{ marginTop: 16 }}
-            >
-              <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-              <p className="ant-upload-text">{t('veracode.upload.title')}</p>
-              <p className="ant-upload-hint">{t('veracode.upload.hint')}</p>
-            </Upload.Dragger>
-          )}
+          <Upload.Dragger
+            accept={UPLOAD_ACCEPT}
+            maxCount={1}
+            showUploadList={false}
+            beforeUpload={beforeUpload}
+            disabled={loading}
+            style={{ marginTop: 16 }}
+          >
+            <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+            <p className="ant-upload-text">{t('veracode.upload.title')}</p>
+            <p className="ant-upload-hint">{t('veracode.upload.hint')}</p>
+          </Upload.Dragger>
           {analysis && (
             <Descriptions size="small" column={{ xs: 1, md: 2, xl: 4 }} style={{ marginTop: 16 }}>
-              <Descriptions.Item label={analysis.page.source === 'UPLOAD' ? t('veracode.file') : t('veracode.page')}>
-                {analysis.page.url
-                  ? <a href={analysis.page.url} target="_blank" rel="noreferrer">{analysis.page.title}</a>
-                  : analysis.page.title}
-                {analysis.page.version != null && <Text type="secondary">&nbsp;v{analysis.page.version}</Text>}
+              <Descriptions.Item label={t('veracode.app')}>{analysis.report.appName ?? '—'}</Descriptions.Item>
+              <Descriptions.Item label={t('veracode.affectedVersion')}>
+                <Space size={4}>
+                  {analysis.report.affectedVersion}
+                  {analysis.report.versionOverridden && (
+                    <Tooltip title={t('veracode.scanVersion', { version: analysis.report.scanVersion ?? '—' })}>
+                      <Tag color="warning">{t('veracode.overridden')}</Tag>
+                    </Tooltip>
+                  )}
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('veracode.policy')}>
+                <Space size={4}>
+                  {analysis.report.policyName ?? '—'}
+                  {analysis.report.policyCompliance && (
+                    <Tag color={/^pass/i.test(analysis.report.policyCompliance) ? 'success' : 'error'}>
+                      {analysis.report.policyCompliance}
+                    </Tag>
+                  )}
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('veracode.file')}>
+                {analysis.report.fileName}
+                {analysis.report.generatedAt && <Text type="secondary">&nbsp;({analysis.report.generatedAt})</Text>}
               </Descriptions.Item>
               <Descriptions.Item label={t('veracode.project')}>{analysis.projectKey}</Descriptions.Item>
               <Descriptions.Item label={t('veracode.jiraVersions')}>
@@ -469,32 +556,63 @@ export function VeracodePage() {
                 placeholder={t('veracode.search')}
                 onSearch={setKeyword}
                 onChange={(e) => !e.target.value && setKeyword('')}
-                style={{ width: 220 }}
+                style={{ width: 280 }}
               />
-              <Popconfirm
-                title={t('veracode.createSelectedConfirm', { count: selected.length, project: analysis?.projectKey ?? '' })}
-                onConfirm={() => create(selected)}
-                disabled={selected.length === 0}
-              >
-                <Button icon={<PlusCircleOutlined />} disabled={selected.length === 0} loading={creating}>
-                  {t('veracode.createSelected', { count: selected.length })}
-                </Button>
-              </Popconfirm>
-              <Popconfirm
-                title={t('veracode.createSelectedConfirm', { count: missingCreatable.length, project: analysis?.projectKey ?? '' })}
-                onConfirm={() => create(missingCreatable)}
-                disabled={missingCreatable.length === 0}
-              >
-                <Button danger disabled={missingCreatable.length === 0} loading={creating}>
-                  {t('veracode.createAllMissing', { count: missingCreatable.length })}
-                </Button>
-              </Popconfirm>
+              <Tooltip title={canCreate ? undefined : t('veracode.token.needed')}>
+                <span>
+                  <Popconfirm
+                    title={t('veracode.createSelectedConfirm', { count: selected.length, project: analysis?.projectKey ?? '' })}
+                    onConfirm={() => create(selected)}
+                    disabled={selected.length === 0 || !canCreate}
+                  >
+                    <Button icon={<PlusCircleOutlined />} disabled={selected.length === 0 || !canCreate} loading={creating}>
+                      {t('veracode.createSelected', { count: selected.length })}
+                    </Button>
+                  </Popconfirm>
+                </span>
+              </Tooltip>
+              <Tooltip title={canCreate ? undefined : t('veracode.token.needed')}>
+                <span>
+                  <Popconfirm
+                    title={t('veracode.createSelectedConfirm', { count: missingCreatable.length, project: analysis?.projectKey ?? '' })}
+                    onConfirm={() => create(missingCreatable)}
+                    disabled={missingCreatable.length === 0 || !canCreate}
+                  >
+                    <Button danger disabled={missingCreatable.length === 0 || !canCreate} loading={creating}>
+                      {t('veracode.createAllMissing', { count: missingCreatable.length })}
+                    </Button>
+                  </Popconfirm>
+                </span>
+              </Tooltip>
               <Button icon={<CloudDownloadOutlined />} onClick={exportXlsx} loading={exporting} disabled={!analysis}>
                 {t('veracode.export')}
               </Button>
             </Space>
           )}
         >
+          {analysis && issues.length > 0 && (
+            <Space wrap style={{ marginBottom: 16 }}>
+              {(['status', 'priority', 'assignee', 'version'] as const).map((key) => (
+                <Select
+                  key={key}
+                  mode="multiple"
+                  allowClear
+                  maxTagCount="responsive"
+                  placeholder={t(`veracode.jira.${key}` as MessageKey)}
+                  options={filterOptions[key]}
+                  value={jiraFilters[key]}
+                  onChange={(value: string[]) => setJiraFilters((prev) => ({ ...prev, [key]: value }))}
+                  style={{ width: 200 }}
+                />
+              ))}
+              {jiraFilterCount > 0 && (
+                <Button type="link" onClick={() => setJiraFilters(NO_JIRA_FILTERS)}>
+                  {t('veracode.jira.reset', { count: jiraFilterCount })}
+                </Button>
+              )}
+              <Text type="secondary">{t('veracode.jira.filterHint')}</Text>
+            </Space>
+          )}
           {analysis || loading ? (
             <Table<Finding>
               rowKey="id"
@@ -505,7 +623,7 @@ export function VeracodePage() {
               pagination={{ pageSize: 20, showSizeChanger: true }}
               // Numeric width, not 'max-content': with a fixed-right column the latter collapses the last
               // scrolling column (see the creed-env-matrix skill).
-              scroll={{ x: 1650 }}
+              scroll={{ x: 1710 }}
               rowSelection={{
                 selectedRowKeys: selected,
                 onChange: (keys) => setSelected(keys as string[]),
@@ -517,6 +635,17 @@ export function VeracodePage() {
           )}
         </ProCard>
       </Space>
+      <JiraTokenModal
+        open={tokenOpen}
+        token={jiraToken.token}
+        remember={jiraToken.remember}
+        jiraBaseUrl={settings?.jiraBaseUrl}
+        mock={settings?.mock}
+        connection={connection}
+        onSave={saveToken}
+        onClear={clearToken}
+        onCancel={() => setTokenOpen(false)}
+      />
     </PageContainer>
   );
 }

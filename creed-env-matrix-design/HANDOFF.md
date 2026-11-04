@@ -61,6 +61,11 @@ Complete and verified in a browser against the real backend.
   verified through the Vite proxy on a real pair. **Not yet checked in a browser** — the extension could not
   attach to any page this session either.
 
+- **Veracode analysis — Veracode XML (2026-11-05)** — the source is now only an uploaded Veracode detailed
+  report (XML, `.xml`); the Confluence page mode, page id and `.html/.csv/.xlsx` uploads are gone. Toolbar:
+  Affects-version override (sent with the upload), *Sample report* (mock only, `POST /analysis/sample`),
+  *Re-check Jira*, *Jira token*. Every follow-up names `analysis.report.id` (the upload id). Typechecks and
+  builds; not seen in a browser (the extension could not attach to the dev server).
 - **Veracode analysis (`/veracode`, 2026-10-16)** — new page, backend `creed-resource-veracode` on
   :18097 via the `/api/veracode` proxy entry (`VITE_VERACODE_TARGET`; not served by the node mock).
   Source is a Confluence page id **or an uploaded file** (Dragger; `.html/.csv/.xlsx/.xls`); create and
