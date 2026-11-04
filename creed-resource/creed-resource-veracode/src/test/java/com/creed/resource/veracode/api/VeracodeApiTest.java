@@ -1,20 +1,22 @@
 package com.creed.resource.veracode.api;
 
-import com.creed.resource.veracode.client.confluence.ConfluenceClient;
 import com.creed.resource.veracode.client.jira.JiraClient;
 import com.creed.resource.veracode.config.RemoteClientsConfiguration;
 import com.creed.resource.veracode.mock.MockJiraStore;
+import com.creed.resource.veracode.service.JiraToken;
+import com.jayway.jsonpath.JsonPath;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.mock.web.MockMultipartFile;
@@ -24,8 +26,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.context.WebApplicationContext;
-
-import com.jayway.jsonpath.JsonPath;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -47,9 +47,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * The whole chain over the in-process mocks: the real {@code @HttpExchange} proxies, the real
- * Confluence page and the JQL-evaluating Jira mock - only the transport is MockMvc instead of a socket,
- * so no port has to be known before the context starts.
+ * The whole chain over the in-process Jira mock: the bundled sample Veracode XML uploaded, the real
+ * {@code @HttpExchange} proxy and the JQL-evaluating Jira mock - only the transport is MockMvc instead of a
+ * socket, so no port has to be known before the context starts.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -62,103 +62,170 @@ class VeracodeApiTest {
     @Autowired
     MockJiraStore jira;
 
+    /** The user's token, as the page sends it; the mock names its user after the last four characters. */
+    private static final String TOKEN = "pat-0000-abcd";
+
     @BeforeEach
     void reset() {
         jira.reset();
     }
 
+    private static MockMultipartFile sample() throws Exception {
+        return new MockMultipartFile("file", "detailedreport.xml", "application/xml",
+                new ClassPathResource(VeracodeController.SAMPLE).getContentAsByteArray());
+    }
+
+    /** Uploads the sample; returns the upload id. */
+    private String upload() throws Exception {
+        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return JsonPath.read(body, "$.report.id");
+    }
+
     @Test
-    void analysisMarksWhatJiraAlreadyHas() throws Exception {
-        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON).content("{}"))
+    void anUploadedReportIsMatchedAgainstJira() throws Exception {
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.page.source").value("CONFLUENCE"))
-                .andExpect(jsonPath("$.page.id").value("98765"))
-                .andExpect(jsonPath("$.page.version").value(7))
-                .andExpect(jsonPath("$.page.url").value("http://localhost/mock/confluence/pages/viewpage.action?pageId=98765"))
+                .andExpect(jsonPath("$.report.fileName").value("detailedreport.xml"))
+                .andExpect(jsonPath("$.report.appName").value("creed-platform"))
+                .andExpect(jsonPath("$.report.scanVersion").value("2.3.0"))
+                .andExpect(jsonPath("$.report.affectedVersion").value("2.3.0"))
+                .andExpect(jsonPath("$.report.versionOverridden").value(false))
+                .andExpect(jsonPath("$.report.policyName").value("Creed Default"))
+                .andExpect(jsonPath("$.report.policyCompliance").value("Did Not Pass"))
                 .andExpect(jsonPath("$.projectKey").value("CREED"))
-                .andExpect(jsonPath("$.counts.total").value(10))
+                .andExpect(jsonPath("$.counts.total").value(9))
                 .andExpect(jsonPath("$.counts.exists").value(3))
-                .andExpect(jsonPath("$.counts.missing").value(7))
-                .andExpect(jsonPath("$.counts.versionNotInJira").value(1))
-                .andExpect(jsonPath("$.warnings", contains("table 2, row 11: skipped, neither a CVE nor a title")))
-                // Filed for 2.3.0 -> found, link built from browse-url.
+                .andExpect(jsonPath("$.counts.missing").value(6))
+                .andExpect(jsonPath("$.counts.versionNotInJira").value(0))
+                .andExpect(jsonPath("$.warnings", contains("1 mitigated vulnerability skipped")))
                 .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].status").value("EXISTS"))
                 .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].issues[0].key").value("CREED-101"))
                 .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].issues[0].url")
                         .value("http://localhost/mock/jira/browse/CREED-101"))
-                // Summary without the [Veracode] prefix still matches on the CVE token.
+                // the library and its version form the component; the title is the summary's first sentence
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].components[0]").value("log4j-core 2.14.1"))
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].title")
+                        .value("Apache Log4j2 JNDI features do not protect against attacker-controlled LDAP and other JNDI related endpoints"))
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].severity").value("Very High"))
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].locations[0]")
+                        .value("log4j-core 2.14.1 (creed-platform.war#zip:WEB-INF/lib/log4j-core-2.14.1.jar)"))
+                // A summary that spells the CVE "cve 2020 36518", without the prefix, still matches.
                 .andExpect(jsonPath("$.findings[?(@.id=='CVE-2020-36518@2.3.0')].issues[0].key").value("CREED-103"))
+                // Jira's own attributes, for the page's filters; CREED-103 is unassigned.
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].issues[0].priority").value("Highest"))
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].issues[0].assignee").value("Alice Wang"))
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2020-36518@2.3.0')].issues[0].assignee").value(contains(nullValue())))
                 // Filed for 2.2.1 only -> still missing for 2.3.0.
                 .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-22965@2.3.0')].status").value("MISSING"))
-                // Two report rows, one finding.
+                // Two snakeyaml versions, one finding.
                 .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-1471@2.3.0')].components[*]", hasSize(2)))
-                // One cell, two CVEs: one filed, one not.
+                // One component, two CVEs: one filed, one not; its mitigated third is not a finding.
                 .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-4104@2.3.0')].status").value("EXISTS"))
                 .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-23302@2.3.0')].status").value("MISSING"))
-                // No CVE -> matched (and keyed) by title.
-                .andExpect(jsonPath("$.findings[?(@.id=='title:sql injection in reportquerybuilder@2.3.0')].status")
-                        .value("MISSING"))
-                // 2.5.0 is not a CREED version: not searched (the JQL would 400), flagged instead.
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2023-6378@2.5.0')].jiraVersion").value(contains(nullValue())))
-                // Severity order: Very High first.
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2019-17571@2.3.0')]", hasSize(0)))
+                // No CVE -> keyed and matched by the advisory id.
+                .andExpect(jsonPath("$.findings[?(@.id=='title:srcclr sid 29587@2.3.0')].status").value("MISSING"))
                 .andExpect(jsonPath("$.findings[0].severity").value("Very High"));
     }
 
     @Test
-    void createsMissingIssuesOnceAndReportsWhyOthersWereNotCreated() throws Exception {
-        String request = """
-                {"pageId":"98765","findingIds":["CVE-2022-22965@2.3.0","CVE-2021-44228@2.3.0",
-                 "CVE-2023-6378@2.5.0","CVE-1999-0001@2.3.0","CVE-2022-22965@2.3.0"]}
-                """;
-        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content(request))
+    void thePageCanOverrideTheAffectedVersion() throws Exception {
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("affectedVersion", "2.5.0"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.results", hasSize(4)))
+                .andExpect(jsonPath("$.report.scanVersion").value("2.3.0"))
+                .andExpect(jsonPath("$.report.affectedVersion").value("2.5.0"))
+                .andExpect(jsonPath("$.report.versionOverridden").value(true))
+                // 2.5.0 is not a CREED version: not searched (the JQL would 400), flagged instead.
+                .andExpect(jsonPath("$.counts.versionNotInJira").value(9))
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.5.0')].jiraVersion").value(contains(nullValue())));
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("affectedVersion", "2.2.1"))
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-22965@2.2.1')].status").value("EXISTS"));
+    }
+
+    @Test
+    void createsMissingIssuesOnceAndReportsWhyOthersWereNotCreated() throws Exception {
+        String uploadId = upload();
+        String request = """
+                {"uploadId":"%s","findingIds":["CVE-2022-22965@2.3.0","CVE-2021-44228@2.3.0",
+                 "CVE-1999-0001@2.3.0","CVE-2022-22965@2.3.0"]}
+                """.formatted(uploadId);
+        mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.results", hasSize(3)))
                 .andExpect(jsonPath("$.results[0].outcome").value("CREATED"))
                 .andExpect(jsonPath("$.results[0].issues[0].key").value("CREED-105"))
                 .andExpect(jsonPath("$.results[1].outcome").value("ALREADY_EXISTS"))
                 .andExpect(jsonPath("$.results[1].issues[0].key").value("CREED-101"))
-                .andExpect(jsonPath("$.results[2].outcome").value("VERSION_NOT_IN_JIRA"))
-                .andExpect(jsonPath("$.results[3].outcome").value("NOT_IN_REPORT"));
+                .andExpect(jsonPath("$.results[2].outcome").value("NOT_IN_REPORT"));
 
         MockJiraStore.Issue created = jira.find("CREED-105");
-        assertThat(created.summary()).isEqualTo("[Veracode] CVE-2022-22965 Spring Framework RCE via data binding on JDK 9+");
+        // summary-template "{project} {component} {cve}", {project} = the report's app_name; filed as the token's user
+        assertThat(created.summary()).isEqualTo("creed-platform spring-beans 5.3.17 CVE-2022-22965");
+        assertThat(created.reporter()).isEqualTo("user-abcd");
         assertThat(created.versions()).containsExactly("2.3.0");
         assertThat(created.labels()).containsExactly("veracode", "CVE-2022-22965");
-        assertThat(created.description()).contains("|Component(s)|spring-beans 5.3.17|", "pageId=98765");
+        assertThat(created.description()).contains("|Component(s)|spring-beans 5.3.17|",
+                "Source: Veracode application creed-platform, scan 2.3.0, policy Creed Default (report detailedreport.xml)");
 
         // The second click: re-checked, not duplicated.
-        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"findingIds\":[\"CVE-2022-22965@2.3.0\"]}"))
+        mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, TOKEN).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]}"))
                 .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"))
                 .andExpect(jsonPath("$.results[0].issues[0].key").value("CREED-105"));
         assertThat(jira.all()).hasSize(5);
     }
 
     @Test
-    void autoCreateFilesEveryMissingFindingWhoseVersionExists() throws Exception {
-        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"autoCreate\":true}"))
+    void versionNotInJiraIsNotCreated() throws Exception {
+        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("affectedVersion", "2.5.0"))
+                .andReturn().getResponse().getContentAsString();
+        String uploadId = JsonPath.read(body, "$.report.id");
+        mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, TOKEN).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.5.0\"]}"))
+                .andExpect(jsonPath("$.results[0].outcome").value("VERSION_NOT_IN_JIRA"));
+    }
+
+    @Test
+    void autoCreateFilesEveryMissingFindingAndFindsThemAgain() throws Exception {
+        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("autoCreate", "true")
+                        .header(JiraToken.HEADER, TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.counts.created").value(6))
-                .andExpect(jsonPath("$.counts.missing").value(1))
-                .andExpect(jsonPath("$.findings[?(@.status=='MISSING')].id", contains("CVE-2023-6378@2.5.0")));
+                .andExpect(jsonPath("$.counts.missing").value(0))
+                .andReturn().getResponse().getContentAsString();
+        // the advisory without a CVE: its id stands in for {cve}, and is what finds it again below
+        assertThat(jira.all()).extracting(MockJiraStore.Issue::summary)
+                .contains("creed-platform netty-codec 4.1.68.Final SRCCLR-SID-29587",
+                        "creed-platform snakeyaml 1.33, snakeyaml 1.30 CVE-2022-1471");
 
-        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON).content("{}"))
+        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + JsonPath.read(body, "$.report.id") + "\"}"))
                 .andExpect(jsonPath("$.counts.exists").value(9))
                 .andExpect(jsonPath("$.counts.created").value(0));
     }
 
     @Test
+    void theSampleIsServedWithTheMocks() throws Exception {
+        mvc.perform(post("/api/veracode/analysis/sample"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.report.appName").value("creed-platform"))
+                .andExpect(jsonPath("$.counts.total").value(9));
+    }
+
+    @Test
     void exportsTheAnalysisAsXlsx() throws Exception {
-        byte[] xlsx = mvc.perform(get("/api/veracode/analysis/export").param("pageId", "98765"))
+        String uploadId = upload();
+        byte[] xlsx = mvc.perform(get("/api/veracode/analysis/export").param("uploadId", uploadId))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType(VeracodeController.XLSX))
-                .andExpect(header().string("Content-Disposition", containsString("veracode-98765-")))
+                .andExpect(header().string("Content-Disposition", containsString("veracode-creed-platform-")))
                 .andReturn().getResponse().getContentAsByteArray();
 
         try (XSSFWorkbook wb = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
             Sheet findings = wb.getSheet("Findings");
-            assertThat(findings.getLastRowNum()).isEqualTo(10);
+            assertThat(findings.getLastRowNum()).isEqualTo(9);
             assertThat(findings.getRow(0).getCell(0).getStringCellValue()).isEqualTo("Status");
             List<String> log4shell = new ArrayList<>();
             for (Row row : findings) {
@@ -167,52 +234,66 @@ class VeracodeApiTest {
                 }
             }
             assertThat(log4shell).contains("EXISTS", "CREED-101", "In Progress", "2.3.0");
-            assertThat(wb.getSheet("Source").getRow(2).getCell(1).getStringCellValue()).isEqualTo("CREED");
+            Sheet source = wb.getSheet("Source");
+            assertThat(source.getRow(0).getCell(1).getStringCellValue()).isEqualTo("creed-platform");
+            assertThat(source.getRow(6).getCell(1).getStringCellValue()).isEqualTo("CREED");
         }
     }
 
     @Test
-    void anUploadedFileIsAnalysedAndThenCreatedAndExportedByItsId() throws Exception {
-        String csv = "CVE,Title,Component,Severity,Affected Version\n"
-                + "CVE-2021-44228,Log4Shell,log4j-core 2.14.1,Very High,2.3.0\n"
-                + "CVE-2022-42889,Text4Shell,commons-text 1.9,Very High,2.3.0\n";
-        MockMultipartFile file = new MockMultipartFile("file", "sca-2.3.0.csv", "text/csv",
-                csv.getBytes(StandardCharsets.UTF_8));
-
-        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(file))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.page.source").value("UPLOAD"))
-                .andExpect(jsonPath("$.page.title").value("sca-2.3.0.csv"))
-                .andExpect(jsonPath("$.page.url").value(nullValue()))
-                .andExpect(jsonPath("$.counts.total").value(2))
-                .andExpect(jsonPath("$.counts.exists").value(1))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].locations[0]").value("CSV, row 2"))
-                .andReturn().getResponse().getContentAsString();
-        String uploadId = JsonPath.read(body, "$.page.id");
-
-        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-42889@2.3.0\"]}"))
-                .andExpect(jsonPath("$.results[0].outcome").value("CREATED"));
-        assertThat(jira.find("CREED-105").description()).contains("Source: uploaded file sca-2.3.0.csv");
-
+    void creatingNeedsTheUsersToken() throws Exception {
+        String uploadId = upload();
+        String request = "{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]}";
+        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("jira_token_required"));
         mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uploadId\":\"" + uploadId + "\"}"))
-                .andExpect(jsonPath("$.counts.exists").value(2));
-        mvc.perform(get("/api/veracode/analysis/export").param("uploadId", uploadId))
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"autoCreate\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("jira_token_required"));
+        // Jira refuses the token: per-finding FAILED with Jira's reason, nothing created
+        mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, "invalid")
+                        .contentType(MediaType.APPLICATION_JSON).content(request))
                 .andExpect(status().isOk())
-                .andExpect(header().string("Content-Disposition", containsString("veracode-upload-")));
+                .andExpect(jsonPath("$.results[0].outcome").value("FAILED"))
+                .andExpect(jsonPath("$.results[0].message").value(containsString("401")));
+        assertThat(jira.all()).hasSize(4);
+    }
+
+    @Test
+    void connectionTestNamesTheTokensUser() throws Exception {
+        mvc.perform(post("/api/veracode/jira/connection").header(JiraToken.HEADER, TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(true))
+                .andExpect(jsonPath("$.user").value("user-abcd"))
+                .andExpect(jsonPath("$.displayName").value("Mock User user-abcd"))
+                .andExpect(jsonPath("$.projectKey").value("CREED"))
+                .andExpect(jsonPath("$.projectAccess").value(true));
+        mvc.perform(post("/api/veracode/jira/connection").header(JiraToken.HEADER, "invalid"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(false))
+                .andExpect(jsonPath("$.status").value(401));
+        mvc.perform(post("/api/veracode/jira/connection"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("jira_token_required"));
     }
 
     @Test
     void uploadErrorsAreNamed() throws Exception {
         mvc.perform(multipart("/api/veracode/analysis/upload")
-                        .file(new MockMultipartFile("file", "report.pdf", "application/pdf", "%PDF".getBytes())))
+                        .file(new MockMultipartFile("file", "report.pdf", "application/pdf", "%PDF-1.7".getBytes())))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("unsupported_file"));
         mvc.perform(multipart("/api/veracode/analysis/upload")
-                        .file(new MockMultipartFile("file", "notes.csv", "text/csv", "a,b\n1,2\n".getBytes())))
+                        .file(new MockMultipartFile("file", "pom.xml", "application/xml", "<project/>".getBytes())))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error").value("report_unreadable"));
+        byte[] noVersion = "<detailedreport xmlns=\"https://www.veracode.com/schema/reports/export/1.0\" app_name=\"x\"/>"
+                .getBytes(StandardCharsets.UTF_8);
+        mvc.perform(multipart("/api/veracode/analysis/upload")
+                        .file(new MockMultipartFile("file", "r.xml", "application/xml", noVersion)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.message").value(containsString("enter the affected version")));
         mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"uploadId\":\"no-such-upload\"}"))
                 .andExpect(status().isNotFound())
@@ -221,15 +302,11 @@ class VeracodeApiTest {
 
     @Test
     void errorsAreNamed() throws Exception {
-        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON).content("{\"pageId\":\"1\"}"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("page_not_found"));
-        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON).content("{\"pageId\":\"98766\"}"))
-                .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.error").value("report_unreadable"));
-        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON).content("{\"pageId\":\"../x\"}"))
-                .andExpect(status().isBadRequest());
-        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content("{\"findingIds\":[]}"))
+        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("bad_request"));
+        mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"uploadId\":\"x\",\"findingIds\":[]}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fields[0].field").value("findingIds"));
     }
@@ -238,36 +315,29 @@ class VeracodeApiTest {
     void settingsCarryNoCredentials() throws Exception {
         mvc.perform(get("/api/veracode/settings"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.defaultPageId").value("98765"))
+                .andExpect(jsonPath("$.projectKey").value("CREED"))
                 .andExpect(jsonPath("$.mock").value(true))
+                .andExpect(jsonPath("$.summaryTemplate").value("{project} {component} {cve}"))
+                .andExpect(jsonPath("$.requireUserToken").value(true))
                 .andExpect(jsonPath("$.token").doesNotExist());
     }
 
     /**
-     * Same proxies, MockMvc underneath. MockMvc is built on first use: building it while the context is
-     * still creating these beans would ask a half-built context for its filters.
+     * Same proxy, MockMvc underneath. MockMvc is built on first use: building it while the context is
+     * still creating this bean would ask a half-built context for its filters.
      */
     @TestConfiguration
     static class ClientsOverMockMvc {
 
         @Bean
         @Primary
-        ConfluenceClient mockMvcConfluenceClient(WebApplicationContext context) {
-            return RemoteClientsConfiguration.confluenceClient(overMockMvc(context, "http://localhost/mock/confluence"));
-        }
-
-        @Bean
-        @Primary
         JiraClient mockMvcJiraClient(WebApplicationContext context) {
-            return RemoteClientsConfiguration.jiraClient(overMockMvc(context, "http://localhost/mock/jira"));
-        }
-
-        private static RestClient overMockMvc(WebApplicationContext context, String baseUrl) {
             AtomicReference<MockMvc> mvc = new AtomicReference<>();
             ClientHttpRequestFactory factory = (uri, method) -> new MockMvcClientHttpRequestFactory(
                     mvc.updateAndGet(m -> m != null ? m : MockMvcBuilders.webAppContextSetup(context).build()))
                     .createRequest(uri, method);
-            return RestClient.builder().baseUrl(baseUrl).requestFactory(factory).build();
+            return RemoteClientsConfiguration.jiraClient(
+                    RestClient.builder().baseUrl("http://localhost/mock/jira").requestFactory(factory).build());
         }
     }
 }

@@ -5,7 +5,8 @@ import org.springframework.http.HttpHeaders;
 import java.nio.charset.StandardCharsets;
 
 /**
- * How this service authenticates to Confluence / Jira.
+ * How this service authenticates to Jira by default - the user's own token from the page replaces it per
+ * request.
  *
  * <ul>
  *   <li>{@code BEARER} - a Data Center personal access token ({@code Authorization: Bearer <token>});</li>

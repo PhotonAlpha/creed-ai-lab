@@ -16,7 +16,6 @@
 
     <properties>
         <!-- Neither is managed by the Boot BOM. POI matches creed-report's pin. -->
-        <jsoup.version>1.22.2</jsoup.version>
         <poi.version>5.4.1</poi.version>
     </properties>
 
@@ -36,12 +35,6 @@
             <artifactId>spring-boot-starter-restclient</artifactId>
         </dependency>
 
-        <!-- Confluence storage format is XHTML; the report is a <table> inside it. -->
-        <dependency>
-            <groupId>org.jsoup</groupId>
-            <artifactId>jsoup</artifactId>
-            <version>${jsoup.version}</version>
-        </dependency>
         <!-- Excel (.xlsx) export: poi-ooxml pulls in poi + the OOXML schemas. -->
         <dependency>
             <groupId>org.apache.poi</groupId>

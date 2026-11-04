@@ -90,6 +90,10 @@ oc get hpa -w
 
 ### 练习 1：veracode 启用 HTTPS，内部 RestClient 加载 keystore / truststore 及其密码
 
+> **2026-11-05 起与当前代码不一致**：veracode 已去掉 Confluence（报告改为上传 Veracode XML），Jira 客户端按需求
+> **不再校验证书和主机名**，`veracode.*.ssl-bundle` 已删除。下文「客户端信任」一半（第二次坏掉、`PKIX`、`confluence_error`）
+> 不再能复现；服务端开 TLS 的一半（keystore、密码来源）仍然适用。保留原文作为练习记录。
+
 **背景**：veracode 默认是纯 HTTP，Confluence/Jira 的 mock 走的是「Pod 自己调自己」
 （`http://localhost:${server.port}/mock/...`）。服务端一旦开 TLS，这条自调用链路会依次坏掉两次，正好把
 「服务端身份」和「客户端信任」两件事分开练：

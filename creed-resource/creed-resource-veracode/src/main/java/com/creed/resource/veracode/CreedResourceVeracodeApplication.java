@@ -7,12 +7,12 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import java.util.Map;
 
 /**
- * Veracode report analysis: reads a Veracode report table from a Confluence page, looks each finding
- * up in Jira by CVE (or title) and affects version, and creates the issues that are missing.
+ * Veracode SCA report analysis: reads an uploaded Veracode detailed report (XML), looks each finding up in
+ * Jira by CVE (or advisory id) and affects version, and creates the issues that are missing.
  *
- * <p>Stateless — no database. Every answer is computed from Confluence and Jira at request time, so the
- * page and Jira stay the only sources of truth. Locally both are served by the in-process mocks under
- * {@code /mock/*} ({@code veracode.mock.enabled}).
+ * <p>No database. Uploads are held in memory for a while; Jira is read at request time, so it stays the
+ * only source of truth for what exists. Locally Jira is the in-process mock under {@code /mock/jira}
+ * ({@code veracode.mock.enabled}).
  *
  * <p>On top of the packaged {@code application*.yml}, an {@code application.yml} (and
  * {@code application-<profile>.yml}) in {@code CREED_VERACODE_CONFIG_DIR}, default

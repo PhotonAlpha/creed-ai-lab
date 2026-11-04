@@ -8,8 +8,8 @@ final class JiraDescription {
     private JiraDescription() {
     }
 
-    static String of(Finding f, ReportPage page) {
-        StringBuilder d = new StringBuilder("h3. Veracode finding\n");
+    static String of(Finding f, ReportView report) {
+        StringBuilder d = new StringBuilder("h3. Veracode SCA finding\n");
         d.append("||Field||Value||\n");
         if (f.cve() != null) {
             row(d, "CVE", "[" + f.cve() + "|https://nvd.nist.gov/vuln/detail/" + f.cve() + "]");
@@ -23,16 +23,15 @@ final class JiraDescription {
         if (f.description() != null) {
             d.append("\n").append(escape(f.description())).append("\n");
         }
-        if (page.uploaded()) {
-            d.append("\nSource: uploaded file ").append(escape(page.title()));
-        } else {
-            d.append("\nSource: ").append(page.url() == null ? escape(page.title())
-                    : "[" + escape(page.title()) + "|" + page.url() + "]");
-            if (page.version() != null) {
-                d.append(" (page version ").append(page.version()).append(")");
-            }
+        d.append("\nSource: Veracode application ").append(escape(report.appName() == null ? "?" : report.appName()));
+        if (report.scanVersion() != null) {
+            d.append(", scan ").append(escape(report.scanVersion()));
         }
-        d.append(" - ").append(String.join("; ", f.locations())).append("\n");
+        if (report.policyName() != null) {
+            d.append(", policy ").append(escape(report.policyName()));
+        }
+        d.append(" (report ").append(escape(report.fileName())).append(") - ")
+                .append(escape(String.join("; ", f.locations()))).append("\n");
         return d.toString();
     }
 

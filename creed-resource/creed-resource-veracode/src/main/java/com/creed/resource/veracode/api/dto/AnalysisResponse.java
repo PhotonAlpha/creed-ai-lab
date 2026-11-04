@@ -1,6 +1,6 @@
 package com.creed.resource.veracode.api.dto;
 
-import com.creed.resource.veracode.service.ReportPage;
+import com.creed.resource.veracode.service.ReportView;
 
 import java.time.Instant;
 import java.util.List;
@@ -9,7 +9,7 @@ import java.util.List;
  * @param warnings  report rows that were skipped or read partially, and creations that failed during an
  *                  {@code autoCreate} run
  */
-public record AnalysisResponse(ReportPage page, String projectKey, List<String> jiraVersions,
+public record AnalysisResponse(ReportView report, String projectKey, List<String> jiraVersions,
                                List<FindingView> findings, List<String> warnings, Counts counts,
                                Instant analyzedAt) {
 

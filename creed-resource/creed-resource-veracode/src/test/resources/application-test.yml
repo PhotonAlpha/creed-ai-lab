@@ -13,11 +13,8 @@ otel:
 veracode:
   mock:
     enabled: true
-  confluence:
-    # Never called over the network: VeracodeApiTest swaps both clients onto MockMvc.
-    base-url: http://localhost/mock/confluence
-    page-id: "98765"
   jira:
+    # Never called over the network: VeracodeApiTest swaps the client onto MockMvc.
     base-url: http://localhost/mock/jira
     browse-url: http://localhost/mock/jira/browse/{key}
     # Small on purpose: the sample report needs several search batches and pages.

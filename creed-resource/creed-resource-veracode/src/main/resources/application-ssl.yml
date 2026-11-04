@@ -29,13 +29,9 @@ server:
     bundle: veracode
     client-auth: none
 
-# The mocks are this process calling itself, now over TLS. The bundle's truststore (Creed root +
-# intermediate) is what lets the clients verify the cert; its SAN must carry `localhost`.
+# The Jira mock is this process calling itself, now over TLS. The Jira client verifies neither the
+# certificate nor the hostname (TrustAllTls), so no trust material is needed for it.
 veracode:
-  confluence:
-    base-url: ${CREED_CONFLUENCE_URL:https://localhost:${server.port}/mock/confluence}
-    ssl-bundle: ${CREED_CONFLUENCE_SSL_BUNDLE:veracode}
   jira:
     base-url: ${CREED_JIRA_URL:https://localhost:${server.port}/mock/jira}
     browse-url: ${CREED_JIRA_BROWSE_URL:https://localhost:${server.port}/mock/jira/browse/{key}}
-    ssl-bundle: ${CREED_JIRA_SSL_BUNDLE:veracode}

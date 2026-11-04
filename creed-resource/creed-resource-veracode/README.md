@@ -1,50 +1,60 @@
 # creed-resource-veracode
 
-Reads a Veracode report from a Confluence page, finds the matching Jira issues, creates the missing
-ones and exports the result to Excel. UI: the `/veracode` page of `creed-env-matrix-design`.
+Reads an uploaded **Veracode detailed report (XML)**, finds the Jira issues that cover its SCA findings,
+creates the missing ones with the user's own Jira token and exports the result to Excel. UI: the
+`/veracode` page of `creed-env-matrix-design`.
 
 ```
-Confluence page (storage XHTML)            Jira project
-  └─ report <table>  ── parse ──► findings ──► GET /project/{key}/versions
-                                    │          POST /search   (JQL per batch)
-                                    │          POST /issue    (missing ones, on request)
-                                    ▼
-                        EXISTS / MISSING / CREATED  ──► UI table · xlsx
+Veracode detailed report (XML upload)       Jira project
+  └─ software_composition_analysis                  GET /project/{key}/versions
+       └─ component / vulnerability ─► findings ──► POST /search   (JQL per batch)
+                                         │          POST /issue    (missing ones, user's token)
+                                         ▼
+                             EXISTS / MISSING / CREATED  ──► UI table · xlsx
 ```
 
-Both remote calls are Spring `@HttpExchange` interfaces (`ConfluenceClient`, `JiraClient`) built with
-`HttpServiceProxyFactory` over a `RestClient` each (own base URL, credentials, timeouts).
+Jira is a Spring `@HttpExchange` interface (`JiraClient`) built with `HttpServiceProxyFactory` over its own
+`RestClient`. **TLS to Jira is not verified** — neither the certificate nor the hostname.
 
-## Report table
+## Report
 
-Any table on the page whose header row (first row, `th` or `td`) has an **affected version** column and
-a **CVE** or **title** column. Header names are configurable (`veracode.report.*`, case-insensitive):
+`POST /api/veracode/analysis/upload` takes the Detailed Report XML (`<detailedreport>`, Veracode export
+schema 1.x) and reads only `software_composition_analysis/vulnerable_components`:
 
-| Field | Accepted headers (default) |
+| Finding field | From |
 |---|---|
-| cve | CVE, CVE ID |
-| title | Title, Vulnerability, Flaw |
-| component | Component, Library |
-| severity | Severity |
-| cvss | CVSS, CVSS Score |
-| affectedVersion | Affected Version, Affects Version, Version — **our** release, = Jira *Affects Version/s* |
-| fixedVersion | Fixed Version, Fix Version |
-| description | Description, Details |
+| cve | `vulnerability/@cve_id` when it is a `CVE-…`; else none (an `SRCCLR-SID-…` advisory) |
+| title | first sentence of `@cve_summary`; the advisory id when there is no CVE |
+| component | `component/@library` + `@version` (the **library's** version), e.g. `log4j-core 2.14.1` |
+| severity | `@severity` 0–5 → Informational … Very High |
+| cvss | `@cvss_score` |
+| affected version | root `detailedreport/@version` (scan / build name), or `affectedVersion` on the upload — Jira's *Affects Version/s* |
+| description | `@cve_summary` |
 
-Rows without a version, or without both CVE and title, are skipped with a warning.
-
-The same rules apply to an **uploaded file** (`POST /api/veracode/analysis/upload`): `.html`/`.htm`,
-`.csv`, `.xlsx`/`.xls` (every sheet; the header row is searched in the first 10 rows, so title rows above
-it are fine). The service's own Excel export can be uploaded back.
+Static flaws are not read. `mitigation="true"` vulnerabilities are skipped with a warning. The parsed report
+stays in memory for 2 h (`veracode.upload.ttl`); create, export and re-analysis name it by upload id.
 
 ## Matching
 
 An issue covers a finding when its *Affects Version/s* contain the finding's version **and** its summary
-names the CVE (whole token) — or, without a CVE, contains the title as a phrase. Created issues get
-summary `[Veracode] <CVE> <title>`, the version, labels `veracode` + the CVE, and a wiki-markup
-description linking back to the page.
+(title) names it, matched loosely: the CVE anywhere in the summary, case and separators ignored
+(`CVE-2021-44228` = `cve 2021 44228` = `CVE_2021_44228`) but never inside a longer id; without a CVE,
+every word of the title (the advisory id) in any order. Created issues get the summary
+`veracode.jira.summary-template` (default `{project} {component} {cve}`, `{project}` = the report's
+`app_name`, e.g. `creed-platform spring-beans 5.3.17 CVE-2022-22965`), the version, labels `veracode` + the
+CVE, and a wiki-markup description naming the Veracode application, scan and policy.
+
+## Jira token
+
+Issues are created with **the user's own Jira access token** (Data Center personal access token), set on
+the page and sent per request as `X-Jira-Token` → `Authorization: Bearer` to Jira. The service never stores
+it. Without it, create (and `autoCreate`) answer 400 `jira_token_required`
+(`veracode.jira.require-user-token: false` falls back to the configured `veracode.jira.auth`). Searches use
+the token when sent, else the configured auth. `POST /api/veracode/jira/connection` tests it: who Jira says
+it is (`/myself`) and whether it sees the project.
 
 ## Configuration
 
-See `application.yml`. Everything external is `${CREED_…}`; locally the defaults point at the
-in-process mocks (`/mock/confluence`, `/mock/jira`; sample page `98765`, project `CREED`).
+See `application.yml`. Everything external is `${CREED_…}`; locally Jira is the in-process mock
+(`/mock/jira`, project `CREED`) and `POST /api/veracode/analysis/sample` analyses the bundled
+`sample/veracode-detailedreport.xml`.

@@ -1,7 +1,7 @@
 package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.config.UploadProperties;
-import com.creed.resource.veracode.service.ReportParser.ParsedReport;
+import com.creed.resource.veracode.service.VeracodeXmlParser.ParsedReport;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -14,7 +14,7 @@ import java.util.UUID;
 
 /**
  * Parsed uploads by id. The parsed rows are kept, not the file: re-parsing would give the same rows, and
- * the bytes of a 10 MB workbook are not worth holding.
+ * the bytes of a detailed report (static flaws included, tens of MB) are not worth holding.
  *
  * <p>In memory and per instance - behind a load balancer the follow-up create/export must reach the
  * instance that took the upload, or it answers {@code upload_expired}.
@@ -23,21 +23,24 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class UploadedReportStore {
 
-    public record Upload(String id, String filename, ParsedReport report, Instant uploadedAt) {
+    /** @param report rows already carry {@code affectedVersion}; {@code versionOverridden} = set on the page */
+    public record Upload(String id, String filename, ParsedReport report, String affectedVersion,
+                         boolean versionOverridden, Instant uploadedAt) {
     }
 
     private final UploadProperties props;
     private final Clock clock;
     private final Map<String, Upload> uploads = new LinkedHashMap<>();
 
-    public synchronized Upload put(String filename, ParsedReport report) {
+    public synchronized Upload put(String filename, ParsedReport report, String affectedVersion, boolean overridden) {
         evictExpired();
         while (uploads.size() >= props.maxEntries()) {
             Iterator<String> oldest = uploads.keySet().iterator();
             oldest.next();
             oldest.remove();
         }
-        Upload upload = new Upload(UUID.randomUUID().toString(), filename, report, Instant.now(clock));
+        Upload upload = new Upload(UUID.randomUUID().toString(), filename, report, affectedVersion, overridden,
+                Instant.now(clock));
         uploads.put(upload.id(), upload);
         return upload;
     }

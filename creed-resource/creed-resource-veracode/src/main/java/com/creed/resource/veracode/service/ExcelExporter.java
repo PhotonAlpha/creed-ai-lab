@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
 
 /**
  * One workbook per analysis: sheet "Findings" (one row per finding, the Jira columns last) and sheet
- * "Source" (page, project, time, warnings) so a forwarded file still says what it was computed from.
+ * "Source" (Veracode app, scan, policy, file, project, time, warnings) so a forwarded file still says what it was computed from.
  *
  * <p>A finding with several issues gets all their keys in one cell; the hyperlink can only point at one,
  * so it points at the first.
@@ -36,7 +36,7 @@ import java.util.stream.Collectors;
 public class ExcelExporter {
 
     private static final String[] HEADERS = {"Status", "CVE", "Title", "Component(s)", "Severity", "CVSS",
-            "Affected version", "Jira version", "Fixed version", "Jira issue(s)", "Jira status", "Report location",
+            "Affected version", "Jira version", "Fixed version", "Jira issue(s)", "Jira status", "Component file",
             "Description"};
     private static final int[] WIDTHS = {12, 18, 48, 36, 12, 8, 16, 14, 16, 22, 16, 20, 60};
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'")
@@ -105,11 +105,13 @@ public class ExcelExporter {
     private static void source(Sheet sheet, AnalysisResponse a, CellStyle header) {
         AnalysisResponse.Counts n = a.counts();
         Object[][] rows = {
-                a.page().uploaded()
-                        ? new Object[]{"Uploaded file", a.page().title()}
-                        : new Object[]{"Confluence page", a.page().title() + " (id " + a.page().id()
-                                + (a.page().version() == null ? "" : ", version " + a.page().version()) + ")"},
-                {"Page URL", nullToEmpty(a.page().url())},
+                {"Veracode application", nullToEmpty(a.report().appName())},
+                {"Scan version", nullToEmpty(a.report().scanVersion())},
+                {"Affected version", a.report().affectedVersion() + (a.report().versionOverridden() ? " (set on the page)" : "")},
+                {"Policy", nullToEmpty(a.report().policyName()) + (a.report().policyCompliance() == null ? ""
+                        : " - " + a.report().policyCompliance())},
+                {"Report generated", nullToEmpty(a.report().generatedAt())},
+                {"Uploaded file", a.report().fileName()},
                 {"Jira project", a.projectKey()},
                 {"Analysed at", TIME.format(a.analyzedAt())},
                 {"Findings", n.total() + " (exists " + n.exists() + ", missing " + n.missing()

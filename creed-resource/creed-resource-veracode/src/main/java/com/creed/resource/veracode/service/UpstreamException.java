@@ -7,7 +7,7 @@ import org.springframework.web.client.RestClientResponseException;
 import java.util.function.Supplier;
 
 /**
- * Confluence or Jira failed - answered as 502, because this service did nothing wrong.
+ * Jira failed - answered as 502, because this service did nothing wrong.
  *
  * @param status the upstream's HTTP status, {@code 0} when it could not be reached at all
  */
@@ -48,7 +48,7 @@ public class UpstreamException extends RuntimeException {
                 return body.describe();
             }
         } catch (RuntimeException ignored) {
-            // Not Jira's envelope (an HTML error page, Confluence's own shape) - fall back to the status.
+            // Not Jira's envelope (an HTML error page from a proxy) - fall back to the status.
         }
         return e.getStatusText().isEmpty() ? e.getStatusCode().toString() : e.getStatusText();
     }

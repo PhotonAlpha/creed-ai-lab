@@ -4,6 +4,7 @@ import com.creed.resource.veracode.domain.Finding;
 import tools.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
@@ -31,7 +33,13 @@ import java.util.regex.Pattern;
  * {@code affectedVersion in (...)}, {@code summary ~ "\"...\""} clauses OR'd - and keeps the two Jira
  * behaviours the real code has to survive: an unknown version in the JQL is a 400 for the whole query,
  * and {@code summary ~} matches tokens, not substrings ({@code CVE-2021-4104} finds a summary with
- * {@code CVE 2021 4104} too). Paging honours {@code startAt}/{@code maxResults}.
+ * {@code CVE 2021 4104} too). Paging honours {@code startAt}/{@code maxResults}. A quoted
+ * {@code summary ~} value is a phrase, an unquoted one plain words in any order.
+ *
+ * <p>Authentication, as far as the page's token needs it: {@code /myself} and creating need a
+ * {@code Bearer} token, and the token {@value #REJECTED_TOKEN} is refused (401) so a failed "test
+ * connection" can be seen; the user is named after the token's last characters. Searching and versions
+ * accept anonymous calls - the service's configured auth is NONE against the mock.
  */
 @RestController
 @RequestMapping("/mock/jira")
@@ -46,8 +54,19 @@ public class MockJiraController {
     private static final Pattern SUMMARY = Pattern.compile("summary\\s*~\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
     private static final Pattern ANY_LITERAL = Pattern.compile(LITERAL);
     private static final Set<String> ISSUE_TYPES = Set.of("bug", "task", "story", "vulnerability");
+    static final String REJECTED_TOKEN = "invalid";
 
     private final MockJiraStore store;
+
+    @GetMapping("/rest/api/2/myself")
+    ResponseEntity<?> myself(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+        String user = user(authorization);
+        if (user == null) {
+            return unauthorized();
+        }
+        return ResponseEntity.ok(Map.of("name", user, "key", user, "displayName", "Mock User " + user,
+                "emailAddress", user + "@example.com", "active", true));
+    }
 
     @GetMapping("/rest/api/2/project/{key}/versions")
     ResponseEntity<?> versions(@PathVariable String key) {
@@ -87,16 +106,24 @@ public class MockJiraController {
                 versions.add(name);
             }
         }
+        // phrase -> contained as is; plain words -> all present, any order
         List<String> phrases = new ArrayList<>();
+        List<List<String>> words = new ArrayList<>();
         Matcher s = SUMMARY.matcher(jql);
         while (s.find()) {
-            phrases.add(Finding.normalise(unescape(s.group(1))));
+            String term = unescape(s.group(1));
+            if (term.startsWith("\"")) {
+                phrases.add(Finding.normalise(term));
+            } else {
+                words.add(List.of(Finding.normalise(term).split(" ")));
+            }
         }
 
         List<MockJiraStore.Issue> hits = store.all().stream()
                 .filter(i -> versions.isEmpty() || i.versions().stream().anyMatch(iv -> versions.stream().anyMatch(iv::equalsIgnoreCase)))
-                .filter(i -> phrases.isEmpty() || phrases.stream().anyMatch(p ->
-                        (" " + Finding.normalise(i.summary()) + " ").contains(" " + p + " ")))
+                .filter(i -> phrases.isEmpty() && words.isEmpty()
+                        || phrases.stream().anyMatch(p -> (" " + Finding.normalise(i.summary()) + " ").contains(" " + p + " "))
+                        || words.stream().anyMatch(w -> List.of(Finding.normalise(i.summary()).split(" ")).containsAll(w)))
                 .toList();
         List<Map<String, Object>> page = hits.stream().skip(startAt).limit(maxResults).map(this::toJson).toList();
 
@@ -109,7 +136,12 @@ public class MockJiraController {
     }
 
     @PostMapping("/rest/api/2/issue")
-    ResponseEntity<?> create(@RequestBody JsonNode body) {
+    ResponseEntity<?> create(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+                             @RequestBody JsonNode body) {
+        String reporter = user(authorization);
+        if (reporter == null) {
+            return unauthorized();
+        }
         JsonNode fields = body.path("fields");
         Map<String, String> errors = new LinkedHashMap<>();
         if (!MockJiraStore.PROJECT.equalsIgnoreCase(fields.path("project").path("key").asString())) {
@@ -137,7 +169,8 @@ public class MockJiraController {
         }
         List<String> labels = new ArrayList<>();
         fields.path("labels").forEach(l -> labels.add(l.asString()));
-        MockJiraStore.Issue issue = store.create(summary, fields.path("description").asString(null), versions, labels);
+        MockJiraStore.Issue issue = store.create(summary, fields.path("description").asString(null), versions, labels,
+                reporter);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "id", String.valueOf(issue.id()), "key", issue.key(), "self", self(issue)));
     }
@@ -153,7 +186,9 @@ public class MockJiraController {
                 + "</title><p><i>mock Jira</i></p><h1>" + HtmlUtils.htmlEscape(issue.key()) + " "
                 + HtmlUtils.htmlEscape(issue.summary()) + "</h1><p>Status: " + HtmlUtils.htmlEscape(issue.status())
                 + " &middot; Affects: " + HtmlUtils.htmlEscape(String.join(", ", issue.versions()))
-                + " &middot; Labels: " + HtmlUtils.htmlEscape(String.join(", ", issue.labels())) + "</p><pre>"
+                + " &middot; Labels: " + HtmlUtils.htmlEscape(String.join(", ", issue.labels()))
+                + (issue.reporter() == null ? "" : " &middot; Reporter: " + HtmlUtils.htmlEscape(issue.reporter()))
+                + "</p><pre>"
                 + HtmlUtils.htmlEscape(issue.description() == null ? "" : issue.description()) + "</pre>";
         return ResponseEntity.ok(html);
     }
@@ -164,7 +199,26 @@ public class MockJiraController {
         fields.put("status", Map.of("name", issue.status()));
         fields.put("versions", issue.versions().stream().map(v -> Map.of("name", v)).toList());
         fields.put("labels", issue.labels());
+        fields.put("priority", issue.priority() == null ? null : Map.of("name", issue.priority()));
+        fields.put("assignee", issue.assignee() == null ? null
+                : Map.of("name", issue.assignee().toLowerCase().replace(' ', '.'), "displayName", issue.assignee()));
         return Map.of("id", String.valueOf(issue.id()), "key", issue.key(), "self", self(issue), "fields", fields);
+    }
+
+    /** The login a Bearer token stands for, {@code null} = no token or the rejected one. */
+    private static String user(String authorization) {
+        if (authorization == null || !authorization.startsWith("Bearer ")) {
+            return null;
+        }
+        String token = authorization.substring("Bearer ".length()).trim();
+        if (token.isEmpty() || token.equals(REJECTED_TOKEN)) {
+            return null;
+        }
+        return "user-" + token.substring(Math.max(0, token.length() - 4));
+    }
+
+    private static ResponseEntity<Map<String, Object>> unauthorized() {
+        return error(HttpStatus.UNAUTHORIZED, "You are not authenticated. Authentication required to perform this operation.", null);
     }
 
     private static String self(MockJiraStore.Issue issue) {

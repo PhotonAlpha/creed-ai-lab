@@ -22,7 +22,8 @@
 - **这个应用上 OCP 必须改的两处配置**：
   - `creed-common-metrics` 的 logback 默认写到 `./logs`，用 `LOGGING_FILE_PATH=/tmp/logs` 改到一定可写的目录；
   - OTel 默认把数据导出到 `localhost:4318`，集群里没有 collector，用 `OTEL_SDK_DISABLED=true` 关掉（第 10 章再接监控）。
-- **mock 模式在集群里照样能用**：veracode 的 Confluence 和 Jira base URL 默认指向 `http://localhost:${server.port}/mock/...`，
+- **mock 模式在集群里照样能用**：veracode 的 Confluence 和 Jira base URL 默认指向 `http://localhost:${server.port}/mock/...`
+  （2026-11-05 起 Confluence 已去掉，只剩 Jira mock 与自带的示例 XML），
   也就是 Pod 自己调用自己，不需要任何外部系统。
 
 ### Deployment、Service、Route：分别是什么，怎么连起来

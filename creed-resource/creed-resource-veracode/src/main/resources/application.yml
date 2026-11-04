@@ -1,5 +1,5 @@
-# Veracode report analysis. Plain HTTP on 18097, no database, no PKI: every answer is computed from
-# Confluence and Jira at request time. The frontend reaches it through Vite's `/api/veracode` proxy
+# Veracode SCA report analysis. Plain HTTP on 18097, no database, no PKI: an uploaded Veracode XML report is
+# matched against Jira at request time. The frontend reaches it through Vite's `/api/veracode` proxy
 # (VITE_VERACODE_TARGET).
 #
 #   mvn -pl creed-resource/creed-resource-veracode spring-boot:run -Dspring-boot.run.workingDirectory="$PWD"
@@ -17,54 +17,44 @@ spring:
     use-jackson2-defaults: true
   servlet:
     multipart:
-      max-file-size: ${CREED_VERACODE_MAX_UPLOAD:10MB}
-      max-request-size: ${CREED_VERACODE_MAX_UPLOAD:10MB}
+      # A detailed report carries every static flaw too; only its SCA section is read (streamed).
+      max-file-size: ${CREED_VERACODE_MAX_UPLOAD:50MB}
+      max-request-size: ${CREED_VERACODE_MAX_UPLOAD:50MB}
 
 veracode:
-  # In-process stand-ins for Confluence and Jira under /mock/confluence and /mock/jira (MockJiraStore,
-  # mock/confluence/*.html). The base URLs below point at them by default; set CREED_VERACODE_MOCK=false
-  # together with the real URLs and tokens.
+  # In-process stand-in for Jira under /mock/jira (MockJiraStore) and the sample report
+  # (POST /api/veracode/analysis/sample). The Jira URLs below point at the mock by default; set
+  # CREED_VERACODE_MOCK=false together with the real URL.
   mock:
     enabled: ${CREED_VERACODE_MOCK:true}
 
-  confluence:
-    # Before /rest/api: https://wiki.example.com (Data Center), https://example.atlassian.net/wiki (Cloud)
-    base-url: ${CREED_CONFLUENCE_URL:http://localhost:${server.port}/mock/confluence}
-    page-id: ${CREED_VERACODE_PAGE_ID:98765}
-    browse-url: ${CREED_CONFLUENCE_BROWSE_URL:}
-    auth:
-      # NONE | BEARER (Data Center PAT) | BASIC (Cloud: e-mail + API token)
-      type: ${CREED_CONFLUENCE_AUTH:NONE}
-      username: ${CREED_CONFLUENCE_USER:}
-      token: ${CREED_CONFLUENCE_TOKEN:}
-    connect-timeout: 5s
-    read-timeout: 20s
-    # spring.ssl.bundle name for an https base URL signed by a private CA; blank = JDK cacerts.
-    ssl-bundle: ${CREED_CONFLUENCE_SSL_BUNDLE:}
-
   jira:
+    # TLS to Jira is NOT verified - no certificate check, no hostname check (asked for; TrustAllTls).
     base-url: ${CREED_JIRA_URL:http://localhost:${server.port}/mock/jira}
     project-key: ${CREED_JIRA_PROJECT:CREED}
     issue-type: ${CREED_JIRA_ISSUE_TYPE:Bug}
-    summary-prefix: "[Veracode]"
+    # Created issue title. {project} = the report's Veracode app_name (the project key when it has none),
+    # {jiraProject} = project-key, {component} = the finding's components, {cve} = the CVE (the advisory id
+    # when there is none); {title} and {version} also work. Lookup never reads it: an issue is matched by its
+    # CVE (or title words) anywhere in the summary, so changing it does not lose existing issues.
+    summary-template: ${CREED_JIRA_SUMMARY_TEMPLATE:{project} {component} {cve}}
+    # Creating needs the user's own access token, configured on the page and sent as X-Jira-Token (Bearer to
+    # Jira). Searches use it when sent and fall back to auth below.
+    require-user-token: ${CREED_JIRA_REQUIRE_USER_TOKEN:true}
     labels: [veracode]
     browse-url: ${CREED_JIRA_BROWSE_URL:http://localhost:${server.port}/mock/jira/browse/{key}}
     jql-batch-size: 40
     page-size: 100
     auth:
+      # NONE | BEARER (Data Center PAT) | BASIC (Cloud: e-mail + API token)
       type: ${CREED_JIRA_AUTH:NONE}
       username: ${CREED_JIRA_USER:}
       token: ${CREED_JIRA_TOKEN:}
     connect-timeout: 5s
     read-timeout: 20s
-    ssl-bundle: ${CREED_JIRA_SSL_BUNDLE:}
 
-  # Report column headers (case-insensitive). See ReportProperties for the defaults.
-  report:
-    affected-version: ["Affected Version", "Affects Version", "Version"]
-
-  # Uploaded reports (POST /api/veracode/analysis/upload) stay in memory so create/export can re-read
-  # them by id. Lost on restart; per instance.
+  # Uploaded Veracode XML reports (POST /api/veracode/analysis/upload) stay in memory, parsed, so
+  # re-analysis, create and export can re-read them by id. Lost on restart; per instance.
   upload:
     ttl: 2h
     max-entries: 50
@@ -79,3 +69,12 @@ management:
     web:
       exposure:
         include: "*"
+
+  
+otel:
+  logs:
+    exporter: none
+  metrics:
+    exporter: none
+  traces:
+    exporter: none

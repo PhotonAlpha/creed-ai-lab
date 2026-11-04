@@ -1,28 +1,30 @@
 # creed-resource-veracode — handoff
 
-**Purpose** Veracode report analysis: read the report table from a Confluence page, look every finding
-up in Jira by CVE (or title) + affects version, list what exists, create what is missing, export xlsx.
+**Purpose** Veracode SCA report analysis: upload a Veracode detailed report (XML), look every SCA finding
+up in Jira by CVE (or advisory id) + affects version, list what exists, create what is missing (with the
+user's own Jira token), export xlsx.
 **Skill** `creed-resource-veracode` · shared: `creed-platform` · frontend: `../../creed-env-matrix-design` (`/veracode`)
 
 ## Run
 
 ```bash
-# plain HTTP on 18097, Confluence + Jira mocked in-process. No database, no PKI.
+# plain HTTP on 18097, Jira mocked in-process. No database, no PKI.
 mvn -pl creed-resource/creed-resource-veracode spring-boot:run -Dspring-boot.run.workingDirectory="$PWD"
 
-curl -s -XPOST localhost:18097/api/veracode/analysis -H 'Content-Type: application/json' -d '{}'
+# the bundled sample report (mock only), or any detailed report XML
+curl -s -XPOST localhost:18097/api/veracode/analysis/sample
+curl -s -F file=@detailedreport.xml localhost:18097/api/veracode/analysis/upload
 ```
 
-Against the real systems: `CREED_VERACODE_MOCK=false`, `CREED_CONFLUENCE_URL`, `CREED_JIRA_URL`,
-`CREED_JIRA_BROWSE_URL=https://jira.example.com/browse/{key}`, `CREED_JIRA_PROJECT`,
-`CREED_VERACODE_PAGE_ID`, and `CREED_{CONFLUENCE,JIRA}_AUTH=BEARER|BASIC` + `_TOKEN` (+ `_USER` for BASIC).
+Against a real Jira: `CREED_VERACODE_MOCK=false`, `CREED_JIRA_URL`,
+`CREED_JIRA_BROWSE_URL=https://jira.example.com/browse/{key}`, `CREED_JIRA_PROJECT`; creating uses each
+user's token from the page. `CREED_JIRA_AUTH=BEARER|BASIC` + `_TOKEN` (+ `_USER`) only sets the default
+for searches without a user token. **TLS to Jira is not verified** (certificate and hostname, `TrustAllTls`).
 
-HTTPS (profile `ssl`, one-way TLS, `client-auth: none`) — keystore/truststore default to
+HTTPS for this service (profile `ssl`, one-way TLS, `client-auth: none`) — keystore/truststore default to
 `/etc/veracode/tls/*.p12` (override `CREED_VERACODE_SSL_KEYSTORE` / `_TRUSTSTORE`), password from
-`CREED_VERACODE_SSL_PASSWORD` or a configtree file `veracode.ssl.password`. The mocks switch to
-`https://localhost:${server.port}` and both clients trust through the same bundle. The cert must carry
-SAN `localhost`; issuing one from the existing CA is in `openshift-learning/03-config-probes-resources.md`
-exercise 1. Verified 2026-10-25: analysis over TLS gives the same 10 / 3 / 7 / 1 as plain HTTP.
+`CREED_VERACODE_SSL_PASSWORD` or a configtree file `veracode.ssl.password`. The Jira mock switches to
+`https://localhost:${server.port}`; the client needs no trust material for it.
 
 ```bash
 CREED_VERACODE_SSL_KEYSTORE=file:tmp/ocp03/pki/veracode-keystore.p12 \
@@ -38,18 +40,47 @@ External config: `application.yml` / `application-<profile>.yml` in `CREED_VERAC
 
 | | |
 |---|---|
-| `GET /settings` | default page id, project, issue type, base URLs, mock flag — no credentials |
-| `POST /analysis` `{pageId?, autoCreate?}` | findings with `status` EXISTS / MISSING / CREATED, `jiraVersion`, `issues`, `warnings`, `counts` |
-| `POST /analysis/upload` multipart `file` + `?autoCreate=` | same, for an uploaded `.html/.htm/.csv/.xlsx/.xls`; `page.source=UPLOAD`, `page.id` = upload id |
-| `POST /jira/issues` `{pageId?, uploadId?, findingIds[]}` | per-id `outcome`: CREATED / ALREADY_EXISTS / NOT_IN_REPORT / VERSION_NOT_IN_JIRA / FAILED |
-| `GET /analysis/export?pageId=` or `?uploadId=` | xlsx (sheets *Findings*, *Source*) from a **fresh** analysis |
+| `GET /settings` | project, issue type, Jira base URL, mock flag, summary template, `requireUserToken` — no credentials |
+| `POST /analysis/upload` multipart `file` + `?affectedVersion=&autoCreate=` | findings with `status` EXISTS / MISSING / CREATED, `jiraVersion`, `issues`, `warnings`, `counts`; `report` (`id` = upload id, `appName`, `scanVersion`, `affectedVersion`, `versionOverridden`, policy, file) |
+| `POST /analysis/sample` `?affectedVersion=&autoCreate=` | the same for the bundled sample XML — **mock only** (404 otherwise) |
+| `POST /analysis` `{uploadId, autoCreate?}` | re-analyse an upload against Jira as it is now |
+| `POST /jira/issues` `{uploadId, findingIds[]}` | per-id `outcome`: CREATED / ALREADY_EXISTS / NOT_IN_REPORT / VERSION_NOT_IN_JIRA / FAILED; **needs `X-Jira-Token`** |
+| `POST /jira/connection` (header `X-Jira-Token`) | `{ok, user, displayName, projectKey, projectAccess, status, message}` — a refused token is `ok:false` + Jira's status, not an error |
+| `GET /analysis/export?uploadId=` | xlsx (sheets *Findings*, *Source*) from a **fresh** analysis |
 
-Errors: `{error, message, fields?, time}` — 404 `page_not_found`, 422 `report_unreadable`,
-502 `confluence_error` / `jira_error`, 400 `bad_request` / `validation_failed` / `unsupported_file`,
-404 `upload_expired`, 413 `file_too_large` (`CREED_VERACODE_MAX_UPLOAD`, default 10MB).
-`uploadId` wins over `pageId` everywhere.
+Every endpoint takes the user's Jira token in `X-Jira-Token` (Bearer to Jira): required to create
+(`autoCreate` included), used for searches when present (else `veracode.jira.auth`). Issues in the
+response carry `status`, `priority`, `assignee` (null = unassigned) for the page's filters.
+
+Errors: `{error, message, fields?, time}` — 400 `unsupported_file` (not XML) / `bad_request` /
+`validation_failed` / `jira_token_required`, 422 `report_unreadable` (XML but not a `<detailedreport>`, or
+no `version` and no override), 404 `upload_expired`, 413 `file_too_large` (`CREED_VERACODE_MAX_UPLOAD`,
+default 50MB), 502 `jira_error`.
 
 ## Current state
+
+2026-11-05 (latest): an example report for testing Jira creation by hand, `.support/veracode/veracode-detailedreport-example.xml`
+(app creed-shop, 2.4.0: 8 findings, all missing in the mock Jira; verified: all 8 created, then found again). A local
+DefectDojo is in `.support/defectdojo` for importing the same XML in its UI - this service does **not** call DefectDojo
+(an integration was built and rolled back on request). The bundled sample now also satisfies DefectDojo's Veracode
+parser (`last_update_time`, `recommendations/para`, `mitigations/mitigation/@date`) - checked by importing it there.
+
+2026-11-05 (later): **the report is a Veracode detailed report XML, uploaded** — Confluence removed (client,
+mock page, page id, `confluence.*` config), the table parser (html/csv/xlsx) removed with jsoup. `VeracodeXmlParser`
+(StAX, SCA section only, mitigated skipped); Affects Version = root `version` or the upload's `affectedVersion`;
+`{project}` = `app_name`; `POST /analysis/sample` (mock only) analyses `sample/veracode-detailedreport.xml`
+(9 findings: 3 exist, 6 missing). **Jira TLS unverified** (`TrustAllTls`, `ssl-bundle` removed). **38 tests
+pass** after `clean` (incl. `TrustAllTlsTest`: self-signed cert for another host accepted, refused by the JDK
+default). Not run against a real Jira or a real Veracode export yet; the page was not seen in a browser.
+
+2026-11-05: **user's Jira token** (page dialog, test connection, `X-Jira-Token`; create requires it; the mock
+needs a Bearer on `/myself` + create, refuses the token `invalid`, records the reporter), **title template**
+`{project} {component} {cve}` (replaces `summary-prefix`), **loose title match** (CVE with any separators;
+title words in any order; JQL searches title words unquoted, lower-cased), issue `priority` / `assignee`
+(mock seeds both). Page: Jira status / priority / assignee / version filters, fuzzy keyword search over
+issue titles. **41 tests pass**; endpoints checked over real HTTP on a second instance (:18197). The page
+typechecks and builds but was **not seen in a browser** — the extension could not attach to any page of
+the dev server (other routes neither).
 
 Complete against the mocks. **38 tests pass** (parser, matching/JQL, actuator masking, external config dir, and the whole chain over MockMvc
 through the real `@HttpExchange` proxies). Verified over real HTTP on :18097: the sample page gives
@@ -66,27 +97,34 @@ it was not checked in a browser (the browser extension could not attach to any p
   user to upload again. The parsed rows are kept, not the bytes.
 - **`MaxUploadSizeExceededException` needs the unscoped `UploadLimitExceptionHandler`** — multipart is
   resolved before a handler is chosen, so the controller-scoped advice never sees it (whitelabel 500).
-- **Excel cells are read with `DataFormatter`** (text as displayed): a version typed as the number 2.3
-  must come out as `2.3`, not a double like `2.2999…`.
-- **CSV that is not valid UTF-8 is decoded as GB18030** (Excel on Chinese Windows); the delimiter is the
-  most frequent of `, ; TAB` in the first line.
+- **The Affects Version is the report's root `version`, never `component/@version`** — the latter is the
+  library's version (it goes into the component label `log4j-core 2.14.1`). A scan named like
+  `16 Oct 2026 Static` is no Jira version: the page's override, sent with the upload, is stored with it.
+- **The XML is streamed (StAX), DTD and external entities off.** A detailed report also carries every static
+  flaw; only `software_composition_analysis/vulnerable_components` is read, elements by local name (any
+  namespace version). Static flaws are not findings here. Mitigated (`mitigation="true"`) vulnerabilities
+  are skipped with a warning.
+- **No CVE = an SCA advisory (`SRCCLR-SID-…`)**: its id is the title, so it is keyed `title:srcclr sid …`
+  and found again by those words in a summary.
 
 - **`affectedVersion in (…)` with a version the project lacks is a 400 for the whole JQL**, not "no
   match". The service reads `/project/{key}/versions` first and only searches known versions; the rest
   are `jiraVersion: null` and cannot be created.
 - **`summary ~` is Lucene full text, not substring.** Phrases are tokenised and stop words dropped, so
-  the query only narrows candidates; `JiraLookupService.covers` decides on the returned summary (CVE as a
-  whole token — `CVE-2021-4422` must not match `CVE-2021-44228`; title as a whole phrase).
-- **The finding is `(CVE or title, affected version)`, not a report row** — two libraries with one CVE
-  are one Jira issue. A cell listing two CVEs is two findings.
-- **Create re-reads page + Jira under a lock**, so a double click returns `ALREADY_EXISTS`. The lock is
+  the query only narrows candidates; `JiraLookupService.covers` decides on the returned summary (CVE with any
+  separators but not inside a longer id — `CVE-2021-4422` must not match `CVE-2021-44228`; title words, any order).
+- **The finding is `(CVE or title, affected version)`, not a vulnerability element** — two libraries with one
+  CVE are one Jira issue (both components in its title).
+- **Create re-reads the upload + Jira under a lock**, so a double click returns `ALREADY_EXISTS`. The lock is
   per process; two instances could still duplicate (Jira has no unique key to lean on).
 - **Jira Cloud has retired `POST /rest/api/2/search`** (`/rest/api/3/search/jql`, token paging). The
   client is Data Center v2; Cloud needs that one method changed.
-- **Clients trust a private CA only via `veracode.{confluence,jira}.ssl-bundle`.** The request factory
-  is built in `RemoteClientsConfiguration`, so Boot's HTTP-client SSL properties never reach it. Blank =
-  JDK cacerts → `PKIX` / `confluence_error` 502 against a Creed-signed cert.
-- **The bundle is declared only in `application-ssl.yml`**: Boot opens every declared bundle at startup,
+- **The Jira client verifies neither certificate nor hostname** (asked for, 2026-11-05; `ssl-bundle` removed).
+  `TrustAllTls` is a no-op `X509ExtendedTrustManager`: the JDK checks the hostname *inside* the extended
+  trust manager, so this skips it for this client only. A plain `X509TrustManager` would not — JSSE wraps it
+  and still checks the name. Never set `jdk.internal.httpclient.disableHostnameVerification` (JVM-wide).
+  Anyone on the path can read the user's token.
+- **The server bundle is declared only in `application-ssl.yml`**: Boot opens every declared bundle at startup,
   so declaring it in `application.yml` breaks the plain-HTTP run. A missing password is not reported as an
   unresolvable placeholder — the literal `${veracode.ssl.password}` becomes the password and startup fails
   with the wrong-password `BadPaddingException`.
@@ -94,13 +132,20 @@ it was not checked in a browser (the browser extension could not attach to any p
   `ActuatorSanitizingConfiguration` masks keys ending in password/secret/token (case-insensitive) and
   containing credentials. Not `ifLikelySensitive()` — it would also mask `project-key` and every URL.
 - Redirects are not followed — a wrong Data Center base URL shows as its 302, not as "HTML is not JSON".
-- Plain HTTP by default and **no auth on this service** (like the siblings' `permitAll`) — but it holds a Jira
-  token that can create issues. Do not expose it beyond localhost as is.
+- Plain HTTP by default and **no auth on this service** (like the siblings' `permitAll`) — it relays the
+  user's token and may hold a configured one. Do not expose it beyond localhost as is; over anything but
+  localhost the `X-Jira-Token` header needs HTTPS (profile `ssl`).
+- **A token header is only sent when non-null** (`@RequestHeader(required = false)` on `JiraClient`): a null
+  argument leaves the client's default `Authorization`; a sent one replaces it. Don't make it required —
+  analysis without a user token relies on the default.
+- **Changing `summary-template` loses no issues**: lookup never reads the template, only the CVE / title
+  words. Removing `{cve}` from it would, though — then a created issue cannot be found again.
 
 ## Open items
 
-- Real Confluence/Jira trial; Jira Cloud search endpoint if that is the target.
-- Merged cells (`rowspan`) in the report table are not expanded.
+- Real Jira trial, and a real Veracode export (the sample follows the export schema 1.x from memory of its
+  shape, not from a downloaded file); Jira Cloud search endpoint if that is the target.
+- Fetching the report from the Veracode API (HMAC-signed `getdetailedreport.do`) instead of an upload.
 - Priority/assignee/components on created issues (project-specific names — not guessed).
 - Not behind `creed-gateway-proxy` (only `/api/env-matrix/**` is proxied there); deploying the page
   needs a route for `/api/veracode/**`.

@@ -26,17 +26,32 @@ class JiraMatchingTest {
     }
 
     @Test
+    void theCveMatchIgnoresCaseAndSeparators() {
+        Finding log4shell = finding("CVE-2021-44228", "Log4Shell", "2.3.0");
+
+        assertThat(JiraLookupService.summaryNames("CREED log4j-core 2.14.1 cve 2021 44228", log4shell)).isTrue();
+        assertThat(JiraLookupService.summaryNames("fix CVE_2021_44228 now", log4shell)).isTrue();
+        assertThat(JiraLookupService.summaryNames("CVE202144228", log4shell)).isTrue();
+        assertThat(JiraLookupService.summaryNames("cve 2021 442281", log4shell)).isFalse();
+        assertThat(JiraLookupService.summaryNames("XCVE-2021-44228", log4shell)).isFalse();
+    }
+
+    @Test
     void aFindingWithoutACveMatchesItsTitleAsAPhrase() {
         Finding sqli = finding(null, "SQL Injection in ReportQueryBuilder", "2.3.0");
 
         assertThat(JiraLookupService.summaryNames("[Veracode] sql injection in ReportQueryBuilder!", sqli)).isTrue();
         assertThat(JiraLookupService.summaryNames("SQL Injection in ReportQueryBuilderV2", sqli)).isFalse();
+        // any order: the words, not the phrase
+        assertThat(JiraLookupService.summaryNames("CREED ReportQueryBuilder.java: injection (SQL) in ReportQueryBuilder", sqli))
+                .isTrue();
+        assertThat(JiraLookupService.summaryNames("SQL Injection in ReportBuilder", sqli)).isFalse();
     }
 
     @Test
     void theVersionIsPartOfTheMatch() {
         JiraIssue issue = new JiraIssue("1", "CREED-1", new JiraIssue.Fields("CVE-2022-22965 Spring4Shell", null,
-                List.of(JiraVersion.named("2.2.1")), List.of()));
+                List.of(JiraVersion.named("2.2.1")), List.of(), null, null));
 
         assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.2.1"), "2.2.1")).isTrue();
         assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.3.0"), "2.3.0")).isFalse();
@@ -46,10 +61,11 @@ class JiraMatchingTest {
     void jqlQuotesValuesAndStripsLuceneOperatorsFromPhrases() {
         String jql = Jql.lookup("CREED", Set.of("2.3.0"), List.of(
                 finding("CVE-2021-44228", "x", "2.3.0"),
-                finding(null, "Path \"traversal\" (RouterFunctions) *", "2.3.0")));
+                finding(null, "Path \"traversal\" (RouterFunctions) * OR more", "2.3.0")));
 
+        // a CVE is a phrase; a title is lower-cased words, so its "OR" is not an operator
         assertThat(jql).isEqualTo("project = \"CREED\" AND affectedVersion in (\"2.3.0\") AND ("
-                + "summary ~ \"\\\"CVE 2021 44228\\\"\" OR summary ~ \"\\\"Path traversal RouterFunctions\\\"\")");
+                + "summary ~ \"\\\"CVE 2021 44228\\\"\" OR summary ~ \"path traversal routerfunctions or more\")");
         assertThat(Jql.quote("a\\b\"c")).isEqualTo("\"a\\\\b\\\"c\"");
     }
 

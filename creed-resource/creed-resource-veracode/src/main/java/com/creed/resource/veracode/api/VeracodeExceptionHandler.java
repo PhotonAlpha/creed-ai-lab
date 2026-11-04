@@ -1,9 +1,9 @@
 package com.creed.resource.veracode.api;
 
-import com.creed.resource.veracode.service.ReportParser;
+import com.creed.resource.veracode.service.JiraToken;
 import com.creed.resource.veracode.service.UploadedReportStore;
 import com.creed.resource.veracode.service.UpstreamException;
-import com.creed.resource.veracode.service.VeracodeAnalysisService;
+import com.creed.resource.veracode.service.VeracodeXmlParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,26 +22,21 @@ import java.util.Map;
  * The same {@code {error, message, fields?, time}} envelope the env-matrix module answers with, so the
  * frontend's one fetch wrapper reads both.
  *
- * <p>Scoped to {@link VeracodeController}: the mocks answer in Confluence's and Jira's own error
- * shapes, and must not be rewritten into this one.
+ * <p>Scoped to {@link VeracodeController}: the Jira mock answers in Jira's own error shape, and must not
+ * be rewritten into this one.
  */
 @RestControllerAdvice(assignableTypes = VeracodeController.class)
 @Slf4j
 public class VeracodeExceptionHandler {
 
-    @ExceptionHandler(VeracodeAnalysisService.PageNotFoundException.class)
-    ResponseEntity<Map<String, Object>> pageNotFound(VeracodeAnalysisService.PageNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body("page_not_found", e.getMessage(), null));
-    }
-
-    /** The page was read; it just holds no report this service can understand. */
-    @ExceptionHandler(ReportParser.ReportFormatException.class)
-    ResponseEntity<Map<String, Object>> unreadable(ReportParser.ReportFormatException e) {
+    /** XML, but not a Veracode detailed report this service can read. */
+    @ExceptionHandler(VeracodeXmlParser.ReportFormatException.class)
+    ResponseEntity<Map<String, Object>> unreadable(VeracodeXmlParser.ReportFormatException e) {
         return ResponseEntity.unprocessableEntity().body(body("report_unreadable", e.getMessage(), null));
     }
 
-    @ExceptionHandler(ReportParser.UnsupportedFileException.class)
-    ResponseEntity<Map<String, Object>> unsupported(ReportParser.UnsupportedFileException e) {
+    @ExceptionHandler(VeracodeXmlParser.UnsupportedFileException.class)
+    ResponseEntity<Map<String, Object>> unsupported(VeracodeXmlParser.UnsupportedFileException e) {
         return ResponseEntity.badRequest().body(body("unsupported_file", e.getMessage(), null));
     }
 
@@ -54,6 +49,12 @@ public class VeracodeExceptionHandler {
     @ExceptionHandler(MissingServletRequestPartException.class)
     ResponseEntity<Map<String, Object>> noFile(MissingServletRequestPartException e) {
         return ResponseEntity.badRequest().body(body("bad_request", "multipart part 'file' is required", null));
+    }
+
+    /** The page opens its token dialog on this. */
+    @ExceptionHandler(JiraToken.RequiredException.class)
+    ResponseEntity<Map<String, Object>> tokenRequired(JiraToken.RequiredException e) {
+        return ResponseEntity.badRequest().body(body("jira_token_required", e.getMessage(), null));
     }
 
     @ExceptionHandler(UpstreamException.class)

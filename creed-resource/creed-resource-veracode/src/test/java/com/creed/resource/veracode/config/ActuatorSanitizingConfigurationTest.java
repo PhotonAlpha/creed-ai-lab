@@ -13,7 +13,7 @@ class ActuatorSanitizingConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-            "CREED_JIRA_TOKEN", "CREED_CONFLUENCE_TOKEN", "CREED_VERACODE_SSL_PASSWORD",
+            "CREED_JIRA_TOKEN", "CREED_VERACODE_SSL_PASSWORD",
             "veracode.jira.auth.token", "veracode.ssl.password",
             "spring.ssl.bundle.jks.veracode.keystore.password", "sun.java.command"})
     void masksSecrets(String key) {
@@ -24,7 +24,7 @@ class ActuatorSanitizingConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = {
             "veracode.jira.project-key", "CREED_JIRA_PROJECT", "veracode.jira.base-url", "CREED_JIRA_URL",
-            "veracode.jira.ssl-bundle", "veracode.jira.auth.username"})
+            "veracode.jira.summary-template", "veracode.jira.auth.username"})
     void keepsTheRest(String key) {
         assertThat(sanitize(key)).isEqualTo("value");
     }

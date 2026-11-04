@@ -12,6 +12,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * for the analysed version, one filed only for an older version (still missing for 2.3.0), one filed
  * without the {@code [Veracode]} prefix (still found - matching is on the CVE token), and a CVE whose
  * id is a prefix of another's. Created issues are lost on restart.
+ *
+ * <p>The seeded issues carry a priority and an assignee (one unassigned) so the page's Jira filters have
+ * something to filter; a created one is "To Do", unassigned, reported by the token's user.
  */
 @Component
 @ConditionalOnProperty(name = "veracode.mock.enabled", havingValue = "true")
@@ -19,8 +22,9 @@ public class MockJiraStore {
 
     public static final String PROJECT = "CREED";
 
-    public record Issue(int id, String key, String summary, String description, String status,
-                        List<String> versions, List<String> labels) {
+    /** @param assignee {@code null} = unassigned; @param reporter who created it ({@code null} for seeds) */
+    public record Issue(int id, String key, String summary, String description, String status, String priority,
+                        String assignee, String reporter, List<String> versions, List<String> labels) {
     }
 
     private final List<String> versions = List.of("2.2.1", "2.3.0", "2.4.0");
@@ -35,16 +39,17 @@ public class MockJiraStore {
         issues.clear();
         sequence.set(100);
         seed("[Veracode] CVE-2021-44228 Apache Log4j2 JNDI features do not protect against attacker-controlled LDAP",
-                "In Progress", "2.3.0");
-        seed("[Veracode] CVE-2022-22965 Spring Framework RCE via data binding on JDK 9+", "Done", "2.2.1");
-        seed("Upgrade jackson-databind: CVE-2020-36518 deep wrapper array nesting", "To Do", "2.3.0");
-        seed("[Veracode] CVE-2021-4104 Log4j 1.2 JMSAppender deserialization", "Done", "2.3.0");
+                "In Progress", "Highest", "Alice Wang", "2.3.0");
+        seed("[Veracode] CVE-2022-22965 Spring Framework RCE via data binding on JDK 9+", "Done", "High", "Bob Li", "2.2.1");
+        // separators instead of the id's own hyphens: still found (the title match is loose)
+        seed("Upgrade jackson-databind: cve 2020 36518 deep wrapper array nesting", "To Do", "Medium", null, "2.3.0");
+        seed("[Veracode] CVE-2021-4104 Log4j 1.2 JMSAppender deserialization", "Done", "High", "Alice Wang", "2.3.0");
     }
 
-    private void seed(String summary, String status, String version) {
+    private void seed(String summary, String status, String priority, String assignee, String version) {
         int n = sequence.incrementAndGet();
-        issues.add(new Issue(10_000 + n, PROJECT + "-" + n, summary, null, status, List.of(version),
-                List.of("veracode")));
+        issues.add(new Issue(10_000 + n, PROJECT + "-" + n, summary, null, status, priority, assignee, null,
+                List.of(version), List.of("veracode")));
     }
 
     public List<String> versions() {
@@ -55,10 +60,11 @@ public class MockJiraStore {
         return List.copyOf(issues);
     }
 
-    public synchronized Issue create(String summary, String description, List<String> versions, List<String> labels) {
+    public synchronized Issue create(String summary, String description, List<String> versions, List<String> labels,
+                                     String reporter) {
         int n = sequence.incrementAndGet();
-        Issue issue = new Issue(10_000 + n, PROJECT + "-" + n, summary, description, "To Do",
-                List.copyOf(versions), List.copyOf(labels));
+        Issue issue = new Issue(10_000 + n, PROJECT + "-" + n, summary, description, "To Do", "Medium", null,
+                reporter, List.copyOf(versions), List.copyOf(labels));
         issues.add(issue);
         return issue;
     }
