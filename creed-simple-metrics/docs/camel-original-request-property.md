@@ -1,8 +1,9 @@
 # 在每个 processor 里拿到原始 REST 请求：exchange property `originalRequest`
 
 需求：`/camel/api/fulfillment` 的每个 processor（包括 multicast 分支和 wireTap）都要知道原始请求。本文记录
-为什么 `getUnitOfWork().getOriginalInMessage()` 不行、统一的做法、以及这个 property 能传到哪里、传不到哪里。
-实现见 `config/OriginalRequestRoutePolicyFactory`。Camel 4.23.0 源码。
+为什么 `getUnitOfWork().getOriginalInMessage()` 不行、统一的做法、`RoutePolicyFactory` 为什么能起作用、本模块两个
+factory 的分工、对性能的影响，以及这个 property 能传到哪里、传不到哪里。实现见 `config/OriginalRequestRoutePolicyFactory`。
+Camel 4.23.0 源码。
 
 ## 1. `getUnitOfWork().getOriginalInMessage()` 为什么不行
 
@@ -41,7 +42,73 @@ import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.ORIGINAL
 exchange.getProperty(ORIGINAL_REQUEST, String.class)
 ```
 
-## 3. property 能传到哪里
+## 3. `RoutePolicyFactory` 为什么能起作用
+
+一条链，从 Spring bean 到每次请求的回调：
+
+1. **发现**：classic `<camelContext>` 的工厂 bean `AbstractCamelContextFactoryBean`（camel-core-xml）在初始化时
+   `getRegistry().findByTypeWithName(RoutePolicyFactory.class)`，把 Spring 容器里每个 `RoutePolicyFactory` 加进
+   `CamelContext.addRoutePolicyFactory(...)`。所以只要是 `@Component` 就生效，不用在 XML 里引用。启动日志可以确认：
+
+   ```
+   Using custom RoutePolicyFactory with id: originalRequestRoutePolicyFactory and implementation: ...
+   Using custom RoutePolicyFactory with id: restApiAuditRoutePolicyFactory and implementation: ...
+   ```
+
+2. **每条 route 装一次**：`RouteReifier` 创建每条 route 时，对每个 factory 调 `createRoutePolicy(context, routeId, definition)`，
+   返回的 policy 放进这条 route 的 policy 列表，再 `internal.addRoutePolicyAdvice(...)` 装到 route 的
+   `CamelInternalProcessor` 上。作用于**所有** route（REST route、`direct:` route、tutorial route……），这是在 route
+   **创建时**做的，不是每次请求做。本模块两个 factory 都返回同一个 policy 实例，不按 route 区分。
+3. **每次进入 route 回调**：`CamelInternalProcessor.RoutePolicyAdvice` 在 exchange 进入这条 route 时（`before()`）依次调
+   每个 policy 的 `onExchangeBegin(route, exchange)`，离开时（`after()`）调 `onExchangeDone`。
+4. **顺序**：同一个 `RouteReifier` 里，policy advice 先于 `RestBindingAdvice` 注册，advice 的 `before()` 按注册顺序执行——
+   所以 `onExchangeBegin` 看到的是 binding 之前的原始 body。
+
+由此来的三个特性：
+
+- **一个 exchange 会触发多次。** fulfillment 一次请求会进入 7 条 route（REST route → `fulfillment` → 两个 fetch → 两个
+  enrich → notification），每次进入都回调一次，multicast 分支和 wireTap 副本进入 `direct:` route 也一样。所以两个 policy
+  都要守卫：`getFromEndpoint()` 以 `servlet:` 开头（副本也继承了这个 from endpoint），再用一个 exchange property 判断
+  "已经做过"（副本也复制了这个 property，于是跳过）。
+- **`onExchangeBegin` 里的异常会被吞掉**：`RoutePolicyAdvice` 捕获后只打一条 WARN（"This exception will be ignored"），
+  请求照常继续。policy 不能用来拦截请求；如果读 body 失败，后面的 binding 可能拿到一个已经被读过的流。
+- **回调在调用方线程上同步执行**：REST route 的回调在 Tomcat 的请求线程上，分支的在 `agg-poolA` 上——policy 里的代码直接
+  算进请求耗时，所以必须便宜。
+
+## 4. 本模块的两个 `RoutePolicyFactory`
+
+两者机制和守卫相同（只处理 `servlet:` 入口、每个 exchange 只做一次），做的事不同：
+
+| | `RestApiAuditRoutePolicyFactory` | `OriginalRequestRoutePolicyFactory` |
+|---|---|---|
+| 目的 | 每个 REST 请求结束时打一行审计日志 | 让每个 processor 都能拿到原始请求体 |
+| `onExchangeBegin` 做什么 | 记下 `CamelHttpMethod` / `CamelHttpUri` / `CamelHttpQuery`，挂一个 `RestApiAuditSynchronization`（`addOnCompletion`） | 读 JSON body 成 String、放回 body、存进 property `originalRequest` |
+| "已做过"的标记 | property `CreedRestApiAuditAttached` | property `originalRequest` 本身 |
+| 为什么必须在入口做 | 后面的 `fetch-*` route 会 `removeHeaders pattern="CamelHttp*"`，到结束时请求行已经没了 | binding 之后 body 变成 Map，原始流也已读完 |
+| 输出 | 请求结束（UnitOfWork 完成）时：`CAMEL-AUDIT POST /camel/api/fulfillment status=200 in 27ms exchangeId=... route=...`，失败是 WARN | 不输出，只留下 property 给后面的 processor 用 |
+| 适用请求 | 所有 REST 请求 | 只有 `Content-Type` 含 `json` 的 |
+
+二者互不依赖，顺序无关。
+
+## 5. 对性能的影响
+
+按代码路径分析，未做基准测试：
+
+- **装配**：每条 route 创建时调一次 `createRoutePolicy`，启动期开销，可以忽略。
+- **每次进入 route，每个 policy**：一次 `onExchangeBegin` + 一次 `onExchangeDone`（`RoutePolicySupport` 默认空实现）。
+  守卫不通过时只是一次字符串 `startsWith` 加一次 property 查找就返回。fulfillment 一次请求进入 7 条 route、两个 policy，
+  共约 14 次这样的调用，和一次下游 HTTP 调用（毫秒级）比可以忽略。
+- **真正有成本的只有 `OriginalRequestRoutePolicyFactory` 的那一次**：
+  - 把请求体整个读成一个 String（一次拷贝，内存 ≈ body 大小），并一直留到 exchange 结束；
+  - 之后 binding 解析的是这个 String 而不是流——解析工作量相同，只是不再走 stream cache。
+
+  对 JSON 接口没问题；大请求体（几 MB 以上）会占同等内存，这类接口应排除在外（现在已经排除了非 JSON 请求）。
+- **对比 `allowUseOriginalMessage="true"`**：那个开关会给**每个** exchange——包括每个 multicast 分支和 wireTap 副本——新建
+  UnitOfWork 时都复制一份 In 消息（必要时还要缓存流），而且拿到的内容还不对（见第 1 节）。property 方案只在入口复制一次，
+  副本之间共享同一个 String 引用。
+- **`RestApiAuditRoutePolicyFactory`**：每个请求读 3 个 header、挂一个回调，结束时打一行日志，开销同样可以忽略。
+
+## 6. property 能传到哪里
 
 property 挂在 exchange 上：后面处理的还是这个 exchange、或者是 Camel 从它复制出来的 exchange，就能拿到；Camel
 新建 exchange、或者出了 JVM，就拿不到。**和同步还是异步无关。**
@@ -83,7 +150,7 @@ producerTemplate.send(uri, e -> {
 - 在分支里改这个 property 只改到副本，不会传回主 exchange。
 - 每个请求的 body 在内存里留到 exchange 结束——JSON 接口没问题，不适合很大的请求体。
 
-## 4. 验证
+## 7. 验证
 
 2026-11-06，`:8096`，连运行中的 catalog（18081）/ order（18091）：
 

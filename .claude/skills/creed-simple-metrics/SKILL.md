@@ -129,6 +129,10 @@ UoW whose "original" is the body at the split; on the main exchange a second rea
 **Not reached**: `wireTap copy="false"` (new empty exchange), anything sent with `ProducerTemplate` (new exchange —
 copy the property over by hand), an `AggregationStrategy` that builds its own result exchange, anything off-JVM.
 Shallow copy: keep the value immutable (a String). Full table + verification: `docs/camel-original-request-property.md`.
+Both `RoutePolicyFactory`s: discovered by `AbstractCamelContextFactoryBean` (`findByTypeWithName`), one policy on
+**every** route, `onExchangeBegin` fires on each route an exchange (or its multicast / wireTap copy) enters — hence the
+`servlet:` + "already done" property guard; exceptions thrown there are swallowed as a WARN, so a policy cannot reject a
+request. Mechanism, the two factories side by side, performance: same doc §3–5.
 
 Both `EventNotifier`/`RoutePolicyFactory` need no manual wiring — the classic `<camelContext>` factory
 bean auto-discovers every such bean in the Spring registry.
