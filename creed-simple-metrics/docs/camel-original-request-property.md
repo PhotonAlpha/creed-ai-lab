@@ -10,7 +10,9 @@ Camel 4.23.0 源码。
 用一个复刻 fulfillment 结构的临时测试验证过（stream body → 模拟 json binding → multicast ×2 → wireTap）：
 
 - **默认直接抛异常**：Camel 4 的 `allowUseOriginalMessage` 默认 `false`，`DefaultUnitOfWork.getOriginalInMessage()`
-  抛 `IllegalStateException: AllowUseOriginalMessage is disabled`。项目里没有打开它，所以每个 processor 第一行就失败。
+  抛 `IllegalStateException: AllowUseOriginalMessage is disabled`。当时项目里没有打开它，所以每个 processor 第一行就失败。
+  （2026-11-06 起 `camel-context.xml` 设了 `allowUseOriginalMessage="true"`，按要求保留：不再抛异常，但下面的问题仍在，
+  processor 仍应读 property。）
 - **打开后也拿不到原始请求**：
 
   | 位置 | 拿到的"原始消息" |
@@ -103,7 +105,7 @@ exchange.getProperty(ORIGINAL_REQUEST, String.class)
   - 之后 binding 解析的是这个 String 而不是流——解析工作量相同，只是不再走 stream cache。
 
   对 JSON 接口没问题；大请求体（几 MB 以上）会占同等内存，这类接口应排除在外（现在已经排除了非 JSON 请求）。
-- **对比 `allowUseOriginalMessage="true"`**：那个开关会给**每个** exchange——包括每个 multicast 分支和 wireTap 副本——新建
+- **对比 `allowUseOriginalMessage="true"`**（现在 `camel-context.xml` 里是打开的，这部分开销当前确实存在）：那个开关会给**每个** exchange——包括每个 multicast 分支和 wireTap 副本——新建
   UnitOfWork 时都复制一份 In 消息（必要时还要缓存流），而且拿到的内容还不对（见第 1 节）。property 方案只在入口复制一次，
   副本之间共享同一个 String 引用。
 - **`RestApiAuditRoutePolicyFactory`**：每个请求读 3 个 header、挂一个回调，结束时打一行日志，开销同样可以忽略。

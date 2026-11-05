@@ -60,7 +60,8 @@ org.apache.camel.TypeConversionException: Error during type conversion from type
 
 - `creed-resource-order` 的 `GET /api/order/large?kb=256&contentType=text/plain`:约 `kb` KiB 的 JSON 文本,
   `Content-Type` 可指定(非 JSON 类型绕开 Logbook 缓冲)。
-- `camel-context.xml`:`<streamCaching ... spoolEnabled="true" spoolThreshold="131072"/>`。
+- `camel-context.xml`:`<streamCaching ... spoolEnabled="true" spoolThreshold="131072"/>`。**这一行自 2026-11-06 起是注释掉的**
+  (按要求保留),即默认不落盘——复现时要先取消注释。
 - 起 order(primary)+ simple-metrics,`curl -k https://localhost:8096/simple/camel/api/payment`
   (`fetch-payment` 第一步就是 `PaymentStickyProcessor`)。
 

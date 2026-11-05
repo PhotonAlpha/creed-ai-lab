@@ -26,7 +26,11 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
   catalog/order servers: success and failure paths, every step (servlet thread, `agg-poolA` for both multicasts,
   `notify-poolB` wireTap) logged its own request; `/api/hello` and the API-8 multipart upload unaffected.
   `getUnitOfWork().getOriginalInMessage()` was tried first and does not work; where the property does and does not
-  reach (ProducerTemplate, `wireTap copy="false"` …): `docs/camel-original-request-property.md`. Pre-existing, unrelated:
+  reach (ProducerTemplate, `wireTap copy="false"` …): `docs/camel-original-request-property.md`.
+  Kept on request in `camel-context.xml`: `allowUseOriginalMessage="true"` (not needed by the property; costs a copy of
+  the In message per exchange / branch / wireTap copy) and the `<streamCaching … spoolEnabled="true" …>` line commented
+  out (Camel defaults: no spooling to disk — large bodies stay in memory; the ProducerTemplate temp-file repro needs it
+  back). Pre-existing, unrelated:
   `LoadBalancedRestClientConfigurationTest` / `RestClientSuppliersTest` each error on clean HEAD (`SslBundle.getKey()`
   null in a mock).
 - **Routes live in `src/main/resources/camel-context.xml`** — the classic `<camelContext>` Spring XML
