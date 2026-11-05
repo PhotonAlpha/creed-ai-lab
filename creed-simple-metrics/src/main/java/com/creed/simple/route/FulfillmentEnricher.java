@@ -1,5 +1,9 @@
 package com.creed.simple.route;
 
+import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.ORIGINAL_REQUEST;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.camel.Exchange;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -17,11 +21,13 @@ import java.util.Map;
  * <p>Referenced from {@code camel-context.xml} as {@code bean:fulfillmentEnricher?method=...}.
  */
 @Component("fulfillmentEnricher")
+@Slf4j
 public class FulfillmentEnricher {
 
     /** Shipping estimate: larger orders take longer to pick & pack. */
     @SuppressWarnings("unchecked")
-    public Map<String, Object> shipping(Map<String, Object> body) {
+    public Map<String, Object> shipping(Exchange exchange, Map<String, Object> body) {
+        log.info("fulfillmentEnricher shipping process:{}", exchange.getProperty(ORIGINAL_REQUEST, String.class));
         List<Map<String, Object>> orders = (List<Map<String, Object>>) body.getOrDefault("fulfillable", List.of());
         Map<String, Object> estimates = new LinkedHashMap<>();
         for (Map<String, Object> order : orders) {
@@ -37,7 +43,8 @@ public class FulfillmentEnricher {
 
     /** Risk score: higher-value orders carry more payment/fraud risk. */
     @SuppressWarnings("unchecked")
-    public Map<String, Object> risk(Map<String, Object> body) {
+    public Map<String, Object> risk(Exchange exchange, Map<String, Object> body) {
+        log.info("fulfillmentEnricher risk process:{}", exchange.getProperty(ORIGINAL_REQUEST, String.class));
         List<Map<String, Object>> orders = (List<Map<String, Object>>) body.getOrDefault("fulfillable", List.of());
         Map<String, Object> scores = new LinkedHashMap<>();
         for (Map<String, Object> order : orders) {

@@ -20,6 +20,15 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Current state
 
+- 2026-11-06: **original REST request in every processor** — `config/OriginalRequestRoutePolicyFactory` puts the
+  inbound JSON body into the exchange property `originalRequest` before REST binding (once per `servlet:` exchange,
+  JSON only, body put back as a String). The fulfillment processors log it. Verified on :8096 against the live
+  catalog/order servers: success and failure paths, every step (servlet thread, `agg-poolA` for both multicasts,
+  `notify-poolB` wireTap) logged its own request; `/api/hello` and the API-8 multipart upload unaffected.
+  `getUnitOfWork().getOriginalInMessage()` was tried first and does not work; where the property does and does not
+  reach (ProducerTemplate, `wireTap copy="false"` …): `docs/camel-original-request-property.md`. Pre-existing, unrelated:
+  `LoadBalancedRestClientConfigurationTest` / `RestClientSuppliersTest` each error on clean HEAD (`SslBundle.getKey()`
+  null in a mock).
 - **Routes live in `src/main/resources/camel-context.xml`** — the classic `<camelContext>` Spring XML
   DSL, loaded via `@ImportResource`, not the modern IO DSL.
 - **Two coexisting downstream-call patterns**: camel-http + a custom `LoadBalancerRoutePlanner`

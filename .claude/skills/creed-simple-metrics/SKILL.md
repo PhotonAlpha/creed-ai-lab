@@ -115,6 +115,21 @@ pitfalls, hc5 entity-is-a-one-shot-stream lesson). Summary:
 | Every send (`<to>`, multicast/wireTap branch, ProducerTemplate) | `EventNotifier` on `ExchangeSentEvent` | `CamelSendTimingEventNotifier` — skips `direct:` (in-JVM glue, already counted in the outer send) | `*-metrics.log` single-line `camel-send endpoint=... timeMs=...` |
 | Every HTTP network round-trip | hc5 `ExecChainHandler` ×3 on `CamelConfig.httpComponent` | `LogbookHttpExecHandler` (full audit, outermost) → `ObservationExecChainHandler` (Micrometer timer + trace propagation) → `CamelLoadBalancerAuditExecHandler` (innermost — logs the LB-resolved instance, the one thing Logbook/Observation can't see) | Logbook block + `httpcomponents.httpclient.request` + `LB resolved -> instance=...` |
 
+### The original REST request in every processor (`config/OriginalRequestRoutePolicyFactory`)
+
+Property `originalRequest` (`ORIGINAL_REQUEST`) = the inbound JSON body as received, set once per `servlet:`
+exchange in a route policy's `onExchangeBegin` — which runs **before** the REST binding advice
+(`RouteReifier` adds the policy advice first), so the body is still raw, not the `bindingMode="json"` Map. It is a
+one-shot stream: read it, then put it back as a String (binding unmarshals that the same). JSON content types only:
+a multipart upload (tutorial API-8) must keep its stream. Exchange properties are copied into multicast branches
+and wireTap copies, so every processor on every pool sees it. **Don't use
+`getUnitOfWork().getOriginalInMessage()`** instead: it throws `IllegalStateException` while
+`allowUseOriginalMessage` is off (Camel 4 default), and when on, each multicast branch / wireTap copy has its own
+UoW whose "original" is the body at the split; on the main exchange a second read of the cached stream is empty.
+**Not reached**: `wireTap copy="false"` (new empty exchange), anything sent with `ProducerTemplate` (new exchange —
+copy the property over by hand), an `AggregationStrategy` that builds its own result exchange, anything off-JVM.
+Shallow copy: keep the value immutable (a String). Full table + verification: `docs/camel-original-request-property.md`.
+
 Both `EventNotifier`/`RoutePolicyFactory` need no manual wiring — the classic `<camelContext>` factory
 bean auto-discovers every such bean in the Spring registry.
 

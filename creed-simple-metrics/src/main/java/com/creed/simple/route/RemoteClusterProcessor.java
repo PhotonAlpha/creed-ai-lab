@@ -1,12 +1,15 @@
 package com.creed.simple.route;
 
-import tools.jackson.databind.JsonNode;
+import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.ORIGINAL_REQUEST;
+
+import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
+import tools.jackson.databind.JsonNode;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -30,6 +33,7 @@ import java.util.Map;
  * <p>Referenced from {@code camel-context.xml} as {@code <process ref="remoteClusterProcessor"/>}.
  */
 @Component("remoteClusterProcessor")
+@Slf4j
 public class RemoteClusterProcessor implements Processor {
 
     private final RestClient clusterRestClient;
@@ -41,6 +45,7 @@ public class RemoteClusterProcessor implements Processor {
     @Override
     public void process(Exchange exchange) {
         String clusterUrl = exchange.getMessage().getHeader("clusterUrl", String.class);
+        log.info("remoteClusterProcessor {}:{}", clusterUrl, exchange.getProperty(ORIGINAL_REQUEST, String.class));
         boolean resilient = exchange.getMessage().getHeader("resilient", false, Boolean.class);
         try {
             JsonNode body = clusterRestClient.get()

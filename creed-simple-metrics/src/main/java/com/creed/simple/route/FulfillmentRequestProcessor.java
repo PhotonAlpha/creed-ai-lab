@@ -1,5 +1,8 @@
 package com.creed.simple.route;
 
+import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.ORIGINAL_REQUEST;
+
+import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.springframework.stereotype.Component;
@@ -22,11 +25,13 @@ import java.util.Map;
  * <p>Referenced from {@code camel-context.xml} as {@code <process ref="fulfillmentRequestProcessor"/>}.
  */
 @Component("fulfillmentRequestProcessor")
+@Slf4j
 public class FulfillmentRequestProcessor implements Processor {
 
     @Override
     @SuppressWarnings("unchecked")
     public void process(Exchange exchange) {
+      log.info("FulfillmentRequestProcessor process:{}", exchange.getProperty(ORIGINAL_REQUEST, String.class));
         Map<String, Object> body = exchange.getMessage().getBody(Map.class);
         boolean failCatalog = body != null && Boolean.TRUE.equals(body.get("failCatalog"));
         boolean failOrder = body != null && Boolean.TRUE.equals(body.get("failOrder"));

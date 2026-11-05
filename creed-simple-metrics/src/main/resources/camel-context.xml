@@ -35,8 +35,8 @@
     <import resource="classpath:camel/tutorial/route-api7-httpexchange.xml"/>
     <import resource="classpath:camel/tutorial/route-api8-upload.xml"/>
 
-    <camelContext xmlns="http://camel.apache.org/schema/spring">
-        <streamCaching id="cacheConfig" bufferSize="1024" spoolEnabled="true" spoolThreshold="131072" />
+    <camelContext xmlns="http://camel.apache.org/schema/spring" allowUseOriginalMessage="true">
+<!--        <streamCaching id="cacheConfig" bufferSize="1024" spoolEnabled="true" spoolThreshold="131072" />-->
         <!-- ===== thread pools =====
              Defined as Micrometer-monitored Spring ExecutorService beans in
              CamelThreadPoolConfiguration (aggregatePoolA / notificationPoolB) instead of inline
@@ -394,6 +394,7 @@
 
         <route id="fulfillment-notification">
             <from uri="direct:fulfillment-notification"/>
+            <process ref="plainProcessor" />
             <log message="fulfillment notification: ${body[summary]} on thread=${threadName}"/>
         </route>
 

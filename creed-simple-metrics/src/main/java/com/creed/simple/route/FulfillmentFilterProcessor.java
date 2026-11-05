@@ -1,16 +1,14 @@
 package com.creed.simple.route;
 
-import tools.jackson.databind.JsonNode;
+import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.ORIGINAL_REQUEST;
+
+import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Step-2 of {@code /api/fulfillment}: filters the aggregated order list down to the orders that are
@@ -27,6 +25,7 @@ import java.util.Set;
  * <p>Referenced from {@code camel-context.xml} as {@code <process ref="fulfillmentFilterProcessor"/>}.
  */
 @Component("fulfillmentFilterProcessor")
+@Slf4j
 public class FulfillmentFilterProcessor implements Processor {
 
     private static final Set<String> ACTIONABLE = Set.of("NEW", "PAID");
@@ -34,6 +33,7 @@ public class FulfillmentFilterProcessor implements Processor {
     @Override
     @SuppressWarnings("unchecked")
     public void process(Exchange exchange) {
+        log.info("fulfillmentFilterProcessor process:{}", exchange.getProperty(ORIGINAL_REQUEST, String.class));
         Map<String, Object> aggregate = exchange.getMessage().getBody(Map.class);
         // Keys match the "source" header set by the fetch routes: "catalog" and "order".
         JsonNode catalog = (JsonNode) aggregate.get("catalog");
