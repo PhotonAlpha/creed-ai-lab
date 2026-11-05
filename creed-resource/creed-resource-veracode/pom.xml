@@ -12,11 +12,13 @@
 
     <artifactId>creed-resource-veracode</artifactId>
     <name>creed-resource-veracode</name>
-    <description>Veracode report analysis — reads the report from Confluence, matches it against Jira, creates the missing issues</description>
+    <description>Veracode report analysis — reads an uploaded Veracode XML report, matches it against Jira, creates the missing issues</description>
 
     <properties>
-        <!-- Neither is managed by the Boot BOM. POI matches creed-report's pin. -->
+        <!-- Neither is managed by the Boot BOM. POI matches creed-report's pin, Logbook creed-simple-metrics'
+             (4.x is the Boot 4 / Jackson 3 line). -->
         <poi.version>5.4.1</poi.version>
+        <logbook.version>4.2.0</logbook.version>
     </properties>
 
     <dependencies>
@@ -33,6 +35,23 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-restclient</artifactId>
+        </dependency>
+        <!-- The Jira RestClient's transport (HttpComponentsClientHttpRequestFactory); version from the Boot BOM. -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+        </dependency>
+        <!-- Jira request/response log: the starter gives the Logbook bean (logbook.* config), logbook-httpclient5
+             the exec handler on the Jira client. Its inbound servlet filter is switched off in application.yml. -->
+        <dependency>
+            <groupId>org.zalando</groupId>
+            <artifactId>logbook-spring-boot-starter</artifactId>
+            <version>${logbook.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.zalando</groupId>
+            <artifactId>logbook-httpclient5</artifactId>
+            <version>${logbook.version}</version>
         </dependency>
 
         <!-- Excel (.xlsx) export: poi-ooxml pulls in poi + the OOXML schemas. -->

@@ -13,9 +13,10 @@ import java.security.cert.X509Certificate;
  * The Jira client's TLS, as asked: <b>no certificate and no hostname verification</b> - any server
  * certificate is accepted, self-signed, expired or issued for another name.
  *
- * <p>Both checks are skipped by one no-op {@link X509ExtendedTrustManager}: the JDK verifies the hostname
- * inside the extended trust manager ({@code checkServerTrusted(chain, authType, SSLEngine)}), so this
- * one client skips it without the JVM-wide {@code jdk.internal.httpclient.disableHostnameVerification}.
+ * <p>One no-op {@link X509ExtendedTrustManager} skips the certificate check, and - being the extended
+ * kind - JSSE's endpoint identification as well, which runs inside {@code checkServerTrusted(chain,
+ * authType, socket)}. HttpClient's own hostname check is turned off separately: {@code RemoteClientsConfiguration}
+ * sets policy {@code CLIENT} with {@code NoopHostnameVerifier}, so the name is not checked on either side.
  *
  * <p>The price: anyone who can intercept the traffic can read the user's Jira token. Acceptable only on a
  * network the team trusts.

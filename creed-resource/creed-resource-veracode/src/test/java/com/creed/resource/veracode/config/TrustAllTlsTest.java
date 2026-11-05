@@ -1,6 +1,12 @@
 package com.creed.resource.veracode.config;
 
 import com.sun.net.httpserver.HttpsConfigurator;
+import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.zalando.logbook.Logbook;
 import com.sun.net.httpserver.HttpsServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,10 +18,7 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLHandshakeException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
@@ -24,8 +27,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * A server with a self-signed certificate issued to another name: the JDK default refuses it on both
- * counts, the Jira client's context accepts it. The keystore is made by the JDK's own keytool - no PKI.
+ * A server with a self-signed certificate issued to another name: HttpClient's defaults refuse it, the Jira
+ * client's (the same pool and client the bean uses) accepts it. The keystore is made by the JDK's own keytool -
+ * no PKI.
  */
 class TrustAllTlsTest {
 
@@ -67,20 +71,25 @@ class TrustAllTlsTest {
         server.stop(0);
     }
 
-    private HttpResponse<String> get(SSLContext context) throws Exception {
-        try (HttpClient client = HttpClient.newBuilder().sslContext(context).build()) {
-            return client.send(HttpRequest.newBuilder(URI.create("https://localhost:" + server.getAddress().getPort() + "/"))
-                    .build(), HttpResponse.BodyHandlers.ofString());
+    private String url() {
+        // the address the server is bound to: "localhost" may resolve to ::1 first
+        return "https://127.0.0.1:" + server.getAddress().getPort() + "/";
+    }
+
+    @Test
+    void acceptsAnUntrustedCertificateForAnotherName() throws Exception {
+        try (PoolingHttpClientConnectionManager pool = RemoteClientsConfiguration.connectionManager(Duration.ofSeconds(5), 2);
+             CloseableHttpClient client = RemoteClientsConfiguration.httpClient(pool, Duration.ofSeconds(5), Logbook.create())) {
+            String body = client.execute(new HttpGet(url()), response -> EntityUtils.toString(response.getEntity()));
+            assertThat(body).isEqualTo("ok");
         }
     }
 
     @Test
-    void acceptsAnUntrustedCertificateForAnotherHost() throws Exception {
-        assertThat(get(TrustAllTls.context()).body()).isEqualTo("ok");
-    }
-
-    @Test
-    void theJdkDefaultWouldNot() {
-        assertThatThrownBy(() -> get(SSLContext.getDefault())).isInstanceOf(SSLHandshakeException.class);
+    void httpClientsDefaultWouldNot() throws Exception {
+        try (CloseableHttpClient client = HttpClients.createDefault()) {
+            assertThatThrownBy(() -> client.execute(new HttpGet(url()), response -> null))
+                    .isInstanceOf(SSLHandshakeException.class);
+        }
     }
 }

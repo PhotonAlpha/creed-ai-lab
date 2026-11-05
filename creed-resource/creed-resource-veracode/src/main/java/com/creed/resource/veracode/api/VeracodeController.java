@@ -105,8 +105,9 @@ public class VeracodeController {
     }
 
     /**
-     * The page's "test connection" for the token it holds: who Jira says it is and whether it sees the
-     * project. A rejected token is an answer ({@code ok: false}, Jira's status), not an error.
+     * The page's "test connection" for the token it holds, on Jira's create metadata: whether the token is
+     * accepted and may create the issue type in the project. A rejected token is an answer ({@code ok: false},
+     * Jira's status), not an error.
      */
     @PostMapping("/jira/connection")
     JiraLookupService.Connection testConnection(@RequestHeader(name = JiraToken.HEADER, required = false) String token) {

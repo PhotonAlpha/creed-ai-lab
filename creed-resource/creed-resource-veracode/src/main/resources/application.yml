@@ -29,6 +29,8 @@ veracode:
     enabled: ${CREED_VERACODE_MOCK:true}
 
   jira:
+    # Only the issue resource (/rest/api/2/issue/**) is called: picker + get to find, createmeta for versions and
+    # the connection test, POST to create. Apache HttpClient 5 underneath.
     # TLS to Jira is NOT verified - no certificate check, no hostname check (asked for; TrustAllTls).
     base-url: ${CREED_JIRA_URL:http://localhost:${server.port}/mock/jira}
     project-key: ${CREED_JIRA_PROJECT:CREED}
@@ -43,8 +45,9 @@ veracode:
     require-user-token: ${CREED_JIRA_REQUIRE_USER_TOKEN:true}
     labels: [veracode]
     browse-url: ${CREED_JIRA_BROWSE_URL:http://localhost:${server.port}/mock/jira/browse/{key}}
-    jql-batch-size: 40
-    page-size: 100
+    # maxResults of the paged createmeta calls (issue types / fields of the issue type)
+    page-size: 50
+    max-connections: 20
     auth:
       # NONE | BEARER (Data Center PAT) | BASIC (Cloud: e-mail + API token)
       type: ${CREED_JIRA_AUTH:NONE}
@@ -58,6 +61,26 @@ veracode:
   upload:
     ttl: 2h
     max-entries: 50
+# Jira request/response log (Logbook, from the Jira client's HttpClient exec chain; RemoteClientsConfiguration).
+# Lines go to the org.zalando.logbook.Logbook logger at TRACE - CREED_VERACODE_LOGBOOK_LEVEL=OFF silences it.
+logbook:
+  filter:
+    enabled: false           # this service's own inbound requests (uploads, X-Jira-Token) are not logged
+  format:
+    style: ${CREED_VERACODE_LOGBOOK_STYLE:http}   # http (readable blocks) | splunk | json | curl
+  obfuscate:
+    headers:                 # the user's token travels as Authorization: Bearer
+      - Authorization
+      - Proxy-Authorization
+      - Cookie
+      - Set-Cookie
+  write:
+    max-body-size: ${CREED_VERACODE_LOGBOOK_MAX_BODY:4096}   # createmeta / issue bodies can be long
+
+logging:
+  level:
+    org.zalando.logbook.Logbook: ${CREED_VERACODE_LOGBOOK_LEVEL:TRACE}
+
 management:
   endpoint:
     configprops:

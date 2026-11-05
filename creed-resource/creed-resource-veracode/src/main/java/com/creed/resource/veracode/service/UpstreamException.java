@@ -22,6 +22,20 @@ public class UpstreamException extends RuntimeException {
         this.status = status;
     }
 
+    private UpstreamException(String system, String message) {
+        super(system + ": " + message);
+        this.system = system;
+        this.status = 200;
+    }
+
+    /**
+     * Jira answered, but the project is not set up for this service - the issue type is not creatable, or
+     * its create screen has no Affects Version/s. Still 502: nothing the page can fix.
+     */
+    static UpstreamException setup(String system, String message) {
+        return new UpstreamException(system, message);
+    }
+
     public String system() {
         return system;
     }

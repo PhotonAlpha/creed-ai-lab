@@ -6,7 +6,6 @@ import com.creed.resource.veracode.domain.Finding;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -51,7 +50,7 @@ class JiraMatchingTest {
     @Test
     void theVersionIsPartOfTheMatch() {
         JiraIssue issue = new JiraIssue("1", "CREED-1", new JiraIssue.Fields("CVE-2022-22965 Spring4Shell", null,
-                List.of(JiraVersion.named("2.2.1")), List.of(), null, null));
+                List.of(JiraVersion.named("2.2.1")), List.of(), null, null, null));
 
         assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.2.1"), "2.2.1")).isTrue();
         assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.3.0"), "2.3.0")).isFalse();
@@ -59,13 +58,17 @@ class JiraMatchingTest {
 
     @Test
     void jqlQuotesValuesAndStripsLuceneOperatorsFromPhrases() {
-        String jql = Jql.lookup("CREED", Set.of("2.3.0"), List.of(
-                finding("CVE-2021-44228", "x", "2.3.0"),
-                finding(null, "Path \"traversal\" (RouterFunctions) * OR more", "2.3.0")));
+        Finding log4shell = finding("CVE-2021-44228", "x", "2.3.0");
+        Finding traversal = finding(null, "Path \"traversal\" (RouterFunctions) * OR more", "2.3.0");
 
         // a CVE is a phrase; a title is lower-cased words, so its "OR" is not an operator
-        assertThat(jql).isEqualTo("project = \"CREED\" AND affectedVersion in (\"2.3.0\") AND ("
-                + "summary ~ \"\\\"CVE 2021 44228\\\"\" OR summary ~ \"path traversal routerfunctions or more\")");
+        assertThat(Jql.lookup("CREED", "2.3.0", log4shell)).isEqualTo(
+                "project = \"CREED\" AND affectedVersion = \"2.3.0\" AND summary ~ \"\\\"CVE 2021 44228\\\"\"");
+        assertThat(Jql.lookup("CREED", "2.3.0", traversal)).isEqualTo(
+                "project = \"CREED\" AND affectedVersion = \"2.3.0\" AND summary ~ \"path traversal routerfunctions or more\"");
+        assertThat(Jql.lookup("CREED", "2.3.0", finding(null, "***", "2.3.0"))).isNull();
+        // the picker's query: the same words, nothing the query parser reads
+        assertThat(Jql.pickerQuery(log4shell)).isEqualTo("CVE 2021 44228");
         assertThat(Jql.quote("a\\b\"c")).isEqualTo("\"a\\\\b\\\"c\"");
     }
 

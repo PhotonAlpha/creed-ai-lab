@@ -28,7 +28,7 @@ class ExternalConfigDirTest {
                 veracode:
                   jira:
                     issue-type: Task
-                    jql-batch-size: 20
+                    max-connections: 20
                   upload:
                     max-entries: 20
                 """);
@@ -36,7 +36,7 @@ class ExternalConfigDirTest {
         try (ConfigurableApplicationContext context = run("--CREED_VERACODE_CONFIG_DIR=" + configDir + "/")) {
             JiraProperties jira = context.getBean(JiraProperties.class);
             assertThat(jira.issueType()).isEqualTo("Task");
-            assertThat(jira.jqlBatchSize()).isEqualTo(20);
+            assertThat(jira.maxConnections()).isEqualTo(20);
             assertThat(context.getBean(UploadProperties.class).maxEntries()).isEqualTo(20);
             // not in the file: still the packaged value (application-test.yml here)
             assertThat(jira.pageSize()).isEqualTo(2);

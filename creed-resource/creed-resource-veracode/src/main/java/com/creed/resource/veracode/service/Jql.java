@@ -2,23 +2,20 @@ package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.domain.Finding;
 
-import java.util.Collection;
-import java.util.List;
 import java.util.Locale;
-import java.util.stream.Collectors;
 
 /**
- * Builds the lookup JQL. One query per batch of findings:
+ * The issue picker's two inputs for one finding: the {@code currentJQL} and the {@code query}.
  *
  * <pre>
- * project = "CREED" AND affectedVersion in ("2.3.0", "2.4.0")
- *   AND (summary ~ "\"CVE 2021 44228\"" OR summary ~ "sql injection in reportquerybuilder")
+ * currentJQL  project = "CREED" AND affectedVersion = "2.3.0" AND summary ~ "\"CVE 2021 44228\""
+ * query       CVE 2021 44228
  * </pre>
  *
  * <p>{@code summary ~} is Lucene full-text search, not a substring test: the phrase is tokenised (so
  * {@code CVE-2021-44228} is the phrase {@code cve 2021 44228}), stop words are dropped, and an unquoted
- * {@code CVE-2021-44228} would mean "cve AND NOT 2021 AND NOT 44228". The query therefore only narrows
- * the candidates; {@link JiraLookupService} decides the match on the returned summaries.
+ * {@code CVE-2021-44228} would mean "cve AND NOT 2021 AND NOT 44228". Both inputs therefore only narrow
+ * the candidates; {@link JiraLookupService} decides the match on the issues it then reads.
  *
  * <p>A CVE is a phrase (its parts in order). A title is plain words, so a summary that has them in another
  * order is still a candidate - the title match is order-free. Those words are lower-cased: unquoted, an
@@ -26,7 +23,8 @@ import java.util.stream.Collectors;
  *
  * <p>Lucene's reserved characters are replaced by spaces in a search phrase rather than escaped - they
  * are token separators anyway, and JQL escaping of a backslash inside a quoted phrase inside a quoted
- * string is three layers deep.
+ * string is three layers deep. The picker's {@code query} is that phrase as words: the picker matches each
+ * word against the start of the summary's words (or the key).
  */
 final class Jql {
 
@@ -35,17 +33,19 @@ final class Jql {
     private Jql() {
     }
 
-    static String lookup(String projectKey, Collection<String> versions, List<Finding> findings) {
-        String versionList = versions.stream().map(Jql::quote).collect(Collectors.joining(", "));
-        String summaries = findings.stream()
-                .map(Jql::summaryTerm)
-                .filter(t -> !t.isEmpty())
-                .distinct()
-                .map(t -> "summary ~ " + quote(t))
-                .collect(Collectors.joining(" OR "));
+    /** {@code null} when the finding has nothing to search by. */
+    static String lookup(String projectKey, String version, Finding finding) {
+        String term = summaryTerm(finding);
+        if (term.isEmpty()) {
+            return null;
+        }
         return "project = " + quote(projectKey)
-                + " AND affectedVersion in (" + versionList + ")"
-                + " AND (" + summaries + ")";
+                + " AND affectedVersion = " + quote(version)
+                + " AND summary ~ " + quote(term);
+    }
+
+    static String pickerQuery(Finding finding) {
+        return searchPhrase(finding.matchText());
     }
 
     private static String summaryTerm(Finding f) {

@@ -45,7 +45,7 @@ External config: `application.yml` / `application-<profile>.yml` in `CREED_VERAC
 | `POST /analysis/sample` `?affectedVersion=&autoCreate=` | the same for the bundled sample XML — **mock only** (404 otherwise) |
 | `POST /analysis` `{uploadId, autoCreate?}` | re-analyse an upload against Jira as it is now |
 | `POST /jira/issues` `{uploadId, findingIds[]}` | per-id `outcome`: CREATED / ALREADY_EXISTS / NOT_IN_REPORT / VERSION_NOT_IN_JIRA / FAILED; **needs `X-Jira-Token`** |
-| `POST /jira/connection` (header `X-Jira-Token`) | `{ok, user, displayName, projectKey, projectAccess, status, message}` — a refused token is `ok:false` + Jira's status, not an error |
+| `POST /jira/connection` (header `X-Jira-Token`) | `{ok, projectKey, issueType, tokenAccepted, canCreate, versions, status, message}` from the create metadata — a refused token is `ok:false` + Jira's status, not an error |
 | `GET /analysis/export?uploadId=` | xlsx (sheets *Findings*, *Source*) from a **fresh** analysis |
 
 Every endpoint takes the user's Jira token in `X-Jira-Token` (Bearer to Jira): required to create
@@ -58,6 +58,22 @@ no `version` and no override), 404 `upload_expired`, 413 `file_too_large` (`CREE
 default 50MB), 502 `jira_error`.
 
 ## Current state
+
+2026-11-06: **Jira calls are the issue resource only** (`/rest/api/2/issue/**`, asked for) and the RestClient runs on
+**Apache HttpClient 5** (`httpclient5`, Boot-managed; pool bean closed by Spring, no redirects, **no cookie store**).
+Lookup = `GET /issue/picker` per finding (`currentJQL` = project + `affectedVersion = "v"` + `summary ~`) + `GET
+/issue/{key}` per candidate (read once per analysis; another project or 404 skipped); versions and the connection test =
+`GET /issue/createmeta/{project}/issuetypes[/{id}]` (paged, `page-size`). Removed: `/search`, `/myself`,
+`/project/{key}/versions`, `jql-batch-size`; new `max-connections`. The connection result has no user any more
+(`tokenAccepted`, `canCreate`, `issueType`, `versions`). A refused token now fails a create request as a whole (502,
+on the create metadata) instead of per finding. **41 tests pass**; over real HTTP on :18197 (Apache transport): test
+connection ok / 401, the example XML created 8 and found them again, every outbound URI under `/rest/api/2/issue`.
+Not run against a real Jira.
+Same day, later: **Logbook** on the Jira client (`logbook-spring-boot-starter` + `logbook-httpclient5` 4.2.0,
+`LogbookHttpExecHandler` first in the HC5 exec chain): request + response with headers and body (`max-body-size`
+4096) at TRACE on `org.zalando.logbook.Logbook`; `Authorization` / cookies masked (checked: the token never appears
+in the log); inbound filter off. Knobs: `CREED_VERACODE_LOGBOOK_LEVEL` (`OFF` silences), `_STYLE`
+(http/splunk/json/curl), `_MAX_BODY`.
 
 2026-11-05 (latest): an example report for testing Jira creation by hand, `.support/veracode/veracode-detailedreport-example.xml`
 (app creed-shop, 2.4.0: 8 findings, all missing in the mock Jira; verified: all 8 created, then found again). A local
@@ -107,9 +123,13 @@ it was not checked in a browser (the browser extension could not attach to any p
 - **No CVE = an SCA advisory (`SRCCLR-SID-…`)**: its id is the title, so it is keyed `title:srcclr sid …`
   and found again by those words in a summary.
 
-- **`affectedVersion in (…)` with a version the project lacks is a 400 for the whole JQL**, not "no
-  match". The service reads `/project/{key}/versions` first and only searches known versions; the rest
-  are `jiraVersion: null` and cannot be created.
+- **Only `/rest/api/2/issue/**` may be called** (asked for, 2026-11-06). Search = the issue picker, which is an
+  auto-complete: Jira caps its result, so the JQL is one finding narrow. Its `hs` (history) section is not bound to
+  `currentJQL` — the project is checked on the issue read. The query matches word *starts*; `currentJQL` decides.
+- **`affectedVersion = "x"` with a version the project lacks is a 400**, not "no match". Versions come from the
+  issue type's create screen (`versions.allowedValues`; archived ones are absent) and only those are searched; the
+  rest are `jiraVersion: null` and cannot be created. No *Affects Version/s* on the create screen, or the issue
+  type not creatable → 502 with the reason (`UpstreamException.setup`).
 - **`summary ~` is Lucene full text, not substring.** Phrases are tokenised and stop words dropped, so
   the query only narrows candidates; `JiraLookupService.covers` decides on the returned summary (CVE with any
   separators but not inside a longer id — `CVE-2021-4422` must not match `CVE-2021-44228`; title words, any order).
@@ -117,12 +137,15 @@ it was not checked in a browser (the browser extension could not attach to any p
   CVE are one Jira issue (both components in its title).
 - **Create re-reads the upload + Jira under a lock**, so a double click returns `ALREADY_EXISTS`. The lock is
   per process; two instances could still duplicate (Jira has no unique key to lean on).
-- **Jira Cloud has retired `POST /rest/api/2/search`** (`/rest/api/3/search/jql`, token paging). The
-  client is Data Center v2; Cloud needs that one method changed.
+- **Logbook logs the wire, so it sees the user's token**: `logbook.obfuscate.headers` must keep `Authorization`.
+  It writes synchronously from the exec chain (log I/O counts in the Jira call's time); `logbook.filter.enabled:
+  false` keeps uploads and `X-Jira-Token` out of it. The picker's `currentJQL` shows URL-decoded in the log.
+- **Apache HttpClient 5 keeps cookies by default — turned off.** One client serves every user's token and Jira
+  answers with `JSESSIONID`; kept, the next user's request (or a tokenless one) would run in the previous session.
 - **The Jira client verifies neither certificate nor hostname** (asked for, 2026-11-05; `ssl-bundle` removed).
-  `TrustAllTls` is a no-op `X509ExtendedTrustManager`: the JDK checks the hostname *inside* the extended
-  trust manager, so this skips it for this client only. A plain `X509TrustManager` would not — JSSE wraps it
-  and still checks the name. Never set `jdk.internal.httpclient.disableHostnameVerification` (JVM-wide).
+  `TrustAllTls` is a no-op `X509ExtendedTrustManager` (JSSE's endpoint identification runs inside the extended
+  one, so it is skipped too; a plain `X509TrustManager` would be wrapped and still check the name), and the TLS
+  strategy has policy `CLIENT` + `NoopHostnameVerifier` for HttpClient's own check.
   Anyone on the path can read the user's token.
 - **The server bundle is declared only in `application-ssl.yml`**: Boot opens every declared bundle at startup,
   so declaring it in `application.yml` breaks the plain-HTTP run. A missing password is not reported as an

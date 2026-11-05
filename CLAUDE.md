@@ -11,7 +11,7 @@ narrative content belongs in a skill or a `HANDOFF.md` (§6).
 
 Java **21** source/target, built with **JDK 25** · Spring Boot **4.1.1** (Spring Framework 7,
 Jakarta EE 11, Tomcat 11) · Spring Cloud **2025.1.3** · **Jackson 3** (`tools.jackson.*`; annotations stay
-`com.fasterxml.jackson.annotation`) · Camel 4.23.0 (simple-metrics only) · Logbook 4.2.0 (simple-metrics only)
+`com.fasterxml.jackson.annotation`) · Camel 4.23.0 (simple-metrics only) · Logbook 4.2.0 (simple-metrics; veracode's Jira client)
 · JasperReports 6.21.3 (jasper-report only)
 · RefactoringMiner 3.1.6 + JGit 6.10 + JDT 3.39 + Thymeleaf (migration-risk only; 3.1.x is Java 23 bytecode → run on JDK 25) · httpclient5 5.6.4 (Boot-managed)
 · Maven 3.9.16, local repo **`/Users/ethan/Desktop/workspace/repos`**
@@ -62,7 +62,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-order` | 18091 / 18092 | `/api/order` | primary / secondary |
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
-| `creed-resource-veracode` | 18097 | `/api/veracode` | HTTP (HTTPS with profile `ssl`, one-way TLS), stateless; uploaded Veracode detailed report (XML, SCA section) → Jira lookup/create (`@HttpExchange`, TLS to Jira unverified, user's token) → xlsx; Jira mocked in-process + sample XML (`veracode.mock.enabled`) |
+| `creed-resource-veracode` | 18097 | `/api/veracode` | HTTP (HTTPS with profile `ssl`, one-way TLS), stateless; uploaded Veracode detailed report (XML, SCA section) → Jira lookup/create (`@HttpExchange` on `/rest/api/2/issue/**` only, Apache HttpClient 5 + Logbook, TLS to Jira unverified, user's token) → xlsx; Jira mocked in-process + sample XML (`veracode.mock.enabled`) |
 | `creed-resource-migration-risk` | 18098 | `/api/migration-risk` | HTTP; migration sync risk: repo1 HEAD vs repo2 directly, no baseline (git branches or plain folders; repo2 may be two repos, merged), one RefactoringMiner run repo1→repo2 → HIGH/MEDIUM/LOW items per file, config keys compared globally; saved per release in Postgres `migration_risk` (`h2` profile without Docker, `mysql` profile = `db/migration-mysql`) for SAFE/ATTENTION review; Thymeleaf AST-diff page `/api/migration-risk/view/diff`; repos only under `migration-risk.allowed-roots` (or https git URLs from `remotes.allowed-hosts`); re-runs track the sync (auto SYNCED, delta, resolved) |
 | `creed-env-matrix-design` | 5173 / 3002 | — | Vite, proxies `/api` → `VITE_API_TARGET` (`.env`: 18095) and the Splunk API → `VITE_SPLUNK_TARGET` (`.env`: creed-gateway-proxy 8088); legacy Node BFF `npm run bff` on 3002 |
 | `creed-mock-buddy` | 5173 / 4000 | — | HTTP / HTTPS (borrows `creed-gateway` cert), **Node/Fastify**; YAML mock server, standalone |

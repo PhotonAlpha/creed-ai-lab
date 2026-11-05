@@ -3,18 +3,20 @@ package com.creed.resource.veracode.service;
 import com.creed.resource.veracode.client.jira.JiraClient;
 import com.creed.resource.veracode.client.jira.JiraCreateIssueRequest;
 import com.creed.resource.veracode.client.jira.JiraCreatedIssue;
+import com.creed.resource.veracode.client.jira.JiraFieldMeta;
 import com.creed.resource.veracode.client.jira.JiraIssue;
-import com.creed.resource.veracode.client.jira.JiraSearchRequest;
-import com.creed.resource.veracode.client.jira.JiraSearchResponse;
-import com.creed.resource.veracode.client.jira.JiraUser;
+import com.creed.resource.veracode.client.jira.JiraIssueType;
+import com.creed.resource.veracode.client.jira.JiraPage;
 import com.creed.resource.veracode.client.jira.JiraVersion;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -22,6 +24,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.IntFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -34,6 +37,11 @@ import java.util.regex.Pattern;
  * longer id; for a finding without a CVE, every word of the title, in any order. The same CVE fixed in 2.2.1
  * is still open for 2.3.0, which is the reason the version is part of the key.
  *
+ * <p>Only the issue resource is called ({@link JiraClient}): a finding's candidates come from the issue
+ * picker (one call per finding, its JQL narrowed to the project, the version and the CVE / title), each
+ * candidate is read with {@code GET /issue/{key}}, and the match is decided here on what Jira returned. The
+ * project's versions are the {@code versions} field of the issue type's create metadata.
+ *
  * <p>Every call carries the user's {@link JiraToken} when the page sent one.
  */
 @Service
@@ -42,7 +50,7 @@ import java.util.regex.Pattern;
 public class JiraLookupService {
 
     static final String JIRA = "Jira";
-    private static final List<String> FIELDS = List.of("summary", "status", "versions", "labels", "priority", "assignee");
+    private static final String FIELDS = "summary,status,versions,labels,priority,assignee,project";
     private static final Pattern CVE_PARTS = Pattern.compile("CVE-(\\d{4})-(\\d+)", Pattern.CASE_INSENSITIVE);
 
     private final JiraClient jira;
@@ -54,32 +62,34 @@ public class JiraLookupService {
     }
 
     /**
-     * The page's "test connection": whose token it is, and whether it can see the project.
+     * The page's "test connection", on the create metadata: whether the token is accepted and may create the
+     * configured issue type in the project, and how many versions it can be filed against. No user name - the
+     * issue resource has no "who am I".
      *
-     * @param status Jira's HTTP status on failure, {@code 0} when Jira was not reachable
+     * @param tokenAccepted Jira took the token (it answered, and not 401) - {@code ok} can still be false
+     * @param status        Jira's HTTP status on failure, {@code 0} when Jira was not reachable
      */
-    public record Connection(boolean ok, String baseUrl, String projectKey, String user, String displayName,
-                             boolean projectAccess, int status, String message) {
+    public record Connection(boolean ok, String baseUrl, String projectKey, String issueType, boolean tokenAccepted,
+                             boolean canCreate, int versions, int status, String message) {
+    }
+
+    /** The configured issue type as Jira knows it, and the versions its create screen offers. */
+    public record CreateMeta(String issueTypeId, String issueType, Map<String, String> versions) {
     }
 
     public Connection connection(JiraToken token) {
         if (!token.present()) {
             throw new JiraToken.RequiredException();
         }
-        JiraUser user;
         try {
-            user = UpstreamException.call(JIRA, () -> jira.myself(token.authorization()));
+            CreateMeta meta = createMeta(token);
+            return new Connection(true, props.baseUrl(), props.projectKey(), meta.issueType(), true, true,
+                    meta.versions().size(), 200, "can create " + meta.issueType() + " in " + props.projectKey() + ", "
+                    + meta.versions().size() + " version(s) to file against");
         } catch (UpstreamException e) {
-            return new Connection(false, props.baseUrl(), props.projectKey(), null, null, false, e.status(), e.getMessage());
-        }
-        String login = user.name() != null ? user.name() : user.key();
-        try {
-            int versions = projectVersions(token).size();
-            return new Connection(true, props.baseUrl(), props.projectKey(), login, user.displayName(), true, 200,
-                    "project " + props.projectKey() + ": " + versions + " version(s)");
-        } catch (UpstreamException e) {
-            // The token works but cannot see the project: lookups would find nothing and creates would fail.
-            return new Connection(false, props.baseUrl(), props.projectKey(), login, user.displayName(), false,
+            // 401: the token itself; anything else Jira answered means it read the token and said no to the project
+            boolean accepted = e.status() != 0 && e.status() != 401;
+            return new Connection(false, props.baseUrl(), props.projectKey(), props.issueType(), accepted, false, 0,
                     e.status(), e.getMessage());
         }
     }
@@ -91,15 +101,39 @@ public class JiraLookupService {
      * spelling.
      */
     public Map<String, String> projectVersions(JiraToken token) {
-        List<JiraVersion> versions = UpstreamException.call(JIRA,
-                () -> jira.projectVersions(token.authorization(), props.projectKey()));
+        return createMeta(token).versions();
+    }
+
+    /**
+     * Two paged calls: the creatable issue types, then the configured one's fields. Archived versions are
+     * not in {@code allowedValues} - nothing can be filed against them, so they count as "not in Jira".
+     */
+    public CreateMeta createMeta(JiraToken token) {
+        String project = props.projectKey();
+        List<JiraIssueType> types = pages(from -> jira.createIssueTypes(token.authorization(), project, from,
+                props.pageSize()));
+        JiraIssueType type = types.stream()
+                .filter(t -> props.issueType().equalsIgnoreCase(t.name()))
+                .findFirst()
+                .orElseThrow(() -> UpstreamException.setup(JIRA, types.isEmpty()
+                        ? "no issue type can be created in project " + project + " with this token"
+                        : "issue type '" + props.issueType() + "' cannot be created in project " + project
+                                + " (creatable: " + String.join(", ", types.stream().map(JiraIssueType::name).toList()) + ")"));
+        List<JiraFieldMeta> fields = pages(from -> jira.createFields(token.authorization(), project, type.id(), from,
+                props.pageSize()));
+        JiraFieldMeta versions = fields.stream()
+                .filter(f -> JiraFieldMeta.VERSIONS.equals(f.fieldId()))
+                .findFirst()
+                .orElseThrow(() -> UpstreamException.setup(JIRA, "Affects Version/s is not on the create screen of "
+                        + type.name() + " in project " + project));
         Map<String, String> byLowerCase = new LinkedHashMap<>();
-        for (JiraVersion v : versions == null ? List.<JiraVersion>of() : versions) {
-            if (v.name() != null) {
-                byLowerCase.putIfAbsent(v.name().trim().toLowerCase(Locale.ROOT), v.name());
+        for (JsonNode v : versions.allowedValues() == null ? List.<JsonNode>of() : versions.allowedValues()) {
+            String name = v.path("name").asString(null);
+            if (name != null) {
+                byLowerCase.putIfAbsent(name.trim().toLowerCase(Locale.ROOT), name);
             }
         }
-        return byLowerCase;
+        return new CreateMeta(type.id(), type.name(), byLowerCase);
     }
 
     public static String jiraVersion(Map<String, String> projectVersions, Finding finding) {
@@ -113,28 +147,43 @@ public class JiraLookupService {
     public Map<String, List<IssueRef>> find(List<Finding> findings, Map<String, String> projectVersions,
                                             JiraToken token) {
         Map<String, List<IssueRef>> result = new LinkedHashMap<>();
-        List<Finding> searchable = new ArrayList<>();
+        // findings share candidates (two CVEs in one issue's summary): each issue is read once per lookup
+        Map<String, JiraIssue> read = new HashMap<>();
         for (Finding f : findings) {
-            if (jiraVersion(projectVersions, f) != null) {
-                searchable.add(f);
-                result.put(f.id(), new ArrayList<>());
+            String version = jiraVersion(projectVersions, f);
+            if (version == null) {
+                continue;
             }
-        }
-        for (int from = 0; from < searchable.size(); from += props.jqlBatchSize()) {
-            List<Finding> batch = searchable.subList(from, Math.min(from + props.jqlBatchSize(), searchable.size()));
-            Set<String> versions = new LinkedHashSet<>();
-            batch.forEach(f -> versions.add(jiraVersion(projectVersions, f)));
-            List<JiraIssue> candidates = searchAll(Jql.lookup(props.projectKey(), versions, batch), token);
-            for (Finding f : batch) {
-                String version = jiraVersion(projectVersions, f);
-                for (JiraIssue issue : candidates) {
-                    if (covers(issue, f, version)) {
-                        result.get(f.id()).add(toRef(issue));
-                    }
+            List<IssueRef> covering = new ArrayList<>();
+            result.put(f.id(), covering);
+            String jql = Jql.lookup(props.projectKey(), version, f);
+            if (jql == null) {
+                continue;
+            }
+            List<String> keys = UpstreamException.call(JIRA,
+                    () -> jira.picker(token.authorization(), Jql.pickerQuery(f), jql, true)).keys();
+            for (String key : keys) {
+                JiraIssue issue = read.containsKey(key) ? read.get(key) : read(key, token);
+                read.put(key, issue);
+                // the history section is not bound to currentJQL: the project is checked here too
+                if (issue != null && props.projectKey().equalsIgnoreCase(issue.projectKey()) && covers(issue, f, version)) {
+                    covering.add(toRef(issue));
                 }
             }
         }
         return result;
+    }
+
+    /** {@code null} when it is gone (or hidden from the token) between the picker and the read. */
+    private JiraIssue read(String key, JiraToken token) {
+        try {
+            return UpstreamException.call(JIRA, () -> jira.issue(token.authorization(), key, FIELDS));
+        } catch (UpstreamException e) {
+            if (e.status() == 404) {
+                return null;
+            }
+            throw e;
+        }
     }
 
     public IssueRef create(Finding finding, String jiraVersion, ReportView report, JiraToken token) {
@@ -198,19 +247,18 @@ public class JiraLookupService {
         return !title.getFirst().isEmpty() && words.containsAll(title);
     }
 
-    private List<JiraIssue> searchAll(String jql, JiraToken token) {
-        List<JiraIssue> issues = new ArrayList<>();
+    /** Every page: until an empty one, {@code isLast}, or {@code total} reached - whichever Jira sends. */
+    private static <T> List<T> pages(IntFunction<JiraPage<T>> page) {
+        List<T> all = new ArrayList<>();
         int startAt = 0;
         while (true) {
             int from = startAt;
-            JiraSearchResponse page = UpstreamException.call(JIRA,
-                    () -> jira.search(token.authorization(), new JiraSearchRequest(jql, from, props.pageSize(), FIELDS)));
-            issues.addAll(page.issuesOrEmpty());
-            startAt += page.issuesOrEmpty().size();
-            // An empty page ends the loop even if `total` says otherwise - Jira can shrink the result
-            // between pages, and trusting `total` alone would spin.
-            if (page.issuesOrEmpty().isEmpty() || startAt >= page.total()) {
-                return issues;
+            JiraPage<T> p = UpstreamException.call(JIRA, () -> page.apply(from));
+            all.addAll(p.valuesOrEmpty());
+            startAt += p.valuesOrEmpty().size();
+            if (p.valuesOrEmpty().isEmpty() || Boolean.TRUE.equals(p.isLast())
+                    || p.total() != null && startAt >= p.total()) {
+                return all;
             }
         }
     }

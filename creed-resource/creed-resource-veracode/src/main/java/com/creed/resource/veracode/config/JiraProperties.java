@@ -11,7 +11,7 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * @param baseUrl        everything before {@code /rest/api/2}
+ * @param baseUrl        everything before {@code /rest/api/2/issue}
  * @param projectKey     the project findings are looked up in and created in
  * @param issueType      issue type name for created issues; must exist in the project's scheme
  * @param summaryTemplate a created issue's summary: {@code {project}} (the report's Veracode {@code app_name}; the
@@ -23,9 +23,9 @@ import java.util.List;
  *                       {@code false} falls back to {@code auth}
  * @param labels         added to every created issue (the CVE id is added as well)
  * @param browseUrl      template for issue links, {@code {key}} is replaced
- * @param jqlBatchSize   findings per search; each adds one {@code summary ~} clause, and a long JQL
- *                       is slow on Jira's side and can exceed its URL/body limits
- * @param pageSize       {@code maxResults} per search page (Jira caps it, usually at 100)
+ * @param pageSize       {@code maxResults} per page of the paged create-metadata calls (issue types, fields)
+ * @param maxConnections pooled connections to Jira (lookups run one after another per request; this bounds
+ *                       concurrent requests)
  */
 @Validated
 @ConfigurationProperties("veracode.jira")
@@ -37,8 +37,8 @@ public record JiraProperties(
         @DefaultValue("true") boolean requireUserToken,
         @DefaultValue("veracode") List<String> labels,
         @NotBlank String browseUrl,
-        @DefaultValue("40") @Min(1) @Max(200) int jqlBatchSize,
-        @DefaultValue("100") @Min(1) @Max(1000) int pageSize,
+        @DefaultValue("50") @Min(1) @Max(1000) int pageSize,
+        @DefaultValue("20") @Min(1) @Max(200) int maxConnections,
         @DefaultValue RemoteAuth auth,
         @DefaultValue("5s") Duration connectTimeout,
         @DefaultValue("20s") Duration readTimeout) {

@@ -48,7 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * The whole chain over the in-process Jira mock: the bundled sample Veracode XML uploaded, the real
- * {@code @HttpExchange} proxy and the JQL-evaluating Jira mock - only the transport is MockMvc instead of a
+ * {@code @HttpExchange} proxy and the picker / createmeta Jira mock - only the transport is MockMvc instead of a
  * socket, so no port has to be known before the context starts.
  */
 @SpringBootTest
@@ -251,27 +251,30 @@ class VeracodeApiTest {
                         .content("{\"uploadId\":\"" + uploadId + "\",\"autoCreate\":true}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("jira_token_required"));
-        // Jira refuses the token: per-finding FAILED with Jira's reason, nothing created
+        // Jira refuses the token: already on the create metadata, before anything is created
         mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, "invalid")
                         .contentType(MediaType.APPLICATION_JSON).content(request))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.results[0].outcome").value("FAILED"))
-                .andExpect(jsonPath("$.results[0].message").value(containsString("401")));
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.error").value("jira_error"))
+                .andExpect(jsonPath("$.message").value(containsString("401")));
         assertThat(jira.all()).hasSize(4);
     }
 
     @Test
-    void connectionTestNamesTheTokensUser() throws Exception {
+    void connectionTestAsksTheCreateMetadata() throws Exception {
         mvc.perform(post("/api/veracode/jira/connection").header(JiraToken.HEADER, TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.ok").value(true))
-                .andExpect(jsonPath("$.user").value("user-abcd"))
-                .andExpect(jsonPath("$.displayName").value("Mock User user-abcd"))
-                .andExpect(jsonPath("$.projectKey").value("CREED"))
-                .andExpect(jsonPath("$.projectAccess").value(true));
+                .andExpect(jsonPath("$.tokenAccepted").value(true))
+                .andExpect(jsonPath("$.canCreate").value(true))
+                .andExpect(jsonPath("$.issueType").value("Bug"))
+                // createmeta answers 2 per page in the test profile: three versions = two pages of fields
+                .andExpect(jsonPath("$.versions").value(3))
+                .andExpect(jsonPath("$.projectKey").value("CREED"));
         mvc.perform(post("/api/veracode/jira/connection").header(JiraToken.HEADER, "invalid"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.ok").value(false))
+                .andExpect(jsonPath("$.tokenAccepted").value(false))
                 .andExpect(jsonPath("$.status").value(401));
         mvc.perform(post("/api/veracode/jira/connection"))
                 .andExpect(status().isBadRequest())

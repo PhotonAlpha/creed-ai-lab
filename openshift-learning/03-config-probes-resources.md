@@ -119,10 +119,11 @@ oc get hpa -w
   | B. configtree | Secret 挂成目录，`SPRING_CONFIG_IMPORT=optional:configtree:/etc/veracode/ssl-pass/`，**文件名就是属性名** | 值只以文件存在；Secret 更新后文件会被 kubelet 原地替换 | 文件名必须是合法属性名（如 `veracode.ssl.password`）；Spring 仍只在启动时读一次 |
 
 - **SSL bundle 是唯一的入口**：服务端和客户端都引用同一个 `spring.ssl.bundle.jks.<name>`，密码只写一处。
-- **这个模块的 RestClient 不会自动吃 bundle**：`RemoteClientsConfiguration.configure()` 自己 new 了
-  `JdkClientHttpRequestFactory`，Boot 关于 HTTP 客户端 SSL 的全局属性对它不生效。必须注入 `SslBundles`，
-  把 `bundle.createSslContext()` 交给 `HttpClient.newBuilder().sslContext(...)`。
-  这是「自定义了 request factory 就要自己接管 SSL」的典型例子。
+- **这个模块的 RestClient 不会自动吃 bundle**：`RemoteClientsConfiguration` 自己建了 Apache HttpClient 5 的连接池和
+  `HttpComponentsClientHttpRequestFactory`，Boot 关于 HTTP 客户端 SSL 的全局属性对它不生效——TLS 由
+  `ClientTlsStrategyBuilder` 决定。这是「自定义了 request factory 就要自己接管 SSL」的典型例子。
+  （到 Jira 这一侧目前按要求不校验证书和主机名：`TrustAllTls` + `NoopHostnameVerifier`；要校验时把 bundle 的
+  `createSslContext()` 交给 `setSslContext(...)` 并去掉 Noop。）
 - **TLS 之后的连锁改动**：探针要改成 `scheme: HTTPS`（kubelet 不校验证书，所以不需要信任 CA）；
   第 02 章的 edge Route 需要改成 `reencrypt`（带 `destinationCACertificate`）或 `passthrough`，第 06 章细讲。
 

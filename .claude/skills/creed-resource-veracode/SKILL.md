@@ -1,6 +1,6 @@
 ---
 name: creed-resource-veracode
-description: creed-resource-veracode — Veracode SCA report analysis backend (uploaded Veracode detailed report XML → SCA findings → Jira lookup/create with the user's own token → xlsx), its @HttpExchange Jira client (TLS unverified), the in-process Jira mock and sample XML, and the /veracode page of creed-env-matrix-design. Use for XML parsing, JQL/matching rules, Jira issue creation and tokens, the mock, or the Veracode UI.
+description: creed-resource-veracode — Veracode SCA report analysis backend (uploaded Veracode detailed report XML → SCA findings → Jira lookup/create with the user's own token → xlsx), its @HttpExchange Jira client (issue resource only, Apache HttpClient 5, TLS unverified), the in-process Jira mock and sample XML, and the /veracode page of creed-env-matrix-design. Use for XML parsing, JQL/matching rules, Jira issue creation and tokens, the mock, or the Veracode UI.
 ---
 
 # creed-resource-veracode
@@ -14,13 +14,16 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 
 - **The only source is an uploaded Veracode detailed report (XML)** (since 2026-11-05, asked for): Confluence,
   the page id and the html/csv/xlsx table parser are gone.
-- `client/jira/JiraClient` — `@HttpExchange`; `config/RemoteClientsConfiguration` builds its `RestClient` from
-  Boot's prototype `RestClient.Builder` (JDK HttpClient, **no redirects**, `TrustAllTls`, default
-  `Authorization` from `RemoteAuth` NONE/BEARER/BASIC). Static `jiraClient(RestClient)` lets tests put the same
+- `client/jira/JiraClient` — `@HttpExchange` over **`/rest/api/2/issue/**` only** (since 2026-11-06, asked for:
+  the Issue group of the Jira DC 11.0.2 reference): `POST /issue`, `GET /issue/picker`, `GET /issue/{key}`,
+  `GET /issue/createmeta/{project}/issuetypes[/{id}]`. `config/RemoteClientsConfiguration` builds its `RestClient`
+  from Boot's prototype `RestClient.Builder` on **Apache HttpClient 5** (`jiraConnectionManager` pool bean,
+  `destroyMethod=close` + `setConnectionManagerShared`; **no redirects, no cookies**; `TrustAllTls` + `CLIENT` /
+  `NoopHostnameVerifier`), default `Authorization` from `RemoteAuth` NONE/BEARER/BASIC. Static `jiraClient(RestClient)` lets tests put the same
   proxy on another transport.
 - `service/VeracodeXmlParser` (StAX) → `ReportRow`s (affected version filled in once known: root `version` or
   the upload's override) → `UploadedReportStore` → `domain/Finding.group` → `service/JiraLookupService`
-  (versions, JQL search, match, create) → `VeracodeAnalysisService` (analyse / create by upload id, re-reads
+  (createmeta versions, picker + get, match, create) → `VeracodeAnalysisService` (analyse / create by upload id, re-reads
   Jira per request) → `ExcelExporter` (POI).
 - `mock/` — `MockJiraController` + `MockJiraStore` (project CREED, versions 2.2.1/2.3.0/2.4.0, four seeded
   issues, keys from CREED-105). `@ConditionalOnProperty veracode.mock.enabled`; the Jira URLs default to
@@ -41,8 +44,16 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 - **Finding = (CVE or normalised title, affected version)**; id `CVE-…@2.3.0` /
   `title:srcclr sid 29587@2.3.0`. Create requests carry ids only; the server re-reads the upload + Jira under a
   per-process lock → `ALREADY_EXISTS` instead of duplicates. Don't switch to client-supplied finding data.
-- **Never put an unknown version into JQL** — Jira 400s the whole query. Versions go through
-  `projectVersions()` (lower-case → Jira spelling); unknown → `jiraVersion: null`, not searched, not creatable.
+- **No `/search`, `/myself`, `/project/{key}/versions`** — don't "simplify" back to them. Lookup = one picker
+  call per finding (`Jql.lookup`: project + `affectedVersion = "v"` + `summary ~`; `Jql.pickerQuery` = the same
+  words) + one `GET /issue/{key}` per candidate key (read once per analysis; another project's key — the picker's
+  history section ignores `currentJQL` — and 404 are skipped). The picker is an auto-complete with a capped
+  result: keep its JQL one finding narrow. The mock caps at 20 too.
+- **Versions = `versions.allowedValues` of the issue type's create screen** (`createMeta()`, two paged calls).
+  Never put an unknown version into JQL — Jira 400s. Unknown → `jiraVersion: null`, not searched, not creatable.
+  Issue type not creatable / no *Affects Version/s* field → `UpstreamException.setup` (502 with the reason).
+- **Test connection = the create metadata** (`Connection`: `tokenAccepted` = answered and not 401, `canCreate`,
+  `issueType`, `versions`) — no user name, the issue resource has no "who am I".
 - **The user's Jira token** (`service/JiraToken`, header `X-Jira-Token`) is passed into every `JiraClient`
   method as an optional `Authorization` argument — null keeps the configured default header, so searches
   still work without one; create requires it (`require-user-token`, 400 `jira_token_required`). Never log it,
@@ -55,13 +66,20 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 - **`summary ~` narrows, Java decides** (`covers`/`summaryNames`). Lucene reserved chars are replaced by
   spaces in phrases (`Jql.searchPhrase`), not escaped. The mock implements the same token semantics, so a
   substring-based "fix" in the mock would hide a real-Jira miss.
-- Search pages until an **empty page or `startAt >= total`** — trusting `total` alone can spin.
+- createmeta pages until an **empty page, `isLast`, or `startAt >= total`** — trusting `total` alone can spin.
+- **Logbook** (`LogbookHttpExecHandler`, `addExecInterceptorFirst`) logs every Jira exchange at TRACE on
+  `org.zalando.logbook.Logbook`. It sees the wire, i.e. the user's Bearer token: never drop `Authorization` from
+  `logbook.obfuscate.headers`. The starter's inbound servlet filter is off (`logbook.filter.enabled: false`) —
+  turning it on would log `X-Jira-Token` and whole uploads.
+- **HttpClient 5 has a cookie store by default — keep `disableCookieManagement()`**: one client serves every
+  user's token, and a kept `JSESSIONID` would carry one user's session into the next (tokenless) request.
 - Exception handler is `@RestControllerAdvice(assignableTypes = VeracodeController.class)`: the mock must
   keep answering in Jira's own error shape, which `UpstreamException.detail` parses.
-- **Jira TLS is unverified on purpose** (asked for): `TrustAllTls` = a no-op `X509ExtendedTrustManager`, which
-  skips the certificate *and* the hostname check (the JDK runs the hostname check inside an extended TM; a plain
-  `X509TrustManager` gets wrapped and still checks it). Per client — never the JVM-wide
-  `jdk.internal.httpclient.disableHostnameVerification`. `TrustAllTlsTest` proves both directions. Profile
+- **Jira TLS is unverified on purpose** (asked for): `TrustAllTls` = a no-op `X509ExtendedTrustManager` (skips the
+  certificate and JSSE's endpoint identification; a plain `X509TrustManager` gets wrapped and still checks the
+  name) and HttpClient's TLS strategy policy `CLIENT` + `NoopHostnameVerifier`. Per client. `TrustAllTlsTest`
+  runs the real pool/client against a self-signed cert for another name, and HttpClient's default refusing it
+  (it uses `127.0.0.1`: `localhost` may resolve to `::1` first and the test server binds IPv4). Profile
   `ssl` (one-way, `client-auth: none`) serves HTTPS; keep the server bundle out of `application.yml` (Boot
   opens declared bundles eagerly).
 - actuator shows values (`show-values: always`); secrets are masked only by `ActuatorSanitizingConfiguration`.
@@ -69,12 +87,13 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 - **`spring.config.additional-location` is a default property set in `main()` (`application()`)**, so
   `@SpringBootTest` never sees it — test it through `CreedResourceVeracodeApplication.application()`
   (`ExternalConfigDirTest`). It is not honoured from `application.yml`: Boot reads it before any config file is loaded.
-- Jira Cloud: `/rest/api/2/search` is retired there (→ `/rest/api/3/search/jql`); the client is DC v2.
 
 ## Tests
 
 `VeracodeApiTest` uploads the sample XML and runs the full chain with `@SpringBootTest` + MockMvc: a `@Primary`
 Jira client bean uses a `ClientHttpRequestFactory` that builds `MockMvcClientHttpRequestFactory` **lazily**
 (building MockMvc while the context still creates the bean would read a half-built context). `application-test.yml`
-sets `jql-batch-size: 3`, `page-size: 2` so batching and paging are exercised. `MockJiraStore.reset()`
+sets `page-size: 2` so createmeta paging is exercised. MockMvc bypasses Apache HttpClient — the transport is
+covered by `TrustAllTlsTest` and a real-HTTP run. `JiraLookupServiceTest` stubs `JiraClient` for shapes the mock
+lacks (issue type not creatable, no versions field, foreign / vanished picks). `MockJiraStore.reset()`
 in `@BeforeEach`.

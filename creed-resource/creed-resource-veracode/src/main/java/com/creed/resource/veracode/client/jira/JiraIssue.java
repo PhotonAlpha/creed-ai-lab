@@ -9,7 +9,11 @@ public record JiraIssue(String id, String key, Fields fields) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Fields(String summary, Status status, List<JiraVersion> versions, List<String> labels,
-                         Named priority, Person assignee) {
+                         Named priority, Person assignee, Project project) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Project(String key) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -26,6 +30,10 @@ public record JiraIssue(String id, String key, Fields fields) {
 
     public String summary() {
         return fields == null || fields.summary() == null ? "" : fields.summary();
+    }
+
+    public String projectKey() {
+        return fields == null || fields.project() == null ? null : fields.project().key();
     }
 
     public String statusName() {

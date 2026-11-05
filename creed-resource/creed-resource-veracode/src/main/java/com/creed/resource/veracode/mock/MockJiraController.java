@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.web.util.HtmlUtils;
@@ -22,24 +23,24 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Stand-in for the three Jira v2 endpoints the service calls, backed by {@link MockJiraStore}.
+ * Stand-in for the issue-resource endpoints the service calls ({@code /rest/api/2/issue/**}: create, picker,
+ * get, createmeta), backed by {@link MockJiraStore}.
  *
- * <p>The search understands exactly the JQL {@code Jql} builds - {@code project = "..."},
- * {@code affectedVersion in (...)}, {@code summary ~ "\"...\""} clauses OR'd - and keeps the two Jira
- * behaviours the real code has to survive: an unknown version in the JQL is a 400 for the whole query,
- * and {@code summary ~} matches tokens, not substrings ({@code CVE-2021-4104} finds a summary with
- * {@code CVE 2021 4104} too). Paging honours {@code startAt}/{@code maxResults}. A quoted
- * {@code summary ~} value is a phrase, an unquoted one plain words in any order.
+ * <p>The picker understands exactly the {@code currentJQL} {@code Jql} builds - {@code project = "..."},
+ * {@code affectedVersion = "..."}, {@code summary ~ "..."} - and keeps the Jira behaviours the real code
+ * has to survive: an unknown version in the JQL is a 400, {@code summary ~} matches tokens, not substrings
+ * ({@code CVE-2021-4104} finds a summary with {@code CVE 2021 4104} too; a quoted value is a phrase, an
+ * unquoted one plain words in any order), the {@code query} matches word starts or the key, and the result
+ * is capped at {@value #PICKER_LIMIT}. createmeta pages honour {@code startAt}/{@code maxResults}.
  *
- * <p>Authentication, as far as the page's token needs it: {@code /myself} and creating need a
- * {@code Bearer} token, and the token {@value #REJECTED_TOKEN} is refused (401) so a failed "test
- * connection" can be seen; the user is named after the token's last characters. Searching and versions
- * accept anonymous calls - the service's configured auth is NONE against the mock.
+ * <p>Authentication, as far as the page's token needs it: creating needs a {@code Bearer} token, and the
+ * token {@value #REJECTED_TOKEN} is refused (401) everywhere, so a failed "test connection" can be seen; the
+ * reporter is named after the token's last characters. Everything else accepts anonymous calls - the
+ * service's configured auth is NONE against the mock.
  */
 @RestController
 @RequestMapping("/mock/jira")
@@ -49,29 +50,46 @@ public class MockJiraController {
 
     private static final String LITERAL = "\"((?:[^\"\\\\]|\\\\.)*)\"";
     private static final Pattern PROJECT = Pattern.compile("project\\s*=\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
-    private static final Pattern VERSIONS = Pattern.compile(
-            "affectedVersion\\s+in\\s*\\(((?:\\s*" + LITERAL + "\\s*,?)+)\\)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern VERSION = Pattern.compile("affectedVersion\\s*=\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
     private static final Pattern SUMMARY = Pattern.compile("summary\\s*~\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
-    private static final Pattern ANY_LITERAL = Pattern.compile(LITERAL);
-    private static final Set<String> ISSUE_TYPES = Set.of("bug", "task", "story", "vulnerability");
+    /** id -> name, as createmeta lists them. */
+    private static final Map<String, String> ISSUE_TYPES = new LinkedHashMap<>(Map.of(
+            "1", "Bug", "3", "Task", "10001", "Story", "10100", "Vulnerability"));
     static final String REJECTED_TOKEN = "invalid";
+    static final int PICKER_LIMIT = 20;
 
     private final MockJiraStore store;
 
-    @GetMapping("/rest/api/2/myself")
-    ResponseEntity<?> myself(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
-        String user = user(authorization);
-        if (user == null) {
+    @GetMapping("/rest/api/2/issue/createmeta/{project}/issuetypes")
+    ResponseEntity<?> issueTypes(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+                                 @PathVariable String project,
+                                 @RequestParam(defaultValue = "0") int startAt,
+                                 @RequestParam(defaultValue = "50") int maxResults) {
+        if (rejected(authorization)) {
             return unauthorized();
         }
-        return ResponseEntity.ok(Map.of("name", user, "key", user, "displayName", "Mock User " + user,
-                "emailAddress", user + "@example.com", "active", true));
+        if (!MockJiraStore.PROJECT.equalsIgnoreCase(project)) {
+            return error(HttpStatus.BAD_REQUEST, "No project could be found with key '" + project + "'.", null);
+        }
+        List<Map<String, Object>> types = new ArrayList<>();
+        ISSUE_TYPES.forEach((id, name) -> types.add(Map.of("id", id, "name", name, "subtask", false,
+                "self", "/rest/api/2/issuetype/" + id)));
+        return ResponseEntity.ok(page(types, startAt, maxResults));
     }
 
-    @GetMapping("/rest/api/2/project/{key}/versions")
-    ResponseEntity<?> versions(@PathVariable String key) {
-        if (!MockJiraStore.PROJECT.equalsIgnoreCase(key)) {
-            return error(HttpStatus.NOT_FOUND, "No project could be found with key '" + key + "'.", null);
+    @GetMapping("/rest/api/2/issue/createmeta/{project}/issuetypes/{issueTypeId}")
+    ResponseEntity<?> createFields(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+                                   @PathVariable String project, @PathVariable String issueTypeId,
+                                   @RequestParam(defaultValue = "0") int startAt,
+                                   @RequestParam(defaultValue = "50") int maxResults) {
+        if (rejected(authorization)) {
+            return unauthorized();
+        }
+        if (!MockJiraStore.PROJECT.equalsIgnoreCase(project)) {
+            return error(HttpStatus.BAD_REQUEST, "No project could be found with key '" + project + "'.", null);
+        }
+        if (!ISSUE_TYPES.containsKey(issueTypeId)) {
+            return error(HttpStatus.NOT_FOUND, "Issue type with id '" + issueTypeId + "' does not exist.", null);
         }
         List<Map<String, Object>> versions = new ArrayList<>();
         int id = 20_000;
@@ -79,37 +97,42 @@ public class MockJiraController {
             versions.add(Map.of("id", String.valueOf(++id), "name", name, "released", !"2.4.0".equals(name),
                     "archived", false));
         }
-        return ResponseEntity.ok(versions);
+        List<Map<String, Object>> fields = List.of(
+                field("summary", "Summary", true, null),
+                field("issuetype", "Issue Type", true, null),
+                field("project", "Project", true, null),
+                field("description", "Description", false, null),
+                field("versions", "Affects Version/s", false, versions),
+                field("labels", "Labels", false, null),
+                field("priority", "Priority", false, null));
+        return ResponseEntity.ok(page(fields, startAt, maxResults));
     }
 
-    @PostMapping("/rest/api/2/search")
-    ResponseEntity<?> search(@RequestBody JsonNode body) {
-        String jql = body.path("jql").asString("");
-        int startAt = Math.max(0, body.path("startAt").asInt(0));
-        int maxResults = Math.min(Math.max(1, body.path("maxResults").asInt(50)), 100);
-
-        Matcher project = PROJECT.matcher(jql);
+    @GetMapping("/rest/api/2/issue/picker")
+    ResponseEntity<?> picker(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+                             @RequestParam(defaultValue = "") String query,
+                             @RequestParam(defaultValue = "") String currentJQL) {
+        if (rejected(authorization)) {
+            return unauthorized();
+        }
+        Matcher project = PROJECT.matcher(currentJQL);
         if (project.find() && !MockJiraStore.PROJECT.equalsIgnoreCase(unescape(project.group(1)))) {
             return error(HttpStatus.BAD_REQUEST, "The value '" + unescape(project.group(1))
                     + "' does not exist for the field 'project'.", null);
         }
-        List<String> versions = new ArrayList<>();
-        Matcher v = VERSIONS.matcher(jql);
+        String version = null;
+        Matcher v = VERSION.matcher(currentJQL);
         if (v.find()) {
-            Matcher lit = ANY_LITERAL.matcher(v.group(1));
-            while (lit.find()) {
-                String name = unescape(lit.group(1));
-                if (store.versions().stream().noneMatch(name::equalsIgnoreCase)) {
-                    return error(HttpStatus.BAD_REQUEST,
-                            "The value '" + name + "' does not exist for the field 'affectedVersion'.", null);
-                }
-                versions.add(name);
+            version = unescape(v.group(1));
+            if (store.versions().stream().noneMatch(version::equalsIgnoreCase)) {
+                return error(HttpStatus.BAD_REQUEST,
+                        "The value '" + version + "' does not exist for the field 'affectedVersion'.", null);
             }
         }
         // phrase -> contained as is; plain words -> all present, any order
         List<String> phrases = new ArrayList<>();
         List<List<String>> words = new ArrayList<>();
-        Matcher s = SUMMARY.matcher(jql);
+        Matcher s = SUMMARY.matcher(currentJQL);
         while (s.find()) {
             String term = unescape(s.group(1));
             if (term.startsWith("\"")) {
@@ -118,21 +141,37 @@ public class MockJiraController {
                 words.add(List.of(Finding.normalise(term).split(" ")));
             }
         }
-
-        List<MockJiraStore.Issue> hits = store.all().stream()
-                .filter(i -> versions.isEmpty() || i.versions().stream().anyMatch(iv -> versions.stream().anyMatch(iv::equalsIgnoreCase)))
+        List<String> queryWords = Finding.normalise(query).isEmpty() ? List.of()
+                : List.of(Finding.normalise(query).split(" "));
+        String affected = version;
+        List<Map<String, Object>> hits = store.all().stream()
+                .filter(i -> affected == null || i.versions().stream().anyMatch(affected::equalsIgnoreCase))
                 .filter(i -> phrases.isEmpty() && words.isEmpty()
                         || phrases.stream().anyMatch(p -> (" " + Finding.normalise(i.summary()) + " ").contains(" " + p + " "))
                         || words.stream().anyMatch(w -> List.of(Finding.normalise(i.summary()).split(" ")).containsAll(w)))
+                .filter(i -> !queryWords.isEmpty() && (i.key().equalsIgnoreCase(query.trim()) || queryWords.stream()
+                        .allMatch(q -> List.of(Finding.normalise(i.summary()).split(" ")).stream().anyMatch(t -> t.startsWith(q)))))
+                .limit(PICKER_LIMIT)
+                .map(i -> Map.<String, Object>of("key", i.key(), "keyHtml", i.key(), "img", "/images/icons/issuetypes/bug.png",
+                        "summary", HtmlUtils.htmlEscape(i.summary()), "summaryText", i.summary()))
                 .toList();
-        List<Map<String, Object>> page = hits.stream().skip(startAt).limit(maxResults).map(this::toJson).toList();
+        return ResponseEntity.ok(Map.of("sections", List.of(
+                Map.of("id", "hs", "label", "History Search", "issues", List.of()),
+                Map.of("id", "cs", "label", "Current Search", "sub", "Showing " + hits.size() + " issue(s)",
+                        "issues", hits))));
+    }
 
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("startAt", startAt);
-        response.put("maxResults", maxResults);
-        response.put("total", hits.size());
-        response.put("issues", page);
-        return ResponseEntity.ok(response);
+    @GetMapping("/rest/api/2/issue/{key}")
+    ResponseEntity<?> issue(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+                            @PathVariable String key) {
+        if (rejected(authorization)) {
+            return unauthorized();
+        }
+        MockJiraStore.Issue issue = store.find(key);
+        if (issue == null) {
+            return error(HttpStatus.NOT_FOUND, "Issue Does Not Exist", null);
+        }
+        return ResponseEntity.ok(toJson(issue));
     }
 
     @PostMapping("/rest/api/2/issue")
@@ -147,7 +186,8 @@ public class MockJiraController {
         if (!MockJiraStore.PROJECT.equalsIgnoreCase(fields.path("project").path("key").asString())) {
             errors.put("project", "project is required");
         }
-        if (!ISSUE_TYPES.contains(fields.path("issuetype").path("name").asString().toLowerCase())) {
+        String issueType = fields.path("issuetype").path("name").asString();
+        if (ISSUE_TYPES.values().stream().noneMatch(issueType::equalsIgnoreCase)) {
             errors.put("issuetype", "Specify a valid issue type");
         }
         String summary = fields.path("summary").asString("");
@@ -196,6 +236,7 @@ public class MockJiraController {
     private Map<String, Object> toJson(MockJiraStore.Issue issue) {
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("summary", issue.summary());
+        fields.put("project", Map.of("key", MockJiraStore.PROJECT, "name", "Creed"));
         fields.put("status", Map.of("name", issue.status()));
         fields.put("versions", issue.versions().stream().map(v -> Map.of("name", v)).toList());
         fields.put("labels", issue.labels());
@@ -203,6 +244,36 @@ public class MockJiraController {
         fields.put("assignee", issue.assignee() == null ? null
                 : Map.of("name", issue.assignee().toLowerCase().replace(' ', '.'), "displayName", issue.assignee()));
         return Map.of("id", String.valueOf(issue.id()), "key", issue.key(), "self", self(issue), "fields", fields);
+    }
+
+    private static Map<String, Object> field(String id, String name, boolean required, List<?> allowedValues) {
+        Map<String, Object> field = new LinkedHashMap<>();
+        field.put("fieldId", id);
+        field.put("name", name);
+        field.put("required", required);
+        if (allowedValues != null) {
+            field.put("allowedValues", allowedValues);
+        }
+        return field;
+    }
+
+    private static Map<String, Object> page(List<?> all, int startAt, int maxResults) {
+        int from = Math.max(0, startAt);
+        int size = Math.min(Math.max(1, maxResults), 50);
+        List<?> values = all.stream().skip(from).limit(size).toList();
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("startAt", from);
+        page.put("maxResults", size);
+        page.put("total", all.size());
+        page.put("isLast", from + values.size() >= all.size());
+        page.put("values", values);
+        return page;
+    }
+
+    /** The refused token was sent (any other header, or none, is let through). */
+    private static boolean rejected(String authorization) {
+        return authorization != null && authorization.startsWith("Bearer ")
+                && authorization.substring("Bearer ".length()).trim().equals(REJECTED_TOKEN);
     }
 
     /** The login a Bearer token stands for, {@code null} = no token or the rejected one. */
