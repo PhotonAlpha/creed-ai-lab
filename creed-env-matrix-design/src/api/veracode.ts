@@ -102,13 +102,20 @@ export interface VeracodeSettings {
 }
 
 /** `POST /jira/connection`: a rejected token is `ok: false` with Jira's status, not an error. */
+/**
+ * The "test connection" answer, from Jira's create metadata (only the issue resource is called, and it has
+ * no "who am I": the result names what the token may do, not whose it is).
+ */
 export interface JiraConnection {
   ok: boolean;
   baseUrl: string;
   projectKey: string;
-  user: string | null;
-  displayName: string | null;
-  projectAccess: boolean;
+  issueType: string;
+  /** Jira took the token (answered, and not 401); `ok` can still be false — project or issue type. */
+  tokenAccepted: boolean;
+  canCreate: boolean;
+  /** Versions the issue type can be filed against. */
+  versions: number;
   /** Jira's HTTP status; 0 = Jira unreachable. */
   status: number;
   message: string | null;

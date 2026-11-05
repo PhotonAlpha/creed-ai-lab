@@ -94,9 +94,9 @@ export function JiraTokenModal({ open, token, remember, jiraBaseUrl, mock, conne
           showIcon
           type={result.ok ? 'success' : 'error'}
           message={result.ok
-            ? t('veracode.token.ok', { user: result.displayName ?? result.user ?? '', project: result.projectKey })
-            : result.user
-              ? t('veracode.token.noProject', { user: result.displayName ?? result.user, project: result.projectKey })
+            ? t('veracode.token.ok', { issueType: result.issueType, project: result.projectKey, versions: result.versions })
+            : result.tokenAccepted
+              ? t('veracode.token.noProject', { issueType: result.issueType, project: result.projectKey })
               : t('veracode.token.rejected', { status: result.status })}
           description={result.message}
         />

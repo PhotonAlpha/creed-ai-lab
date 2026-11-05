@@ -442,7 +442,7 @@ export function VeracodePage() {
                 {!token
                   ? <Tag color="default" style={{ marginInlineEnd: 0 }}>{t('veracode.token.unset')}</Tag>
                   : connection?.ok
-                    ? <Tag color="success" style={{ marginInlineEnd: 0 }}>{connection.displayName ?? connection.user}</Tag>
+                    ? <Tag color="success" style={{ marginInlineEnd: 0 }}>{t('veracode.token.valid')}</Tag>
                     : connection
                       ? <Tag color="error" style={{ marginInlineEnd: 0 }}>{t('veracode.token.bad')}</Tag>
                       : <Tag color="processing" style={{ marginInlineEnd: 0 }}>{t('veracode.token.set')}</Tag>}
