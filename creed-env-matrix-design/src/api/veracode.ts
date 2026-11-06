@@ -203,6 +203,12 @@ export interface UploadOptions {
   fields?: CreateFieldValues;
 }
 
+/** Bytes of the report sent so far. */
+export interface UploadProgress {
+  loaded: number;
+  total: number;
+}
+
 const uploadQuery = ({ affectedVersion, autoCreate, fields }: UploadOptions) => new URLSearchParams({
   autoCreate: String(!!autoCreate),
   ...(affectedVersion?.trim() ? { affectedVersion: affectedVersion.trim() } : {}),
@@ -226,20 +232,33 @@ export const veracodeApi = {
    * Multipart, so not through `requestAt`: that sets a JSON Content-Type whenever there is a body, and
    * a multipart request must let the browser write its own boundary. `affectedVersion` overrides the
    * report's `version` (blank = the report's).
+   *
+   * XMLHttpRequest rather than fetch: fetch has no upload progress. `onProgress` gets the bytes sent; once the
+   * last byte is out it is called with `loaded === total` and the server is parsing and asking Jira.
    */
-  analyzeUpload: async (file: File, options: UploadOptions, auth: JiraAuth) => {
-    const form = new FormData();
-    form.append('file', file);
-    const response = await fetch(`${BASE}/analysis/upload?${uploadQuery(options)}`, {
-      method: 'POST',
-      body: form,
-      headers: tokenHeader(auth),
-    });
-    if (!response.ok) {
-      throw await parseError(response);
-    }
-    return (await response.json()) as Analysis;
-  },
+  analyzeUpload: (file: File, options: UploadOptions, auth: JiraAuth, onProgress?: (p: UploadProgress) => void) =>
+    new Promise<Analysis>((resolve, reject) => {
+      const form = new FormData();
+      form.append('file', file);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${BASE}/analysis/upload?${uploadQuery(options)}`);
+      Object.entries(tokenHeader(auth)).forEach(([name, value]) => xhr.setRequestHeader(name, value));
+      xhr.upload.onprogress = (e) => {
+        onProgress?.({ loaded: e.loaded, total: e.lengthComputable ? e.total : file.size });
+      };
+      xhr.upload.onload = () => onProgress?.({ loaded: file.size, total: file.size });
+      xhr.onload = () => {
+        // through a Response, so the error envelope is unwrapped exactly as for every other call
+        const response = new Response(xhr.responseText, { status: xhr.status, statusText: xhr.statusText });
+        if (xhr.status < 200 || xhr.status >= 300) {
+          void parseError(response).then(reject, reject);
+          return;
+        }
+        response.json().then((body) => resolve(body as Analysis), reject);
+      };
+      xhr.onerror = () => reject(new Error(`upload failed: ${BASE} not reachable`));
+      xhr.send(form);
+    }),
 
   /** The backend's bundled sample report, as if uploaded — only served with the mocks. */
   analyzeSample: (options: UploadOptions, auth: JiraAuth) =>

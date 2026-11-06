@@ -168,7 +168,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 页面布局与 Ant Design Pro 默认一致：ProLayout `layout="mix"`，顶部标题栏 + 左侧可折叠菜单。
 - 创建的 Jira 标题按 `veracode.jira.summary-template`，默认 `{project} {component} {cve}`，`{project}` 为报告的 Veracode 应用名 `app_name`（如 `creed-platform spring-beans 5.3.17 CVE-2022-22965`）。
 - 表格可按关联 Jira 的属性过滤（状态 / 优先级 / 经办人 / 影响版本，多选），搜索框对 CVE、标题、组件、Jira 号与 Jira 标题做模糊匹配。
-- 支持导出 Excel。
+- 支持导出 Excel（Severity 按等级填充背景色）。
+- 上传报告时显示进度：先显示上传百分比和字节数（XMLHttpRequest，fetch 没有上传进度）；上传完成后显示「正在解析并在 Jira 中查找」的进行中进度条（服务端这一步不报告进度，不显示百分比）。
 
 ### 5.7 迁移同步风险（`/migration-risk`）
 - 后端：`creed-resource/creed-resource-migration-risk`；RefactoringMiner（目录比较模式）+ JGit + JDT；结果存 PostgreSQL `migration_risk`（也支持 MySQL：`mysql` profile）。

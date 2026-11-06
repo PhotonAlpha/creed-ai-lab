@@ -18,6 +18,7 @@ import {
   Table,
   Tag,
   Tooltip,
+  Progress,
   Typography,
   Upload,
 } from 'antd';
@@ -104,6 +105,8 @@ export function VeracodePage() {
   const [autoCreate, setAutoCreate] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(false);
+  /** The upload under way: bytes sent, then (all sent) the server parsing and asking Jira. */
+  const [upload, setUpload] = useState<{ name: string; loaded: number; total: number } | null>(null);
   const [creating, setCreating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -168,7 +171,10 @@ export function VeracodePage() {
       if (tokenMissing(e)) setTokenOpen(true);
       setError(e instanceof ApiError && e.body?.error === 'upload_expired' ? t('veracode.uploadExpired') : (e as Error).message);
     } finally {
-      if (current === requestId.current) setLoading(false);
+      if (current === requestId.current) {
+        setLoading(false);
+        setUpload(null);
+      }
     }
   }, [message, t]);
 
@@ -229,7 +235,11 @@ export function VeracodePage() {
    * the same request-id guard as a re-analysis.
    */
   const beforeUpload = (file: File) => {
-    withToken(() => confirmed(() => void run(() => veracodeApi.analyzeUpload(file, options(), auth), options().autoCreate)));
+    withToken(() => confirmed(() => {
+      setUpload({ name: file.name, loaded: 0, total: file.size });
+      void run(() => veracodeApi.analyzeUpload(file, options(), auth,
+        (p) => setUpload({ name: file.name, ...p })), options().autoCreate);
+    }));
     return false;
   };
 
@@ -517,6 +527,7 @@ export function VeracodePage() {
             <p className="ant-upload-text">{t('veracode.upload.title')}</p>
             <p className="ant-upload-hint">{t('veracode.upload.hint')}</p>
           </Upload.Dragger>
+          {upload && <UploadProgressBar {...upload} autoCreate={options().autoCreate} />}
           {analysis && (
             <Descriptions size="small" column={{ xs: 1, md: 2, xl: 4 }} style={{ marginTop: 16 }}>
               <Descriptions.Item label={t('veracode.app')}>{analysis.report.appName ?? '—'}</Descriptions.Item>
@@ -758,5 +769,28 @@ function JiraFieldsBar({ fields, values, onChange }: {
         return <Space key={f.fieldId} size={4}>{label}{control}</Space>;
       })}
     </Space>
+  );
+}
+
+const formatBytes = (n: number) =>
+  n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+/**
+ * Two phases: the upload, measured in bytes; then the server's part (parse the XML, look every finding up in
+ * Jira, create when asked), which reports nothing while it runs — shown as a running bar, not a fake percentage.
+ */
+function UploadProgressBar({ name, loaded, total, autoCreate }: { name: string; loaded: number; total: number; autoCreate: boolean }) {
+  const { t } = useI18n();
+  const sent = total > 0 && loaded >= total;
+  const percent = total > 0 ? Math.min(100, Math.floor((loaded / total) * 100)) : 0;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <Typography.Text type="secondary">
+        {sent
+          ? t(autoCreate ? 'veracode.upload.creating' : 'veracode.upload.analysing', { name })
+          : t('veracode.upload.sending', { name, loaded: formatBytes(loaded), total: formatBytes(total) })}
+      </Typography.Text>
+      <Progress percent={sent ? 100 : percent} status="active" showInfo={!sent} />
+    </div>
   );
 }
