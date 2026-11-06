@@ -1,15 +1,18 @@
 package com.creed.resource.veracode.api.dto;
 
+import com.creed.resource.veracode.service.CreateField;
 import com.creed.resource.veracode.service.ReportView;
 
 import java.time.Instant;
 import java.util.List;
 
 /**
- * @param warnings  report rows that were skipped or read partially, and creations that failed during an
- *                  {@code autoCreate} run
+ * @param createFields the create-screen fields the page asks for before creating (read with the user's token)
+ * @param warnings     report rows that were skipped or read partially, and creations that failed during an
+ *                     {@code autoCreate} run
  */
 public record AnalysisResponse(ReportView report, String projectKey, List<String> jiraVersions,
+                               List<CreateField> createFields,
                                List<FindingView> findings, List<String> warnings, Counts counts,
                                Instant analyzedAt) {
 

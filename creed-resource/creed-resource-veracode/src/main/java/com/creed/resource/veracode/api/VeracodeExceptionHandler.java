@@ -1,5 +1,6 @@
 package com.creed.resource.veracode.api;
 
+import com.creed.resource.veracode.service.JiraLookupService;
 import com.creed.resource.veracode.service.JiraToken;
 import com.creed.resource.veracode.service.UploadedReportStore;
 import com.creed.resource.veracode.service.UpstreamException;
@@ -55,6 +56,12 @@ public class VeracodeExceptionHandler {
     @ExceptionHandler(JiraToken.RequiredException.class)
     ResponseEntity<Map<String, Object>> tokenRequired(JiraToken.RequiredException e) {
         return ResponseEntity.badRequest().body(body("jira_token_required", e.getMessage(), null));
+    }
+
+    /** The page points at its Jira field choices on this. */
+    @ExceptionHandler(JiraLookupService.FieldsRequiredException.class)
+    ResponseEntity<Map<String, Object>> fieldsRequired(JiraLookupService.FieldsRequiredException e) {
+        return ResponseEntity.badRequest().body(body("jira_fields_required", e.getMessage(), null));
     }
 
     @ExceptionHandler(UpstreamException.class)

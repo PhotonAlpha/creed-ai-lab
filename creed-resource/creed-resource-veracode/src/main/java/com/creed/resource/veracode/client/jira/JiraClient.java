@@ -15,15 +15,15 @@ import org.springframework.web.service.annotation.PostExchange;
  * {@code /project/{key}/versions}. Finding is therefore picker + get, the project's versions come from the
  * create metadata, and so does the "test connection".
  *
- * <p>Every method takes an {@code Authorization} value: the user's token from the page
- * ({@code JiraToken.authorization()}), or {@code null} for the client's configured default header - a
- * null optional header is not sent, and a sent one replaces the default.
+ * <p>Every method takes the {@code Authorization} value of the user's token from the page
+ * ({@code JiraToken.authorization()}). There is no service account behind it: the client has no default
+ * header, so whatever Jira does, it does as the user who asked.
  */
 @HttpExchange(url = "/rest/api/2/issue", accept = "application/json")
 public interface JiraClient {
 
     @PostExchange(contentType = "application/json")
-    JiraCreatedIssue createIssue(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    JiraCreatedIssue createIssue(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
                                  @RequestBody JiraCreateIssueRequest request);
 
     /**
@@ -31,20 +31,20 @@ public interface JiraClient {
      * Jira caps the result (it is an auto-complete), so the JQL is kept narrow - one finding per call.
      */
     @GetExchange("/picker")
-    JiraPickerResult picker(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    JiraPickerResult picker(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
                             @RequestParam String query,
                             @RequestParam String currentJQL,
                             @RequestParam boolean showSubTasks);
 
     /** @param fields comma-separated; the default would be every field, comments and all */
     @GetExchange("/{key}")
-    JiraIssue issue(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    JiraIssue issue(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
                     @PathVariable String key,
                     @RequestParam String fields);
 
     /** The issue types the caller may create in the project - empty without the Create Issues permission. */
     @GetExchange("/createmeta/{project}/issuetypes")
-    JiraPage<JiraIssueType> createIssueTypes(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    JiraPage<JiraIssueType> createIssueTypes(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
                                              @PathVariable String project,
                                              @RequestParam int startAt,
                                              @RequestParam int maxResults);
@@ -55,7 +55,7 @@ public interface JiraClient {
      * project does not have is a 400, not "no match".
      */
     @GetExchange("/createmeta/{project}/issuetypes/{issueTypeId}")
-    JiraPage<JiraFieldMeta> createFields(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    JiraPage<JiraFieldMeta> createFields(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
                                          @PathVariable String project,
                                          @PathVariable String issueTypeId,
                                          @RequestParam int startAt,

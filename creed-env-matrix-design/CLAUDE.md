@@ -162,6 +162,10 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 按 Jira 标题模糊匹配：CVE 出现在标题任意位置即可（忽略大小写和 `-` `_` 空格，但不会匹配更长的编号）；无 CVE 时标题的每个词都出现即可，不论顺序。
 - 创建 Jira 使用**用户自己的访问令牌**：页面「Jira 令牌」中配置并「测试连接」（显示令牌对应的用户、是否能访问项目），
   默认存 sessionStorage，勾选「记住」存 localStorage；随请求以 `X-Jira-Token` 发给后端，后端不保存。未配置时创建按钮不可用。
+  对话框先选 **Jira Cloud**（邮箱 + API 令牌，另带 `X-Jira-User`，后端以 Basic 认证）或 **Jira Data Center**（个人访问令牌，后端以 Bearer），两者都调用 REST API v2；`base-url` 为 `*.atlassian.net` 时默认选中 Cloud。
+  「测试连接」逐项显示检查结果（令牌 → 能否创建该问题类型 → 是否有影响版本字段 → 项目是否有版本），失败项给出在 Jira 中的修复方法；
+  问题类型可在对话框中选择（标出哪些类型有影响版本字段），随令牌保存，以 `X-Jira-Issue-Type` 发给后端，默认取 `veracode.jira.issue-type`。
+- 页面布局与 Ant Design Pro 默认一致：ProLayout `layout="mix"`，顶部标题栏 + 左侧可折叠菜单。
 - 创建的 Jira 标题按 `veracode.jira.summary-template`，默认 `{project} {component} {cve}`，`{project}` 为报告的 Veracode 应用名 `app_name`（如 `creed-platform spring-beans 5.3.17 CVE-2022-22965`）。
 - 表格可按关联 Jira 的属性过滤（状态 / 优先级 / 经办人 / 影响版本，多选），搜索框对 CVE、标题、组件、Jira 号与 Jira 标题做模糊匹配。
 - 支持导出 Excel。

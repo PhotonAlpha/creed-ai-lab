@@ -23,10 +23,12 @@ import {
 } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { CloudDownloadOutlined, ExperimentOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined } from '@ant-design/icons';
-import { UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
-import type { Analysis, CreateResult, Finding, FindingStatus, IssueRef, JiraConnection, VeracodeSettings } from '../../api/veracode';
+import { jiraAuthComplete, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
+import type {
+  Analysis, CreateField, CreateFieldValues, CreateResult, Finding, FindingStatus, IssueRef, JiraAuth, JiraConnection, VeracodeSettings,
+} from '../../api/veracode';
 import { JiraTokenModal } from './JiraTokenModal';
-import { jiraTokenStore } from './jiraToken';
+import { emptyAuth, jiraTokenStore } from './jiraToken';
 import { ApiError } from '../../api/client';
 import { useI18n } from '../../locales';
 import type { MessageKey } from '../../locales';
@@ -111,11 +113,38 @@ export function VeracodePage() {
   const [selected, setSelected] = useState<string[]>([]);
 
   const [jiraToken, setJiraToken] = useState(() => jiraTokenStore.load());
+  /** Nothing saved: an empty sign-in of the kind the backend suggests (Cloud for `*.atlassian.net`). */
+  const suggestCloud = !!settings?.cloud;
+  const auth = useMemo<JiraAuth>(
+    () => jiraToken.auth ?? emptyAuth(suggestCloud ? 'cloud' : 'dataCenter'),
+    [jiraToken.auth, suggestCloud],
+  );
   const [connection, setConnection] = useState<JiraConnection | null>(null);
   const [tokenOpen, setTokenOpen] = useState(false);
-  const token = jiraToken.token || undefined;
-  /** Creating is refused server-side without the user's token; the buttons say so first. */
-  const canCreate = !settings?.requireUserToken || !!token;
+  /** The page is shared: every Jira call goes with the user's own token, the backend has none to fall back on. */
+  const hasToken = jiraAuthComplete(auth);
+
+  /**
+   * What creating needs besides the finding (Component/s, required fields Jira has no default for), read with
+   * the user's token: from the analysis, else from the last connection test.
+   */
+  const createFields = useMemo<CreateField[]>(
+    () => analysis?.createFields ?? connection?.fields ?? [],
+    [analysis, connection],
+  );
+  const [fieldValues, setFieldValues] = useState<CreateFieldValues>({});
+  /** Jira's defaults preselected; a choice the user already made for the same field is kept. */
+  useEffect(() => {
+    setFieldValues((prev) => Object.fromEntries(createFields.map((f) => [
+      f.fieldId, prev[f.fieldId]?.length ? prev[f.fieldId] : f.defaults,
+    ])));
+  }, [createFields]);
+  const missingFields = createFields.filter((f) => f.required && !fieldValues[f.fieldId]?.length).map((f) => f.name);
+  /** Refused server-side otherwise; the buttons say why first. */
+  const canCreate = hasToken && missingFields.length === 0;
+  const createBlocked = !hasToken
+    ? t('veracode.token.needed')
+    : missingFields.length > 0 ? t('veracode.fields.missing', { names: missingFields.join(', ') }) : undefined;
 
   /** Guards against an older analysis resolving after a newer one (StrictMode double mount, fast clicks). */
   const requestId = useRef(0);
@@ -136,27 +165,38 @@ export function VeracodePage() {
     } catch (e) {
       if (current !== requestId.current) return;
       setAnalysis(null);
+      if (tokenMissing(e)) setTokenOpen(true);
       setError(e instanceof ApiError && e.body?.error === 'upload_expired' ? t('veracode.uploadExpired') : (e as Error).message);
     } finally {
       if (current === requestId.current) setLoading(false);
     }
   }, [message, t]);
 
+  /** Without a token nothing can be read either: the dialog opens instead of a request that would be refused. */
+  const withToken = useCallback((send: () => void) => {
+    if (!hasToken) {
+      setTokenOpen(true);
+      return;
+    }
+    send();
+  }, [hasToken]);
+
   const analyze = useCallback(
-    (uploadId: string, auto: boolean) => run(() => veracodeApi.analyze(uploadId, auto, token), auto),
-    [run, token],
+    (uploadId: string, auto: boolean) =>
+      withToken(() => void run(() => veracodeApi.analyze(uploadId, auth, auto, fieldValues), auto)),
+    [run, auth, withToken, fieldValues],
   );
 
   /** A token saved earlier is tested once on load, so the toolbar can name its user. */
   useEffect(() => {
-    if (!jiraToken.token) return;
-    veracodeApi.testConnection(jiraToken.token).then(setConnection).catch(() => setConnection(null));
+    if (!jiraToken.auth || !jiraAuthComplete(jiraToken.auth)) return;
+    veracodeApi.testConnection(jiraToken.auth).then(setConnection).catch(() => setConnection(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const saveToken = (value: string, remember: boolean, tested: JiraConnection | null) => {
+  const saveToken = (value: JiraAuth, remember: boolean, tested: JiraConnection | null) => {
     jiraTokenStore.save(value, remember);
-    setJiraToken({ token: value, remember });
+    setJiraToken({ auth: value, remember });
     setConnection(tested);
     setTokenOpen(false);
     if (!tested) {
@@ -166,7 +206,7 @@ export function VeracodePage() {
 
   const clearToken = () => {
     jiraTokenStore.clear();
-    setJiraToken({ token: '', remember: false });
+    setJiraToken({ auth: null, remember: false });
     setConnection(null);
     setTokenOpen(false);
   };
@@ -182,19 +222,19 @@ export function VeracodePage() {
       send();
     }
   };
-  const options = () => ({ affectedVersion: versionOverride, autoCreate: autoCreate && canCreate });
+  const options = () => ({ affectedVersion: versionOverride, autoCreate: autoCreate && canCreate, fields: fieldValues });
 
   /**
    * `false` keeps antd's Upload from posting the file itself; the page sends it so the result lands in
    * the same request-id guard as a re-analysis.
    */
   const beforeUpload = (file: File) => {
-    confirmed(() => void run(() => veracodeApi.analyzeUpload(file, options(), token), options().autoCreate));
+    withToken(() => confirmed(() => void run(() => veracodeApi.analyzeUpload(file, options(), auth), options().autoCreate)));
     return false;
   };
 
   const analyzeSample = () =>
-    confirmed(() => void run(() => veracodeApi.analyzeSample(options(), token), options().autoCreate));
+    withToken(() => confirmed(() => void run(() => veracodeApi.analyzeSample(options(), auth), options().autoCreate)));
 
   useEffect(() => {
     veracodeApi.settings().then(setSettings).catch((e: Error) => setError(e.message));
@@ -250,7 +290,7 @@ export function VeracodePage() {
     if (!analysis || ids.length === 0) return;
     setCreating(true);
     try {
-      const { results } = await veracodeApi.createIssues(analysis.report.id, ids, token);
+      const { results } = await veracodeApi.createIssues(analysis.report.id, ids, fieldValues, auth);
       applyResults(results);
     } catch (e) {
       if (tokenMissing(e)) setTokenOpen(true);
@@ -262,9 +302,13 @@ export function VeracodePage() {
 
   const exportXlsx = async () => {
     if (!analysis) return;
+    if (!hasToken) {
+      setTokenOpen(true);
+      return;
+    }
     setExporting(true);
     try {
-      const { blob, filename } = await veracodeApi.exportXlsx(analysis.report.id, token);
+      const { blob, filename } = await veracodeApi.exportXlsx(analysis.report.id, auth);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -394,8 +438,11 @@ export function VeracodePage() {
           <Button size="small" icon={<PlusCircleOutlined />} loading={creating}>{t('veracode.createOne')}</Button>
         </Popconfirm>
       ) : (
-        <Tooltip title={t('veracode.token.needed')}>
-          <Button size="small" icon={<KeyOutlined />} onClick={() => setTokenOpen(true)}>{t('veracode.createOne')}</Button>
+        <Tooltip title={createBlocked}>
+          <Button size="small" icon={hasToken ? <PlusCircleOutlined /> : <KeyOutlined />} disabled={hasToken}
+                  onClick={() => setTokenOpen(true)}>
+            {t('veracode.createOne')}
+          </Button>
         </Tooltip>
       )),
     },
@@ -417,7 +464,7 @@ export function VeracodePage() {
                 allowClear
               />
             </Tooltip>
-            <Tooltip title={canCreate ? undefined : t('veracode.token.needed')}>
+            <Tooltip title={createBlocked}>
               <Checkbox checked={autoCreate && canCreate} disabled={!canCreate} onChange={(e) => setAutoCreate(e.target.checked)}>
                 {t('veracode.autoCreate')}
               </Checkbox>
@@ -439,19 +486,25 @@ export function VeracodePage() {
             <Tooltip title={connection?.message ?? t('veracode.token.buttonHint')}>
               <Button icon={<KeyOutlined />} onClick={() => setTokenOpen(true)}>
                 {t('veracode.token.button')}
-                {!token
+                {!hasToken
                   ? <Tag color="default" style={{ marginInlineEnd: 0 }}>{t('veracode.token.unset')}</Tag>
                   : connection?.ok
                     ? <Tag color="success" style={{ marginInlineEnd: 0 }}>{t('veracode.token.valid')}</Tag>
-                    : connection
+                    : connection && !connection.tokenAccepted
                       ? <Tag color="error" style={{ marginInlineEnd: 0 }}>{t('veracode.token.bad')}</Tag>
-                      : <Tag color="processing" style={{ marginInlineEnd: 0 }}>{t('veracode.token.set')}</Tag>}
+                      : connection
+                        // the token is fine; the issue type or the project is not (the dialog says what)
+                        ? <Tag color="warning" style={{ marginInlineEnd: 0 }}>{t('veracode.token.attention')}</Tag>
+                        : <Tag color="processing" style={{ marginInlineEnd: 0 }}>{t('veracode.token.set')}</Tag>}
               </Button>
             </Tooltip>
             {settings?.mock && (
               <Tooltip title={t('veracode.mockHint')}><Tag color="purple">{t('veracode.mock')}</Tag></Tooltip>
             )}
           </Space>
+          {createFields.length > 0 && (
+            <JiraFieldsBar fields={createFields} values={fieldValues} onChange={setFieldValues} />
+          )}
           <Upload.Dragger
             accept={UPLOAD_ACCEPT}
             maxCount={1}
@@ -558,7 +611,7 @@ export function VeracodePage() {
                 onChange={(e) => !e.target.value && setKeyword('')}
                 style={{ width: 280 }}
               />
-              <Tooltip title={canCreate ? undefined : t('veracode.token.needed')}>
+              <Tooltip title={createBlocked}>
                 <span>
                   <Popconfirm
                     title={t('veracode.createSelectedConfirm', { count: selected.length, project: analysis?.projectKey ?? '' })}
@@ -571,7 +624,7 @@ export function VeracodePage() {
                   </Popconfirm>
                 </span>
               </Tooltip>
-              <Tooltip title={canCreate ? undefined : t('veracode.token.needed')}>
+              <Tooltip title={createBlocked}>
                 <span>
                   <Popconfirm
                     title={t('veracode.createSelectedConfirm', { count: missingCreatable.length, project: analysis?.projectKey ?? '' })}
@@ -637,7 +690,8 @@ export function VeracodePage() {
       </Space>
       <JiraTokenModal
         open={tokenOpen}
-        token={jiraToken.token}
+        auth={auth}
+        saved={!!jiraToken.auth}
         remember={jiraToken.remember}
         jiraBaseUrl={settings?.jiraBaseUrl}
         mock={settings?.mock}
@@ -647,5 +701,62 @@ export function VeracodePage() {
         onCancel={() => setTokenOpen(false)}
       />
     </PageContainer>
+  );
+}
+
+/**
+ * The create screen's fields this page fills (Component/s, required fields without a Jira default). Options come
+ * from Jira through the user's token; values are option ids, or the typed text.
+ */
+function JiraFieldsBar({ fields, values, onChange }: {
+  fields: CreateField[];
+  values: CreateFieldValues;
+  onChange: (values: CreateFieldValues) => void;
+}) {
+  const { t } = useI18n();
+  const set = (fieldId: string, value: string[]) => onChange({ ...values, [fieldId]: value });
+  return (
+    <Space wrap align="center" style={{ marginTop: 16 }}>
+      <Tooltip title={t('veracode.fields.hint')}>
+        <Text strong>{t('veracode.fields.title')}</Text>
+      </Tooltip>
+      {fields.map((f) => {
+        const value = values[f.fieldId] ?? [];
+        const label = <Text>{f.required && <Text type="danger">* </Text>}{f.name}</Text>;
+        const control = f.kind === 'OPTIONS' ? (
+          <Select
+            mode={f.multiple ? 'multiple' : undefined}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            maxTagCount="responsive"
+            status={f.required && value.length === 0 ? 'warning' : undefined}
+            value={f.multiple ? value : value[0]}
+            onChange={(v: string | string[] | undefined) => set(f.fieldId, v == null ? [] : Array.isArray(v) ? v : [v])}
+            options={f.options.map((o) => ({ value: o.id, label: o.label }))}
+            placeholder={t('veracode.fields.choose', { name: f.name })}
+            style={{ minWidth: 200 }}
+          />
+        ) : f.multiple ? (
+          <Select
+            mode="tags"
+            value={value}
+            onChange={(v: string[]) => set(f.fieldId, v)}
+            status={f.required && value.length === 0 ? 'warning' : undefined}
+            placeholder={t('veracode.fields.type', { name: f.name })}
+            style={{ minWidth: 200 }}
+          />
+        ) : (
+          <Input
+            value={value[0] ?? ''}
+            onChange={(e) => set(f.fieldId, e.target.value.trim() ? [e.target.value] : [])}
+            status={f.required && value.length === 0 ? 'warning' : undefined}
+            placeholder={t(f.kind === 'USER' ? 'veracode.fields.user' : 'veracode.fields.type', { name: f.name })}
+            style={{ width: 200 }}
+          />
+        );
+        return <Space key={f.fieldId} size={4}>{label}{control}</Space>;
+      })}
+    </Space>
   );
 }

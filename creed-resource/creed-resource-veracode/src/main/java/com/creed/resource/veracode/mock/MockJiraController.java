@@ -37,10 +37,14 @@ import java.util.regex.Pattern;
  * unquoted one plain words in any order), the {@code query} matches word starts or the key, and the result
  * is capped at {@value #PICKER_LIMIT}. createmeta pages honour {@code startAt}/{@code maxResults}.
  *
- * <p>Authentication, as far as the page's token needs it: creating needs a {@code Bearer} token, and the
- * token {@value #REJECTED_TOKEN} is refused (401) everywhere, so a failed "test connection" can be seen; the
- * reporter is named after the token's last characters. Everything else accepts anonymous calls - the
- * service's configured auth is NONE against the mock.
+ * <p>The create screen is a strict one, as on the Jira this was written against: Affects Version/s, Component/s
+ * (components {@link #COMPONENTS}) and a custom single select {@value #ENVIRONMENT_FIELD} "Environment Found"
+ * ({@link #ENVIRONMENTS}) are required, and a create without them is Jira's 400. Components and options are named
+ * by id in a create, as real Jira takes them.
+ *
+ * <p>Authentication: every call needs a {@code Bearer} token (Data Center) or {@code Basic} e-mail + API token
+ * (Cloud), as on a Jira without anonymous access - the service has no account of its own. The token {@value #REJECTED_TOKEN} is refused (401), so a failed "test
+ * connection" can be seen; the reporter is named after the token's last characters.
  */
 @RestController
 @RequestMapping("/mock/jira")
@@ -52,11 +56,29 @@ public class MockJiraController {
     private static final Pattern PROJECT = Pattern.compile("project\\s*=\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
     private static final Pattern VERSION = Pattern.compile("affectedVersion\\s*=\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
     private static final Pattern SUMMARY = Pattern.compile("summary\\s*~\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
-    /** id -> name, as createmeta lists them. */
-    private static final Map<String, String> ISSUE_TYPES = new LinkedHashMap<>(Map.of(
-            "1", "Bug", "3", "Task", "10001", "Story", "10100", "Vulnerability"));
     static final String REJECTED_TOKEN = "invalid";
     static final int PICKER_LIMIT = 20;
+    static final List<String> COMPONENTS = List.of("Security", "Platform", "Payments");
+    static final String ENVIRONMENT_FIELD = "customfield_10100";
+    /** option id -> value */
+    static final Map<String, String> ENVIRONMENTS = new LinkedHashMap<>();
+    /**
+     * Task's create screen has no Affects Version/s, as in a Jira Cloud Scrum project: the connection test must say
+     * so (and offer the other types) instead of failing as "cannot create".
+     */
+    static final String NO_VERSIONS_TYPE = "3";
+
+    /** id -> name, as createmeta lists them (insertion order: {@code Map.of} has none). */
+    private static final Map<String, String> ISSUE_TYPES = new LinkedHashMap<>();
+
+    static {
+        ENVIRONMENTS.put("10200", "Production");
+        ENVIRONMENTS.put("10201", "Staging");
+        ISSUE_TYPES.put("1", "Bug");
+        ISSUE_TYPES.put("3", "Task");
+        ISSUE_TYPES.put("10001", "Story");
+        ISSUE_TYPES.put("10100", "Vulnerability");
+    }
 
     private final MockJiraStore store;
 
@@ -65,7 +87,7 @@ public class MockJiraController {
                                  @PathVariable String project,
                                  @RequestParam(defaultValue = "0") int startAt,
                                  @RequestParam(defaultValue = "50") int maxResults) {
-        if (rejected(authorization)) {
+        if (user(authorization) == null) {
             return unauthorized();
         }
         if (!MockJiraStore.PROJECT.equalsIgnoreCase(project)) {
@@ -82,7 +104,7 @@ public class MockJiraController {
                                    @PathVariable String project, @PathVariable String issueTypeId,
                                    @RequestParam(defaultValue = "0") int startAt,
                                    @RequestParam(defaultValue = "50") int maxResults) {
-        if (rejected(authorization)) {
+        if (user(authorization) == null) {
             return unauthorized();
         }
         if (!MockJiraStore.PROJECT.equalsIgnoreCase(project)) {
@@ -97,14 +119,22 @@ public class MockJiraController {
             versions.add(Map.of("id", String.valueOf(++id), "name", name, "released", !"2.4.0".equals(name),
                     "archived", false));
         }
-        List<Map<String, Object>> fields = List.of(
-                field("summary", "Summary", true, null),
-                field("issuetype", "Issue Type", true, null),
-                field("project", "Project", true, null),
-                field("description", "Description", false, null),
-                field("versions", "Affects Version/s", false, versions),
-                field("labels", "Labels", false, null),
-                field("priority", "Priority", false, null));
+        List<Map<String, Object>> fields = new ArrayList<>(List.of(
+                field("summary", "Summary", true, schema("string", null, "summary", null), null),
+                field("issuetype", "Issue Type", true, schema("issuetype", null, "issuetype", null), null),
+                field("project", "Project", true, schema("project", null, "project", null), null),
+                field("description", "Description", false, schema("string", null, "description", null), null),
+                field("versions", "Affects Version/s", true, schema("array", "version", "versions", null), versions),
+                field("components", "Component/s", true, schema("array", "component", "components", null),
+                        componentValues()),
+                field(ENVIRONMENT_FIELD, "Environment Found", true,
+                        schema("option", null, null, "com.atlassian.jira.plugin.system.customfieldtypes:select"),
+                        environmentValues()),
+                field("labels", "Labels", false, schema("array", "string", "labels", null), null),
+                field("priority", "Priority", false, schema("priority", null, "priority", null), null)));
+        if (NO_VERSIONS_TYPE.equals(issueTypeId)) {
+            fields.removeIf(f -> "versions".equals(f.get("fieldId")));
+        }
         return ResponseEntity.ok(page(fields, startAt, maxResults));
     }
 
@@ -112,7 +142,7 @@ public class MockJiraController {
     ResponseEntity<?> picker(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
                              @RequestParam(defaultValue = "") String query,
                              @RequestParam(defaultValue = "") String currentJQL) {
-        if (rejected(authorization)) {
+        if (user(authorization) == null) {
             return unauthorized();
         }
         Matcher project = PROJECT.matcher(currentJQL);
@@ -164,7 +194,7 @@ public class MockJiraController {
     @GetMapping("/rest/api/2/issue/{key}")
     ResponseEntity<?> issue(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
                             @PathVariable String key) {
-        if (rejected(authorization)) {
+        if (user(authorization) == null) {
             return unauthorized();
         }
         MockJiraStore.Issue issue = store.find(key);
@@ -196,6 +226,9 @@ public class MockJiraController {
         } else if (summary.length() > 255) {
             errors.put("summary", "Summary must be less than 255 characters.");
         }
+        if (ISSUE_TYPES.get(NO_VERSIONS_TYPE).equalsIgnoreCase(issueType) && fields.has("versions")) {
+            errors.put("versions", "Field 'versions' cannot be set. It is not on the appropriate screen, or unknown.");
+        }
         List<String> versions = new ArrayList<>();
         for (JsonNode version : fields.path("versions")) {
             String name = version.path("name").asString();
@@ -204,13 +237,32 @@ public class MockJiraController {
             }
             versions.add(name);
         }
+        if (versions.isEmpty()) {
+            errors.put("versions", "Affects Version/s is required.");
+        }
+        List<String> components = new ArrayList<>();
+        for (JsonNode component : fields.path("components")) {
+            String name = componentName(component);
+            if (name == null) {
+                errors.put("components", "Component with id '" + component.path("id").asString("") + "' is not valid");
+            } else {
+                components.add(name);
+            }
+        }
+        if (components.isEmpty() && !errors.containsKey("components")) {
+            errors.put("components", "Component/s is required.");
+        }
+        String environment = ENVIRONMENTS.get(fields.path(ENVIRONMENT_FIELD).path("id").asString(""));
+        if (environment == null) {
+            errors.put(ENVIRONMENT_FIELD, "Environment Found is required.");
+        }
         if (!errors.isEmpty()) {
             return error(HttpStatus.BAD_REQUEST, null, errors);
         }
         List<String> labels = new ArrayList<>();
         fields.path("labels").forEach(l -> labels.add(l.asString()));
-        MockJiraStore.Issue issue = store.create(summary, fields.path("description").asString(null), versions, labels,
-                reporter);
+        MockJiraStore.Issue issue = store.create(summary, fields.path("description").asString(null), versions,
+                components, environment, labels, reporter, issueType);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "id", String.valueOf(issue.id()), "key", issue.key(), "self", self(issue)));
     }
@@ -226,6 +278,8 @@ public class MockJiraController {
                 + "</title><p><i>mock Jira</i></p><h1>" + HtmlUtils.htmlEscape(issue.key()) + " "
                 + HtmlUtils.htmlEscape(issue.summary()) + "</h1><p>Status: " + HtmlUtils.htmlEscape(issue.status())
                 + " &middot; Affects: " + HtmlUtils.htmlEscape(String.join(", ", issue.versions()))
+                + " &middot; Components: " + HtmlUtils.htmlEscape(String.join(", ", issue.components()))
+                + " &middot; Environment Found: " + HtmlUtils.htmlEscape(String.valueOf(issue.environment()))
                 + " &middot; Labels: " + HtmlUtils.htmlEscape(String.join(", ", issue.labels()))
                 + (issue.reporter() == null ? "" : " &middot; Reporter: " + HtmlUtils.htmlEscape(issue.reporter()))
                 + "</p><pre>"
@@ -240,17 +294,63 @@ public class MockJiraController {
         fields.put("status", Map.of("name", issue.status()));
         fields.put("versions", issue.versions().stream().map(v -> Map.of("name", v)).toList());
         fields.put("labels", issue.labels());
+        fields.put("components", issue.components().stream().map(c -> Map.of("name", c)).toList());
+        fields.put(ENVIRONMENT_FIELD, issue.environment() == null ? null : Map.of("value", issue.environment()));
         fields.put("priority", issue.priority() == null ? null : Map.of("name", issue.priority()));
         fields.put("assignee", issue.assignee() == null ? null
                 : Map.of("name", issue.assignee().toLowerCase().replace(' ', '.'), "displayName", issue.assignee()));
         return Map.of("id", String.valueOf(issue.id()), "key", issue.key(), "self", self(issue), "fields", fields);
     }
 
-    private static Map<String, Object> field(String id, String name, boolean required, List<?> allowedValues) {
+    private static List<Map<String, Object>> componentValues() {
+        List<Map<String, Object>> values = new ArrayList<>();
+        int id = 30_000;
+        for (String name : COMPONENTS) {
+            values.add(Map.of("id", String.valueOf(++id), "name", name));
+        }
+        return values;
+    }
+
+    private static List<Map<String, Object>> environmentValues() {
+        List<Map<String, Object>> values = new ArrayList<>();
+        ENVIRONMENTS.forEach((id, value) -> values.add(Map.of("id", id, "value", value)));
+        return values;
+    }
+
+    /** By id (what the service sends) or name. */
+    private static String componentName(JsonNode component) {
+        String id = component.path("id").asString(null);
+        if (id != null) {
+            int index = Integer.parseInt(id) - 30_001;
+            return index >= 0 && index < COMPONENTS.size() ? COMPONENTS.get(index) : null;
+        }
+        String name = component.path("name").asString(null);
+        return COMPONENTS.contains(name) ? name : null;
+    }
+
+    private static Map<String, Object> schema(String type, String items, String system, String custom) {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", type);
+        if (items != null) {
+            schema.put("items", items);
+        }
+        if (system != null) {
+            schema.put("system", system);
+        }
+        if (custom != null) {
+            schema.put("custom", custom);
+        }
+        return schema;
+    }
+
+    private static Map<String, Object> field(String id, String name, boolean required, Map<String, Object> schema,
+                                             List<?> allowedValues) {
         Map<String, Object> field = new LinkedHashMap<>();
         field.put("fieldId", id);
         field.put("name", name);
         field.put("required", required);
+        field.put("hasDefaultValue", false);
+        field.put("schema", schema);
         if (allowedValues != null) {
             field.put("allowedValues", allowedValues);
         }
@@ -270,15 +370,27 @@ public class MockJiraController {
         return page;
     }
 
-    /** The refused token was sent (any other header, or none, is let through). */
-    private static boolean rejected(String authorization) {
-        return authorization != null && authorization.startsWith("Bearer ")
-                && authorization.substring("Bearer ".length()).trim().equals(REJECTED_TOKEN);
-    }
-
     /** The login a Bearer token stands for, {@code null} = no token or the rejected one. */
     private static String user(String authorization) {
-        if (authorization == null || !authorization.startsWith("Bearer ")) {
+        if (authorization == null) {
+            return null;
+        }
+        if (authorization.startsWith("Basic ")) {
+            // Cloud style: base64(email:apiToken); the user is the e-mail
+            String decoded;
+            try {
+                decoded = new String(java.util.Base64.getDecoder().decode(authorization.substring("Basic ".length()).trim()),
+                        java.nio.charset.StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException e) {
+                return null;
+            }
+            int colon = decoded.indexOf(':');
+            if (colon <= 0 || decoded.substring(colon + 1).isBlank() || decoded.substring(colon + 1).equals(REJECTED_TOKEN)) {
+                return null;
+            }
+            return decoded.substring(0, colon);
+        }
+        if (!authorization.startsWith("Bearer ")) {
             return null;
         }
         String token = authorization.substring("Bearer ".length()).trim();

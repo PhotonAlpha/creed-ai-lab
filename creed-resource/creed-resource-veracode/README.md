@@ -54,13 +54,43 @@ CVE, and a wiki-markup description naming the Veracode application, scan and pol
 
 ## Jira token
 
-Issues are created with **the user's own Jira access token** (Data Center personal access token), set on
-the page and sent per request as `X-Jira-Token` → `Authorization: Bearer` to Jira. The service never stores
-it. Without it, create (and `autoCreate`) answer 400 `jira_token_required`
-(`veracode.jira.require-user-token: false` falls back to the configured `veracode.jira.auth`). Searches use
-the token when sent, else the configured auth. `POST /api/veracode/jira/connection` tests it on the create
-metadata: whether Jira accepts it, may create the issue type in the project, and how many versions it can be
-filed against (no user name — the issue resource has no "who am I").
+The page is shared, and the service has **no Jira account of its own**: every Jira call — lookups, the create
+metadata, creating — uses **the user's own Jira sign-in**, typed on the page and sent per request. The page asks
+which Jira it is; both go through the same REST API v2 resources:
+
+| Page choice | Headers to this service | To Jira |
+|---|---|---|
+| Jira Cloud | `X-Jira-Token` = API token, `X-Jira-User` = Atlassian account e-mail | `Authorization: Basic base64(email:token)` |
+| Jira Data Center | `X-Jira-Token` = personal access token | `Authorization: Bearer <token>` |
+
+The kind travels with the token (an e-mail present = Cloud), not with the configuration: the dialog only
+preselects Cloud when `base-url` is `*.atlassian.net`. On Cloud a user field takes an `accountId` instead of a
+name, and the create metadata pages its items as `issueTypes` / `fields` instead of `values` (both read). A Cloud
+API token "with scopes" is not accepted on `https://<site>.atlassian.net` — use a classic API token.
+
+**Issue type and the connection test.** `veracode.jira.issue-type` is only the default: the page lets each user pick
+one, sent as `X-Jira-Issue-Type` with the token (lookups read that type's versions, creating files as it). The test
+answers check by check — `problem` is the first that failed: `UNREACHABLE`, `TOKEN_REJECTED` (401), `PROJECT`
+(other Jira error), `ISSUE_TYPE` (not creatable), `AFFECTS_VERSION` (not on the type's create screen — common for
+Task in Jira Cloud Scrum projects), `NO_VERSIONS` — and lists every creatable type (`issueTypes`) with whether it has
+Affects Version/s, so the page can offer one that works. That costs one paged createmeta call per issue type, on the
+test only; analyses read just the chosen one. So each user sees what they
+may see and files issues as themselves (reporter = the token's owner). The service never stores it. Without it
+every endpoint except `/settings` answers 400 `jira_token_required`. `POST /api/veracode/jira/connection` tests
+it on the create metadata: whether Jira accepts it, may create the issue type in the project, how many versions
+it can be filed against, and which fields the page has to ask for (no user name — the issue resource has no
+"who am I").
+
+## Required Jira fields
+
+The create screen decides what else a new issue needs. Read with the user's token, `createFields` (in every
+analysis, and `fields` in the connection test) lists **Component/s** and every **required field without a Jira
+default** that the service does not set itself (it always sets project, issue type, summary, description,
+Affects Version/s, labels). Each has `kind` OPTIONS (with Jira's `options`) / USER / NUMBER / TEXT, `multiple`,
+and `defaults` — Jira's default, else the only option of a required field — which the page preselects. Create
+and `autoCreate` take the choices as `fields` (`{"components": ["Security"], "customfield_10100": "Production"}`;
+an option by id or label, any case); they are checked against the screen first: a required field left empty is
+400 `jira_fields_required`, an unknown option 400 `bad_request`, before anything is created.
 
 ## Configuration
 

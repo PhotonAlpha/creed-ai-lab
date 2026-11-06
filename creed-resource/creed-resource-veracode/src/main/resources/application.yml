@@ -32,27 +32,23 @@ veracode:
     # Only the issue resource (/rest/api/2/issue/**) is called: picker + get to find, createmeta for versions and
     # the connection test, POST to create. Apache HttpClient 5 underneath.
     # TLS to Jira is NOT verified - no certificate check, no hostname check (asked for; TrustAllTls).
-    base-url: ${CREED_JIRA_URL:http://localhost:${server.port}/mock/jira}
-    project-key: ${CREED_JIRA_PROJECT:CREED}
-    issue-type: ${CREED_JIRA_ISSUE_TYPE:Bug}
+    base-url: "https://ethancaoq.atlassian.net"
+    project-key: DT
+    issue-type: Defect
     # Created issue title. {project} = the report's Veracode app_name (the project key when it has none),
     # {jiraProject} = project-key, {component} = the finding's components, {cve} = the CVE (the advisory id
     # when there is none); {title} and {version} also work. Lookup never reads it: an issue is matched by its
     # CVE (or title words) anywhere in the summary, so changing it does not lose existing issues.
     summary-template: ${CREED_JIRA_SUMMARY_TEMPLATE:{project} {component} {cve}}
-    # Creating needs the user's own access token, configured on the page and sent as X-Jira-Token (Bearer to
-    # Jira). Searches use it when sent and fall back to auth below.
-    require-user-token: ${CREED_JIRA_REQUIRE_USER_TOKEN:true}
+    # No Jira account here: every call (lookup, createmeta, create) uses the token the user typed on the page,
+    # sent as X-Jira-Token. The page asks Cloud or Data Center: Cloud adds the Atlassian e-mail (X-Jira-User) and
+    # goes to Jira as Basic base64(email:token), Data Center's personal access token as Bearer. Both REST API v2.
+    # Without a token a request is 400 jira_token_required.
     labels: [veracode]
-    browse-url: ${CREED_JIRA_BROWSE_URL:http://localhost:${server.port}/mock/jira/browse/{key}}
+    browse-url: https://ethancaoq.atlassian.net/browse/DT-4/{key}
     # maxResults of the paged createmeta calls (issue types / fields of the issue type)
     page-size: 50
     max-connections: 20
-    auth:
-      # NONE | BEARER (Data Center PAT) | BASIC (Cloud: e-mail + API token)
-      type: ${CREED_JIRA_AUTH:NONE}
-      username: ${CREED_JIRA_USER:}
-      token: ${CREED_JIRA_TOKEN:}
     connect-timeout: 5s
     read-timeout: 20s
 

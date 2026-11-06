@@ -3,8 +3,12 @@ package com.creed.resource.veracode.api.dto;
 /**
  * What the page shows about where it reads from and writes to. No credentials.
  *
- * @param requireUserToken creating Jira issues needs the user's token ({@code X-Jira-Token})
+ * Every Jira call needs the user's own token ({@code X-Jira-Token}); there is no service account to fall back on.
+ *
+ * @param cloud the deployment the token dialog preselects (Jira Cloud when the base URL is {@code *.atlassian.net});
+ *              the user can switch it - Cloud sends the Atlassian e-mail too ({@code X-Jira-User}, Basic auth),
+ *              Data Center a personal access token alone (Bearer)
  */
 public record VeracodeSettings(String projectKey, String issueType, String jiraBaseUrl, boolean mock,
-                               String summaryTemplate, boolean requireUserToken) {
+                               String summaryTemplate, boolean cloud) {
 }

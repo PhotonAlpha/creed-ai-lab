@@ -19,7 +19,7 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   `GET /issue/createmeta/{project}/issuetypes[/{id}]`. `config/RemoteClientsConfiguration` builds its `RestClient`
   from Boot's prototype `RestClient.Builder` on **Apache HttpClient 5** (`jiraConnectionManager` pool bean,
   `destroyMethod=close` + `setConnectionManagerShared`; **no redirects, no cookies**; `TrustAllTls` + `CLIENT` /
-  `NoopHostnameVerifier`), default `Authorization` from `RemoteAuth` NONE/BEARER/BASIC. Static `jiraClient(RestClient)` lets tests put the same
+  `NoopHostnameVerifier`), **no default `Authorization`**. Static `jiraClient(RestClient)` lets tests put the same
   proxy on another transport.
 - `service/VeracodeXmlParser` (StAX) → `ReportRow`s (affected version filled in once known: root `version` or
   the upload's override) → `UploadedReportStore` → `domain/Finding.group` → `service/JiraLookupService`
@@ -53,11 +53,27 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   Never put an unknown version into JQL — Jira 400s. Unknown → `jiraVersion: null`, not searched, not creatable.
   Issue type not creatable / no *Affects Version/s* field → `UpstreamException.setup` (502 with the reason).
 - **Test connection = the create metadata** (`Connection`: `tokenAccepted` = answered and not 401, `canCreate`,
-  `issueType`, `versions`) — no user name, the issue resource has no "who am I".
-- **The user's Jira token** (`service/JiraToken`, header `X-Jira-Token`) is passed into every `JiraClient`
-  method as an optional `Authorization` argument — null keeps the configured default header, so searches
-  still work without one; create requires it (`require-user-token`, 400 `jira_token_required`). Never log it,
-  never store it server-side. The page keeps it in sessionStorage (localStorage when "remember").
+  `issueType`, `versions`, `fields` = what the page asks for) — no user name, the issue resource has no "who am I".
+- **The user's Jira token is the only identity** (`service/JiraToken`, header `X-Jira-Token`; since 2026-11-06, asked
+  for: a shared page, each user as themselves). Every `JiraClient` method has a *required* `Authorization`
+  argument, every service entry calls `token.require()` (400 `jira_token_required`). Don't reintroduce a service
+  account or a fallback header — reads would then show one account's view and the reporter would be wrong. Never
+  log it (Logbook masks `Authorization`), never store it server-side. The page keeps it in sessionStorage
+  (localStorage when "remember"), as JSON `{deployment, token, email}` (a bare string = an old DC token).
+- **Cloud vs Data Center is the token's, not the config's**: `X-Jira-User` (e-mail) present → `Basic
+  base64(email:token)` and `CreateMeta.cloud` (user fields → `accountId`); absent → `Bearer`. Cloud answers an API
+  token sent as Bearer with a bare 401. Both stay on `/rest/api/2/issue/**` (v2 takes a plain-text description; v3
+  would need ADF). Cloud's createmeta pages say `issueTypes` / `fields` — `JiraPage`'s `@JsonAlias`.
+- **Issue type is the page's** (`X-Jira-Issue-Type` → `JiraToken.issueType`, `issueTypeOr(config)`), so every
+  service entry sees it with no extra parameter. A type without Affects Version/s is a named check
+  (`Problem.AFFECTS_VERSION`), never a generic failure — don't fold the checks back into one message. Sub-task
+  types are filtered out (no parent to create them under).
+- **Required create fields come from the page** (`service/CreateField`, `JiraLookupService.resolveFields`): Component/s
+  plus every `required && !hasDefaultValue` field outside `FILLED` (project, issuetype, summary, description,
+  versions, labels). Options are by id in Jira's JSON (`{"id": ...}`; a list when `schema.type = array`), users
+  `{"name": ...}`; the API also takes an option's label. Checked before the first create — never let a missing field
+  turn into one FAILED per finding. A required field must not fail createmeta / the connection test: reading needs
+  none of them. The mock's screen (versions, components, `customfield_10100`) is pinned by `VeracodeApiTest`.
 - **Summary = `summary-template`** (`{project} {component} {cve}`; `{project}` = the report's `app_name`, else the
   Jira key; `{jiraProject}` = the key; `{cve}` = title without a CVE). Matching
   must never depend on it: a CVE is found anywhere in a summary, separators / case ignored, not inside a

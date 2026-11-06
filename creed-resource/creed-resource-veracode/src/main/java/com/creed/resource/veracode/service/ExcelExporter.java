@@ -2,17 +2,21 @@ package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.api.dto.AnalysisResponse;
 import com.creed.resource.veracode.api.dto.FindingView;
+import com.creed.resource.veracode.domain.Severity;
 import com.creed.resource.veracode.service.JiraLookupService.IssueRef;
 import org.apache.poi.common.usermodel.HyperlinkType;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.CreationHelper;
+import org.apache.poi.ss.usermodel.FillPatternType;
 import org.apache.poi.ss.usermodel.Font;
 import org.apache.poi.ss.usermodel.Hyperlink;
 import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.util.CellRangeAddress;
+import org.apache.poi.xssf.usermodel.XSSFCellStyle;
+import org.apache.poi.xssf.usermodel.XSSFColor;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Component;
 
@@ -39,6 +43,12 @@ public class ExcelExporter {
             "Affected version", "Jira version", "Fixed version", "Jira issue(s)", "Jira status", "Component file",
             "Description"};
     private static final int[] WIDTHS = {12, 18, 48, 36, 12, 8, 16, 14, 16, 22, 16, 20, 60};
+    /**
+     * Severity cell fill by {@link Severity#rank} (Informational 0 ... Very High 5): the hues of the page's severity
+     * tags (blue, gold, orange, volcano, red), at a lightness that keeps black text readable and survives printing.
+     * Unrecognised severities stay unfilled.
+     */
+    private static final String[] SEVERITY_FILL = {"F0F0F0", "BAE0FF", "FFE58F", "FFD591", "FFBB96", "FFA39E"};
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'")
             .withZone(ZoneOffset.UTC);
 
@@ -49,6 +59,7 @@ public class ExcelExporter {
             CellStyle link = linkStyle(wb);
             CellStyle wrap = wb.createCellStyle();
             wrap.setWrapText(true);
+            CellStyle[] severity = severityStyles(wb);
 
             Sheet sheet = wb.createSheet("Findings");
             Row head = sheet.createRow(0);
@@ -71,7 +82,12 @@ public class ExcelExporter {
                 }
                 row.createCell(c++).setCellValue(nullToEmpty(f.title()));
                 row.createCell(c++).setCellValue(String.join(", ", f.components()));
-                row.createCell(c++).setCellValue(nullToEmpty(f.severity()));
+                Cell level = row.createCell(c++);
+                level.setCellValue(nullToEmpty(f.severity()));
+                int rank = Severity.rank(f.severity());
+                if (rank >= 0) {
+                    level.setCellStyle(severity[rank]);
+                }
                 Cell cvss = row.createCell(c++);
                 if (f.cvss() != null) {
                     cvss.setCellValue(f.cvss());
@@ -137,6 +153,23 @@ public class ExcelExporter {
         Hyperlink link = helper.createHyperlink(HyperlinkType.URL);
         link.setAddress(address);
         return link;
+    }
+
+    /** One style per level - a workbook holds at most 64000 styles, so never one per cell. */
+    private static CellStyle[] severityStyles(XSSFWorkbook wb) {
+        Font bold = wb.createFont();
+        bold.setBold(true);
+        CellStyle[] styles = new CellStyle[SEVERITY_FILL.length];
+        for (int rank = 0; rank < styles.length; rank++) {
+            XSSFCellStyle style = wb.createCellStyle();
+            style.setFillForegroundColor(new XSSFColor(java.util.HexFormat.of().parseHex(SEVERITY_FILL[rank])));
+            style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            if (rank >= 4) {
+                style.setFont(bold);
+            }
+            styles[rank] = style;
+        }
+        return styles;
     }
 
     private static CellStyle headerStyle(XSSFWorkbook wb) {

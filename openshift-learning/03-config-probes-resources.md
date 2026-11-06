@@ -387,7 +387,7 @@ SanitizingFunction maskSecrets() {
 ```
 
 - 链式的 `ifXxx` 之间是**或**的关系：命中任意一条就遮住。键的匹配**不区分大小写**，
-  所以环境变量 `CREED_JIRA_TOKEN`、configprops 里的 `veracode.jira.auth.token`、configtree 文件 `veracode.ssl.password` 都会被遮住。
+  所以环境变量 `CREED_VERACODE_SSL_PASSWORD`、configtree 文件 `veracode.ssl.password` 这类键都会被遮住（Jira 令牌已不在配置里：每个用户在页面填自己的）。
 - **为什么不用现成的 `ifLikelySensitive()`**：它的后缀规则里有 `key`、`url`、`address`，
   会把 `veracode.jira.project-key` 和所有 base URL 一起遮住，而这些恰好是排查时最需要看的值。用之前先看它到底匹配哪些键。
 - 自定义函数先执行；没被它遮住的值，再由 `show-values` 决定是否显示。所以 `always` 加上这个函数，效果就是「敏感值遮住、其余明文」。

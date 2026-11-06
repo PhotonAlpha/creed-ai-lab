@@ -75,6 +75,8 @@ export interface Analysis {
   report: ReportView;
   projectKey: string;
   jiraVersions: string[];
+  /** What creating needs from the page, read through the user's token. */
+  createFields: CreateField[];
   findings: Finding[];
   warnings: string[];
   counts: AnalysisCounts;
@@ -97,12 +99,41 @@ export interface VeracodeSettings {
   mock: boolean;
   /** Created issue title, e.g. `{project} {component} {cve}`. */
   summaryTemplate: string;
-  /** Creating issues needs the user's own Jira token (sent as `X-Jira-Token`). */
-  requireUserToken: boolean;
+  /** The deployment the token dialog preselects (the base URL is `*.atlassian.net`); the user can switch it. */
+  cloud: boolean;
 }
 
-/** `POST /jira/connection`: a rejected token is `ok: false` with Jira's status, not an error. */
 /**
+ * A create-screen field the page asks for (Component/s, required fields Jira has no default for), read with
+ * the user's token — so the options are the ones that user may choose. `defaults` are preselected: Jira's
+ * default, else the only option of a required field (option ids for OPTIONS).
+ */
+export interface CreateField {
+  fieldId: string;
+  name: string;
+  required: boolean;
+  kind: 'OPTIONS' | 'USER' | 'NUMBER' | 'TEXT';
+  multiple: boolean;
+  options: { id: string; label: string }[];
+  defaults: string[];
+}
+
+/** fieldId -> option ids (OPTIONS) or the typed value(s). */
+export type CreateFieldValues = Record<string, string[]>;
+
+/** The connection test's checks in order; `problem` names the first that failed. */
+export type JiraProblem = 'UNREACHABLE' | 'TOKEN_REJECTED' | 'PROJECT' | 'ISSUE_TYPE' | 'AFFECTS_VERSION' | 'NO_VERSIONS';
+
+/** An issue type the token may create, and whether findings can be filed as it (Affects Version/s on its screen). */
+export interface JiraIssueTypeOption {
+  id: string;
+  name: string;
+  affectsVersion: boolean;
+  versions: number;
+}
+
+/**
+ * `POST /jira/connection`: a rejected token is `ok: false` with Jira's status, not an error.
  * The "test connection" answer, from Jira's create metadata (only the issue resource is called, and it has
  * no "who am I": the result names what the token may do, not whose it is).
  */
@@ -114,54 +145,95 @@ export interface JiraConnection {
   /** Jira took the token (answered, and not 401); `ok` can still be false — project or issue type. */
   tokenAccepted: boolean;
   canCreate: boolean;
+  /** The issue type's create screen has Affects Version/s. */
+  affectsVersion: boolean;
   /** Versions the issue type can be filed against. */
   versions: number;
+  /** The create-screen fields the page asks for. */
+  fields: CreateField[];
+  /** Every type the token may create — the page's issue type choice. */
+  issueTypes: JiraIssueTypeOption[];
+  /** The first failed check, `null` when `ok`. */
+  problem: JiraProblem | null;
   /** Jira's HTTP status; 0 = Jira unreachable. */
   status: number;
   message: string | null;
 }
 
-/** The user's Jira access token travels per request in this header; the backend never stores it. */
+/**
+ * The user's Jira access token travels with every request in this header — the backend has no Jira account of
+ * its own and never stores it, so a shared page reads and files as whoever is using it.
+ */
 export const JIRA_TOKEN_HEADER = 'X-Jira-Token';
+/** Jira Cloud only: the Atlassian account e-mail that goes with the API token. */
+export const JIRA_USER_HEADER = 'X-Jira-User';
+/** The issue type the user files as; absent = the backend's `veracode.jira.issue-type`. */
+export const JIRA_ISSUE_TYPE_HEADER = 'X-Jira-Issue-Type';
 
-const tokenHeader = (token?: string): Record<string, string> => (token ? { [JIRA_TOKEN_HEADER]: token } : {});
+export type JiraDeployment = 'cloud' | 'dataCenter';
+
+/**
+ * How the user signs in to Jira. Both kinds go through REST API v2; the backend sends Cloud's e-mail + API token as
+ * `Basic base64(email:token)` and Data Center's personal access token as `Bearer`.
+ */
+export interface JiraAuth {
+  deployment: JiraDeployment;
+  token: string;
+  /** Cloud only. */
+  email: string;
+  /** Not a credential, but the user's choice too, sent with every call; '' = the backend's configured type. */
+  issueType: string;
+}
+
+/** Everything the chosen kind needs is filled in. */
+export const jiraAuthComplete = (auth: JiraAuth) =>
+  !!auth.token.trim() && (auth.deployment === 'dataCenter' || !!auth.email.trim());
+
+const tokenHeader = (auth: JiraAuth): Record<string, string> => ({
+  [JIRA_TOKEN_HEADER]: auth.token,
+  ...(auth.deployment === 'cloud' && auth.email ? { [JIRA_USER_HEADER]: auth.email } : {}),
+  ...(auth.issueType ? { [JIRA_ISSUE_TYPE_HEADER]: auth.issueType } : {}),
+});
 
 /** Spelled out because `requestAt` drops its own Content-Type as soon as `init.headers` is set. */
 export interface UploadOptions {
   affectedVersion?: string;
   autoCreate?: boolean;
+  /** Create-screen values for `autoCreate`. */
+  fields?: CreateFieldValues;
 }
 
-const uploadQuery = ({ affectedVersion, autoCreate }: UploadOptions) => new URLSearchParams({
+const uploadQuery = ({ affectedVersion, autoCreate, fields }: UploadOptions) => new URLSearchParams({
   autoCreate: String(!!autoCreate),
   ...(affectedVersion?.trim() ? { affectedVersion: affectedVersion.trim() } : {}),
+  ...(autoCreate && fields ? { fields: JSON.stringify(fields) } : {}),
 });
 
-const json = (body: unknown, token?: string): RequestInit => ({
+const json = (body: unknown, auth: JiraAuth): RequestInit => ({
   method: 'POST',
   body: JSON.stringify(body),
-  headers: { 'Content-Type': 'application/json', ...tokenHeader(token) },
+  headers: { 'Content-Type': 'application/json', ...tokenHeader(auth) },
 });
 
 export const veracodeApi = {
   settings: () => requestAt<VeracodeSettings>(BASE, '/settings'),
 
-  /** Re-analyse an upload against Jira as it is now. `autoCreate` needs `token`; the lookup uses it when set. */
-  analyze: (uploadId: string, autoCreate = false, token?: string) =>
-    requestAt<Analysis>(BASE, '/analysis', json({ uploadId, autoCreate }, token)),
+  /** Re-analyse an upload against Jira as it is now. */
+  analyze: (uploadId: string, auth: JiraAuth, autoCreate = false, fields?: CreateFieldValues) =>
+    requestAt<Analysis>(BASE, '/analysis', json({ uploadId, autoCreate, fields }, auth)),
 
   /**
    * Multipart, so not through `requestAt`: that sets a JSON Content-Type whenever there is a body, and
    * a multipart request must let the browser write its own boundary. `affectedVersion` overrides the
    * report's `version` (blank = the report's).
    */
-  analyzeUpload: async (file: File, options: UploadOptions, token?: string) => {
+  analyzeUpload: async (file: File, options: UploadOptions, auth: JiraAuth) => {
     const form = new FormData();
     form.append('file', file);
     const response = await fetch(`${BASE}/analysis/upload?${uploadQuery(options)}`, {
       method: 'POST',
       body: form,
-      headers: tokenHeader(token),
+      headers: tokenHeader(auth),
     });
     if (!response.ok) {
       throw await parseError(response);
@@ -170,26 +242,26 @@ export const veracodeApi = {
   },
 
   /** The backend's bundled sample report, as if uploaded — only served with the mocks. */
-  analyzeSample: (options: UploadOptions, token?: string) =>
-    requestAt<Analysis>(BASE, `/analysis/sample?${uploadQuery(options)}`, { method: 'POST', headers: tokenHeader(token) }),
+  analyzeSample: (options: UploadOptions, auth: JiraAuth) =>
+    requestAt<Analysis>(BASE, `/analysis/sample?${uploadQuery(options)}`, { method: 'POST', headers: tokenHeader(auth) }),
 
   /**
    * Findings go by id: the server re-reads the page and re-checks Jira before creating, so a stale
    * screen or a double click comes back ALREADY_EXISTS instead of a duplicate.
    */
-  createIssues: (uploadId: string, findingIds: string[], token?: string) =>
-    requestAt<{ results: CreateResult[] }>(BASE, '/jira/issues', json({ uploadId, findingIds }, token)),
+  createIssues: (uploadId: string, findingIds: string[], fields: CreateFieldValues, auth: JiraAuth) =>
+    requestAt<{ results: CreateResult[] }>(BASE, '/jira/issues', json({ uploadId, findingIds, fields }, auth)),
 
-  /** Who Jira says the token belongs to, and whether it sees the project. */
-  testConnection: (token: string) =>
-    requestAt<JiraConnection>(BASE, '/jira/connection', { method: 'POST', headers: tokenHeader(token) }),
+  /** What the token may create in the project, and the create-screen fields the page has to ask for. */
+  testConnection: (auth: JiraAuth) =>
+    requestAt<JiraConnection>(BASE, '/jira/connection', { method: 'POST', headers: tokenHeader(auth) }),
 
   /**
    * A fresh analysis as .xlsx. Fetched rather than opened as a link so a failure shows the server's
    * message instead of a browser download of an error page.
    */
-  exportXlsx: async (uploadId: string, token?: string) => {
-    const response = await fetch(`${BASE}/analysis/export?${new URLSearchParams({ uploadId })}`, { headers: tokenHeader(token) });
+  exportXlsx: async (uploadId: string, auth: JiraAuth) => {
+    const response = await fetch(`${BASE}/analysis/export?${new URLSearchParams({ uploadId })}`, { headers: tokenHeader(auth) });
     if (!response.ok) {
       throw await parseError(response);
     }

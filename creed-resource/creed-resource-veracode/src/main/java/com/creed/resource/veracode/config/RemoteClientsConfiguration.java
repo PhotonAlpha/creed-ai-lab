@@ -14,7 +14,6 @@ import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
 import org.apache.hc.core5.util.Timeout;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.support.RestClientAdapter;
@@ -39,7 +38,7 @@ import java.time.Duration;
  *
  * <p><b>No cookies.</b> One client serves every user's token, and Jira answers each call with a
  * {@code JSESSIONID}: kept, it would be sent with the next user's request - and a call without a token
- * (the configured auth {@code NONE}) would run as whoever came before.
+ * would run as whoever came before.
  *
  * <p>Every Jira request and response is logged by Logbook ({@code logbook.*}, logger
  * {@code org.zalando.logbook.Logbook} at TRACE), from inside HttpClient's exec chain - so what is logged is what
@@ -62,15 +61,12 @@ public class RemoteClientsConfiguration {
     @Bean
     JiraClient jiraClient(RestClient.Builder builder, PoolingHttpClientConnectionManager jiraConnectionManager,
                           Logbook logbook, JiraProperties props) {
-        log.info("Jira client -> {} project {} ({}, Apache HttpClient 5, TLS not verified)", props.baseUrl(),
-                props.projectKey(), props.auth());
+        log.info("Jira client -> {} project {} (each user's own token, Apache HttpClient 5, TLS not verified)",
+                props.baseUrl(), props.projectKey());
         HttpComponentsClientHttpRequestFactory requestFactory =
                 new HttpComponentsClientHttpRequestFactory(httpClient(jiraConnectionManager, props.readTimeout(), logbook));
+        // no default Authorization: a call without the user's token is refused before it gets here (JiraToken)
         builder.baseUrl(props.baseUrl()).requestFactory(requestFactory);
-        String authorization = props.auth().headerValue();
-        if (authorization != null) {
-            builder.defaultHeader(HttpHeaders.AUTHORIZATION, authorization);
-        }
         return jiraClient(builder.build());
     }
 

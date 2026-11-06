@@ -43,8 +43,11 @@ export function App() {
       <ProLayout
         title={t('app.title')}
         logo={false}
-        layout="top"
+        // Ant Design Pro's default: header across the top, the menu in a collapsible left sider
+        layout="mix"
         fixedHeader
+        fixSiderbar
+        siderWidth={208}
         contentWidth="Fluid"
         location={{ pathname }}
         route={{

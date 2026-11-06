@@ -1,17 +1,11 @@
 package com.creed.resource.veracode.client.jira;
 
-import java.util.List;
+import java.util.Map;
 
-/** {@code {"fields": {...}}} - only the fields this service sets. */
-public record JiraCreateIssueRequest(Fields fields) {
-
-    public record Fields(Key project, Name issuetype, String summary, String description,
-                         List<JiraVersion> versions, List<String> labels) {
-    }
-
-    public record Key(String key) {
-    }
-
-    public record Name(String name) {
-    }
+/**
+ * {@code {"fields": {...}}}. A map, not a record: besides the fields this service always sets (project, issue
+ * type, summary, description, versions, labels) it carries whatever the create screen requires - Component/s,
+ * custom fields - in the JSON shape each one takes ({@code {"id": ...}}, a list of them, a string ...).
+ */
+public record JiraCreateIssueRequest(Map<String, Object> fields) {
 }

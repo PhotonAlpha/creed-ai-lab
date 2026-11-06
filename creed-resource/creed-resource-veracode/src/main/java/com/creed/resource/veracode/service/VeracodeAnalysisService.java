@@ -32,8 +32,12 @@ import java.util.stream.Collectors;
  * findings by id with the whole chain re-read first, so a finding someone else filed in the meantime comes
  * back {@code ALREADY_EXISTS} instead of becoming a duplicate.
  *
- * <p>The user's {@link JiraToken} goes to every Jira call; creating (on request or by {@code autoCreate})
- * refuses to start without one while {@code veracode.jira.require-user-token} is on.
+ * <p>Every request needs the user's {@link JiraToken}: it goes to every Jira call, so a shared page reads and
+ * files as whoever is using it. Without one nothing is parsed or called ({@code jira_token_required}).
+ *
+ * <p>The create screen's other fields (Component/s, required custom fields) come with the request - the page's
+ * choices - and are checked against the screen before the first issue is created: an unknown value, or a
+ * required field left empty, fails the whole request instead of every finding one by one.
  */
 @Service
 @RequiredArgsConstructor
@@ -54,19 +58,22 @@ public class VeracodeAnalysisService {
     private final ReentrantLock createLock = new ReentrantLock();
 
     private record Snapshot(ReportView report, List<Finding> findings, List<String> warnings,
-                            Map<String, String> jiraVersions, Map<String, List<IssueRef>> matches) {
+                            JiraLookupService.CreateMeta meta, Map<String, List<IssueRef>> matches) {
+
+        Map<String, String> jiraVersions() {
+            return meta.versions();
+        }
     }
 
     /**
      * Parses and keeps the file, then analyses it; the response's {@code report.id} is the upload id.
      *
      * @param versionOverride the Affects Version to use instead of the report's {@code version}; blank = the report's
+     * @param fields          create-screen values for {@code autoCreate} (fieldId -> value or values)
      */
     public AnalysisResponse analyzeUpload(String filename, byte[] content, String versionOverride, boolean autoCreate,
-                                          JiraToken token) {
-        if (autoCreate) {
-            requireToken(token);
-        }
+                                          Map<String, Object> fields, JiraToken token) {
+        token.require();
         ParsedReport parsed = parser.parse(filename, content);
         boolean overridden = versionOverride != null && !versionOverride.isBlank();
         String version = overridden ? versionOverride.trim() : parsed.info().version();
@@ -77,16 +84,17 @@ public class VeracodeAnalysisService {
         UploadedReportStore.Upload upload = uploads.put(filename, parsed.withVersion(version), version, overridden);
         log.info("upload {} '{}' ({} bytes): app {}, version {}{}, {} vulnerabilities", upload.id(), filename,
                 content.length, parsed.info().appName(), version, overridden ? " (overridden)" : "", parsed.rows().size());
-        return analyze(upload.id(), autoCreate, token);
+        return analyze(upload.id(), autoCreate, fields, token);
     }
 
-    public AnalysisResponse analyze(String uploadId, boolean autoCreate, JiraToken token) {
+    public AnalysisResponse analyze(String uploadId, boolean autoCreate, Map<String, Object> fields, JiraToken token) {
+        token.require();
         if (autoCreate) {
-            requireToken(token);
             createLock.lock();
         }
         try {
             Snapshot s = load(uploadId, token);
+            Map<String, Object> chosen = autoCreate ? jira.resolveFields(s.meta(), fields) : Map.of();
             List<String> warnings = new ArrayList<>(s.warnings());
             List<FindingView> views = new ArrayList<>();
             for (Finding f : s.findings()) {
@@ -95,7 +103,7 @@ public class VeracodeAnalysisService {
                 FindingStatus status = issues.isEmpty() ? FindingStatus.MISSING : FindingStatus.EXISTS;
                 if (status == FindingStatus.MISSING && autoCreate && version != null) {
                     try {
-                        issues = List.of(jira.create(f, version, s.report(), token));
+                        issues = List.of(jira.create(f, version, chosen, s.report(), token));
                         status = FindingStatus.CREATED;
                     } catch (UpstreamException e) {
                         warnings.add(f.id() + ": not created - " + e.getMessage());
@@ -104,7 +112,8 @@ public class VeracodeAnalysisService {
                 views.add(FindingView.of(f, status, version, issues));
             }
             return new AnalysisResponse(s.report(), jiraProps.projectKey(), List.copyOf(s.jiraVersions().values()),
-                    views, warnings, AnalysisResponse.Counts.of(views), Instant.now(clock));
+                    s.meta().fields(), views, warnings,
+                    AnalysisResponse.Counts.of(views), Instant.now(clock));
         } finally {
             if (autoCreate) {
                 createLock.unlock();
@@ -112,16 +121,18 @@ public class VeracodeAnalysisService {
         }
     }
 
-    public CreateIssuesResponse create(String uploadId, List<String> findingIds, JiraToken token) {
-        requireToken(token);
+    public CreateIssuesResponse create(String uploadId, List<String> findingIds, Map<String, Object> fields,
+                                       JiraToken token) {
+        token.require();
         createLock.lock();
         try {
             Snapshot s = load(uploadId, token);
+            Map<String, Object> chosen = jira.resolveFields(s.meta(), fields);
             Map<String, Finding> byId = s.findings().stream()
                     .collect(Collectors.toMap(Finding::id, Function.identity(), (a, b) -> a, LinkedHashMap::new));
             List<Result> results = new ArrayList<>();
             for (String id : findingIds.stream().distinct().toList()) {
-                results.add(createOne(id, byId.get(id), s, token));
+                results.add(createOne(id, byId.get(id), s, chosen, token));
             }
             return new CreateIssuesResponse(results);
         } finally {
@@ -129,13 +140,7 @@ public class VeracodeAnalysisService {
         }
     }
 
-    private void requireToken(JiraToken token) {
-        if (jiraProps.requireUserToken() && !token.present()) {
-            throw new JiraToken.RequiredException();
-        }
-    }
-
-    private Result createOne(String id, Finding f, Snapshot s, JiraToken token) {
+    private Result createOne(String id, Finding f, Snapshot s, Map<String, Object> fields, JiraToken token) {
         if (f == null) {
             return new Result(id, Outcome.NOT_IN_REPORT, List.of(), "no such finding in " + s.report().fileName());
         }
@@ -149,7 +154,7 @@ public class VeracodeAnalysisService {
             return new Result(id, Outcome.ALREADY_EXISTS, existing, null);
         }
         try {
-            return new Result(id, Outcome.CREATED, List.of(jira.create(f, version, s.report(), token)), null);
+            return new Result(id, Outcome.CREATED, List.of(jira.create(f, version, fields, s.report(), token)), null);
         } catch (UpstreamException e) {
             log.warn("create failed for {}: {}", id, e.getMessage());
             return new Result(id, Outcome.FAILED, List.of(), e.getMessage());
@@ -167,11 +172,11 @@ public class VeracodeAnalysisService {
                 upload.affectedVersion(), upload.versionOverridden(), info.policyName(), info.policyCompliance(),
                 info.generationDate());
         List<Finding> findings = Finding.group(parsed.rows());
-        Map<String, String> versions = jira.projectVersions(token);
-        Map<String, List<IssueRef>> matches = jira.find(findings, versions, token);
+        JiraLookupService.CreateMeta meta = jira.createMeta(token);
+        Map<String, List<IssueRef>> matches = jira.find(findings, meta.versions(), token);
         log.info("upload {}: {} vulnerabilities -> {} findings, {} matched in Jira, {} warnings", upload.id(),
                 parsed.rows().size(), findings.size(), matches.values().stream().filter(l -> !l.isEmpty()).count(),
                 parsed.warnings().size());
-        return new Snapshot(report, findings, parsed.warnings(), versions, matches);
+        return new Snapshot(report, findings, parsed.warnings(), meta, matches);
     }
 }

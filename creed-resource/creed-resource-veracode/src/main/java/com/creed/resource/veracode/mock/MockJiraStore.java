@@ -24,7 +24,8 @@ public class MockJiraStore {
 
     /** @param assignee {@code null} = unassigned; @param reporter who created it ({@code null} for seeds) */
     public record Issue(int id, String key, String summary, String description, String status, String priority,
-                        String assignee, String reporter, List<String> versions, List<String> labels) {
+                        String assignee, String reporter, List<String> versions, List<String> components,
+                        String environment, List<String> labels, String issueType) {
     }
 
     private final List<String> versions = List.of("2.2.1", "2.3.0", "2.4.0");
@@ -49,7 +50,7 @@ public class MockJiraStore {
     private void seed(String summary, String status, String priority, String assignee, String version) {
         int n = sequence.incrementAndGet();
         issues.add(new Issue(10_000 + n, PROJECT + "-" + n, summary, null, status, priority, assignee, null,
-                List.of(version), List.of("veracode")));
+                List.of(version), List.of("Security"), "Production", List.of("veracode"), "Bug"));
     }
 
     public List<String> versions() {
@@ -60,11 +61,11 @@ public class MockJiraStore {
         return List.copyOf(issues);
     }
 
-    public synchronized Issue create(String summary, String description, List<String> versions, List<String> labels,
-                                     String reporter) {
+    public synchronized Issue create(String summary, String description, List<String> versions, List<String> components,
+                                     String environment, List<String> labels, String reporter, String issueType) {
         int n = sequence.incrementAndGet();
         Issue issue = new Issue(10_000 + n, PROJECT + "-" + n, summary, description, "To Do", "Medium", null,
-                reporter, List.copyOf(versions), List.copyOf(labels));
+                reporter, List.copyOf(versions), List.copyOf(components), environment, List.copyOf(labels), issueType);
         issues.add(issue);
         return issue;
     }

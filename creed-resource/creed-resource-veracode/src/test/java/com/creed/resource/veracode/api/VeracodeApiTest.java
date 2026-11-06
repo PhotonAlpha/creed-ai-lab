@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.ClassPathResource;
@@ -52,12 +51,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * socket, so no port has to be known before the context starts.
  */
 @SpringBootTest
-@AutoConfigureMockMvc
 @ActiveProfiles("test")
 class VeracodeApiTest {
 
     @Autowired
-    MockMvc mvc;
+    WebApplicationContext context;
 
     @Autowired
     MockJiraStore jira;
@@ -65,9 +63,18 @@ class VeracodeApiTest {
     /** The user's token, as the page sends it; the mock names its user after the last four characters. */
     private static final String TOKEN = "pat-0000-abcd";
 
+    /** The create screen's other fields, as the page sends them: an option by label (any case) or by id. */
+    private static final String FIELDS = "\"fields\":{\"components\":[\"security\"],\"customfield_10100\":\"Production\"}";
+
+    /** Every request carries the user's token, as the page does; {@link #anonymous} carries none. */
+    MockMvc mvc;
+    MockMvc anonymous;
+
     @BeforeEach
     void reset() {
         jira.reset();
+        mvc = MockMvcBuilders.webAppContextSetup(context).defaultRequest(get("/").header(JiraToken.HEADER, TOKEN)).build();
+        anonymous = MockMvcBuilders.webAppContextSetup(context).build();
     }
 
     private static MockMultipartFile sample() throws Exception {
@@ -148,8 +155,8 @@ class VeracodeApiTest {
         String uploadId = upload();
         String request = """
                 {"uploadId":"%s","findingIds":["CVE-2022-22965@2.3.0","CVE-2021-44228@2.3.0",
-                 "CVE-1999-0001@2.3.0","CVE-2022-22965@2.3.0"]}
-                """.formatted(uploadId);
+                 "CVE-1999-0001@2.3.0","CVE-2022-22965@2.3.0"],%s}
+                """.formatted(uploadId, FIELDS);
         mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON).content(request))
                 .andExpect(status().isOk())
@@ -165,13 +172,16 @@ class VeracodeApiTest {
         assertThat(created.summary()).isEqualTo("creed-platform spring-beans 5.3.17 CVE-2022-22965");
         assertThat(created.reporter()).isEqualTo("user-abcd");
         assertThat(created.versions()).containsExactly("2.3.0");
+        // the page's choices, sent as Jira's option ids
+        assertThat(created.components()).containsExactly("Security");
+        assertThat(created.environment()).isEqualTo("Production");
         assertThat(created.labels()).containsExactly("veracode", "CVE-2022-22965");
         assertThat(created.description()).contains("|Component(s)|spring-beans 5.3.17|",
                 "Source: Veracode application creed-platform, scan 2.3.0, policy Creed Default (report detailedreport.xml)");
 
         // The second click: re-checked, not duplicated.
         mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, TOKEN).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]}"))
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]," + FIELDS + "}"))
                 .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"))
                 .andExpect(jsonPath("$.results[0].issues[0].key").value("CREED-105"));
         assertThat(jira.all()).hasSize(5);
@@ -183,18 +193,20 @@ class VeracodeApiTest {
                 .andReturn().getResponse().getContentAsString();
         String uploadId = JsonPath.read(body, "$.report.id");
         mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, TOKEN).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.5.0\"]}"))
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.5.0\"]," + FIELDS + "}"))
                 .andExpect(jsonPath("$.results[0].outcome").value("VERSION_NOT_IN_JIRA"));
     }
 
     @Test
     void autoCreateFilesEveryMissingFindingAndFindsThemAgain() throws Exception {
         String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("autoCreate", "true")
-                        .header(JiraToken.HEADER, TOKEN))
+                        .param("fields", "{\"components\":[\"Platform\",\"30001\"],\"customfield_10100\":[\"10201\"]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.counts.created").value(6))
                 .andExpect(jsonPath("$.counts.missing").value(0))
                 .andReturn().getResponse().getContentAsString();
+        assertThat(jira.find("CREED-105").components()).containsExactly("Platform", "Security");
+        assertThat(jira.find("CREED-105").environment()).isEqualTo("Staging");
         // the advisory without a CVE: its id stands in for {cve}, and is what finds it again below
         assertThat(jira.all()).extracting(MockJiraStore.Issue::summary)
                 .contains("creed-platform netty-codec 4.1.68.Final SRCCLR-SID-29587",
@@ -204,6 +216,41 @@ class VeracodeApiTest {
                         .content("{\"uploadId\":\"" + JsonPath.read(body, "$.report.id") + "\"}"))
                 .andExpect(jsonPath("$.counts.exists").value(9))
                 .andExpect(jsonPath("$.counts.created").value(0));
+    }
+
+    @Test
+    void requiredFieldsAreOfferedThroughTheTokenAndCheckedBeforeCreating() throws Exception {
+        // the analysis says what the create screen needs from the page, with the options this token may use
+        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()))
+                .andExpect(jsonPath("$.createFields[*].name", contains("Component/s", "Environment Found")))
+                .andExpect(jsonPath("$.createFields[0].kind").value("OPTIONS"))
+                .andExpect(jsonPath("$.createFields[0].multiple").value(true))
+                .andExpect(jsonPath("$.createFields[0].required").value(true))
+                .andExpect(jsonPath("$.createFields[1].multiple").value(false))
+                .andExpect(jsonPath("$.createFields[1].options[*].label", contains("Production", "Staging")))
+                .andReturn().getResponse().getContentAsString();
+        String uploadId = JsonPath.read(body, "$.report.id");
+        String head = "{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]";
+        String[][] refused = {
+                {head + "}", "jira_fields_required", "Jira requires Component/s, Environment Found to create a Bug in CREED"},
+                {head + ",\"fields\":{\"components\":[\"Nope\"],\"customfield_10100\":\"Production\"}}", "bad_request",
+                        "Component/s has no value 'Nope' (has: Security, Platform, Payments)"},
+                {head + ",\"fields\":{\"components\":[\"Security\"],\"customfield_10100\":[\"Production\",\"Staging\"]}}",
+                        "bad_request", "Environment Found takes one value"},
+                {head + ",\"fields\":{\"priority\":\"High\"}}", "bad_request", "field 'priority' is not one the page fills"},
+        };
+        for (String[] r : refused) {
+            mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content(r[0]))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value(r[1]))
+                    .andExpect(jsonPath("$.message").value(containsString(r[2])));
+        }
+        // autoCreate is checked the same way, before anything is created
+        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"autoCreate\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("jira_fields_required"));
+        assertThat(jira.all()).hasSize(4);
     }
 
     @Test
@@ -234,6 +281,21 @@ class VeracodeApiTest {
                 }
             }
             assertThat(log4shell).contains("EXISTS", "CREED-101", "In Progress", "2.3.0");
+            // Severity is filled by level: the same colour for the same level, a different one per level
+            java.util.Map<String, String> fills = new java.util.HashMap<>();
+            for (Row row : findings) {
+                if (row.getRowNum() == 0) {
+                    continue;
+                }
+                org.apache.poi.xssf.usermodel.XSSFCellStyle style =
+                        (org.apache.poi.xssf.usermodel.XSSFCellStyle) row.getCell(4).getCellStyle();
+                String rgb = style.getFillForegroundColorColor() == null ? null
+                        : style.getFillForegroundColorColor().getARGBHex();
+                assertThat(rgb).as(row.getCell(4).getStringCellValue()).isNotNull();
+                assertThat(fills.putIfAbsent(row.getCell(4).getStringCellValue(), rgb)).isIn(null, rgb);
+            }
+            assertThat(fills).hasSizeGreaterThan(1);
+            assertThat(new java.util.HashSet<>(fills.values())).hasSameSizeAs(fills.values());
             Sheet source = wb.getSheet("Source");
             assertThat(source.getRow(0).getCell(1).getStringCellValue()).isEqualTo("creed-platform");
             assertThat(source.getRow(6).getCell(1).getStringCellValue()).isEqualTo("CREED");
@@ -241,14 +303,21 @@ class VeracodeApiTest {
     }
 
     @Test
-    void creatingNeedsTheUsersToken() throws Exception {
+    void everyCallNeedsTheUsersToken() throws Exception {
         String uploadId = upload();
-        String request = "{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]}";
-        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content(request))
+        // no service account to fall back on: reading needs the token as much as creating
+        anonymous.perform(multipart("/api/veracode/analysis/upload").file(sample()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("jira_token_required"));
-        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uploadId\":\"" + uploadId + "\",\"autoCreate\":true}"))
+        anonymous.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + uploadId + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("jira_token_required"));
+        anonymous.perform(get("/api/veracode/analysis/export").param("uploadId", uploadId))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("jira_token_required"));
+        String request = "{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]," + FIELDS + "}";
+        anonymous.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content(request))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("jira_token_required"));
         // Jira refuses the token: already on the create metadata, before anything is created
@@ -270,13 +339,76 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.issueType").value("Bug"))
                 // createmeta answers 2 per page in the test profile: three versions = two pages of fields
                 .andExpect(jsonPath("$.versions").value(3))
+                // what the page asks for: Component/s and the required custom select, with Jira's options
+                .andExpect(jsonPath("$.fields[*].fieldId", contains("components", "customfield_10100")))
+                .andExpect(jsonPath("$.fields[0].options[*].label", contains("Security", "Platform", "Payments")))
+                .andExpect(jsonPath("$.fields[1].options[*].id", contains("10200", "10201")))
+                .andExpect(jsonPath("$.message").value(containsString("to choose on the page: Component/s, Environment Found")))
                 .andExpect(jsonPath("$.projectKey").value("CREED"));
         mvc.perform(post("/api/veracode/jira/connection").header(JiraToken.HEADER, "invalid"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.ok").value(false))
                 .andExpect(jsonPath("$.tokenAccepted").value(false))
                 .andExpect(jsonPath("$.status").value(401));
+        anonymous.perform(post("/api/veracode/jira/connection"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("jira_token_required"));
+    }
+
+    @Test
+    void connectionTestSaysWhichCheckFailedAndWhichIssueTypesWork() throws Exception {
+        // every creatable type, each with whether it can be filed against a version (the mock's Task cannot)
         mvc.perform(post("/api/veracode/jira/connection"))
+                .andExpect(jsonPath("$.problem").doesNotExist())
+                .andExpect(jsonPath("$.affectsVersion").value(true))
+                .andExpect(jsonPath("$.issueTypes[*].name", contains("Bug", "Task", "Story", "Vulnerability")))
+                .andExpect(jsonPath("$.issueTypes[*].affectsVersion", contains(true, false, true, true)))
+                .andExpect(jsonPath("$.issueTypes[1].versions").value(0));
+        // the page's choice travels as a header: a type without Affects Version/s is named as such, not "cannot create"
+        mvc.perform(post("/api/veracode/jira/connection").header(JiraToken.ISSUE_TYPE_HEADER, "Task"))
+                .andExpect(jsonPath("$.ok").value(false))
+                .andExpect(jsonPath("$.tokenAccepted").value(true))
+                .andExpect(jsonPath("$.canCreate").value(true))
+                .andExpect(jsonPath("$.affectsVersion").value(false))
+                .andExpect(jsonPath("$.problem").value("AFFECTS_VERSION"))
+                .andExpect(jsonPath("$.message").value(containsString("issue types that have it: Bug, Story, Vulnerability")));
+        mvc.perform(post("/api/veracode/jira/connection").header(JiraToken.ISSUE_TYPE_HEADER, "Epic"))
+                .andExpect(jsonPath("$.ok").value(false))
+                .andExpect(jsonPath("$.canCreate").value(false))
+                .andExpect(jsonPath("$.problem").value("ISSUE_TYPE"));
+        mvc.perform(post("/api/veracode/jira/connection").header(JiraToken.HEADER, "invalid"))
+                .andExpect(jsonPath("$.problem").value("TOKEN_REJECTED"));
+        // an analysis with such a type says what to do as well
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).header(JiraToken.ISSUE_TYPE_HEADER, "Task"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.message").value(containsString("add the field to that screen in Jira")));
+    }
+
+    @Test
+    void issuesAreCreatedAsTheIssueTypeThePageChose() throws Exception {
+        String uploadId = upload();
+        mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.ISSUE_TYPE_HEADER, "Story")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]," + FIELDS + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.results[0].outcome").value("CREATED"));
+        assertThat(jira.all()).last().extracting(MockJiraStore.Issue::issueType).isEqualTo("Story");
+    }
+
+    @Test
+    void jiraCloudTokensComeWithTheEmail() throws Exception {
+        // Cloud on the page: e-mail + API token, sent to Jira as Basic (the mock decodes it like Cloud does)
+        anonymous.perform(post("/api/veracode/jira/connection")
+                        .header(JiraToken.HEADER, "api-token").header(JiraToken.USER_HEADER, "me@example.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(true));
+        anonymous.perform(post("/api/veracode/jira/connection")
+                        .header(JiraToken.HEADER, "invalid").header(JiraToken.USER_HEADER, "me@example.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(false))
+                .andExpect(jsonPath("$.status").value(401));
+        // an e-mail without the token is still no token
+        anonymous.perform(post("/api/veracode/jira/connection").header(JiraToken.USER_HEADER, "me@example.com"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("jira_token_required"));
     }
@@ -321,7 +453,7 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.projectKey").value("CREED"))
                 .andExpect(jsonPath("$.mock").value(true))
                 .andExpect(jsonPath("$.summaryTemplate").value("{project} {component} {cve}"))
-                .andExpect(jsonPath("$.requireUserToken").value(true))
+                .andExpect(jsonPath("$.requireUserToken").doesNotExist())
                 .andExpect(jsonPath("$.token").doesNotExist());
     }
 

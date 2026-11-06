@@ -18,8 +18,9 @@ curl -s -F file=@detailedreport.xml localhost:18097/api/veracode/analysis/upload
 
 Against a real Jira: `CREED_VERACODE_MOCK=false`, `CREED_JIRA_URL`,
 `CREED_JIRA_BROWSE_URL=https://jira.example.com/browse/{key}`, `CREED_JIRA_PROJECT`; creating uses each
-user's token from the page. `CREED_JIRA_AUTH=BEARER|BASIC` + `_TOKEN` (+ `_USER`) only sets the default
-for searches without a user token. **TLS to Jira is not verified** (certificate and hostname, `TrustAllTls`).
+user's token from the page — there is no service account (`veracode.jira.auth` / `require-user-token` removed
+2026-11-06): every call, reads included, is the user's. **TLS to Jira is not verified** (certificate and hostname,
+`TrustAllTls`).
 
 HTTPS for this service (profile `ssl`, one-way TLS, `client-auth: none`) — keystore/truststore default to
 `/etc/veracode/tls/*.p12` (override `CREED_VERACODE_SSL_KEYSTORE` / `_TRUSTSTORE`), password from
@@ -40,16 +41,23 @@ External config: `application.yml` / `application-<profile>.yml` in `CREED_VERAC
 
 | | |
 |---|---|
-| `GET /settings` | project, issue type, Jira base URL, mock flag, summary template, `requireUserToken` — no credentials |
-| `POST /analysis/upload` multipart `file` + `?affectedVersion=&autoCreate=` | findings with `status` EXISTS / MISSING / CREATED, `jiraVersion`, `issues`, `warnings`, `counts`; `report` (`id` = upload id, `appName`, `scanVersion`, `affectedVersion`, `versionOverridden`, policy, file) |
+| `GET /settings` | project, issue type, Jira base URL, mock flag, summary template — no credentials, the only call without a token |
+| `POST /analysis/upload` multipart `file` + `?affectedVersion=&autoCreate=&fields=<json>` | findings with `status` EXISTS / MISSING / CREATED, `jiraVersion`, `issues`, `warnings`, `counts`, `createFields`; `report` (`id` = upload id, `appName`, `scanVersion`, `affectedVersion`, `versionOverridden`, policy, file) |
 | `POST /analysis/sample` `?affectedVersion=&autoCreate=` | the same for the bundled sample XML — **mock only** (404 otherwise) |
-| `POST /analysis` `{uploadId, autoCreate?}` | re-analyse an upload against Jira as it is now |
-| `POST /jira/issues` `{uploadId, findingIds[]}` | per-id `outcome`: CREATED / ALREADY_EXISTS / NOT_IN_REPORT / VERSION_NOT_IN_JIRA / FAILED; **needs `X-Jira-Token`** |
-| `POST /jira/connection` (header `X-Jira-Token`) | `{ok, projectKey, issueType, tokenAccepted, canCreate, versions, status, message}` from the create metadata — a refused token is `ok:false` + Jira's status, not an error |
-| `GET /analysis/export?uploadId=` | xlsx (sheets *Findings*, *Source*) from a **fresh** analysis |
+| `POST /analysis` `{uploadId, autoCreate?, fields?}` | re-analyse an upload against Jira as it is now |
+| `POST /jira/issues` `{uploadId, findingIds[], fields}` | per-id `outcome`: CREATED / ALREADY_EXISTS / NOT_IN_REPORT / VERSION_NOT_IN_JIRA / FAILED; `fields` = the create screen's other fields (`{"components":["Security"],"customfield_10100":"Production"}`) |
+| `POST /jira/connection` | `{ok, projectKey, issueType, tokenAccepted, canCreate, versions, fields, status, message}` from the create metadata — a refused token is `ok:false` + Jira's status, not an error |
+| `GET /analysis/export?uploadId=` | xlsx (sheets *Findings*, *Source*) from a **fresh** analysis; *Severity* filled by level (`ExcelExporter.SEVERITY_FILL`, the page's tag hues: Very High red … Very Low blue, Informational grey) |
 
-Every endpoint takes the user's Jira token in `X-Jira-Token` (Bearer to Jira): required to create
-(`autoCreate` included), used for searches when present (else `veracode.jira.auth`). Issues in the
+Every endpoint but `/settings` needs the user's Jira token in `X-Jira-Token` — no fallback. Jira Cloud adds the
+Atlassian e-mail in `X-Jira-User` (→ Basic), Data Center sends the PAT alone (→ Bearer); the page asks which
+(2026-11-06), both REST API v2. `veracode.jira.cloud` is gone: the e-mail decides, `/settings.cloud` only
+preselects the dialog (`*.atlassian.net`). Tests pin `project-key: CREED` in `application-test.yml` because
+`application.yml` now points at a real Cloud site (and `issue-type: Bug`, since it says Task).
+Issue type per user (2026-11-06): `X-Jira-Issue-Type`, default `issue-type`; `/jira/connection` reports
+`problem` + `issueTypes[{name, affectsVersion, versions}]` instead of one "cannot create". The mock's Task has no
+Affects Version/s (like the Cloud Scrum project that prompted it) and refuses `versions` on create.
+Issues in the
 response carry `status`, `priority`, `assignee` (null = unassigned) for the page's filters.
 
 Errors: `{error, message, fields?, time}` — 400 `unsupported_file` (not XML) / `bad_request` /
@@ -58,6 +66,20 @@ no `version` and no override), 404 `upload_expired`, 413 `file_too_large` (`CREE
 default 50MB), 502 `jira_error`.
 
 ## Current state
+
+2026-11-06 (latest): **every Jira call is the page user's** — `RemoteAuth`, `veracode.jira.auth` and
+`require-user-token` removed, `JiraClient`'s `Authorization` header required, no default header; no token → 400
+`jira_token_required` on every endpoint but `/settings` (the page opens its token dialog). **Required create fields
+come from the page**: `createMeta` turns Component/s and every required field without a Jira default (other than the
+six the service sets) into `CreateField`s (`OPTIONS` with Jira's options / `USER` / `NUMBER` / `TEXT`, `multiple`,
+`defaults` = Jira's default, else a required field's only option) — returned as `createFields` (analysis) and
+`fields` (connection test); create / `autoCreate` take `fields` and `resolveFields` checks them before the first
+create (`jira_fields_required`, `bad_request`). A required field no longer fails the connection test or an analysis
+(reads only). The mock now requires a Bearer everywhere and, like the Jira this was written against, Affects
+Version/s + Component/s + a required custom select `customfield_10100` "Environment Found". Page: a "Jira fields"
+bar (selects / inputs, defaults preselected), create disabled until required fields are filled. **44 tests pass**;
+over HTTP on :18197: no token → 400, connection lists both fields, create without fields → `jira_fields_required`,
+with them → created with reporter = the token's user. The page typechecks; not seen in a browser.
 
 2026-11-06: **Jira calls are the issue resource only** (`/rest/api/2/issue/**`, asked for) and the RestClient runs on
 **Apache HttpClient 5** (`httpclient5`, Boot-managed; pool bean closed by Spring, no redirects, **no cookie store**).
