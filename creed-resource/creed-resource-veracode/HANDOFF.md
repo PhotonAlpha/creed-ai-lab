@@ -81,7 +81,7 @@ bar (selects / inputs, defaults preselected), create disabled until required fie
 over HTTP on :18197: no token → 400, connection lists both fields, create without fields → `jira_fields_required`,
 with them → created with reporter = the token's user. The page typechecks; not seen in a browser.
 
-2026-11-06: **Jira calls are the issue resource only** (`/rest/api/2/issue/**`, asked for) and the RestClient runs on
+2026-11-06 (later the same day superseded for lookups by the batched search, see Gotchas): **Jira calls are the issue resource only** (`/rest/api/2/issue/**`, asked for) and the RestClient runs on
 **Apache HttpClient 5** (`httpclient5`, Boot-managed; pool bean closed by Spring, no redirects, **no cookie store**).
 Lookup = `GET /issue/picker` per finding (`currentJQL` = project + `affectedVersion = "v"` + `summary ~`) + `GET
 /issue/{key}` per candidate (read once per analysis; another project or 404 skipped); versions and the connection test =
@@ -145,9 +145,10 @@ it was not checked in a browser (the browser extension could not attach to any p
 - **No CVE = an SCA advisory (`SRCCLR-SID-…`)**: its id is the title, so it is keyed `title:srcclr sid …`
   and found again by those words in a summary.
 
-- **Only `/rest/api/2/issue/**` may be called** (asked for, 2026-11-06). Search = the issue picker, which is an
-  auto-complete: Jira caps its result, so the JQL is one finding narrow. Its `hs` (history) section is not bound to
-  `currentJQL` — the project is checked on the issue read. The query matches word *starts*; `currentJQL` decides.
+- **Lookup is a batched JQL search** (2026-11-06, asked for: the picker was one call per finding plus a read per
+  candidate, and its `hs` history section ignored `currentJQL`). `Jql.lookup` ORs the findings' `summary ~` terms,
+  `search-batch-size` (50) per call; DC `/rest/api/2/search`, Cloud `/rest/api/3/search/jql` (v2 search retired there).
+  A match also needs every Component(s) in the summary (`componentsNamed`) while the template has `{component}`.
 - **`affectedVersion = "x"` with a version the project lacks is a 400**, not "no match". Versions come from the
   issue type's create screen (`versions.allowedValues`; archived ones are absent) and only those are searched; the
   rest are `jiraVersion: null` and cannot be created. No *Affects Version/s* on the create screen, or the issue

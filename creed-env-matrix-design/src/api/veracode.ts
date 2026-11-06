@@ -134,8 +134,8 @@ export interface JiraIssueTypeOption {
 
 /**
  * `POST /jira/connection`: a rejected token is `ok: false` with Jira's status, not an error.
- * The "test connection" answer, from Jira's create metadata (only the issue resource is called, and it has
- * no "who am I": the result names what the token may do, not whose it is).
+ * The "test connection" answer, from Jira's create metadata (no "who am I" is called: the result names what the
+ * token may do, not whose it is).
  */
 export interface JiraConnection {
   ok: boolean;

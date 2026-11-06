@@ -159,7 +159,9 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 报告来源**只有上传的 Veracode 详细报告（XML）**，只读取 SCA 部分（不再读取 Confluence 页面）；影响版本默认取报告根节点 `version`，可在上传前手工指定。
 - 按 CVE（无 CVE 时按公告编号）+ affect version 在 Jira 中查找是否存在：
   存在则列出 Jira 编号、状态、优先级、经办人；不存在则可按需创建（单行 / 所选 / 全部缺失，或分析时自动创建）。
-- 按 Jira 标题模糊匹配：CVE 出现在标题任意位置即可（忽略大小写和 `-` `_` 空格，但不会匹配更长的编号）；无 CVE 时标题的每个词都出现即可，不论顺序。
+- 按 Jira 标题模糊匹配：CVE 出现在标题任意位置即可（忽略大小写和 `-` `_` 空格，但不会匹配更长的编号）；无 CVE 时标题的每个词都出现即可，不论顺序；
+  且表格中的 **Component(s)** 每一个都要作为完整的词出现在标题中（如 `log4j-core 2.14.1`，`log4j-api` 或 `2.14.10` 不算），标题模板含 `{component}` 时生效。
+  查找用批量 JQL 搜索：每个版本每 50 条漏洞一次（Data Center `/rest/api/2/search`，Cloud `/rest/api/3/search/jql`）。
 - 创建 Jira 使用**用户自己的访问令牌**：页面「Jira 令牌」中配置并「测试连接」（显示令牌对应的用户、是否能访问项目），
   默认存 sessionStorage，勾选「记住」存 localStorage；随请求以 `X-Jira-Token` 发给后端，后端不保存。未配置时创建按钮不可用。
   对话框先选 **Jira Cloud**（邮箱 + API 令牌，另带 `X-Jira-User`，后端以 Basic 认证）或 **Jira Data Center**（个人访问令牌，后端以 Bearer），两者都调用 REST API v2；`base-url` 为 `*.atlassian.net` 时默认选中 Cloud。

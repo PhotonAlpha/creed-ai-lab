@@ -27,15 +27,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Stand-in for the issue-resource endpoints the service calls ({@code /rest/api/2/issue/**}: create, picker,
- * get, createmeta), backed by {@link MockJiraStore}.
+ * Stand-in for the Jira endpoints the service calls - create and createmeta ({@code /rest/api/2/issue/**}), search
+ * (Data Center {@code /rest/api/2/search}, Cloud {@code /rest/api/3/search/jql}) - backed by {@link MockJiraStore}.
  *
- * <p>The picker understands exactly the {@code currentJQL} {@code Jql} builds - {@code project = "..."},
- * {@code affectedVersion = "..."}, {@code summary ~ "..."} - and keeps the Jira behaviours the real code
- * has to survive: an unknown version in the JQL is a 400, {@code summary ~} matches tokens, not substrings
- * ({@code CVE-2021-4104} finds a summary with {@code CVE 2021 4104} too; a quoted value is a phrase, an
- * unquoted one plain words in any order), the {@code query} matches word starts or the key, and the result
- * is capped at {@value #PICKER_LIMIT}. createmeta pages honour {@code startAt}/{@code maxResults}.
+ * <p>Search understands exactly the JQL {@code Jql} builds - {@code project = "..."}, {@code affectedVersion = "..."},
+ * {@code summary ~ "..."} OR'ed - and keeps the Jira behaviours the real code has to survive: an unknown version in
+ * the JQL is a 400, {@code summary ~} matches tokens, not substrings ({@code CVE-2021-4104} finds a summary with
+ * {@code CVE 2021 4104} too; a quoted value is a phrase, an unquoted one plain words in any order), and so it
+ * returns more than the service counts as a match (another component's issue for the same CVE). Search and
+ * createmeta pages honour {@code startAt}/{@code maxResults}, Cloud's search its {@code nextPageToken}.
  *
  * <p>The create screen is a strict one, as on the Jira this was written against: Affects Version/s, Component/s
  * (components {@link #COMPONENTS}) and a custom single select {@value #ENVIRONMENT_FIELD} "Environment Found"
@@ -57,7 +57,6 @@ public class MockJiraController {
     private static final Pattern VERSION = Pattern.compile("affectedVersion\\s*=\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
     private static final Pattern SUMMARY = Pattern.compile("summary\\s*~\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
     static final String REJECTED_TOKEN = "invalid";
-    static final int PICKER_LIMIT = 20;
     static final List<String> COMPONENTS = List.of("Security", "Platform", "Payments");
     static final String ENVIRONMENT_FIELD = "customfield_10100";
     /** option id -> value */
@@ -138,20 +137,69 @@ public class MockJiraController {
         return ResponseEntity.ok(page(fields, startAt, maxResults));
     }
 
-    @GetMapping("/rest/api/2/issue/picker")
-    ResponseEntity<?> picker(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
-                             @RequestParam(defaultValue = "") String query,
-                             @RequestParam(defaultValue = "") String currentJQL) {
+    /** Data Center search: {@code startAt} / {@code maxResults} / {@code total}. */
+    @GetMapping("/rest/api/2/search")
+    ResponseEntity<?> search(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+                             @RequestParam(defaultValue = "") String jql,
+                             @RequestParam(defaultValue = "0") int startAt,
+                             @RequestParam(defaultValue = "50") int maxResults) {
         if (user(authorization) == null) {
             return unauthorized();
         }
-        Matcher project = PROJECT.matcher(currentJQL);
+        Object hits = matching(jql);
+        if (hits instanceof ResponseEntity<?> refused) {
+            return refused;
+        }
+        List<?> all = (List<?>) hits;
+        int from = Math.min(startAt, all.size());
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("startAt", startAt);
+        page.put("maxResults", maxResults);
+        page.put("total", all.size());
+        page.put("issues", all.subList(from, Math.min(all.size(), from + maxResults)));
+        return ResponseEntity.ok(page);
+    }
+
+    /**
+     * Jira Cloud's search ({@code /rest/api/2/search} is retired there): paged by an opaque {@code nextPageToken},
+     * {@code isLast} on the last page, no {@code total}. The token here is just the next offset.
+     */
+    @GetMapping("/rest/api/3/search/jql")
+    ResponseEntity<?> searchJql(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+                                @RequestParam(defaultValue = "") String jql,
+                                @RequestParam(required = false) String nextPageToken,
+                                @RequestParam(defaultValue = "50") int maxResults) {
+        if (user(authorization) == null) {
+            return unauthorized();
+        }
+        Object hits = matching(jql);
+        if (hits instanceof ResponseEntity<?> refused) {
+            return refused;
+        }
+        List<?> all = (List<?>) hits;
+        int from = nextPageToken == null ? 0 : Math.min(Integer.parseInt(nextPageToken), all.size());
+        int to = Math.min(all.size(), from + maxResults);
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("issues", all.subList(from, to));
+        page.put("isLast", to >= all.size());
+        if (to < all.size()) {
+            page.put("nextPageToken", String.valueOf(to));
+        }
+        return ResponseEntity.ok(page);
+    }
+
+    /**
+     * The issues the JQL {@code Jql} builds selects, as issue JSON in key order - or Jira's 400 for an unknown
+     * project or version. {@code summary ~} terms are OR'ed, as {@code Jql} joins them.
+     */
+    private Object matching(String jql) {
+        Matcher project = PROJECT.matcher(jql);
         if (project.find() && !MockJiraStore.PROJECT.equalsIgnoreCase(unescape(project.group(1)))) {
             return error(HttpStatus.BAD_REQUEST, "The value '" + unescape(project.group(1))
                     + "' does not exist for the field 'project'.", null);
         }
         String version = null;
-        Matcher v = VERSION.matcher(currentJQL);
+        Matcher v = VERSION.matcher(jql);
         if (v.find()) {
             version = unescape(v.group(1));
             if (store.versions().stream().noneMatch(version::equalsIgnoreCase)) {
@@ -162,7 +210,7 @@ public class MockJiraController {
         // phrase -> contained as is; plain words -> all present, any order
         List<String> phrases = new ArrayList<>();
         List<List<String>> words = new ArrayList<>();
-        Matcher s = SUMMARY.matcher(currentJQL);
+        Matcher s = SUMMARY.matcher(jql);
         while (s.find()) {
             String term = unescape(s.group(1));
             if (term.startsWith("\"")) {
@@ -171,37 +219,14 @@ public class MockJiraController {
                 words.add(List.of(Finding.normalise(term).split(" ")));
             }
         }
-        List<String> queryWords = Finding.normalise(query).isEmpty() ? List.of()
-                : List.of(Finding.normalise(query).split(" "));
         String affected = version;
-        List<Map<String, Object>> hits = store.all().stream()
+        return store.all().stream()
                 .filter(i -> affected == null || i.versions().stream().anyMatch(affected::equalsIgnoreCase))
                 .filter(i -> phrases.isEmpty() && words.isEmpty()
                         || phrases.stream().anyMatch(p -> (" " + Finding.normalise(i.summary()) + " ").contains(" " + p + " "))
                         || words.stream().anyMatch(w -> List.of(Finding.normalise(i.summary()).split(" ")).containsAll(w)))
-                .filter(i -> !queryWords.isEmpty() && (i.key().equalsIgnoreCase(query.trim()) || queryWords.stream()
-                        .allMatch(q -> List.of(Finding.normalise(i.summary()).split(" ")).stream().anyMatch(t -> t.startsWith(q)))))
-                .limit(PICKER_LIMIT)
-                .map(i -> Map.<String, Object>of("key", i.key(), "keyHtml", i.key(), "img", "/images/icons/issuetypes/bug.png",
-                        "summary", HtmlUtils.htmlEscape(i.summary()), "summaryText", i.summary()))
+                .map(this::toJson)
                 .toList();
-        return ResponseEntity.ok(Map.of("sections", List.of(
-                Map.of("id", "hs", "label", "History Search", "issues", List.of()),
-                Map.of("id", "cs", "label", "Current Search", "sub", "Showing " + hits.size() + " issue(s)",
-                        "issues", hits))));
-    }
-
-    @GetMapping("/rest/api/2/issue/{key}")
-    ResponseEntity<?> issue(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
-                            @PathVariable String key) {
-        if (user(authorization) == null) {
-            return unauthorized();
-        }
-        MockJiraStore.Issue issue = store.find(key);
-        if (issue == null) {
-            return error(HttpStatus.NOT_FOUND, "Issue Does Not Exist", null);
-        }
-        return ResponseEntity.ok(toJson(issue));
     }
 
     @PostMapping("/rest/api/2/issue")

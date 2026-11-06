@@ -29,8 +29,8 @@ veracode:
     enabled: ${CREED_VERACODE_MOCK:true}
 
   jira:
-    # Only the issue resource (/rest/api/2/issue/**) is called: picker + get to find, createmeta for versions and
-    # the connection test, POST to create. Apache HttpClient 5 underneath.
+    # Lookup = JQL search, search-batch-size findings per call (DC /rest/api/2/search, Cloud /rest/api/3/search/jql);
+    # createmeta for versions and the connection test, POST /rest/api/2/issue to create. Apache HttpClient 5 underneath.
     # TLS to Jira is NOT verified - no certificate check, no hostname check (asked for; TrustAllTls).
     base-url: "https://ethancaoq.atlassian.net"
     project-key: DT

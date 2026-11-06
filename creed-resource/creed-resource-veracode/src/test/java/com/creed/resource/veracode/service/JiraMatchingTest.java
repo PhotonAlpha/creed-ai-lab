@@ -52,8 +52,26 @@ class JiraMatchingTest {
         JiraIssue issue = new JiraIssue("1", "CREED-1", new JiraIssue.Fields("CVE-2022-22965 Spring4Shell", null,
                 List.of(JiraVersion.named("2.2.1")), List.of(), null, null, null));
 
-        assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.2.1"), "2.2.1")).isTrue();
-        assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.3.0"), "2.3.0")).isFalse();
+        assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.2.1"), "2.2.1", false)).isTrue();
+        assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.3.0"), "2.3.0", false)).isFalse();
+    }
+
+    @Test
+    void theComponentIsMatchedAsWholeWords() {
+        Finding core = new Finding("CVE-2021-44228@2.3.0", "CVE-2021-44228", "Log4Shell", List.of("log4j-core 2.14.1"),
+                null, null, "2.3.0", null, null, List.of());
+
+        assertThat(JiraLookupService.componentsNamed("creed-platform log4j-core 2.14.1 CVE-2021-44228", core)).isTrue();
+        // case and separators ignored, as the template may have been edited by hand
+        assertThat(JiraLookupService.componentsNamed("LOG4J_CORE 2.14.1: CVE-2021-44228", core)).isTrue();
+        assertThat(JiraLookupService.componentsNamed("creed-platform log4j-api 2.14.1 CVE-2021-44228", core)).isFalse();
+        assertThat(JiraLookupService.componentsNamed("creed-platform log4j-core 2.14.10 CVE-2021-44228", core)).isFalse();
+        assertThat(JiraLookupService.componentsNamed("creed-platform 2.14.1 log4j-core CVE-2021-44228", core)).isFalse();
+        // a finding in two components: an issue for both covers it, one for either alone does not
+        Finding two = new Finding(core.id(), core.cve(), core.title(), List.of("log4j-core 2.14.1", "log4j-api 2.14.1"),
+                null, null, "2.3.0", null, null, List.of());
+        assertThat(JiraLookupService.componentsNamed("app log4j-core 2.14.1, log4j-api 2.14.1 CVE-2021-44228", two)).isTrue();
+        assertThat(JiraLookupService.componentsNamed("app log4j-core 2.14.1 CVE-2021-44228", two)).isFalse();
     }
 
     @Test
@@ -62,13 +80,11 @@ class JiraMatchingTest {
         Finding traversal = finding(null, "Path \"traversal\" (RouterFunctions) * OR more", "2.3.0");
 
         // a CVE is a phrase; a title is lower-cased words, so its "OR" is not an operator
-        assertThat(Jql.lookup("CREED", "2.3.0", log4shell)).isEqualTo(
-                "project = \"CREED\" AND affectedVersion = \"2.3.0\" AND summary ~ \"\\\"CVE 2021 44228\\\"\"");
-        assertThat(Jql.lookup("CREED", "2.3.0", traversal)).isEqualTo(
-                "project = \"CREED\" AND affectedVersion = \"2.3.0\" AND summary ~ \"path traversal routerfunctions or more\"");
-        assertThat(Jql.lookup("CREED", "2.3.0", finding(null, "***", "2.3.0"))).isNull();
-        // the picker's query: the same words, nothing the query parser reads
-        assertThat(Jql.pickerQuery(log4shell)).isEqualTo("CVE 2021 44228");
+        // one search for many findings: their terms OR'ed, the same CVE once
+        assertThat(Jql.lookup("CREED", "2.3.0", List.of(log4shell, traversal, log4shell))).isEqualTo(
+                "project = \"CREED\" AND affectedVersion = \"2.3.0\" AND (summary ~ \"\\\"CVE 2021 44228\\\"\""
+                        + " OR summary ~ \"path traversal routerfunctions or more\") ORDER BY key");
+        assertThat(Jql.lookup("CREED", "2.3.0", List.of(finding(null, "***", "2.3.0")))).isNull();
         assertThat(Jql.quote("a\\b\"c")).isEqualTo("\"a\\\\b\\\"c\"");
     }
 

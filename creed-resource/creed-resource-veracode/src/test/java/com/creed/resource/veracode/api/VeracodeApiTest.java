@@ -414,6 +414,16 @@ class VeracodeApiTest {
     }
 
     @Test
+    void jiraCloudLooksUpThroughItsOwnSearch() throws Exception {
+        // Cloud retired /rest/api/2/search: the same analysis goes through /rest/api/3/search/jql and its page token
+        anonymous.perform(multipart("/api/veracode/analysis/upload").file(sample())
+                        .header(JiraToken.HEADER, "api-token").header(JiraToken.USER_HEADER, "me@example.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.counts.exists").value(3))
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].issues[0].key").value("CREED-101"));
+    }
+
+    @Test
     void uploadErrorsAreNamed() throws Exception {
         mvc.perform(multipart("/api/veracode/analysis/upload")
                         .file(new MockMultipartFile("file", "report.pdf", "application/pdf", "%PDF-1.7".getBytes())))

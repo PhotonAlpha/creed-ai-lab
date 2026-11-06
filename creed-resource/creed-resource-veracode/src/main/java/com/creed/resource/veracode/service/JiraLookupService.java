@@ -7,6 +7,7 @@ import com.creed.resource.veracode.client.jira.JiraFieldMeta;
 import com.creed.resource.veracode.client.jira.JiraIssue;
 import com.creed.resource.veracode.client.jira.JiraIssueType;
 import com.creed.resource.veracode.client.jira.JiraPage;
+import com.creed.resource.veracode.client.jira.JiraSearchResult;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
 import lombok.RequiredArgsConstructor;
@@ -31,18 +32,24 @@ import java.util.regex.Pattern;
 /**
  * Finds the Jira issues that already cover a finding, and creates the ones that do not exist.
  *
- * <p>An issue covers a finding when its Affects Version/s include the finding's affected version
- * <em>and</em> its summary (the issue's title) names the finding, matched loosely: the CVE id anywhere in
- * it, case and separators ignored ({@code cve 2021 44228}, {@code CVE_2021_44228}), but never as part of a
- * longer id; for a finding without a CVE, every word of the title, in any order. The same CVE fixed in 2.2.1
- * is still open for 2.3.0, which is the reason the version is part of the key.
+ * <p>An issue covers a finding when (all three):
+ * <ul>
+ *   <li>its Affects Version/s include the finding's affected version - the same CVE fixed in 2.2.1 is still open
+ *       for 2.3.0, which is why the version is part of the key;</li>
+ *   <li>its summary names the finding, loosely: the CVE id anywhere, case and separators ignored
+ *       ({@code cve 2021 44228}, {@code CVE_2021_44228}) but never as part of a longer id; without a CVE, every
+ *       word of the title (an advisory id such as {@code SRCCLR-SID-29587}), in any order;</li>
+ *   <li>its summary names every component the page shows for the finding ({@code log4j-core 2.14.1}), as a run of
+ *       words - asked for (2026-11-06): the same CVE in another library is another issue. Only while the summary
+ *       template has {@code {component}}: otherwise the issues this page creates could never match.</li>
+ * </ul>
  *
- * <p>Only the issue resource is called ({@link JiraClient}): a finding's candidates come from the issue
- * picker (one call per finding, its JQL narrowed to the project, the version and the CVE / title), each
- * candidate is read with {@code GET /issue/{key}}, and the match is decided here on what Jira returned. The
+ * <p>Finding: one JQL search per affected version and batch of up to {@code search-batch-size} findings, the
+ * fields returned inline ({@link Jql}); the match is decided here on what Jira returned. Data Center searches
+ * {@code /rest/api/2/search}, Jira Cloud {@code /rest/api/3/search/jql} (v2 search is retired there). The
  * project's versions are the {@code versions} field of the issue type's create metadata.
  *
- * <p>Every call carries the user's {@link JiraToken} when the page sent one.
+ * <p>Every call carries the user's {@link JiraToken}.
  */
 @Service
 @RequiredArgsConstructor
@@ -332,44 +339,62 @@ public class JiraLookupService {
     public Map<String, List<IssueRef>> find(List<Finding> findings, Map<String, String> projectVersions,
                                             JiraToken token) {
         Map<String, List<IssueRef>> result = new LinkedHashMap<>();
-        // findings share candidates (two CVEs in one issue's summary): each issue is read once per lookup
-        Map<String, JiraIssue> read = new HashMap<>();
+        Map<String, List<Finding>> byVersion = new LinkedHashMap<>();
         for (Finding f : findings) {
             String version = jiraVersion(projectVersions, f);
-            if (version == null) {
-                continue;
-            }
-            List<IssueRef> covering = new ArrayList<>();
-            result.put(f.id(), covering);
-            String jql = Jql.lookup(props.projectKey(), version, f);
-            if (jql == null) {
-                continue;
-            }
-            List<String> keys = UpstreamException.call(JIRA,
-                    () -> jira.picker(token.authorization(), Jql.pickerQuery(f), jql, true)).keys();
-            for (String key : keys) {
-                JiraIssue issue = read.containsKey(key) ? read.get(key) : read(key, token);
-                read.put(key, issue);
-                // the history section is not bound to currentJQL: the project is checked here too
-                if (issue != null && props.projectKey().equalsIgnoreCase(issue.projectKey()) && covers(issue, f, version)) {
-                    covering.add(toRef(issue));
-                }
+            if (version != null) {
+                result.put(f.id(), new ArrayList<>());
+                byVersion.computeIfAbsent(version, v -> new ArrayList<>()).add(f);
             }
         }
+        boolean withComponents = props.summaryTemplate().contains("{component}");
+        byVersion.forEach((version, all) -> {
+            for (int from = 0; from < all.size(); from += props.searchBatchSize()) {
+                List<Finding> batch = all.subList(from, Math.min(all.size(), from + props.searchBatchSize()));
+                String jql = Jql.lookup(props.projectKey(), version, batch);
+                if (jql == null) {
+                    continue;
+                }
+                for (JiraIssue issue : search(jql, token)) {
+                    for (Finding f : batch) {
+                        if (covers(issue, f, version, withComponents)) {
+                            result.get(f.id()).add(toRef(issue));
+                        }
+                    }
+                }
+            }
+        });
         return result;
     }
 
-    /** {@code null} when it is gone (or hidden from the token) between the picker and the read. */
-    private JiraIssue read(String key, JiraToken token) {
-        try {
-            return UpstreamException.call(JIRA, () -> jira.issue(token.authorization(), key, FIELDS));
-        } catch (UpstreamException e) {
-            if (e.status() == 404) {
-                return null;
+    /** Every page of one search; Cloud and Data Center page differently. */
+    private List<JiraIssue> search(String jql, JiraToken token) {
+        Map<String, JiraIssue> byKey = new LinkedHashMap<>();
+        if (token.cloud()) {
+            String next = null;
+            do {
+                String from = next;
+                JiraSearchResult page = UpstreamException.call(JIRA,
+                        () -> jira.searchJql(token.authorization(), jql, FIELDS, from, props.pageSize()));
+                page.issuesOrEmpty().forEach(i -> byKey.putIfAbsent(i.key(), i));
+                next = page.issuesOrEmpty().isEmpty() || Boolean.TRUE.equals(page.isLast()) ? null : page.nextPageToken();
+            } while (next != null);
+        } else {
+            int startAt = 0;
+            while (true) {
+                int from = startAt;
+                JiraSearchResult page = UpstreamException.call(JIRA,
+                        () -> jira.search(token.authorization(), jql, FIELDS, from, props.pageSize()));
+                page.issuesOrEmpty().forEach(i -> byKey.putIfAbsent(i.key(), i));
+                startAt += page.issuesOrEmpty().size();
+                if (page.issuesOrEmpty().isEmpty() || page.total() != null && startAt >= page.total()) {
+                    break;
+                }
             }
-            throw e;
         }
+        return List.copyOf(byKey.values());
     }
+
 
     /** @param fields from {@link #resolveFields}: the create screen's other fields, already in Jira's shape */
     public IssueRef create(Finding finding, String jiraVersion, Map<String, Object> fields, ReportView report,
@@ -411,9 +436,21 @@ public class JiraLookupService {
         return summary.length() <= 255 ? summary : summary.substring(0, 254) + "…";
     }
 
-    static boolean covers(JiraIssue issue, Finding finding, String jiraVersion) {
+    static boolean covers(JiraIssue issue, Finding finding, String jiraVersion, boolean withComponents) {
         boolean versionMatches = issue.versionNames().stream().anyMatch(v -> v.equalsIgnoreCase(jiraVersion));
-        return versionMatches && summaryNames(issue.summary(), finding);
+        return versionMatches && summaryNames(issue.summary(), finding)
+                && (!withComponents || componentsNamed(issue.summary(), finding));
+    }
+
+    /**
+     * Every component of the finding appears in the summary as a run of whole words, case and separators ignored:
+     * {@code log4j-core 2.14.1} is in "creed-platform log4j-core 2.14.1 CVE-2021-44228", not in "log4j-api 2.14.1 ..."
+     * nor in "log4j-core 2.14.10 ...".
+     */
+    static boolean componentsNamed(String summary, Finding finding) {
+        String words = " " + Finding.normalise(summary) + " ";
+        return finding.components().stream().map(Finding::normalise).filter(c -> !c.isEmpty())
+                .allMatch(c -> words.contains(" " + c + " "));
     }
 
     /**

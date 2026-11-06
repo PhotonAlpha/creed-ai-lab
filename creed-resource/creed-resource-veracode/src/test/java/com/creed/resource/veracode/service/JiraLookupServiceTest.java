@@ -7,18 +7,14 @@ import com.creed.resource.veracode.client.jira.JiraFieldMeta;
 import com.creed.resource.veracode.client.jira.JiraIssue;
 import com.creed.resource.veracode.client.jira.JiraIssueType;
 import com.creed.resource.veracode.client.jira.JiraPage;
-import com.creed.resource.veracode.client.jira.JiraPickerResult;
+import com.creed.resource.veracode.client.jira.JiraSearchResult;
 import com.creed.resource.veracode.client.jira.JiraVersion;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.client.HttpClientErrorException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,7 +23,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** The Jira project's shapes the mock does not have: other issue types, no versions field, foreign picks. */
+/** The Jira project's shapes the mock does not have: other issue types, no versions field, search batching and paging. */
 class JiraLookupServiceTest {
 
     private static final JiraToken TOKEN = new JiraToken("pat");
@@ -55,23 +51,62 @@ class JiraLookupServiceTest {
     }
 
     @Test
-    void picksFromAnotherProjectOrGoneAreNotMatches() {
+    void findingsAreLookedUpInBatchesAndMatchedOnComponentAndCve() {
         FakeJira jira = new FakeJira();
-        jira.picked = List.of("CREED-1", "OTHER-7", "CREED-2", "CREED-1");
-        jira.issues = Map.of(
-                "CREED-1", issue("CREED-1", "CREED", "[Veracode] CVE-2021-44228 log4j"),
-                "OTHER-7", issue("OTHER-7", "OTHER", "CVE-2021-44228 elsewhere"));
-        Finding log4shell = new Finding("CVE-2021-44228@2.3.0", "CVE-2021-44228", "Log4Shell", List.of(), null, null,
-                "2.3.0", null, null, List.of());
+        jira.found = List.of(
+                issue("CREED-1", "CREED", "creed-platform log4j-core 2.14.1 CVE-2021-44228"),
+                // the same CVE, another component: Jira's summary ~ returns it, it is not this finding's issue
+                issue("CREED-2", "CREED", "creed-platform log4j-api 2.14.1 CVE-2021-44228"),
+                issue("CREED-3", "CREED", "creed-platform spring-beans 5.3.17 CVE-2022-22965"),
+                // a longer version is not the component's version
+                issue("CREED-4", "CREED", "creed-platform log4j-core 2.14.10 CVE-2021-44228"),
+                issue("CREED-1", "CREED", "creed-platform log4j-core 2.14.1 CVE-2021-44228"));
+        Finding log4shell = finding("CVE-2021-44228", "log4j-core 2.14.1");
+        Finding spring4shell = finding("CVE-2022-22965", "spring-beans 5.3.17");
+        Finding text4shell = finding("CVE-2022-42889", "commons-text 1.9");
 
-        Map<String, List<JiraLookupService.IssueRef>> found =
-                service(jira).find(List.of(log4shell), Map.of("2.3.0", "2.3.0"), TOKEN);
+        Map<String, List<JiraLookupService.IssueRef>> found = service(jira, 2)
+                .find(List.of(log4shell, spring4shell, text4shell), Map.of("2.3.0", "2.3.0"), TOKEN);
 
         assertThat(found.get(log4shell.id())).extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-1");
-        // one read per key, the duplicate pick included; CREED-2 answered 404 and was skipped
-        assertThat(jira.reads).containsExactly("CREED-1", "OTHER-7", "CREED-2");
-        assertThat(jira.lastJql).isEqualTo(
-                "project = \"CREED\" AND affectedVersion = \"2.3.0\" AND summary ~ \"\\\"CVE 2021 44228\\\"\"");
+        assertThat(found.get(spring4shell.id())).extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-3");
+        assertThat(found.get(text4shell.id())).isEmpty();
+        // three findings, batches of two: two searches, not one call (plus a read per candidate) per finding
+        assertThat(jira.jqls).containsExactly(
+                "project = \"CREED\" AND affectedVersion = \"2.3.0\" AND (summary ~ \"\\\"CVE 2021 44228\\\"\" OR "
+                        + "summary ~ \"\\\"CVE 2022 22965\\\"\") ORDER BY key",
+                "project = \"CREED\" AND affectedVersion = \"2.3.0\" AND (summary ~ \"\\\"CVE 2022 42889\\\"\") ORDER BY key");
+        // Data Center pages by startAt: one issue per page here, so every page was read
+        assertThat(jira.pages).isEqualTo(5 + 5);
+    }
+
+    @Test
+    void jiraCloudSearchesThroughSearchJqlAndItsPageToken() {
+        FakeJira jira = new FakeJira();
+        jira.found = List.of(
+                issue("CREED-1", "CREED", "creed-platform log4j-core 2.14.1 CVE-2021-44228"),
+                issue("CREED-2", "CREED", "creed-platform log4j-api 2.14.1 CVE-2021-44228"));
+        Finding log4shell = finding("CVE-2021-44228", "log4j-core 2.14.1");
+
+        Map<String, List<JiraLookupService.IssueRef>> found = service(jira, 50)
+                .find(List.of(log4shell), Map.of("2.3.0", "2.3.0"), new JiraToken("api-token", "me@example.com"));
+
+        assertThat(found.get(log4shell.id())).extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-1");
+        assertThat(jira.cloudPages).isEqualTo(2);
+        assertThat(jira.pages).isZero();
+    }
+
+    @Test
+    void withoutComponentInTheSummaryTemplateTheCveAloneDecides() {
+        FakeJira jira = new FakeJira();
+        jira.found = List.of(issue("CREED-2", "CREED", "[Veracode] CVE-2021-44228 log4j"));
+        Finding log4shell = finding("CVE-2021-44228", "log4j-core 2.14.1");
+        JiraLookupService service = new JiraLookupService(jira, new JiraProperties("http://jira", "CREED", "Bug",
+                "[Veracode] {cve} {title}", List.of("veracode"), "http://jira/browse/{key}", 1, 50, 5,
+                Duration.ofSeconds(1), Duration.ofSeconds(1)));
+
+        assertThat(service.find(List.of(log4shell), Map.of("2.3.0", "2.3.0"), TOKEN).get(log4shell.id()))
+                .extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-2");
     }
 
     @Test
@@ -189,9 +224,17 @@ class JiraLookupServiceTest {
                 List.of(JiraVersion.named("2.3.0")), List.of(), null, null, new JiraIssue.Project(project)));
     }
 
+    private static Finding finding(String cve, String component) {
+        return new Finding(cve + "@2.3.0", cve, cve, List.of(component), null, null, "2.3.0", null, null, List.of());
+    }
+
     private static JiraLookupService service(JiraClient jira) {
+        return service(jira, 50);
+    }
+
+    private static JiraLookupService service(JiraClient jira, int searchBatchSize) {
         return new JiraLookupService(jira, new JiraProperties("http://jira", "CREED", "Bug", "{project} {component} {cve}",
-                List.of("veracode"), "http://jira/browse/{key}", 1, 5,
+                List.of("veracode"), "http://jira/browse/{key}", 1, searchBatchSize, 5,
                 Duration.ofSeconds(1), Duration.ofSeconds(1)));
     }
 
@@ -202,10 +245,11 @@ class JiraLookupServiceTest {
         List<JiraFieldMeta> fields = List.of(
                 new JiraFieldMeta("summary", "Summary", true, false, null, null, null),
                 new JiraFieldMeta("versions", "Affects Version/s", true, false, ARRAY, values("2.3.0"), null));
-        List<String> picked = List.of();
-        Map<String, JiraIssue> issues = Map.of();
-        final List<String> reads = new ArrayList<>();
-        String lastJql;
+        /** What every search answers, whatever the JQL - the service decides the match. */
+        List<JiraIssue> found = List.of();
+        final List<String> jqls = new ArrayList<>();
+        int pages;
+        int cloudPages;
         String lastAuthorization;
 
         @Override
@@ -214,21 +258,23 @@ class JiraLookupServiceTest {
         }
 
         @Override
-        public JiraPickerResult picker(String authorization, String query, String currentJQL, boolean showSubTasks) {
-            lastJql = currentJQL;
-            return new JiraPickerResult(List.of(new JiraPickerResult.Section("cs", "Current Search",
-                    picked.stream().map(k -> new JiraPickerResult.Item(k, "")).toList())));
+        public JiraSearchResult search(String authorization, String jql, String fields, int startAt, int maxResults) {
+            pages++;
+            if (startAt == 0) {
+                jqls.add(jql);
+            }
+            List<JiraIssue> page = found.stream().skip(startAt).limit(maxResults).toList();
+            return new JiraSearchResult(startAt, found.size(), null, null, page);
         }
 
         @Override
-        public JiraIssue issue(String authorization, String key, String fields) {
-            reads.add(key);
-            JiraIssue issue = issues.get(key);
-            if (issue == null) {
-                throw HttpClientErrorException.create(HttpStatus.NOT_FOUND, "Not Found", HttpHeaders.EMPTY,
-                        "{}".getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8);
-            }
-            return issue;
+        public JiraSearchResult searchJql(String authorization, String jql, String fields, String nextPageToken,
+                                          int maxResults) {
+            cloudPages++;
+            int from = nextPageToken == null ? 0 : Integer.parseInt(nextPageToken);
+            List<JiraIssue> page = found.stream().skip(from).limit(maxResults).toList();
+            boolean last = from + page.size() >= found.size();
+            return new JiraSearchResult(null, null, last, last ? null : String.valueOf(from + page.size()), page);
         }
 
         @Override

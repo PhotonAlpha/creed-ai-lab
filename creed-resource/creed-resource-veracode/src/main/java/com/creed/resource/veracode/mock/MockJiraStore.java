@@ -10,8 +10,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * In-memory Jira project {@code CREED}. Seeded so the sample report shows every outcome: one CVE filed
  * for the analysed version, one filed only for an older version (still missing for 2.3.0), one filed
- * without the {@code [Veracode]} prefix (still found - matching is on the CVE token), and a CVE whose
- * id is a prefix of another's. Created issues are lost on restart.
+ * in free wording (still found - matching is on the CVE token and the component's words), and a CVE whose
+ * id is a prefix of another's. Every seed names its component as the summary template writes it
+ * ({@code log4j-core 2.14.1}): with {@code {component}} in the template a summary without it is not a match.
+ * Created issues are lost on restart.
  *
  * <p>The seeded issues carry a priority and an assignee (one unassigned) so the page's Jira filters have
  * something to filter; a created one is "To Do", unassigned, reported by the token's user.
@@ -39,12 +41,12 @@ public class MockJiraStore {
     public synchronized void reset() {
         issues.clear();
         sequence.set(100);
-        seed("[Veracode] CVE-2021-44228 Apache Log4j2 JNDI features do not protect against attacker-controlled LDAP",
+        seed("creed-platform log4j-core 2.14.1 CVE-2021-44228",
                 "In Progress", "Highest", "Alice Wang", "2.3.0");
-        seed("[Veracode] CVE-2022-22965 Spring Framework RCE via data binding on JDK 9+", "Done", "High", "Bob Li", "2.2.1");
+        seed("creed-platform spring-beans 5.3.17 CVE-2022-22965", "Done", "High", "Bob Li", "2.2.1");
         // separators instead of the id's own hyphens: still found (the title match is loose)
-        seed("Upgrade jackson-databind: cve 2020 36518 deep wrapper array nesting", "To Do", "Medium", null, "2.3.0");
-        seed("[Veracode] CVE-2021-4104 Log4j 1.2 JMSAppender deserialization", "Done", "High", "Alice Wang", "2.3.0");
+        seed("Upgrade jackson-databind 2.12.6: cve 2020 36518 deep wrapper array nesting", "To Do", "Medium", null, "2.3.0");
+        seed("[Veracode] log4j 1.2.17 CVE-2021-4104 JMSAppender deserialization", "Done", "High", "Alice Wang", "2.3.0");
     }
 
     private void seed(String summary, String status, String priority, String assignee, String version) {

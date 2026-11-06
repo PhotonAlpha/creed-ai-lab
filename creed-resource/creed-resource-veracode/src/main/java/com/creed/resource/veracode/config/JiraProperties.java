@@ -24,7 +24,9 @@ import java.util.List;
  *                       an issue is found by the CVE (or title) anywhere in its summary
  * @param labels         added to every created issue (the CVE id is added as well)
  * @param browseUrl      template for issue links, {@code {key}} is replaced
- * @param pageSize       {@code maxResults} per page of the paged create-metadata calls (issue types, fields)
+ * @param pageSize       {@code maxResults} per page of the paged calls (create metadata, searches)
+ * @param searchBatchSize findings per lookup search: their CVEs are OR'ed into one JQL. Bounded by the URL length
+ *                       (the JQL is a query parameter) - 50 CVE phrases are about 3 KB encoded
  * @param maxConnections pooled connections to Jira (lookups run one after another per request; this bounds
  *                       concurrent requests)
  */
@@ -38,6 +40,7 @@ public record JiraProperties(
         @DefaultValue("veracode") List<String> labels,
         @NotBlank String browseUrl,
         @DefaultValue("50") @Min(1) @Max(1000) int pageSize,
+        @DefaultValue("50") @Min(1) @Max(100) int searchBatchSize,
         @DefaultValue("20") @Min(1) @Max(200) int maxConnections,
         @DefaultValue("5s") Duration connectTimeout,
         @DefaultValue("20s") Duration readTimeout) {

@@ -5,11 +5,11 @@ creates the missing ones with the user's own Jira token and exports the result t
 `/veracode` page of `creed-env-matrix-design`.
 
 ```
-Veracode detailed report (XML upload)       Jira project — /rest/api/2/issue/** only
-  └─ software_composition_analysis                  GET  /issue/createmeta/{key}/issuetypes[/{id}]  (versions)
-       └─ component / vulnerability ─► findings ──► GET  /issue/picker   (one per finding, currentJQL)
-                                         │          GET  /issue/{key}    (each candidate)
-                                         │          POST /issue          (missing ones, user's token)
+Veracode detailed report (XML upload)       Jira project
+  └─ software_composition_analysis                  GET  /rest/api/2/issue/createmeta/{key}/issuetypes[/{id}]  (versions)
+       └─ component / vulnerability ─► findings ──► GET  /rest/api/2/search      (DC; ≤ 50 findings per call)
+                                         │          GET  /rest/api/3/search/jql  (Cloud; same JQL, page token)
+                                         │          POST /rest/api/2/issue       (missing ones, user's token)
                                          ▼
                              EXISTS / MISSING / CREATED  ──► UI table · xlsx
 ```
@@ -17,8 +17,8 @@ Veracode detailed report (XML upload)       Jira project — /rest/api/2/issue/*
 Jira is a Spring `@HttpExchange` interface (`JiraClient`) built with `HttpServiceProxyFactory` over its own
 `RestClient`, on **Apache HttpClient 5** (pooled, no redirects, no cookies). Every Jira request and response is
 logged by **Logbook** (logger `org.zalando.logbook.Logbook`, TRACE; `Authorization` masked; the service's own
-inbound requests are not logged). Only the **Issue** group of the
-Jira Data Center REST API (11.0.2 reference) is used — no `/search`, `/myself` or `/project/{key}/versions`.
+inbound requests are not logged). Calls: the **Issue** group (create, createmeta) and the JQL **search** — no
+`/myself` or `/project/{key}/versions`.
 **TLS to Jira is not verified** — neither the certificate nor the hostname.
 
 ## Report
@@ -41,12 +41,25 @@ stays in memory for 2 h (`veracode.upload.ttl`); create, export and re-analysis 
 
 ## Matching
 
-An issue covers a finding when its *Affects Version/s* contain the finding's version **and** its summary
-(title) names it, matched loosely: the CVE anywhere in the summary, case and separators ignored
-(`CVE-2021-44228` = `cve 2021 44228` = `CVE_2021_44228`) but never inside a longer id; without a CVE,
-every word of the title (the advisory id) in any order. Candidates come from the issue picker (its
-`currentJQL` = project + `affectedVersion = "…"` + `summary ~ …`, its `query` = the CVE / title words); each
-is read with `GET /issue/{key}` and the match is decided on that. The project's versions are the
+An issue covers a finding when all three hold:
+
+1. its *Affects Version/s* contain the finding's version;
+2. its summary names the CVE, loosely: anywhere, case and separators ignored (`CVE-2021-44228` =
+   `cve 2021 44228` = `CVE_2021_44228`), never inside a longer id; without a CVE, every word of the title (the
+   advisory id, e.g. `SRCCLR-SID-29587`) in any order;
+3. its summary names **every Component(s) of the finding** as whole words in order (`log4j-core 2.14.1`;
+   case and separators ignored): `log4j-api 2.14.1` or `log4j-core 2.14.10` is another issue. Only while
+   `summary-template` contains `{component}` — a template without it never writes one, so it is not asked for.
+
+The created summary (`creed-platform log4j-core 2.14.1 CVE-2021-44228`) therefore matches itself, and one CVE in
+two libraries is two issues.
+
+**Lookup is a JQL search, batched**: one search per version and per `search-batch-size` (default 50) findings —
+`project = "…" AND affectedVersion = "…" AND (summary ~ "\"CVE 2021 44228\"" OR summary ~ … ) ORDER BY key`, fields
+read inline (no per-issue `GET`). Jira's `summary ~` only narrows; rules 1–3 are decided here on what it returns.
+Data Center: `/rest/api/2/search` (`startAt`); Cloud: `/rest/api/3/search/jql` (`nextPageToken`) — Cloud retired
+the v2 search. A report with 300 findings in one version takes 6 searches instead of 300 picker calls plus a read
+per candidate. The project's versions are the
 *Affects Version/s* `allowedValues` of the configured issue type's create screen. Created issues get the summary
 `veracode.jira.summary-template` (default `{project} {component} {cve}`, `{project}` = the report's
 `app_name`, e.g. `creed-platform spring-beans 5.3.17 CVE-2022-22965`), the version, labels `veracode` + the

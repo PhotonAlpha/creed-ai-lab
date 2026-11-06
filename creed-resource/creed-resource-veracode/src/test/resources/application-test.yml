@@ -22,3 +22,5 @@ veracode:
     browse-url: http://localhost/mock/jira/browse/{key}
     # Small on purpose: the create metadata (4 issue types, 7 fields) then takes several pages.
     page-size: 2
+    # Three findings per search, so the sample report's lookups take several batches.
+    search-batch-size: 3

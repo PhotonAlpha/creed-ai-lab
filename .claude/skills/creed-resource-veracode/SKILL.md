@@ -14,16 +14,15 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 
 - **The only source is an uploaded Veracode detailed report (XML)** (since 2026-11-05, asked for): Confluence,
   the page id and the html/csv/xlsx table parser are gone.
-- `client/jira/JiraClient` — `@HttpExchange` over **`/rest/api/2/issue/**` only** (since 2026-11-06, asked for:
-  the Issue group of the Jira DC 11.0.2 reference): `POST /issue`, `GET /issue/picker`, `GET /issue/{key}`,
-  `GET /issue/createmeta/{project}/issuetypes[/{id}]`. `config/RemoteClientsConfiguration` builds its `RestClient`
+- `client/jira/JiraClient` — `@HttpExchange`: `POST /rest/api/2/issue`, `GET /rest/api/2/issue/createmeta/{project}/issuetypes[/{id}]`,
+  and the search: `GET /rest/api/2/search` (DC) / `GET /rest/api/3/search/jql` (Cloud, `nextPageToken`). `config/RemoteClientsConfiguration` builds its `RestClient`
   from Boot's prototype `RestClient.Builder` on **Apache HttpClient 5** (`jiraConnectionManager` pool bean,
   `destroyMethod=close` + `setConnectionManagerShared`; **no redirects, no cookies**; `TrustAllTls` + `CLIENT` /
   `NoopHostnameVerifier`), **no default `Authorization`**. Static `jiraClient(RestClient)` lets tests put the same
   proxy on another transport.
 - `service/VeracodeXmlParser` (StAX) → `ReportRow`s (affected version filled in once known: root `version` or
   the upload's override) → `UploadedReportStore` → `domain/Finding.group` → `service/JiraLookupService`
-  (createmeta versions, picker + get, match, create) → `VeracodeAnalysisService` (analyse / create by upload id, re-reads
+  (createmeta versions, batched search, match, create) → `VeracodeAnalysisService` (analyse / create by upload id, re-reads
   Jira per request) → `ExcelExporter` (POI).
 - `mock/` — `MockJiraController` + `MockJiraStore` (project CREED, versions 2.2.1/2.3.0/2.4.0, four seeded
   issues, keys from CREED-105). `@ConditionalOnProperty veracode.mock.enabled`; the Jira URLs default to
@@ -44,11 +43,13 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 - **Finding = (CVE or normalised title, affected version)**; id `CVE-…@2.3.0` /
   `title:srcclr sid 29587@2.3.0`. Create requests carry ids only; the server re-reads the upload + Jira under a
   per-process lock → `ALREADY_EXISTS` instead of duplicates. Don't switch to client-supplied finding data.
-- **No `/search`, `/myself`, `/project/{key}/versions`** — don't "simplify" back to them. Lookup = one picker
-  call per finding (`Jql.lookup`: project + `affectedVersion = "v"` + `summary ~`; `Jql.pickerQuery` = the same
-  words) + one `GET /issue/{key}` per candidate key (read once per analysis; another project's key — the picker's
-  history section ignores `currentJQL` — and 404 are skipped). The picker is an auto-complete with a capped
-  result: keep its JQL one finding narrow. The mock caps at 20 too.
+- **Lookup = batched JQL search** (2026-11-06, replaced the picker + per-candidate `GET`, asked for: too many calls).
+  `Jql.lookup(project, version, findings)` ORs the `summary ~` terms, `search-batch-size` findings per call, fields
+  inline. Cloud has no `/rest/api/2/search` — `token.cloud()` picks `/rest/api/3/search/jql`. Still no `/myself`,
+  `/project/{key}/versions`. Keep the JQL to the three clauses the mock parses (project, affectedVersion, summary ~).
+- **Match = version + CVE (or title words) + every Component(s) as a whole-word run** (`componentsNamed`; only when
+  `summary-template` has `{component}`). `summary ~` cannot express "these words in this order next to that CVE",
+  so it narrows and Java decides — the search returns another library's issue for the same CVE by design.
 - **Versions = `versions.allowedValues` of the issue type's create screen** (`createMeta()`, two paged calls).
   Never put an unknown version into JQL — Jira 400s. Unknown → `jiraVersion: null`, not searched, not creatable.
   Issue type not creatable / no *Affects Version/s* field → `UpstreamException.setup` (502 with the reason).
@@ -62,8 +63,8 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   (localStorage when "remember"), as JSON `{deployment, token, email}` (a bare string = an old DC token).
 - **Cloud vs Data Center is the token's, not the config's**: `X-Jira-User` (e-mail) present → `Basic
   base64(email:token)` and `CreateMeta.cloud` (user fields → `accountId`); absent → `Bearer`. Cloud answers an API
-  token sent as Bearer with a bare 401. Both stay on `/rest/api/2/issue/**` (v2 takes a plain-text description; v3
-  would need ADF). Cloud's createmeta pages say `issueTypes` / `fields` — `JiraPage`'s `@JsonAlias`.
+  token sent as Bearer with a bare 401. Create and createmeta stay on v2 (v2 takes a plain-text description; v3
+  would need ADF); only Cloud's search is v3, and none of the fields it reads differ. Cloud's createmeta pages say `issueTypes` / `fields` — `JiraPage`'s `@JsonAlias`.
 - **Issue type is the page's** (`X-Jira-Issue-Type` → `JiraToken.issueType`, `issueTypeOr(config)`), so every
   service entry sees it with no extra parameter. A type without Affects Version/s is a named check
   (`Problem.AFFECTS_VERSION`), never a generic failure — don't fold the checks back into one message. Sub-task
