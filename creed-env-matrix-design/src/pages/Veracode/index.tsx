@@ -28,7 +28,7 @@ import {
 } from 'antd';
 import type { TableColumnsType } from 'antd';
 import {
-  CloudDownloadOutlined, ExperimentOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined, TagOutlined,
+  CloudDownloadOutlined, ExperimentOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined, TagOutlined, TagsOutlined,
 } from '@ant-design/icons';
 import { jiraAuthComplete, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
 import type {
@@ -67,6 +67,13 @@ const STATUS_COLOR: Record<FindingStatus, string> = { EXISTS: 'success', MISSING
  * the version comes from the page's Jira version choice, not the finding.
  */
 const creatable = (f: Finding) => f.status === 'MISSING' || f.needsLabel;
+
+/**
+ * Creating and labelling look apart everywhere: create = the primary blue, add label = orange, the colour of the
+ * "label missing" tag and stat card. Rows use the light `filled` variant so a column of them stays calm.
+ */
+const CREATE_BUTTON = { color: 'primary', icon: <PlusCircleOutlined /> } as const;
+const LABEL_BUTTON = { color: 'orange', icon: <TagOutlined /> } as const;
 
 /** The Jira issue a finding belongs to, whichever application reported it — the backend's `Finding.issueKey`. */
 const issueKey = (f: Finding) => `${f.cveId ?? `Unknown|${f.cwe ?? 'Unknown'}`}@${f.fileName}`;
@@ -482,7 +489,9 @@ export function VeracodePage() {
     version: (analysis?.jiraVersions ?? distinct(issues.flatMap((i) => i.versions))).map((v) => ({ value: v, label: v })),
   }), [issues, analysis, t]);
   const jiraFilterCount = Object.values(jiraFilters).filter((v) => v.length > 0).length;
-  const missingCreatable = (analysis?.findings ?? []).filter(creatable).map((f) => f.id);
+  /** Split, so labelling can be done in one go and is not lost among the creates. */
+  const allMissing = (analysis?.findings ?? []).filter((f) => f.status === 'MISSING' && !f.needsLabel).map((f) => f.id);
+  const allUnlabelled = (analysis?.findings ?? []).filter((f) => f.needsLabel).map((f) => f.id);
 
   const applicationColumn = severalApplications && !groupByApplication;
   const columns: TableColumnsType<Finding> = [
@@ -600,13 +609,14 @@ export function VeracodePage() {
             : t('veracode.createOneConfirm', { project: analysis?.projectKey ?? '' })}
           onConfirm={() => create([f.id])}
         >
-          <Button size="small" icon={f.needsLabel ? <TagOutlined /> : <PlusCircleOutlined />} loading={creating}>
+          <Button size="small" variant="filled" {...(f.needsLabel ? LABEL_BUTTON : CREATE_BUTTON)} loading={creating}>
             {t(f.needsLabel ? 'veracode.labelOne' : 'veracode.createOne')}
           </Button>
         </Popconfirm>
       ) : (
         <Tooltip title={createBlocked}>
-          <Button size="small" icon={hasToken ? <PlusCircleOutlined /> : <KeyOutlined />} disabled={hasToken}
+          <Button size="small" variant="filled" {...(f.needsLabel ? LABEL_BUTTON : CREATE_BUTTON)}
+                  {...(hasToken ? {} : { icon: <KeyOutlined /> })} disabled={hasToken}
                   onClick={() => setTokenOpen(true)}>
             {t(f.needsLabel ? 'veracode.labelOne' : 'veracode.createOne')}
           </Button>
@@ -927,7 +937,7 @@ export function VeracodePage() {
                     onConfirm={() => create(selected)}
                     disabled={selected.length === 0 || !canCreate}
                   >
-                    <Button icon={<PlusCircleOutlined />} disabled={selected.length === 0 || !canCreate} loading={creating}>
+                    <Button variant="outlined" {...CREATE_BUTTON} disabled={selected.length === 0 || !canCreate} loading={creating}>
                       {t('veracode.createSelected', { count: selected.length })}
                     </Button>
                   </Popconfirm>
@@ -936,12 +946,26 @@ export function VeracodePage() {
               <Tooltip title={createBlocked}>
                 <span>
                   <Popconfirm
-                    title={t('veracode.createSelectedConfirm', { count: missingCreatable.length, project: analysis?.projectKey ?? '' })}
-                    onConfirm={() => create(missingCreatable)}
-                    disabled={missingCreatable.length === 0 || !canCreate}
+                    title={t('veracode.createSelectedConfirm', { count: allMissing.length, project: analysis?.projectKey ?? '' })}
+                    onConfirm={() => create(allMissing)}
+                    disabled={allMissing.length === 0 || !canCreate}
                   >
-                    <Button danger disabled={missingCreatable.length === 0 || !canCreate} loading={creating}>
-                      {t('veracode.createAllMissing', { count: missingCreatable.length })}
+                    <Button variant="solid" {...CREATE_BUTTON} disabled={allMissing.length === 0 || !canCreate} loading={creating}>
+                      {t('veracode.createAllMissing', { count: allMissing.length })}
+                    </Button>
+                  </Popconfirm>
+                </span>
+              </Tooltip>
+              <Tooltip title={createBlocked ?? t('veracode.labelAllHint')}>
+                <span>
+                  <Popconfirm
+                    title={t('veracode.labelAllConfirm', { count: allUnlabelled.length })}
+                    onConfirm={() => create(allUnlabelled)}
+                    disabled={allUnlabelled.length === 0 || !canCreate}
+                  >
+                    <Button variant="solid" {...LABEL_BUTTON} icon={<TagsOutlined />}
+                            disabled={allUnlabelled.length === 0 || !canCreate} loading={creating}>
+                      {t('veracode.labelAll', { count: allUnlabelled.length })}
                     </Button>
                   </Popconfirm>
                 </span>

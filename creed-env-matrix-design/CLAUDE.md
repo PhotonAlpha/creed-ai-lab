@@ -176,6 +176,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   描述表格按页面列顺序，含完整 `cve_summary`。
 - 可一次上传多个 XML：不同 application 时表格可按 application 过滤、分组（可折叠）；相同 CVE + 相同 jar 的 Jira 已存在时不再重复创建，
   而是给它加上该 application 的 label（行上显示「缺少 label」，按钮为「添加 label」）。
+  按钮按颜色区分：创建 = 蓝色（primary）+ ➕ 图标，添加 label = 橙色 + 标签图标（与「缺少 label」标签、统计卡片同色）；
+  工具栏「创建全部缺失」只建缺失的，「添加全部 label」一键给所有缺少 label 的 Jira 加上，避免遗漏。
   application 显示在分组（折叠面板）标题上，单个报告时显示在上方的报告表中；只有关闭分组、多个 application 混在一个表里时才显示 application 列。
   查找用批量 JQL 搜索：每 50 条漏洞一次（Data Center `/rest/api/2/search`，Cloud `/rest/api/3/search/jql`）。
 - 创建 Jira 使用**用户自己的访问令牌**：页面「Jira 令牌」中配置并「测试连接」（显示令牌对应的用户、是否能访问项目），
