@@ -54,16 +54,16 @@ class JiraLookupServiceTest {
     void findingsAreLookedUpInBatchesAndMatchedOnComponentAndCve() {
         FakeJira jira = new FakeJira();
         jira.found = List.of(
-                issue("CREED-1", "CREED", "creed-platform log4j-core 2.14.1 CVE-2021-44228"),
-                // the same CVE, another component: Jira's summary ~ returns it, it is not this finding's issue
-                issue("CREED-2", "CREED", "creed-platform log4j-api 2.14.1 CVE-2021-44228"),
-                issue("CREED-3", "CREED", "creed-platform spring-beans 5.3.17 CVE-2022-22965"),
-                // a longer version is not the component's version
-                issue("CREED-4", "CREED", "creed-platform log4j-core 2.14.10 CVE-2021-44228"),
-                issue("CREED-1", "CREED", "creed-platform log4j-core 2.14.1 CVE-2021-44228"));
-        Finding log4shell = finding("CVE-2021-44228", "log4j-core 2.14.1");
-        Finding spring4shell = finding("CVE-2022-22965", "spring-beans 5.3.17");
-        Finding text4shell = finding("CVE-2022-42889", "commons-text 1.9");
+                issue("CREED-1", "CREED", "creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar"),
+                // the same CVE, another jar: Jira's summary ~ returns it, it is not this finding's issue
+                issue("CREED-2", "CREED", "creed - CVE-2021-44228|CWE-502 - log4j-api-2.14.1.jar"),
+                issue("CREED-3", "CREED", "creed - CVE-2022-22965|CWE-94 - spring-beans-5.3.17.jar"),
+                // a longer version is not the jar's version
+                issue("CREED-4", "CREED", "creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.10.jar"),
+                issue("CREED-1", "CREED", "creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar"));
+        Finding log4shell = finding("CVE-2021-44228", "log4j-core-2.14.1.jar");
+        Finding spring4shell = finding("CVE-2022-22965", "spring-beans-5.3.17.jar");
+        Finding text4shell = finding("CVE-2022-42889", "commons-text-1.9.jar");
 
         Map<String, List<JiraLookupService.IssueRef>> found = service(jira, 2)
                 .find(List.of(log4shell, spring4shell, text4shell), List.of("2.3.0"), TOKEN);
@@ -84,9 +84,9 @@ class JiraLookupServiceTest {
     void jiraCloudSearchesThroughSearchJqlAndItsPageToken() {
         FakeJira jira = new FakeJira();
         jira.found = List.of(
-                issue("CREED-1", "CREED", "creed-platform log4j-core 2.14.1 CVE-2021-44228"),
-                issue("CREED-2", "CREED", "creed-platform log4j-api 2.14.1 CVE-2021-44228"));
-        Finding log4shell = finding("CVE-2021-44228", "log4j-core 2.14.1");
+                issue("CREED-1", "CREED", "creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar"),
+                issue("CREED-2", "CREED", "creed - CVE-2021-44228|CWE-502 - log4j-api-2.14.1.jar"));
+        Finding log4shell = finding("CVE-2021-44228", "log4j-core-2.14.1.jar");
 
         Map<String, List<JiraLookupService.IssueRef>> found = service(jira, 50)
                 .find(List.of(log4shell), List.of("2.3.0"), new JiraToken("api-token", "me@example.com"));
@@ -97,16 +97,33 @@ class JiraLookupServiceTest {
     }
 
     @Test
-    void withoutComponentInTheSummaryTemplateTheCveAloneDecides() {
+    void withoutTheFileInTheSummaryTemplateTheCveAloneDecides() {
         FakeJira jira = new FakeJira();
         jira.found = List.of(issue("CREED-2", "CREED", "[Veracode] CVE-2021-44228 log4j"));
-        Finding log4shell = finding("CVE-2021-44228", "log4j-core 2.14.1");
-        JiraLookupService service = new JiraLookupService(jira, new JiraProperties("http://jira", "CREED", "Bug",
-                "[Veracode] {cve} {title}", List.of("veracode"), "http://jira/browse/{key}", 1, 50, 5,
-                Duration.ofSeconds(1), Duration.ofSeconds(1)));
+        Finding log4shell = finding("CVE-2021-44228", "log4j-core-2.14.1.jar");
+        JiraLookupService service = new JiraLookupService(jira, properties("[Veracode] {cve}", 50));
 
         assertThat(service.find(List.of(log4shell), List.of("2.3.0"), TOKEN).get(log4shell.id()))
                 .extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-2");
+    }
+
+    @Test
+    void theSummaryAndTheLabelsOfACreatedIssue() {
+        JiraLookupService service = service(new FakeJira());
+        Finding log4shell = new Finding("CREED-PAY-GATEWAY-API|CVE-2021-44228@log4j-core-2.14.1.jar",
+                "CREED-PAY-GATEWAY-API", "CVE-2021-44228", "CVE-2021-44228", "CWE-502", "log4j-core-2.14.1.jar",
+                List.of("log4j-core 2.14.1"), null, null, "2.3.0", null, List.of());
+        Finding unknown = new Finding("a|Unknown|Unknown@x.jar", "two words", null, null, null, "x.jar", List.of(), null,
+                null, null, null, List.of());
+
+        // {project} is project-name, not the Veracode application
+        assertThat(service.summary(log4shell)).isEqualTo("creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar");
+        assertThat(service.summary(unknown)).isEqualTo("creed - Unknown|Unknown - x.jar");
+        // configured labels, project-name, and the application without its first two parts - not the cve_id
+        assertThat(service.labels(log4shell)).containsExactly("veracode", "creed", "GATEWAY-API");
+        assertThat(service.applicationLabel(log4shell)).isEqualTo("GATEWAY-API");
+        // fewer than two hyphens: the whole name; Jira takes no spaces in a label
+        assertThat(service.labels(unknown)).containsExactly("veracode", "creed", "two_words");
     }
 
     @Test
@@ -224,8 +241,8 @@ class JiraLookupServiceTest {
                 List.of(JiraVersion.named("2.3.0")), List.of(), null, null, new JiraIssue.Project(project)));
     }
 
-    private static Finding finding(String cve, String component) {
-        return new Finding(cve + "@2.3.0", cve, cve, List.of(component), null, null, "2.3.0", null, null, List.of());
+    private static Finding finding(String cve, String file) {
+        return JiraMatchingTest.finding(cve, "CWE-1", file);
     }
 
     private static JiraLookupService service(JiraClient jira) {
@@ -233,9 +250,13 @@ class JiraLookupServiceTest {
     }
 
     private static JiraLookupService service(JiraClient jira, int searchBatchSize) {
-        return new JiraLookupService(jira, new JiraProperties("http://jira", "CREED", "Bug", "{project} {component} {cve}",
-                List.of("veracode"), "http://jira/browse/{key}", 1, searchBatchSize, 5,
-                Duration.ofSeconds(1), Duration.ofSeconds(1)));
+        return new JiraLookupService(jira, properties("{project} - {cve}|{cwe} - {file}", searchBatchSize));
+    }
+
+    private static JiraProperties properties(String template, int searchBatchSize) {
+        return new JiraProperties("http://jira", "CREED", "Bug", "creed", template, List.of("veracode"),
+                "^[^-]*-[^-]*-(.+)$", "http://jira/browse/{key}", 1, searchBatchSize, 5,
+                Duration.ofSeconds(1), Duration.ofSeconds(1));
     }
 
     /** Pages of one item each (pageSize 1), so paging is walked as well. */
@@ -254,6 +275,11 @@ class JiraLookupServiceTest {
 
         @Override
         public JiraCreatedIssue createIssue(String authorization, JiraCreateIssueRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void updateIssue(String authorization, String key, Map<String, Object> update) {
             throw new UnsupportedOperationException();
         }
 

@@ -153,6 +153,11 @@ it was not checked in a browser (the browser extension could not attach to any p
   in (...)` (none = any), create files under the one chosen (else 400 `jira_version_required`). `FindingView.jiraVersion`,
   `counts.versionNotInJira` and outcome `VERSION_NOT_IN_JIRA` are gone; the response has `selectedVersions` /
   `createVersion`, the connection `versionNames`. The page caches its state in sessionStorage (`pageCache`).
+- **Findings per application + CVE + jar** (2026-11-06, asked for): summary `{project} - {cve}|{cwe} - {file}`
+  (`project-name`), labels + `project-name` + application label (`application-label` regex), several XML files per
+  upload (`reports`, `uploadId`), a CVE + jar another application already filed is labelled (`LABELED`), not
+  duplicated. The mock answers `PUT /rest/api/2/issue/{key}` labels; seeds use the new summary and carry the sample
+  application's label. A report without `version` is no longer refused (the version is display only).
 - **`affectedVersion = "x"` with a version the project lacks is a 400**, not "no match". Versions come from the
   issue type's create screen (`versions.allowedValues`; archived ones are absent) and only those are searched; the
   rest are `jiraVersion: null` and cannot be created. No *Affects Version/s* on the create screen, or the issue

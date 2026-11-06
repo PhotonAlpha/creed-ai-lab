@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -232,6 +233,27 @@ public class MockJiraController {
                         || words.stream().anyMatch(w -> List.of(Finding.normalise(i.summary()).split(" ")).containsAll(w)))
                 .map(this::toJson)
                 .toList();
+    }
+
+    /** Only what the service sends: {@code {"update": {"labels": [{"add": "x"}]}}}; 204 like Jira. */
+    @PutMapping("/rest/api/2/issue/{key}")
+    ResponseEntity<?> update(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+                             @PathVariable String key, @RequestBody JsonNode body) {
+        if (user(authorization) == null) {
+            return unauthorized();
+        }
+        if (store.find(key) == null) {
+            return error(HttpStatus.NOT_FOUND, "Issue Does Not Exist", null);
+        }
+        for (JsonNode op : body.path("update").path("labels")) {
+            String label = op.path("add").asString("");
+            if (label.isBlank() || label.contains(" ")) {
+                return error(HttpStatus.BAD_REQUEST, null, Map.of("labels", "The label '" + label
+                        + "' contains spaces which is invalid."));
+            }
+            store.addLabel(key, label);
+        }
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/rest/api/2/issue")

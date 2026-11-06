@@ -59,18 +59,24 @@ final class Jql {
                 + " ORDER BY key";
     }
 
-    private static final java.util.regex.Pattern CVE_ID =
-            java.util.regex.Pattern.compile("CVE-\\d{4}-\\d+", java.util.regex.Pattern.CASE_INSENSITIVE);
+    /** A CVE or CWE id, sent as written: inside the phrase quotes its hyphens are text. */
+    private static final java.util.regex.Pattern ID =
+            java.util.regex.Pattern.compile("(CVE-\\d{4}|CWE)-\\d+", java.util.regex.Pattern.CASE_INSENSITIVE);
 
+    /**
+     * The vulnerability's id as a phrase: the CVE (or advisory id) - or, for an Unknown, its CWE (the Java match then
+     * asks for "Unknown" too). {@code ""} when the finding has neither.
+     */
     private static String summaryTerm(Finding f) {
-        if (f.cve() != null && CVE_ID.matcher(f.cve().trim()).matches()) {
-            return "\"" + f.cve().trim().toUpperCase(Locale.ROOT) + "\"";
-        }
-        String text = searchPhrase(f.matchText());
-        if (text.isEmpty()) {
+        String id = f.cveId() != null ? f.cveId() : f.cwe();
+        if (id == null) {
             return "";
         }
-        return f.cve() != null ? "\"" + text + "\"" : text.toLowerCase(Locale.ROOT);
+        if (ID.matcher(id.trim()).matches()) {
+            return "\"" + id.trim().toUpperCase(Locale.ROOT) + "\"";
+        }
+        String text = searchPhrase(id);
+        return text.isEmpty() ? "" : "\"" + text + "\"";
     }
 
     /** The text as Lucene will tokenise it, with nothing in it that means something to the query parser. */

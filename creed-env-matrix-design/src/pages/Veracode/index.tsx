@@ -6,6 +6,7 @@ import {
   Button,
   Checkbox,
   Col,
+  Collapse,
   Descriptions,
   Empty,
   Input,
@@ -15,6 +16,7 @@ import {
   Select,
   Space,
   Statistic,
+  Switch,
   Table,
   Tag,
   Tooltip,
@@ -24,10 +26,13 @@ import {
   theme,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { CloudDownloadOutlined, ExperimentOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import {
+  CloudDownloadOutlined, ExperimentOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined, TagOutlined,
+} from '@ant-design/icons';
 import { jiraAuthComplete, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
 import type {
-  Analysis, CreateField, CreateFieldValues, CreateResult, Finding, FindingStatus, IssueRef, JiraAuth, JiraConnection, VeracodeSettings,
+  Analysis, CreateField, CreateFieldValues, CreateResult, Finding, FindingStatus, IssueRef, JiraAuth, JiraConnection,
+  ReportView, VeracodeSettings,
 } from '../../api/veracode';
 import { JiraTokenModal } from './JiraTokenModal';
 import { emptyAuth, jiraTokenStore } from './jiraToken';
@@ -55,8 +60,14 @@ const SEVERITY_COLOR = ['default', 'blue', 'gold', 'orange', 'volcano', 'red'];
 
 const STATUS_COLOR: Record<FindingStatus, string> = { EXISTS: 'success', MISSING: 'error', CREATED: 'processing' };
 
-/** A missing finding can be created; the version comes from the page's Jira version choice, not the finding. */
-const creatable = (f: Finding) => f.status === 'MISSING';
+/**
+ * A missing finding can be created, and one whose issue lacks its application's label can be labelled (same button);
+ * the version comes from the page's Jira version choice, not the finding.
+ */
+const creatable = (f: Finding) => f.status === 'MISSING' || f.needsLabel;
+
+/** The Jira issue a finding belongs to, whichever application reported it — the backend's `Finding.issueKey`. */
+const issueKey = (f: Finding) => `${f.cveId ?? `Unknown|${f.cwe ?? 'Unknown'}`}@${f.fileName}`;
 
 /** Lower case, every run of non-letters/digits one space — so `CVE-2021-44228`, `cve 2021 44228` and `CVE_2021_44228` read alike. */
 const fuzzy = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -68,7 +79,7 @@ const fuzzy = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '
 const matchesKeyword = (f: Finding, keyword: string) => {
   const words = fuzzy(keyword).split(' ').filter(Boolean);
   if (words.length === 0) return true;
-  const text = ` ${fuzzy([f.cve, f.title, f.affectedVersion, ...f.components,
+  const text = ` ${fuzzy([f.title, f.application, f.fileName, f.description, f.affectedVersion, ...f.components,
     ...f.issues.flatMap((i) => [i.key, i.summary])].filter(Boolean).join(' '))} `;
   return words.every((w) => text.includes(w));
 };
@@ -97,6 +108,8 @@ const matchesJira = (f: Finding, j: JiraFilters) =>
 /** What survives a reload besides the analysis (see `pageCache`). */
 interface CachedView {
   jiraVersions: string[];
+  applications: string[];
+  groupByApplication: boolean;
   versionOverride: string;
   fieldValues: CreateFieldValues;
   statusFilter: StatusFilter;
@@ -127,12 +140,15 @@ export function VeracodePage() {
   /** Set when the analysis on screen came from the cache, not from Jira just now. */
   const [restoredAt, setRestoredAt] = useState<number | null>(cached?.analysis ? cached.savedAt : null);
   const [loading, setLoading] = useState(false);
-  /** The upload under way: bytes sent, then (all sent) the server parsing and asking Jira. */
+  /** The upload under way (one or more files): bytes sent, then (all sent) the server parsing and asking Jira. */
   const [upload, setUpload] = useState<{ name: string; loaded: number; total: number } | null>(null);
   const [creating, setCreating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(cached?.view.statusFilter ?? 'ALL');
+  /** Several reports, several Veracode applications: filtered (none = all) and, if asked, grouped by it. */
+  const [applications, setApplications] = useState<string[]>(cached?.view.applications ?? []);
+  const [groupByApplication, setGroupByApplication] = useState(cached?.view.groupByApplication ?? true);
   const [keyword, setKeyword] = useState(cached?.view.keyword ?? '');
   const [jiraFilters, setJiraFilters] = useState<JiraFilters>(cached?.view.jiraFilters ?? NO_JIRA_FILTERS);
   const [selected, setSelected] = useState<string[]>([]);
@@ -180,14 +196,16 @@ export function VeracodePage() {
   /** Everything restorable, written whenever it changes. */
   useEffect(() => {
     pageCache.save<CachedView>(analysis, {
-      jiraVersions, versionOverride, fieldValues, statusFilter, keyword, jiraFilters, pageSize: page.pageSize,
+      jiraVersions, applications, groupByApplication, versionOverride, fieldValues, statusFilter, keyword, jiraFilters,
+      pageSize: page.pageSize,
     });
-  }, [analysis, jiraVersions, versionOverride, fieldValues, statusFilter, keyword, jiraFilters, page.pageSize]);
+  }, [analysis, jiraVersions, applications, groupByApplication, versionOverride, fieldValues, statusFilter, keyword,
+    jiraFilters, page.pageSize]);
 
   /** Back to the first page whenever the rows change underneath it. */
   useEffect(() => {
     setPage((p) => ({ ...p, current: 1 }));
-  }, [analysis, statusFilter, keyword, jiraFilters]);
+  }, [analysis, statusFilter, keyword, jiraFilters, applications]);
 
   /** Guards against an older analysis resolving after a newer one (StrictMode double mount, fast clicks). */
   const requestId = useRef(0);
@@ -237,7 +255,7 @@ export function VeracodePage() {
   /** Another Jira version choice is another search: the analysis on screen is redone with it. */
   const chooseVersions = (versions: string[]) => {
     setJiraVersions(versions);
-    if (analysis) analyze(analysis.report.id, false, versions);
+    if (analysis) analyze(analysis.uploadId, false, versions);
   };
 
   /**
@@ -289,14 +307,18 @@ export function VeracodePage() {
   });
 
   /**
-   * `false` keeps antd's Upload from posting the file itself; the page sends it so the result lands in
-   * the same request-id guard as a re-analysis.
+   * `false` keeps antd's Upload from posting the files itself; the page sends them so the result lands in
+   * the same request-id guard as a re-analysis. antd calls this once per file of a drop, with the whole list:
+   * the last call sends them all, as one upload (several reports analysed together).
    */
-  const beforeUpload = (file: File) => {
+  const beforeUpload = (file: File, fileList: File[]) => {
+    if (file !== fileList[fileList.length - 1]) return false;
+    const name = fileList.length === 1 ? file.name : t('veracode.upload.files', { count: fileList.length });
+    const total = fileList.reduce((n, f) => n + f.size, 0);
     withToken(() => confirmed(() => {
-      setUpload({ name: file.name, loaded: 0, total: file.size });
-      void run(() => veracodeApi.analyzeUpload(file, options(), auth,
-        (p) => setUpload({ name: file.name, ...p })), options().autoCreate);
+      setUpload({ name, loaded: 0, total });
+      void run(() => veracodeApi.analyzeUpload(fileList, options(), auth,
+        (p) => setUpload({ name, ...p })), options().autoCreate);
     }));
     return false;
   };
@@ -314,27 +336,44 @@ export function VeracodePage() {
    */
   const applyResults = (results: CreateResult[]) => {
     const byId = new Map(results.map((r) => [r.findingId, r]));
+    const done = (r?: CreateResult) => r?.outcome === 'CREATED' || r?.outcome === 'ALREADY_EXISTS' || r?.outcome === 'LABELED';
     setAnalysis((prev) => {
       if (!prev) return prev;
+      // an issue just created for one application is also the issue of the other applications' same finding
+      const filed = new Map<string, CreateResult>();
+      prev.findings.forEach((f) => {
+        const r = byId.get(f.id);
+        if (r?.outcome === 'CREATED') filed.set(issueKey(f), r);
+      });
       const findings = prev.findings.map((f): Finding => {
         const r = byId.get(f.id);
-        if (r?.outcome === 'CREATED') return { ...f, status: 'CREATED', issues: r.issues };
-        if (r?.outcome === 'ALREADY_EXISTS') return { ...f, status: 'EXISTS', issues: r.issues };
-        return f;
+        if (r?.outcome === 'CREATED') return { ...f, status: 'CREATED', issues: r.issues, needsLabel: false };
+        if (r?.outcome === 'ALREADY_EXISTS' || r?.outcome === 'LABELED') {
+          return { ...f, status: 'EXISTS', issues: r.issues, needsLabel: false };
+        }
+        const sibling = f.status === 'MISSING' ? filed.get(issueKey(f)) : undefined;
+        return sibling ? { ...f, status: 'EXISTS', issues: sibling.issues, needsLabel: true } : f;
       });
       const count = (s: FindingStatus) => findings.filter((f) => f.status === s).length;
       return {
         ...prev,
         findings,
-        counts: { ...prev.counts, exists: count('EXISTS'), missing: count('MISSING'), created: count('CREATED') },
+        counts: {
+          ...prev.counts,
+          exists: count('EXISTS'),
+          missing: count('MISSING'),
+          created: count('CREATED'),
+          needsLabel: findings.filter((f) => f.needsLabel).length,
+        },
       };
     });
-    setSelected((prev) => prev.filter((id) => byId.get(id)?.outcome !== 'CREATED'
-      && byId.get(id)?.outcome !== 'ALREADY_EXISTS'));
+    setSelected((prev) => prev.filter((id) => !done(byId.get(id))));
 
     const created = results.filter((r) => r.outcome === 'CREATED').length;
-    const others = results.filter((r) => r.outcome !== 'CREATED');
+    const labelled = results.filter((r) => r.outcome === 'LABELED').length;
+    const others = results.filter((r) => r.outcome !== 'CREATED' && r.outcome !== 'LABELED');
     if (created > 0) message.success(t('veracode.createdCount', { count: created }));
+    if (labelled > 0) message.success(t('veracode.labelledCount', { count: labelled }));
     if (others.length > 0) {
       modal.warning({
         title: t('veracode.notCreatedTitle', { count: others.length }),
@@ -358,7 +397,7 @@ export function VeracodePage() {
     if (!analysis || ids.length === 0) return;
     setCreating(true);
     try {
-      const { results } = await veracodeApi.createIssues(analysis.report.id, ids, fieldValues, jiraVersions, auth);
+      const { results } = await veracodeApi.createIssues(analysis.uploadId, ids, fieldValues, jiraVersions, auth);
       applyResults(results);
     } catch (e) {
       if (tokenMissing(e)) setTokenOpen(true);
@@ -376,7 +415,7 @@ export function VeracodePage() {
     }
     setExporting(true);
     try {
-      const { blob, filename } = await veracodeApi.exportXlsx(analysis.report.id, auth, jiraVersions);
+      const { blob, filename } = await veracodeApi.exportXlsx(analysis.uploadId, auth, jiraVersions);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -392,11 +431,18 @@ export function VeracodePage() {
 
   const rows = useMemo(
     () => (analysis?.findings ?? [])
+      .filter((f) => applications.length === 0 || applications.includes(f.application ?? ''))
       .filter((f) => statusFilter === 'ALL' || f.status === statusFilter)
       .filter((f) => matchesJira(f, jiraFilters))
       .filter((f) => matchesKeyword(f, keyword.trim())),
-    [analysis, statusFilter, keyword, jiraFilters],
+    [analysis, applications, statusFilter, keyword, jiraFilters],
   );
+  /** The upload's applications, in report order. */
+  const applicationList = useMemo(
+    () => [...new Set((analysis?.findings ?? []).map((f) => f.application ?? ''))],
+    [analysis],
+  );
+  const severalApplications = applicationList.length > 1;
   const issues = useMemo(() => (analysis?.findings ?? []).flatMap((f) => f.issues), [analysis]);
   const filterOptions = useMemo(() => ({
     status: distinct(issues.map((i) => i.status)).map((v) => ({ value: v, label: v })),
@@ -411,37 +457,55 @@ export function VeracodePage() {
   const jiraFilterCount = Object.values(jiraFilters).filter((v) => v.length > 0).length;
   const missingCreatable = (analysis?.findings ?? []).filter(creatable).map((f) => f.id);
 
+  const applicationColumn = severalApplications && !groupByApplication;
   const columns: TableColumnsType<Finding> = [
     {
       title: t('veracode.col.status'),
       dataIndex: 'status',
       width: 110,
-      render: (s: FindingStatus) => <Tag color={STATUS_COLOR[s]}>{t(`veracode.status.${s}` as MessageKey)}</Tag>,
+      render: (s: FindingStatus, f) => (
+        <Space direction="vertical" size={2}>
+          <Tag color={STATUS_COLOR[s]}>{t(`veracode.status.${s}` as MessageKey)}</Tag>
+          {f.needsLabel && (
+            <Tooltip title={t('veracode.needsLabelHint')}><Tag color="warning">{t('veracode.needsLabel')}</Tag></Tooltip>
+          )}
+        </Space>
+      ),
     },
+    // the collapse header names the application of a group, the reports table that of a single one: a column only
+    // when several applications share one ungrouped table
+    ...(applicationColumn ? [{
+      title: t('veracode.col.application'),
+      dataIndex: 'application',
+      width: 180,
+      render: (a: string | null) => a ?? '—',
+    }] : []),
     {
-      title: 'CVE',
-      dataIndex: 'cve',
-      width: 160,
-      render: (cve: string | null) => cve
-        ? <a href={`https://nvd.nist.gov/vuln/detail/${cve}`} target="_blank" rel="noreferrer">{cve}</a>
-        : <Text type="secondary">{t('veracode.noCve')}</Text>,
-    },
-    {
+      // cve_id|cwe_id: the CVE links to NVD, the CWE to MITRE; "Unknown" for a missing part
       title: t('veracode.col.title'),
       dataIndex: 'title',
-      width: 320,
-      render: (title: string, f) => (
-        <Tooltip title={f.description} placement="topLeft">
-          <Paragraph style={{ margin: 0 }} ellipsis={{ rows: 2 }}>{title}</Paragraph>
-        </Tooltip>
+      width: 220,
+      render: (_, f) => (
+        <Space size={0} wrap>
+          {f.cve
+            ? <a href={`https://nvd.nist.gov/vuln/detail/${f.cve}`} target="_blank" rel="noreferrer">{f.cve}</a>
+            : <Text type={f.cveId ? undefined : 'secondary'}>{f.cveId ?? 'Unknown'}</Text>}
+          <Text type="secondary">|</Text>
+          {f.cwe && /^CWE-\d+$/.test(f.cwe)
+            ? <a href={`https://cwe.mitre.org/data/definitions/${f.cwe.slice(4)}.html`} target="_blank" rel="noreferrer">{f.cwe}</a>
+            : <Text type="secondary">{f.cwe ?? 'Unknown'}</Text>}
+        </Space>
       ),
     },
     {
-      title: t('veracode.col.components'),
-      dataIndex: 'components',
+      title: t('veracode.col.component'),
+      dataIndex: 'fileName',
       width: 240,
-      render: (components: string[]) => (
-        <Space size={[0, 4]} wrap>{components.map((c) => <Tag key={c}>{c}</Tag>)}</Space>
+      render: (file: string, f) => (
+        <Space direction="vertical" size={2}>
+          <Text>{file}</Text>
+          <Space size={[0, 4]} wrap>{f.components.map((c) => <Tag key={c}>{c}</Tag>)}</Space>
+        </Space>
       ),
     },
     {
@@ -465,7 +529,13 @@ export function VeracodePage() {
       width: 150,
       // the report's, for reading only: Jira is searched and filed by the Jira versions above
     },
-    { title: t('veracode.col.fixedVersion'), dataIndex: 'fixedVersion', width: 140 },
+    {
+      // the whole cve_summary, wrapped - not cut to a first sentence
+      title: t('veracode.col.description'),
+      dataIndex: 'description',
+      width: 420,
+      render: (d: string | null) => <Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{d ?? '—'}</Paragraph>,
+    },
     {
       title: t('veracode.col.jira'),
       dataIndex: 'issues',
@@ -488,25 +558,63 @@ export function VeracodePage() {
     {
       title: t('veracode.col.actions'),
       key: 'actions',
-      width: 120,
+      width: 130,
       fixed: 'right',
+      // an existing issue of another application is labelled, not created again
       render: (_, f) => creatable(f) && (canCreate ? (
         <Popconfirm
-          title={t('veracode.createOneConfirm', { project: analysis?.projectKey ?? '' })}
+          title={f.needsLabel
+            ? t('veracode.labelOneConfirm', { key: f.issues[0]?.key ?? '' })
+            : t('veracode.createOneConfirm', { project: analysis?.projectKey ?? '' })}
           onConfirm={() => create([f.id])}
         >
-          <Button size="small" icon={<PlusCircleOutlined />} loading={creating}>{t('veracode.createOne')}</Button>
+          <Button size="small" icon={f.needsLabel ? <TagOutlined /> : <PlusCircleOutlined />} loading={creating}>
+            {t(f.needsLabel ? 'veracode.labelOne' : 'veracode.createOne')}
+          </Button>
         </Popconfirm>
       ) : (
         <Tooltip title={createBlocked}>
           <Button size="small" icon={hasToken ? <PlusCircleOutlined /> : <KeyOutlined />} disabled={hasToken}
                   onClick={() => setTokenOpen(true)}>
-            {t('veracode.createOne')}
+            {t(f.needsLabel ? 'veracode.labelOne' : 'veracode.createOne')}
           </Button>
         </Tooltip>
       )),
     },
   ];
+
+  /**
+   * The findings table. Paged by the page's state when it is the only one; in a group each table keeps its own page,
+   * all with the chosen page size. Selections add up across the groups' tables.
+   */
+  const findingsTable = (data: Finding[], single: boolean) => {
+    const ids = new Set(data.map((f) => f.id));
+    return (
+      <Table<Finding>
+        rowKey="id"
+        size="middle"
+        loading={loading}
+        columns={columns}
+        dataSource={data}
+        pagination={{
+          ...(single ? { current: page.current } : {}),
+          pageSize: page.pageSize,
+          showSizeChanger: true,
+          pageSizeOptions: [20, 50, 100, 200],
+          showTotal: (total) => t('veracode.pageTotal', { total }),
+          onChange: (current, pageSize) => setPage({ current: pageSize === page.pageSize ? current : 1, pageSize }),
+        }}
+        // Numeric width, not 'max-content': with a fixed-right column the latter collapses the last
+        // scrolling column (see the creed-env-matrix skill).
+        scroll={{ x: applicationColumn ? 2190 : 2010 }}
+        rowSelection={{
+          selectedRowKeys: selected.filter((id) => ids.has(id)),
+          onChange: (keys) => setSelected((prev) => [...prev.filter((id) => !ids.has(id)), ...(keys as string[])]),
+          getCheckboxProps: (f) => ({ disabled: !creatable(f) }),
+        }}
+      />
+    );
+  };
 
   const counts = analysis?.counts;
 
@@ -548,7 +656,7 @@ export function VeracodePage() {
             </Tooltip>
             {analysis && (
               <Tooltip title={t('veracode.reanalyzeHint')}>
-                <Button icon={<ReloadOutlined />} loading={loading} onClick={() => analyze(analysis.report.id, false)}>
+                <Button icon={<ReloadOutlined />} loading={loading} onClick={() => analyze(analysis.uploadId, false)}>
                   {t('veracode.reanalyze')}
                 </Button>
               </Tooltip>
@@ -584,7 +692,7 @@ export function VeracodePage() {
           )}
           <Upload.Dragger
             accept={UPLOAD_ACCEPT}
-            maxCount={1}
+            multiple
             showUploadList={false}
             beforeUpload={beforeUpload}
             disabled={loading}
@@ -596,45 +704,61 @@ export function VeracodePage() {
           </Upload.Dragger>
           {upload && <UploadProgressBar {...upload} autoCreate={options().autoCreate} />}
           {analysis && (
-            <Descriptions size="small" column={{ xs: 1, md: 2, xl: 4 }} style={{ marginTop: 16 }}>
-              <Descriptions.Item label={t('veracode.app')}>{analysis.report.appName ?? '—'}</Descriptions.Item>
-              <Descriptions.Item label={t('veracode.affectedVersion')}>
-                <Space size={4}>
-                  {analysis.report.affectedVersion}
-                  {analysis.report.versionOverridden && (
-                    <Tooltip title={t('veracode.scanVersion', { version: analysis.report.scanVersion ?? '—' })}>
-                      <Tag color="warning">{t('veracode.overridden')}</Tag>
-                    </Tooltip>
-                  )}
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('veracode.policy')}>
-                <Space size={4}>
-                  {analysis.report.policyName ?? '—'}
-                  {analysis.report.policyCompliance && (
-                    <Tag color={/^pass/i.test(analysis.report.policyCompliance) ? 'success' : 'error'}>
-                      {analysis.report.policyCompliance}
-                    </Tag>
-                  )}
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('veracode.file')}>
-                {analysis.report.fileName}
-                {analysis.report.generatedAt && <Text type="secondary">&nbsp;({analysis.report.generatedAt})</Text>}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('veracode.project')}>{analysis.projectKey}</Descriptions.Item>
-              <Descriptions.Item label={t('veracode.jiraVersions')}>
-                {/* one line however many: the full list is in the tooltip and the version dropdown */}
-                <Text ellipsis={{ tooltip: analysis.selectedVersions.join(', ') }} style={{ maxWidth: 260 }}>
-                  {analysis.selectedVersions.length === 0
-                    ? t('veracode.jiraVersion.any', { count: analysis.jiraVersions.length })
-                    : analysis.selectedVersions.join(', ')}
-                </Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('veracode.analyzedAt')}>
-                {new Date(analysis.analyzedAt).toLocaleString()}
-              </Descriptions.Item>
-            </Descriptions>
+            <>
+              <Descriptions size="small" column={{ xs: 1, md: 2, xl: 4 }} style={{ marginTop: 16 }}>
+                <Descriptions.Item label={t('veracode.project')}>{analysis.projectKey}</Descriptions.Item>
+                <Descriptions.Item label={t('veracode.jiraVersions')}>
+                  {/* one line however many: the full list is in the tooltip and the version dropdown */}
+                  <Text ellipsis={{ tooltip: analysis.selectedVersions.join(', ') }} style={{ maxWidth: 260 }}>
+                    {analysis.selectedVersions.length === 0
+                      ? t('veracode.jiraVersion.any', { count: analysis.jiraVersions.length })
+                      : analysis.selectedVersions.join(', ')}
+                  </Text>
+                </Descriptions.Item>
+                <Descriptions.Item label={t('veracode.analyzedAt')}>
+                  {new Date(analysis.analyzedAt).toLocaleString()}
+                </Descriptions.Item>
+              </Descriptions>
+              {/* one line per uploaded report: its Veracode application, version and policy */}
+              <Table<ReportView>
+                size="small"
+                rowKey="fileName"
+                pagination={false}
+                dataSource={analysis.reports}
+                columns={[
+                  { title: t('veracode.file'), dataIndex: 'fileName' },
+                  { title: t('veracode.app'), dataIndex: 'appName', render: (v: string | null) => v ?? '—' },
+                  {
+                    title: t('veracode.affectedVersion'),
+                    dataIndex: 'affectedVersion',
+                    render: (v: string | null, r) => (
+                      <Space size={4}>
+                        {v ?? '—'}
+                        {r.versionOverridden && (
+                          <Tooltip title={t('veracode.scanVersion', { version: r.scanVersion ?? '—' })}>
+                            <Tag color="warning">{t('veracode.overridden')}</Tag>
+                          </Tooltip>
+                        )}
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: t('veracode.policy'),
+                    dataIndex: 'policyName',
+                    render: (v: string | null, r) => (
+                      <Space size={4}>
+                        {v ?? '—'}
+                        {r.policyCompliance && (
+                          <Tag color={/^pass/i.test(r.policyCompliance) ? 'success' : 'error'}>{r.policyCompliance}</Tag>
+                        )}
+                      </Space>
+                    ),
+                  },
+                  { title: t('veracode.generatedAt'), dataIndex: 'generatedAt', render: (v: string | null) => v ?? '—' },
+                ]}
+                style={{ marginTop: 8 }}
+              />
+            </>
           )}
         </ProCard>
 
@@ -649,7 +773,7 @@ export function VeracodePage() {
             message={t('veracode.cache.restored', { time: new Date(restoredAt).toLocaleString() })}
             action={(
               <Space>
-                <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => analyze(analysis.report.id, false)}>
+                <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => analyze(analysis.uploadId, false)}>
                   {t('veracode.reanalyze')}
                 </Button>
                 <Button size="small" onClick={() => { pageCache.clear(); setAnalysis(null); setRestoredAt(null); }}>
@@ -677,11 +801,13 @@ export function VeracodePage() {
               ['EXISTS', counts.exists, design.colorSuccessBg, design.colorSuccessBorder, design.colorSuccessText],
               ['MISSING', counts.missing, design.colorErrorBg, design.colorErrorBorder, design.colorErrorText],
               ['CREATED', counts.created, design.colorPrimaryBg, design.colorPrimaryBorder, design.colorPrimaryText],
+              ['needsLabel', counts.needsLabel, design.colorWarningBg, design.colorWarningBorder, design.colorWarningText],
             ] as const).map(([key, value, background, border, color]) => (
-              <Col key={key} xs={12} md={6}>
+              <Col key={key} xs={12} md={8} xl={4} flex="auto">
                 <ProCard bordered style={{ background, borderColor: border }}>
                   <Statistic
-                    title={key === 'total' ? t('veracode.stat.total') : t(`veracode.status.${key}` as MessageKey)}
+                    title={key === 'total' ? t('veracode.stat.total')
+                      : key === 'needsLabel' ? t('veracode.needsLabel') : t(`veracode.status.${key}` as MessageKey)}
                     value={value}
                     valueStyle={{ color }}
                   />
@@ -706,6 +832,24 @@ export function VeracodePage() {
                   { value: 'CREATED', label: t('veracode.status.CREATED') },
                 ]}
               />
+              {severalApplications && (
+                <>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    maxTagCount="responsive"
+                    placeholder={t('veracode.application.filter')}
+                    value={applications}
+                    onChange={setApplications}
+                    options={applicationList.map((a) => ({ value: a, label: a || '—' }))}
+                    style={{ width: 240 }}
+                  />
+                  <Space size={4}>
+                    <Switch size="small" checked={groupByApplication} onChange={setGroupByApplication} />
+                    <Text>{t('veracode.application.group')}</Text>
+                  </Space>
+                </>
+              )}
               <Input.Search
                 allowClear
                 defaultValue={keyword}
@@ -769,30 +913,31 @@ export function VeracodePage() {
               <Text type="secondary">{t('veracode.jira.filterHint')}</Text>
             </Space>
           )}
-          {analysis || loading ? (
-            <Table<Finding>
-              rowKey="id"
-              size="middle"
-              loading={loading}
-              columns={columns}
-              dataSource={rows}
-              pagination={{
-                current: page.current,
-                pageSize: page.pageSize,
-                showSizeChanger: true,
-                pageSizeOptions: [20, 50, 100, 200],
-                showTotal: (total) => t('veracode.pageTotal', { total }),
-                onChange: (current, pageSize) => setPage({ current: pageSize === page.pageSize ? current : 1, pageSize }),
-              }}
-              // Numeric width, not 'max-content': with a fixed-right column the latter collapses the last
-              // scrolling column (see the creed-env-matrix skill).
-              scroll={{ x: 1710 }}
-              rowSelection={{
-                selectedRowKeys: selected,
-                onChange: (keys) => setSelected(keys as string[]),
-                getCheckboxProps: (f) => ({ disabled: !creatable(f) }),
-              }}
+          {analysis && severalApplications && groupByApplication ? (
+            // one collapsible table per Veracode application; the selection spans them all
+            <Collapse
+              defaultActiveKey={applicationList}
+              items={applicationList
+                .filter((a) => applications.length === 0 || applications.includes(a))
+                .map((a) => {
+                  const own = rows.filter((f) => (f.application ?? '') === a);
+                  return {
+                    key: a,
+                    label: (
+                      <Space>
+                        <Text strong>{a || '—'}</Text>
+                        <Tag>{t('veracode.application.count', { count: own.length })}</Tag>
+                        {own.some((f) => f.status === 'MISSING') && (
+                          <Tag color="error">{own.filter((f) => f.status === 'MISSING').length} {t('veracode.status.MISSING')}</Tag>
+                        )}
+                      </Space>
+                    ),
+                    children: findingsTable(own, false),
+                  };
+                })}
             />
+          ) : analysis || loading ? (
+            findingsTable(rows, true)
           ) : (
             <Empty description={t('veracode.empty')} />
           )}

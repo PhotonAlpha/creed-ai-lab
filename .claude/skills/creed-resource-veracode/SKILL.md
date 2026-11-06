@@ -40,16 +40,20 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   `software_composition_analysis/vulnerable_components/component/vulnerabilities/vulnerability` is read; static
   flaws are ignored; `mitigation="true"` skipped with a warning; a non-CVE id (`SRCCLR-SID-…`) is the title.
 
-- **Finding = (CVE or normalised title, affected version)** — the id only (`affectedVersion` no longer reaches Jira); id `CVE-…@2.3.0` /
-  `title:srcclr sid 29587@2.3.0`. Create requests carry ids only; the server re-reads the upload + Jira under a
+- **Finding = (application, `cve_id` or Unknown+`cwe_id`, component `file_name`)** (2026-11-06, asked for) — id
+  `creed-platform|CVE-2021-44228@log4j-core-2.14.1.jar`; `Finding.issueKey` is the same without the application: one
+  Jira issue per CVE + jar across applications, each application's label added (`addApplicationLabel`, outcome
+  `LABELED`, `needsLabel` on the view) instead of a duplicate. `createdNow` in `VeracodeAnalysisService.file` carries
+  that within one request. Several files per upload (`UploadedReportStore.ReportFile`). Create requests carry ids only; the server re-reads the upload + Jira under a
   per-process lock → `ALREADY_EXISTS` instead of duplicates. Don't switch to client-supplied finding data.
 - **Lookup = batched JQL search** (2026-11-06, replaced the picker + per-candidate `GET`, asked for: too many calls).
   `Jql.lookup(project, versions, findings)` ORs the `summary ~` terms (a CVE as the quoted id itself,
   `"\"CVE-2021-44228\""` — asked for; unquoted, its `-` would be Lucene's NOT), `search-batch-size` findings per call, fields
   inline. Cloud has no `/rest/api/2/search` — `token.cloud()` picks `/rest/api/3/search/jql`. Still no `/myself`,
   `/project/{key}/versions`. Keep the JQL to the three clauses the mock parses (project, affectedVersion, summary ~).
-- **Match = a chosen Jira version (any, if none chosen) + CVE (or title words) + every Component(s) as a whole-word run** (`componentsNamed`; only when
-  `summary-template` has `{component}`). `summary ~` cannot express "these words in this order next to that CVE",
+- **Match = a chosen Jira version (any, if none chosen) + `cve_id` (Unknown: "Unknown" + CWE) + the `file_name` as a
+  whole-word run** (`named`; only when `summary-template` has `{file}`, components likewise with `{component}`).
+  `{project}` is `project-name`, never the Veracode application — tests pin `project-name: creed`. `summary ~` cannot express "these words in this order next to that CVE",
   so it narrows and Java decides — the search returns another library's issue for the same CVE by design.
 - **Versions = `versions.allowedValues` of the issue type's create screen** (`createMeta()`, two paged calls).
   They are the page's version list. **The report's version is display only** (2026-11-06, asked for): Jira is
@@ -108,6 +112,9 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 - **`spring.config.additional-location` is a default property set in `main()` (`application()`)**, so
   `@SpringBootTest` never sees it — test it through `CreedResourceVeracodeApplication.application()`
   (`ExternalConfigDirTest`). It is not honoured from `application.yml`: Boot reads it before any config file is loaded.
+- **No "Fixed version" field (removed 2026-11-06)**: the detailed report XML's SCA `component` / `vulnerability`
+  carry no fix / safe version, so the column was always empty since the XML became the only source. Bringing it
+  back needs another source (e.g. Veracode's SCA REST API), not a parser tweak.
 
 ## Tests
 

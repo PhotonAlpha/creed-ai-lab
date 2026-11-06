@@ -8,39 +8,55 @@ final class JiraDescription {
     private JiraDescription() {
     }
 
+    /**
+     * One table, the page's columns in the page's order (the title's {@code cve_id|cwe_id} as two rows); the
+     * {@code cve_summary} is its last row, in full.
+     */
     static String of(Finding f, ReportView report) {
         StringBuilder d = new StringBuilder("h3. Veracode SCA finding\n");
         d.append("||Field||Value||\n");
-        if (f.cve() != null) {
-            row(d, "CVE", "[" + f.cve() + "|https://nvd.nist.gov/vuln/detail/" + f.cve() + "]");
-        }
-        row(d, "Title", escape(f.title()));
+        // not one "cve|cwe" cell: | ends a cell, and Jira Cloud renders an escaped \| as a backslash and a new cell
+        row(d, "CVE", f.cve() != null
+                ? "[" + f.cve() + "|https://nvd.nist.gov/vuln/detail/" + f.cve() + "]" : escape(f.cveText()));
+        row(d, "CWE", cwe(f));
+        row(d, "Veracode application", escape(f.application()));
+        row(d, "Component file", escape(f.fileName()));
         row(d, "Component(s)", escape(String.join(", ", f.components())));
         row(d, "Severity", escape(f.severity()));
         row(d, "CVSS", f.cvss() == null ? "" : f.cvss().toString());
         row(d, "Affected version", escape(f.affectedVersion()));
-        row(d, "Fixed version", escape(f.fixedVersion()));
-        if (f.description() != null) {
-            d.append("\n").append(escape(f.description())).append("\n");
-        }
-        d.append("\nSource: Veracode application ").append(escape(report.appName() == null ? "?" : report.appName()));
+        row(d, "Location", escape(String.join("; ", f.locations())));
+        row(d, "Description", escape(f.description()));
+        d.append("\nSource: report ").append(escape(report.fileName()));
         if (report.scanVersion() != null) {
             d.append(", scan ").append(escape(report.scanVersion()));
         }
         if (report.policyName() != null) {
             d.append(", policy ").append(escape(report.policyName()));
         }
-        d.append(" (report ").append(escape(report.fileName())).append(") - ")
-                .append(escape(String.join("; ", f.locations()))).append("\n");
+        d.append("\n");
         return d.toString();
     }
 
-    private static void row(StringBuilder d, String field, String value) {
-        d.append('|').append(field).append('|').append(value == null || value.isEmpty() ? " " : value).append("|\n");
+    /** {@code CWE-502} links to MITRE's entry; "Unknown" stays text. */
+    private static String cwe(Finding f) {
+        if (f.cwe() != null && f.cwe().matches("CWE-\\d+")) {
+            return "[" + f.cwe() + "|https://cwe.mitre.org/data/definitions/" + f.cwe().substring(4) + ".html]";
+        }
+        return escape(f.cweText());
     }
 
-    /** {@code |} ends a table cell and {@code [ ] { }} start links/macros in wiki markup. */
+    private static void row(StringBuilder d, String field, String value) {
+        // a line break would end the table row: a multi-line summary is kept to one
+        String cell = value == null || value.isBlank() ? " " : value.replaceAll("\\s*\\R\\s*", " ");
+        d.append('|').append(field).append('|').append(cell).append("|\n");
+    }
+
+    /**
+     * {@code [ ] { }} start links/macros in wiki markup: escaped. {@code |} ends a table cell, and Jira Cloud does not
+     * honour {@code \|} in a cell (it shows the backslash and splits the cell): it becomes {@code ¦}, which reads alike.
+     */
     private static String escape(String text) {
-        return text == null ? null : text.replaceAll("([|\\[\\]{}])", "\\\\$1");
+        return text == null ? null : text.replace("|", "¦").replaceAll("([\\[\\]{}])", "\\\\$1");
     }
 }

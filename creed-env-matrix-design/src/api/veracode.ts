@@ -19,33 +19,45 @@ export interface IssueRef {
   /** Display name; null = unassigned. */
   assignee: string | null;
   versions: string[];
+  labels: string[];
   url: string;
 }
 
+/**
+ * One vulnerability (`cve_id`) in one component file (`file_name`) of one Veracode application. The same CVE in the
+ * same jar of two applications is one Jira issue, labelled with both (`needsLabel` until it is).
+ */
 export interface Finding {
-  /** `CVE-2021-44228@2.3.0`, or `title:<normalised title>@<version>` for a finding without a CVE. */
+  /** `creed-platform|CVE-2021-44228@log4j-core-2.14.1.jar`. */
   id: string;
-  cve: string | null;
+  /** The report's Veracode application (`app_name`). */
+  application: string | null;
+  /** `cve_id|cwe_id`, "Unknown" for a missing part. */
   title: string;
+  /** The report's `cve_id` (a CVE or an advisory id); null = Unknown. */
+  cveId: string | null;
+  /** `cveId` when it is a CVE — linked to NVD. */
+  cve: string | null;
+  cwe: string | null;
+  /** The component's `file_name`. */
+  fileName: string;
   components: string[];
   severity: string | null;
   cvss: number | null;
   /** The report's version (or the page's override): shown only, never searched or filed under. */
   affectedVersion: string;
-  fixedVersion: string | null;
+  /** The full `cve_summary`. */
   description: string | null;
   /** "log4j-core 2.14.1 (app.war#zip:WEB-INF/lib/log4j-core-2.14.1.jar)" — the components in the report. */
   locations: string[];
   status: FindingStatus;
   issues: IssueRef[];
+  /** The issue exists (another application filed it) but lacks this application's label: "create" adds it. */
+  needsLabel: boolean;
 }
 
-/**
- * The uploaded Veracode detailed report (XML). `id` is the upload id every follow-up request names; it lives
- * in the backend's memory for `veracode.upload.ttl` (2 h) and not across a restart — then 404 `upload_expired`.
- */
+/** One uploaded Veracode detailed report (XML); an upload may hold several, one per file. */
 export interface ReportView {
-  id: string;
   fileName: string;
   appName: string | null;
   appId: string | null;
@@ -67,10 +79,17 @@ export interface AnalysisCounts {
   exists: number;
   missing: number;
   created: number;
+  /** Existing issues still without the finding's application label. */
+  needsLabel: number;
 }
 
 export interface Analysis {
-  report: ReportView;
+  /**
+   * What every follow-up request names; the upload lives in the backend's memory for `veracode.upload.ttl` (2 h) and
+   * not across a restart — then 404 `upload_expired`.
+   */
+  uploadId: string;
+  reports: ReportView[];
   projectKey: string;
   /** Every version the issue type can be filed against — the page's Jira version list. */
   jiraVersions: string[];
@@ -86,7 +105,7 @@ export interface Analysis {
   analyzedAt: string;
 }
 
-export type CreateOutcome = 'CREATED' | 'ALREADY_EXISTS' | 'NOT_IN_REPORT' | 'FAILED';
+export type CreateOutcome = 'CREATED' | 'ALREADY_EXISTS' | 'LABELED' | 'NOT_IN_REPORT' | 'FAILED';
 
 export interface CreateResult {
   findingId: string;
@@ -250,17 +269,19 @@ export const veracodeApi = {
    * XMLHttpRequest rather than fetch: fetch has no upload progress. `onProgress` gets the bytes sent; once the
    * last byte is out it is called with `loaded === total` and the server is parsing and asking Jira.
    */
-  analyzeUpload: (file: File, options: UploadOptions, auth: JiraAuth, onProgress?: (p: UploadProgress) => void) =>
+  analyzeUpload: (files: File[], options: UploadOptions, auth: JiraAuth, onProgress?: (p: UploadProgress) => void) =>
     new Promise<Analysis>((resolve, reject) => {
       const form = new FormData();
-      form.append('file', file);
+      // one part per file, all named `file`: the backend reads them as one upload
+      files.forEach((file) => form.append('file', file));
+      const size = files.reduce((n, f) => n + f.size, 0);
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${BASE}/analysis/upload?${uploadQuery(options)}`);
       Object.entries(tokenHeader(auth)).forEach(([name, value]) => xhr.setRequestHeader(name, value));
       xhr.upload.onprogress = (e) => {
-        onProgress?.({ loaded: e.loaded, total: e.lengthComputable ? e.total : file.size });
+        onProgress?.({ loaded: e.loaded, total: e.lengthComputable ? e.total : size });
       };
-      xhr.upload.onload = () => onProgress?.({ loaded: file.size, total: file.size });
+      xhr.upload.onload = () => onProgress?.({ loaded: size, total: size });
       xhr.onload = () => {
         // through a Response, so the error envelope is unwrapped exactly as for every other call
         const response = new Response(xhr.responseText, { status: xhr.status, statusText: xhr.statusText });

@@ -88,56 +88,64 @@ class VeracodeApiTest {
     private String upload() throws Exception {
         String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("jiraVersions", "2.3.0"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-        return JsonPath.read(body, "$.report.id");
+        return JsonPath.read(body, "$.uploadId");
     }
 
     @Test
     void anUploadedReportIsMatchedAgainstJira() throws Exception {
         mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("jiraVersions", "2.3.0"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.report.fileName").value("detailedreport.xml"))
-                .andExpect(jsonPath("$.report.appName").value("creed-platform"))
-                .andExpect(jsonPath("$.report.scanVersion").value("2.3.0"))
-                .andExpect(jsonPath("$.report.affectedVersion").value("2.3.0"))
-                .andExpect(jsonPath("$.report.versionOverridden").value(false))
-                .andExpect(jsonPath("$.report.policyName").value("Creed Default"))
-                .andExpect(jsonPath("$.report.policyCompliance").value("Did Not Pass"))
+                .andExpect(jsonPath("$.reports[0].fileName").value("detailedreport.xml"))
+                .andExpect(jsonPath("$.reports[0].appName").value("creed-platform-2026-10-06-Creed"))
+                .andExpect(jsonPath("$.reports[0].scanVersion").value("2.3.0"))
+                .andExpect(jsonPath("$.reports[0].affectedVersion").value("2.3.0"))
+                .andExpect(jsonPath("$.reports[0].versionOverridden").value(false))
+                .andExpect(jsonPath("$.reports[0].policyName").value("Creed Default"))
+                .andExpect(jsonPath("$.reports[0].policyCompliance").value("Did Not Pass"))
                 .andExpect(jsonPath("$.projectKey").value("CREED"))
-                .andExpect(jsonPath("$.counts.total").value(9))
+                // the same CVE in two snakeyaml jars is two findings now: 10, not 9
+                .andExpect(jsonPath("$.counts.total").value(10))
                 .andExpect(jsonPath("$.counts.exists").value(3))
-                .andExpect(jsonPath("$.counts.missing").value(6))
+                .andExpect(jsonPath("$.counts.missing").value(7))
+                .andExpect(jsonPath("$.counts.needsLabel").value(0))
                 // the project's versions are the page's list; the chosen one is what was searched and is filed under
                 .andExpect(jsonPath("$.jiraVersions", contains("2.2.1", "2.3.0", "2.4.0")))
                 .andExpect(jsonPath("$.selectedVersions", contains("2.3.0")))
                 .andExpect(jsonPath("$.createVersion").value("2.3.0"))
                 .andExpect(jsonPath("$.warnings", contains("1 mitigated vulnerability skipped")))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].status").value("EXISTS"))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].issues[0].key").value("CREED-101"))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].issues[0].url")
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].status").value("EXISTS"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].issues[0].key").value("CREED-101"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].issues[0].url")
                         .value("http://localhost/mock/jira/browse/CREED-101"))
-                // the library and its version form the component; the title is the summary's first sentence
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].components[0]").value("log4j-core 2.14.1"))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].title")
-                        .value("Apache Log4j2 JNDI features do not protect against attacker-controlled LDAP and other JNDI related endpoints"))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].severity").value("Very High"))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].locations[0]")
+                // the title is cve_id|cwe_id; the jar is the component's file_name; the description the whole cve_summary
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].title").value("CVE-2021-44228|CWE-502"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].application").value("creed-platform-2026-10-06-Creed"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].fileName").value("log4j-core-2.14.1.jar"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].components[0]").value("log4j-core 2.14.1"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].description").value("Apache Log4j2 JNDI features do not "
+                        + "protect against attacker-controlled LDAP and other JNDI related endpoints. An attacker who can "
+                        + "control log messages can execute arbitrary code."))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].needsLabel").value(false))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].severity").value("Very High"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].locations[0]")
                         .value("log4j-core 2.14.1 (creed-platform.war#zip:WEB-INF/lib/log4j-core-2.14.1.jar)"))
                 // A summary that spells the CVE "cve 2020 36518", without the prefix, still matches.
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2020-36518@2.3.0')].issues[0].key").value("CREED-103"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2020-36518@jackson-databind-2.12.6.jar')].issues[0].key").value("CREED-103"))
                 // Jira's own attributes, for the page's filters; CREED-103 is unassigned.
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].issues[0].priority").value("Highest"))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].issues[0].assignee").value("Alice Wang"))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2020-36518@2.3.0')].issues[0].assignee").value(contains(nullValue())))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].issues[0].priority").value("Highest"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].issues[0].assignee").value("Alice Wang"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2020-36518@jackson-databind-2.12.6.jar')].issues[0].assignee").value(contains(nullValue())))
                 // Filed for 2.2.1 only -> still missing for 2.3.0.
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-22965@2.3.0')].status").value("MISSING"))
-                // Two snakeyaml versions, one finding.
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-1471@2.3.0')].components[*]", hasSize(2)))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar')].status").value("MISSING"))
+                // one CVE in two snakeyaml jars: one finding (and one Jira issue) per jar
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2022-1471@snakeyaml-1.33.jar')].status").value("MISSING"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2022-1471@snakeyaml-1.30.jar')].status").value("MISSING"))
                 // One component, two CVEs: one filed, one not; its mitigated third is not a finding.
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-4104@2.3.0')].status").value("EXISTS"))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-23302@2.3.0')].status").value("MISSING"))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2019-17571@2.3.0')]", hasSize(0)))
-                // No CVE -> keyed and matched by the advisory id.
-                .andExpect(jsonPath("$.findings[?(@.id=='title:srcclr sid 29587@2.3.0')].status").value("MISSING"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-4104@log4j-1.2.17.jar')].status").value("EXISTS"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2022-23302@log4j-1.2.17.jar')].status").value("MISSING"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2019-17571@log4j-1.2.17.jar')]", hasSize(0)))
+                // An advisory id is the cve_id as given.
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|SRCCLR-SID-29587@netty-codec-4.1.68.Final.jar')].status").value("MISSING"))
                 .andExpect(jsonPath("$.findings[0].severity").value("Very High"));
     }
 
@@ -149,16 +157,16 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.selectedVersions", hasSize(0)))
                 .andExpect(jsonPath("$.createVersion").value(nullValue()))
                 .andExpect(jsonPath("$.counts.exists").value(4))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-22965@2.3.0')].status").value("EXISTS"));
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar')].status").value("EXISTS"));
         // the report's version (or the page's override) is display only: 2.5.0 is no CREED version, nothing breaks
         mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("affectedVersion", "2.5.0")
                         .param("jiraVersions", "2.2.1"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.report.scanVersion").value("2.3.0"))
-                .andExpect(jsonPath("$.report.affectedVersion").value("2.5.0"))
-                .andExpect(jsonPath("$.report.versionOverridden").value(true))
+                .andExpect(jsonPath("$.reports[0].scanVersion").value("2.3.0"))
+                .andExpect(jsonPath("$.reports[0].affectedVersion").value("2.5.0"))
+                .andExpect(jsonPath("$.reports[0].versionOverridden").value(true))
                 .andExpect(jsonPath("$.counts.exists").value(1))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-22965@2.5.0')].status").value("EXISTS"));
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar')].status").value("EXISTS"));
         // several versions: any of them; names in any case, answered in Jira's spelling and order
         mvc.perform(multipart("/api/veracode/analysis/upload").file(sample())
                         .param("jiraVersions", "2.3.0").param("jiraVersions", "2.2.1"))
@@ -175,8 +183,8 @@ class VeracodeApiTest {
     void createsMissingIssuesOnceAndReportsWhyOthersWereNotCreated() throws Exception {
         String uploadId = upload();
         String request = """
-                {"uploadId":"%s","findingIds":["CVE-2022-22965@2.3.0","CVE-2021-44228@2.3.0",
-                 "CVE-1999-0001@2.3.0","CVE-2022-22965@2.3.0"],%s}
+                {"uploadId":"%s","findingIds":["creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar","creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar",
+                 "creed-platform-2026-10-06-Creed|CVE-1999-0001@x.jar","creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar"],%s}
                 """.formatted(uploadId, FIELDS);
         mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON).content(request))
@@ -189,20 +197,28 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.results[2].outcome").value("NOT_IN_REPORT"));
 
         MockJiraStore.Issue created = jira.find("CREED-105");
-        // summary-template "{project} {component} {cve}", {project} = the report's app_name; filed as the token's user
-        assertThat(created.summary()).isEqualTo("creed-platform spring-beans 5.3.17 CVE-2022-22965");
+        // "{project} - {cve}|{cwe} - {file}", {project} = project-name (not the Veracode application); as the token's user
+        assertThat(created.summary()).isEqualTo("creed - CVE-2022-22965|CWE-94 - spring-beans-5.3.17.jar");
         assertThat(created.reporter()).isEqualTo("user-abcd");
         assertThat(created.versions()).containsExactly("2.3.0");
         // the page's choices, sent as Jira's option ids
         assertThat(created.components()).containsExactly("Security");
         assertThat(created.environment()).isEqualTo("Production");
-        assertThat(created.labels()).containsExactly("veracode", "CVE-2022-22965");
-        assertThat(created.description()).contains("|Component(s)|spring-beans 5.3.17|",
-                "Source: Veracode application creed-platform, scan 2.3.0, policy Creed Default (report detailedreport.xml)");
+        // configured, project-name, the application's label (creed-platform-2026-10-06-Creed -> 2026-10-06-Creed); no CVE
+        assertThat(created.labels()).containsExactly("veracode", "creed", "2026-10-06-Creed");
+        // no "\\|" escape anywhere: Jira Cloud renders it as a backslash and an extra cell
+        assertThat(created.description()).doesNotContain("\\|");
+        assertThat(created.description()).contains(
+                "|CVE|[CVE-2022-22965|https://nvd.nist.gov/vuln/detail/CVE-2022-22965]|",
+                "|CWE|[CWE-94|https://cwe.mitre.org/data/definitions/94.html]|",
+                "|Veracode application|creed-platform-2026-10-06-Creed|", "|Component file|spring-beans-5.3.17.jar|",
+                "|Component(s)|spring-beans 5.3.17|",
+                "|Description|Spring Framework RCE via data binding on JDK 9+. A Spring MVC or WebFlux application running on JDK 9+ may be vulnerable.|",
+                "Source: report detailedreport.xml, scan 2.3.0, policy Creed Default");
 
         // The second click: re-checked, not duplicated.
         mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, TOKEN).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]," + FIELDS + "}"))
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar\"]," + FIELDS + "}"))
                 .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"))
                 .andExpect(jsonPath("$.results[0].issues[0].key").value("CREED-105"));
         assertThat(jira.all()).hasSize(5);
@@ -211,7 +227,7 @@ class VeracodeApiTest {
     @Test
     void creatingNeedsExactlyOneJiraVersion() throws Exception {
         String uploadId = upload();
-        String head = "{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"],"
+        String head = "{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar\"],"
                 + "\"fields\":{\"components\":[\"Security\"],\"customfield_10100\":\"Production\"}";
         for (String versions : new String[] {"", ",\"jiraVersions\":[\"2.3.0\",\"2.4.0\"]"}) {
             mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content(head + versions + "}"))
@@ -238,20 +254,70 @@ class VeracodeApiTest {
                         .param("jiraVersions", "2.3.0")
                         .param("fields", "{\"components\":[\"Platform\",\"30001\"],\"customfield_10100\":[\"10201\"]}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.counts.created").value(6))
+                .andExpect(jsonPath("$.counts.created").value(7))
                 .andExpect(jsonPath("$.counts.missing").value(0))
                 .andReturn().getResponse().getContentAsString();
         assertThat(jira.find("CREED-105").components()).containsExactly("Platform", "Security");
         assertThat(jira.find("CREED-105").environment()).isEqualTo("Staging");
-        // the advisory without a CVE: its id stands in for {cve}, and is what finds it again below
+        // the advisory id is the cve_id; one CVE in two jars is two issues - each found again below
         assertThat(jira.all()).extracting(MockJiraStore.Issue::summary)
-                .contains("creed-platform netty-codec 4.1.68.Final SRCCLR-SID-29587",
-                        "creed-platform snakeyaml 1.33, snakeyaml 1.30 CVE-2022-1471");
+                .contains("creed - SRCCLR-SID-29587|CWE-400 - netty-codec-4.1.68.Final.jar",
+                        "creed - CVE-2022-1471|CWE-502 - snakeyaml-1.33.jar", "creed - CVE-2022-1471|CWE-502 - snakeyaml-1.30.jar");
 
         mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uploadId\":\"" + JsonPath.read(body, "$.report.id") + "\",\"jiraVersions\":[\"2.3.0\"]}"))
-                .andExpect(jsonPath("$.counts.exists").value(9))
+                        .content("{\"uploadId\":\"" + JsonPath.read(body, "$.uploadId") + "\",\"jiraVersions\":[\"2.3.0\"]}"))
+                .andExpect(jsonPath("$.counts.exists").value(10))
                 .andExpect(jsonPath("$.counts.created").value(0));
+    }
+
+    /** The sample as another Veracode application's report. */
+    private static MockMultipartFile otherApplication() throws Exception {
+        String xml = new String(new ClassPathResource(VeracodeController.SAMPLE).getContentAsByteArray(), StandardCharsets.UTF_8)
+                .replace("app_name=\"creed-platform-2026-10-06-Creed\"", "app_name=\"creed-pay-gateway-api\"");
+        return new MockMultipartFile("file", "gateway.xml", "application/xml", xml.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void twoApplicationsShareAnIssueAndEachAddsItsLabel() throws Exception {
+        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).file(otherApplication())
+                        .param("jiraVersions", "2.3.0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reports[*].appName", contains("creed-platform-2026-10-06-Creed", "creed-pay-gateway-api")))
+                // a finding per application: the page groups and filters by it
+                .andExpect(jsonPath("$.counts.total").value(20))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-pay-gateway-api|CVE-2021-44228@log4j-core-2.14.1.jar')].application")
+                        .value("creed-pay-gateway-api"))
+                // the same CVE in the same jar is the same issue - which lacks this application's label
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-pay-gateway-api|CVE-2021-44228@log4j-core-2.14.1.jar')].issues[0].key")
+                        .value("CREED-101"))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-pay-gateway-api|CVE-2021-44228@log4j-core-2.14.1.jar')].needsLabel")
+                        .value(true))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].needsLabel")
+                        .value(false))
+                .andExpect(jsonPath("$.counts.needsLabel").value(3))
+                .andReturn().getResponse().getContentAsString();
+        String uploadId = JsonPath.read(body, "$.uploadId");
+
+        // both applications miss CVE-2022-22965: one issue is created, the second application only labels it
+        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content("""
+                        {"uploadId":"%s","findingIds":["creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar",
+                         "creed-pay-gateway-api|CVE-2022-22965@spring-beans-5.3.17.jar",
+                         "creed-pay-gateway-api|CVE-2021-44228@log4j-core-2.14.1.jar"],%s}
+                        """.formatted(uploadId, FIELDS)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.results[*].outcome", contains("CREATED", "LABELED", "LABELED")))
+                .andExpect(jsonPath("$.results[1].issues[0].key").value("CREED-105"))
+                .andExpect(jsonPath("$.results[2].issues[0].key").value("CREED-101"));
+        assertThat(jira.all()).hasSize(5);
+        // AAA-BBB-CCC-DDD -> CCC-DDD: creed-pay-gateway-api is labelled gateway-api
+        assertThat(jira.find("CREED-105").labels()).containsExactly("veracode", "creed", "2026-10-06-Creed", "gateway-api");
+        assertThat(jira.find("CREED-101").labels()).contains("2026-10-06-Creed", "gateway-api");
+
+        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"jiraVersions\":[\"2.3.0\"]}"))
+                .andExpect(jsonPath("$.counts.needsLabel").value(2))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-pay-gateway-api|CVE-2022-22965@spring-beans-5.3.17.jar')].status")
+                        .value("EXISTS"));
     }
 
     @Test
@@ -265,8 +331,8 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.createFields[1].multiple").value(false))
                 .andExpect(jsonPath("$.createFields[1].options[*].label", contains("Production", "Staging")))
                 .andReturn().getResponse().getContentAsString();
-        String uploadId = JsonPath.read(body, "$.report.id");
-        String head = "{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]";
+        String uploadId = JsonPath.read(body, "$.uploadId");
+        String head = "{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar\"]";
         String[][] refused = {
                 {head + "}", "jira_fields_required", "Jira requires Component/s, Environment Found to create a Bug in CREED"},
                 {head + ",\"fields\":{\"components\":[\"Nope\"],\"customfield_10100\":\"Production\"}}", "bad_request",
@@ -293,8 +359,8 @@ class VeracodeApiTest {
     void theSampleIsServedWithTheMocks() throws Exception {
         mvc.perform(post("/api/veracode/analysis/sample"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.report.appName").value("creed-platform"))
-                .andExpect(jsonPath("$.counts.total").value(9));
+                .andExpect(jsonPath("$.reports[0].appName").value("creed-platform-2026-10-06-Creed"))
+                .andExpect(jsonPath("$.counts.total").value(10));
     }
 
     @Test
@@ -308,15 +374,16 @@ class VeracodeApiTest {
 
         try (XSSFWorkbook wb = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
             Sheet findings = wb.getSheet("Findings");
-            assertThat(findings.getLastRowNum()).isEqualTo(9);
+            assertThat(findings.getLastRowNum()).isEqualTo(10);
             assertThat(findings.getRow(0).getCell(0).getStringCellValue()).isEqualTo("Status");
             List<String> log4shell = new ArrayList<>();
             for (Row row : findings) {
-                if ("CVE-2021-44228".equals(row.getCell(1).getStringCellValue())) {
+                if ("CVE-2021-44228|CWE-502".equals(row.getCell(2).getStringCellValue())) {
                     row.forEach(c -> log4shell.add(c.toString()));
                 }
             }
-            assertThat(log4shell).contains("EXISTS", "CREED-101", "In Progress", "2.3.0");
+            assertThat(log4shell).contains("EXISTS", "creed-platform-2026-10-06-Creed", "log4j-core-2.14.1.jar", "CREED-101", "In Progress",
+                    "2.3.0");
             // Severity is filled by level: the same colour for the same level, a different one per level
             java.util.Map<String, String> fills = new java.util.HashMap<>();
             for (Row row : findings) {
@@ -324,16 +391,18 @@ class VeracodeApiTest {
                     continue;
                 }
                 org.apache.poi.xssf.usermodel.XSSFCellStyle style =
-                        (org.apache.poi.xssf.usermodel.XSSFCellStyle) row.getCell(4).getCellStyle();
+                        (org.apache.poi.xssf.usermodel.XSSFCellStyle) row.getCell(5).getCellStyle();
                 String rgb = style.getFillForegroundColorColor() == null ? null
                         : style.getFillForegroundColorColor().getARGBHex();
-                assertThat(rgb).as(row.getCell(4).getStringCellValue()).isNotNull();
-                assertThat(fills.putIfAbsent(row.getCell(4).getStringCellValue(), rgb)).isIn(null, rgb);
+                assertThat(rgb).as(row.getCell(5).getStringCellValue()).isNotNull();
+                assertThat(fills.putIfAbsent(row.getCell(5).getStringCellValue(), rgb)).isIn(null, rgb);
             }
             assertThat(fills).hasSizeGreaterThan(1);
             assertThat(new java.util.HashSet<>(fills.values())).hasSameSizeAs(fills.values());
             Sheet source = wb.getSheet("Source");
-            assertThat(source.getRow(0).getCell(1).getStringCellValue()).isEqualTo("creed-platform");
+            // a block per uploaded report, then the analysis
+            assertThat(source.getRow(0).getCell(1).getStringCellValue()).isEqualTo("detailedreport.xml");
+            assertThat(source.getRow(1).getCell(1).getStringCellValue()).isEqualTo("creed-platform-2026-10-06-Creed");
             assertThat(source.getRow(6).getCell(1).getStringCellValue()).isEqualTo("CREED");
         }
     }
@@ -352,7 +421,7 @@ class VeracodeApiTest {
         anonymous.perform(get("/api/veracode/analysis/export").param("uploadId", uploadId))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("jira_token_required"));
-        String request = "{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]," + FIELDS + "}";
+        String request = "{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar\"]," + FIELDS + "}";
         anonymous.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content(request))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("jira_token_required"));
@@ -425,7 +494,7 @@ class VeracodeApiTest {
         String uploadId = upload();
         mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.ISSUE_TYPE_HEADER, "Story")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"]," + FIELDS + "}"))
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar\"]," + FIELDS + "}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.results[0].outcome").value("CREATED"));
         assertThat(jira.all()).last().extracting(MockJiraStore.Issue::issueType).isEqualTo("Story");
@@ -456,7 +525,7 @@ class VeracodeApiTest {
                         .header(JiraToken.HEADER, "api-token").header(JiraToken.USER_HEADER, "me@example.com"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.counts.exists").value(3))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].issues[0].key").value("CREED-101"));
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].issues[0].key").value("CREED-101"));
     }
 
     @Test
@@ -469,12 +538,13 @@ class VeracodeApiTest {
                         .file(new MockMultipartFile("file", "pom.xml", "application/xml", "<project/>".getBytes())))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error").value("report_unreadable"));
+        // the version is display only now: a report without one is analysed all the same
         byte[] noVersion = "<detailedreport xmlns=\"https://www.veracode.com/schema/reports/export/1.0\" app_name=\"x\"/>"
                 .getBytes(StandardCharsets.UTF_8);
         mvc.perform(multipart("/api/veracode/analysis/upload")
                         .file(new MockMultipartFile("file", "r.xml", "application/xml", noVersion)))
-                .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.message").value(containsString("enter the affected version")));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reports[0].affectedVersion").value(nullValue()));
         mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"uploadId\":\"no-such-upload\"}"))
                 .andExpect(status().isNotFound())
@@ -498,7 +568,7 @@ class VeracodeApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.projectKey").value("CREED"))
                 .andExpect(jsonPath("$.mock").value(true))
-                .andExpect(jsonPath("$.summaryTemplate").value("{project} {component} {cve}"))
+                .andExpect(jsonPath("$.summaryTemplate").value("{project} - {cve}|{cwe} - {file}"))
                 .andExpect(jsonPath("$.requireUserToken").doesNotExist())
                 .andExpect(jsonPath("$.token").doesNotExist());
     }

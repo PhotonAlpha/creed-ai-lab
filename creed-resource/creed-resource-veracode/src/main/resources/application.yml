@@ -35,17 +35,24 @@ veracode:
     base-url: "https://ethancaoq.atlassian.net"
     project-key: DT
     issue-type: Defect
-    # Created issue title. {project} = the report's Veracode app_name (the project key when it has none),
-    # {jiraProject} = project-key, {component} = the finding's components, {cve} = the CVE (the advisory id
-    # when there is none); {title} and {version} also work. Lookup never reads it: an issue is matched by its
-    # CVE (or title words) anywhere in the summary, so changing it does not lose existing issues.
-    summary-template: ${CREED_JIRA_SUMMARY_TEMPLATE:{project} {component} {cve}}
+    # {project} in created summaries and a label on every created issue - this service's own name, not the Veracode
+    # application. Blank = project-key.
+    project-name: IDB VERACODE SCA
+    # Created issue title. {project} = project-name, {cve} = the cve_id ("Unknown" without one), {cwe} = the cwe_id
+    # ("Unknown" without one), {file} = the component's file_name, {application} = the Veracode app_name;
+    # {component}, {jiraProject}, {version} also work. An issue matches when its summary names the CVE (Unknown + CWE
+    # without one) and - as far as the template has them - the {file} and the {component}.
+    summary-template: ${CREED_JIRA_SUMMARY_TEMPLATE:{project} - {cve}|{cwe} - {file}}
     # No Jira account here: every call (lookup, createmeta, create) uses the token the user typed on the page,
     # sent as X-Jira-Token. The page asks Cloud or Data Center: Cloud adds the Atlassian e-mail (X-Jira-User) and
     # goes to Jira as Basic base64(email:token), Data Center's personal access token as Bearer. Both REST API v2.
     # Without a token a request is 400 jira_token_required.
-    labels: [veracode]
-    browse-url: https://ethancaoq.atlassian.net/browse/DT-4/{key}
+    # Every created issue: these, project-name and the application label (application-label's group 1 of the
+    # Veracode app_name: AAA-BBB-CCC-DDD -> CCC-DDD). The same issue reported by another application gets that
+    # application's label added instead of a second issue.
+    labels: ["IDB VERACODE SCA"]
+    application-label: ${CREED_JIRA_APPLICATION_LABEL:^[^-]*-[^-]*-(.+)$}
+    browse-url: https://ethancaoq.atlassian.net/browse/{key}
     # maxResults of the paged createmeta calls (issue types / fields of the issue type)
     page-size: 50
     max-connections: 20

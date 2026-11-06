@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
 import org.springframework.web.service.annotation.PostExchange;
+import org.springframework.web.service.annotation.PutExchange;
 
 /**
  * Jira REST API v2 (Data Center 11.0.2 and Cloud): the issue resource ({@code /rest/api/2/issue/**}) to create
@@ -27,6 +28,12 @@ public interface JiraClient {
     @PostExchange(url = "/rest/api/2/issue", contentType = "application/json")
     JiraCreatedIssue createIssue(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
                                  @RequestBody JiraCreateIssueRequest request);
+
+    /** Jira answers 204: the body is {@code {"update": {"labels": [{"add": "x"}]}}} - only the named labels change. */
+    @PutExchange(url = "/rest/api/2/issue/{key}", contentType = "application/json")
+    void updateIssue(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+                     @PathVariable String key,
+                     @RequestBody java.util.Map<String, Object> update);
 
     /** Data Center: paged by {@code startAt}. @param fields comma-separated */
     @GetExchange("/rest/api/2/search")

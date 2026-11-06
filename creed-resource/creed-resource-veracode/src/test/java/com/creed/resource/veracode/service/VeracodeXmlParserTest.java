@@ -27,9 +27,10 @@ class VeracodeXmlParserTest {
                     <component library="lib" version="1.2" file_name="lib-1.2.jar">
                       <file_paths><file_path value="a.war#lib-1.2.jar"/><file_path value="b.war#lib-1.2.jar"/></file_paths>
                       <vulnerabilities>
-                        <vulnerability cve_id="cve-2024-1234" cvss_score="7.1" severity="4"
+                        <vulnerability cve_id="cve-2024-1234" cwe_id="CWE-79" cvss_score="7.1" severity="4"
                                        cve_summary="First sentence here. Second one."/>
                         <vulnerability cve_id="SRCCLR-SID-1" severity="2" cvss_score="n/a" cve_summary="No CVE."/>
+                        <vulnerability cwe_id="cwe-400" severity="3" cve_summary="Neither id."/>
                       </vulnerabilities>
                     </component>
                   </vulnerable_components></software_composition_analysis>
@@ -39,19 +40,27 @@ class VeracodeXmlParserTest {
         assertThat(report.info().appName()).isEqualTo("shop");
         assertThat(report.info().version()).isEqualTo("1.0");
         assertThat(report.info().policyCompliance()).isEqualTo("Pass");
-        assertThat(report.rows()).hasSize(2);
+        assertThat(report.rows()).hasSize(3);
         ReportRow cve = report.rows().getFirst();
-        assertThat(cve.cve()).isEqualTo("CVE-2024-1234");
-        assertThat(cve.title()).isEqualTo("First sentence here");
+        assertThat(cve.application()).isEqualTo("shop");
+        assertThat(cve.cveId()).isEqualTo("CVE-2024-1234");
+        assertThat(cve.cwe()).isEqualTo("CWE-79");
+        assertThat(cve.fileName()).isEqualTo("lib-1.2.jar");
+        // the whole cve_summary, not its first sentence
+        assertThat(cve.summary()).isEqualTo("First sentence here. Second one.");
         assertThat(cve.component()).isEqualTo("lib 1.2");
         assertThat(cve.severity()).isEqualTo("High");
         assertThat(cve.cvss()).isEqualTo(7.1);
         assertThat(cve.location()).isEqualTo("lib 1.2 (a.war#lib-1.2.jar)");
         assertThat(cve.affectedVersion()).isNull();
         ReportRow advisory = report.rows().get(1);
-        assertThat(advisory.cve()).isNull();
-        assertThat(advisory.title()).isEqualTo("SRCCLR-SID-1");
+        // an advisory id is the cve_id as given
+        assertThat(advisory.cveId()).isEqualTo("SRCCLR-SID-1");
+        assertThat(advisory.cwe()).isNull();
         assertThat(advisory.severity()).isEqualTo("Low");
+        ReportRow unknown = report.rows().get(2);
+        assertThat(unknown.cveId()).isNull();
+        assertThat(unknown.cwe()).isEqualTo("CWE-400");
         assertThat(advisory.cvss()).isNull();
         assertThat(report.warnings()).containsExactly("lib 1.2 (a.war#lib-1.2.jar): CVSS 'n/a' is not a number, left empty");
         assertThat(report.withVersion("1.0").rows()).allMatch(r -> "1.0".equals(r.affectedVersion()));
@@ -78,12 +87,5 @@ class VeracodeXmlParserTest {
                 <!DOCTYPE detailedreport [<!ENTITY x SYSTEM "file:///etc/passwd">]>
                 <detailedreport version="1">&x;</detailedreport>
                 """)).isInstanceOf(VeracodeXmlParser.UnsupportedFileException.class);
-    }
-
-    @Test
-    void theTitleIsTheSummarysFirstSentenceCapped() {
-        assertThat(VeracodeXmlParser.firstSentence("  A. B.")).isEqualTo("A");
-        assertThat(VeracodeXmlParser.firstSentence("v1.2.3 is affected")).isEqualTo("v1.2.3 is affected");
-        assertThat(VeracodeXmlParser.firstSentence("x".repeat(300))).hasSize(160).endsWith("…");
     }
 }

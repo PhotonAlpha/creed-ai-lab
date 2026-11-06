@@ -7,8 +7,10 @@ import type { Analysis } from '../../api/veracode';
  *
  * A big analysis can exceed the storage quota (about 5 MB): the state is then kept without it, with its upload id,
  * and the page re-analyses that upload on load instead of showing it from the cache.
+ *
+ * The key is versioned: since v2 an analysis holds several reports (`uploadId` + `reports`), a v1 entry would not render.
  */
-const KEY = 'veracode.page';
+const KEY = 'veracode.page.v2';
 
 export interface CachedPage<F> {
   analysis: Analysis | null;
@@ -36,7 +38,7 @@ export const pageCache = {
     } catch {
       // over the quota (or storage blocked): keep the small part, the upload id stands in for the analysis
       try {
-        write({ analysis: null, uploadId: analysis?.report.id ?? null, savedAt: Date.now(), view });
+        write({ analysis: null, uploadId: analysis?.uploadId ?? null, savedAt: Date.now(), view });
       } catch {
         // storage unavailable: the page simply starts empty after a reload
       }

@@ -161,8 +161,16 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   新建时关联所选版本，所以创建必须正好选一个；切换版本会自动重新分析。
 - 按 CVE（无 CVE 时按公告编号）+ Component(s) + 所选 Jira 版本在 Jira 中查找是否存在：
   存在则列出 Jira 编号、状态、优先级、经办人；不存在则可按需创建（单行 / 所选 / 全部缺失，或分析时自动创建）。
-- 按 Jira 标题模糊匹配：CVE 出现在标题任意位置即可（忽略大小写和 `-` `_` 空格，但不会匹配更长的编号）；无 CVE 时标题的每个词都出现即可，不论顺序；
-  且表格中的 **Component(s)** 每一个都要作为完整的词出现在标题中（如 `log4j-core 2.14.1`，`log4j-api` 或 `2.14.10` 不算），标题模板含 `{component}` 时生效。
+- 一行 = 一个 Veracode application + 一个 `cve_id` + 一个组件 `file_name`（同一 CVE 在两个 jar 中是两行、两个 Jira）。
+  表格列：状态 / 标题（`cve_id|cwe_id`，缺失为 Unknown）/ 组件文件 / 严重级别 / CVSS / 影响版本 / 描述（完整 `cve_summary`）/ Jira。
+- 按 Jira 标题匹配：CVE 出现在标题任意位置即可（忽略大小写和 `-` `_` 空格，但不会匹配更长的编号）；无 `cve_id` 时按 `Unknown` + `cwe_id`；
+  且组件 `file_name` 要作为完整的词出现在标题中（`log4j-api-2.14.1.jar` 或 `log4j-core-2.14.10.jar` 不算），标题模板含 `{file}` 时生效。
+- 新建 Jira 标题 `{project} - {cve_id}|{cwe_id} - {file_name}`，`{project}` 为 `veracode.jira.project-name`（不是 Veracode application）；
+  label：`veracode`、`{project}`、application label（不含 `cve_id`）（`app_name` 去掉第二个 `-` 之前的部分，`AAA-BBB-CCC-DDD` → `CCC-DDD`，正则 `veracode.jira.application-label`）；
+  描述表格按页面列顺序，含完整 `cve_summary`。
+- 可一次上传多个 XML：不同 application 时表格可按 application 过滤、分组（可折叠）；相同 CVE + 相同 jar 的 Jira 已存在时不再重复创建，
+  而是给它加上该 application 的 label（行上显示「缺少 label」，按钮为「添加 label」）。
+  application 显示在分组（折叠面板）标题上，单个报告时显示在上方的报告表中；只有关闭分组、多个 application 混在一个表里时才显示 application 列。
   查找用批量 JQL 搜索：每 50 条漏洞一次（Data Center `/rest/api/2/search`，Cloud `/rest/api/3/search/jql`）。
 - 创建 Jira 使用**用户自己的访问令牌**：页面「Jira 令牌」中配置并「测试连接」（显示令牌对应的用户、是否能访问项目），
   默认存 sessionStorage，勾选「记住」存 localStorage；随请求以 `X-Jira-Token` 发给后端，后端不保存。未配置时创建按钮不可用。
@@ -170,7 +178,6 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   「测试连接」逐项显示检查结果（令牌 → 能否创建该问题类型 → 是否有影响版本字段 → 项目是否有版本），失败项给出在 Jira 中的修复方法；
   问题类型可在对话框中选择（标出哪些类型有影响版本字段），随令牌保存，以 `X-Jira-Issue-Type` 发给后端，默认取 `veracode.jira.issue-type`。
 - 页面布局与 Ant Design Pro 默认一致：ProLayout `layout="mix"`，顶部标题栏 + 左侧可折叠菜单。
-- 创建的 Jira 标题按 `veracode.jira.summary-template`，默认 `{project} {component} {cve}`，`{project}` 为报告的 Veracode 应用名 `app_name`（如 `creed-platform spring-beans 5.3.17 CVE-2022-22965`）。
 - 表格可按关联 Jira 的属性过滤（状态 / 优先级 / 经办人 / 影响版本，多选），搜索框对 CVE、标题、组件、Jira 号与 Jira 标题做模糊匹配。
 - 支持导出 Excel（Severity 按等级填充背景色）。
 - 统计卡片（漏洞总数 / 已在 Jira / 缺失 / 已创建）按状态用不同背景色（主题 token）；表格分页受控，默认每页 50 条（20 / 50 / 100 / 200）。

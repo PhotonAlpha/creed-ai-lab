@@ -64,8 +64,19 @@ public class JiraLookupService {
     private final JiraProperties props;
 
     /** @param assignee display name; {@code null} = unassigned */
+    /** @param labels the issue's labels - an application's label missing from them is added, not a second issue */
     public record IssueRef(String key, String summary, String status, String priority, String assignee,
-                           List<String> versions, String url) {
+                           List<String> versions, List<String> labels, String url) {
+
+        public boolean hasLabel(String label) {
+            return label == null || labels != null && labels.stream().anyMatch(label::equalsIgnoreCase);
+        }
+
+        IssueRef withLabel(String label) {
+            List<String> all = new ArrayList<>(labels == null ? List.of() : labels);
+            all.add(label);
+            return new IssueRef(key, summary, status, priority, assignee, versions, List.copyOf(all), url);
+        }
     }
 
     /**
@@ -387,7 +398,6 @@ public class JiraLookupService {
     public Map<String, List<IssueRef>> find(List<Finding> findings, List<String> versions, JiraToken token) {
         Map<String, List<IssueRef>> result = new LinkedHashMap<>();
         findings.forEach(f -> result.put(f.id(), new ArrayList<>()));
-        boolean withComponents = props.summaryTemplate().contains("{component}");
         for (int from = 0; from < findings.size(); from += props.searchBatchSize()) {
             List<Finding> batch = findings.subList(from, Math.min(findings.size(), from + props.searchBatchSize()));
             String jql = Jql.lookup(props.projectKey(), versions, batch);
@@ -396,7 +406,7 @@ public class JiraLookupService {
             }
             for (JiraIssue issue : search(jql, token)) {
                 for (Finding f : batch) {
-                    if (covers(issue, f, versions, withComponents)) {
+                    if (covers(issue, f, versions, props.summaryTemplate())) {
                         result.get(f.id()).add(toRef(issue));
                     }
                 }
@@ -437,11 +447,8 @@ public class JiraLookupService {
     /** @param fields from {@link #resolveFields}: the create screen's other fields, already in Jira's shape */
     public IssueRef create(Finding finding, String jiraVersion, Map<String, Object> fields, ReportView report,
                            JiraToken token) {
-        List<String> labels = new ArrayList<>(props.labels());
-        if (finding.cve() != null) {
-            labels.add(finding.cve());
-        }
-        String summary = summary(finding, report);
+        List<String> labels = labels(finding);
+        String summary = summary(finding);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("project", Map.of("key", props.projectKey()));
         body.put("issuetype", Map.of("name", token.issueTypeOr(props.issueType())));
@@ -452,34 +459,86 @@ public class JiraLookupService {
         body.putAll(fields);
         JiraCreatedIssue created = UpstreamException.call(JIRA,
                 () -> jira.createIssue(token.authorization(), new JiraCreateIssueRequest(body)));
-        log.info("created {} for {} (upload {})", created.key(), finding.id(), report.id());
-        return new IssueRef(created.key(), summary, null, null, null, List.of(jiraVersion), props.browse(created.key()));
+        log.info("created {} for {} (report {})", created.key(), finding.id(), report.fileName());
+        return new IssueRef(created.key(), summary, null, null, null, List.of(jiraVersion), labels,
+                props.browse(created.key()));
     }
 
     /**
-     * {@code summary-template} filled in, whitespace collapsed; Jira limits a summary to 255 characters, so a
-     * long one is cut.
+     * The issue another application already has for this finding: the finding's application label is added
+     * ({@code update.labels.add}, the other labels untouched) instead of filing a second issue.
      */
-    String summary(Finding finding, ReportView report) {
-        String subject = finding.cve() != null ? finding.cve() : Objects.requireNonNullElse(finding.title(), "");
-        String project = report.appName() != null ? report.appName() : props.projectKey();
+    public IssueRef addApplicationLabel(IssueRef issue, Finding finding, JiraToken token) {
+        String label = applicationLabel(finding);
+        if (issue.hasLabel(label)) {
+            return issue;
+        }
+        UpstreamException.call(JIRA, () -> {
+            jira.updateIssue(token.authorization(), issue.key(),
+                    Map.of("update", Map.of("labels", List.of(Map.of("add", label)))));
+            return null;
+        });
+        log.info("labelled {} with {} for {}", issue.key(), label, finding.id());
+        return issue.withLabel(label);
+    }
+
+    /** The label of the finding's Veracode application ({@code application-label}), Jira-safe; {@code null} without one. */
+    public String applicationLabel(Finding finding) {
+        return label(props.applicationLabel(finding.application()));
+    }
+
+    /**
+     * A created issue's labels: the configured ones, {@code project-name}, the application's. Not the {@code cve_id}
+     * (asked for, 2026-11-06): the summary carries it, and matching reads the summary.
+     */
+    List<String> labels(Finding finding) {
+        Set<String> labels = new LinkedHashSet<>();
+        props.labels().forEach(l -> addLabel(labels, label(l)));
+        addLabel(labels, label(props.project()));
+        addLabel(labels, applicationLabel(finding));
+        return List.copyOf(labels);
+    }
+
+    private static void addLabel(Set<String> labels, String label) {
+        if (label != null && labels.stream().noneMatch(label::equalsIgnoreCase)) {
+            labels.add(label);
+        }
+    }
+
+    /** Jira refuses a label with a space in it: spaces become {@code _}. */
+    private static String label(String text) {
+        return text == null || text.isBlank() ? null : text.trim().replaceAll("\\s+", "_");
+    }
+
+    /**
+     * {@code summary-template} filled in ({@code {project} - {cve}|{cwe} - {file}} by default), whitespace collapsed;
+     * Jira limits a summary to 255 characters, so a long one is cut.
+     */
+    String summary(Finding finding) {
         String summary = props.summaryTemplate()
-                .replace("{project}", project)
+                .replace("{project}", props.project())
                 .replace("{jiraProject}", props.projectKey())
+                .replace("{application}", Objects.requireNonNullElse(finding.application(), ""))
                 .replace("{component}", String.join(", ", finding.components()))
-                .replace("{cve}", subject)
-                .replace("{title}", Objects.requireNonNullElse(finding.title(), ""))
-                .replace("{version}", finding.affectedVersion())
+                .replace("{cve}", finding.cveText())
+                .replace("{cwe}", finding.cweText())
+                .replace("{file}", Objects.requireNonNullElse(finding.fileName(), ""))
+                .replace("{version}", Objects.requireNonNullElse(finding.affectedVersion(), ""))
                 .replaceAll("\\s+", " ").trim();
         return summary.length() <= 255 ? summary : summary.substring(0, 254) + "…";
     }
 
-    /** @param versions the selected Jira versions; empty = any */
-    static boolean covers(JiraIssue issue, Finding finding, List<String> versions, boolean withComponents) {
+    /**
+     * @param versions the selected Jira versions; empty = any
+     * @param template the summary template: the file and the components are asked for only where it writes them,
+     *                 otherwise the issues this page creates could never match
+     */
+    static boolean covers(JiraIssue issue, Finding finding, List<String> versions, String template) {
         boolean versionMatches = versions.isEmpty()
                 || issue.versionNames().stream().anyMatch(v -> versions.stream().anyMatch(v::equalsIgnoreCase));
         return versionMatches && summaryNames(issue.summary(), finding)
-                && (!withComponents || componentsNamed(issue.summary(), finding));
+                && (!template.contains("{file}") || named(issue.summary(), finding.fileName()))
+                && (!template.contains("{component}") || componentsNamed(issue.summary(), finding));
     }
 
     /**
@@ -488,16 +547,24 @@ public class JiraLookupService {
      * nor in "log4j-core 2.14.10 ...".
      */
     static boolean componentsNamed(String summary, Finding finding) {
-        String words = " " + Finding.normalise(summary) + " ";
-        return finding.components().stream().map(Finding::normalise).filter(c -> !c.isEmpty())
-                .allMatch(c -> words.contains(" " + c + " "));
+        return finding.components().stream().allMatch(c -> named(summary, c));
     }
 
     /**
-     * The fuzzy title match. A CVE: its year and number with any run of space / {@code -} / {@code _} (or
-     * nothing) between the parts, case ignored - but not inside a longer id, so {@code CVE-2021-4422} does not
-     * match a summary about {@code CVE-2021-44228}. A title: all its words appear in the summary as words, in
-     * any order ({@code ReportQueryBuilder} does not match {@code ReportQueryBuilderV2}).
+     * The text appears in the summary as a run of whole words, case and separators ignored: the file
+     * {@code log4j-core-2.14.1.jar} is in "creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar", not in
+     * "... log4j-core-2.14.10.jar". Blank text = nothing to ask for.
+     */
+    static boolean named(String summary, String text) {
+        String wanted = Finding.normalise(text);
+        return wanted.isEmpty() || (" " + Finding.normalise(summary) + " ").contains(" " + wanted + " ");
+    }
+
+    /**
+     * The vulnerability part of the match. A CVE: its year and number with any run of space / {@code -} /
+     * {@code _} (or nothing) between the parts, case ignored - but not inside a longer id, so {@code CVE-2021-4422}
+     * does not match a summary about {@code CVE-2021-44228}. Another id ({@code SRCCLR-SID-29587}): its words as a
+     * run. No id: "Unknown" and the CWE - the CWE is then what tells one Unknown from another.
      */
     static boolean summaryNames(String summary, Finding finding) {
         if (finding.cve() != null) {
@@ -508,9 +575,10 @@ public class JiraLookupService {
             return Pattern.compile("(?<![A-Za-z0-9])" + pattern + "(?![0-9])", Pattern.CASE_INSENSITIVE)
                     .matcher(summary).find();
         }
-        Set<String> words = new LinkedHashSet<>(List.of(Finding.normalise(summary).split(" ")));
-        List<String> title = List.of(Finding.normalise(finding.title()).split(" "));
-        return !title.getFirst().isEmpty() && words.containsAll(title);
+        if (finding.cveId() != null) {
+            return named(summary, finding.cveId());
+        }
+        return named(summary, Finding.UNKNOWN) && finding.cwe() != null && named(summary, finding.cwe());
     }
 
     /** Every page: until an empty one, {@code isLast}, or {@code total} reached - whichever Jira sends. */
@@ -531,6 +599,8 @@ public class JiraLookupService {
 
     private IssueRef toRef(JiraIssue issue) {
         return new IssueRef(issue.key(), issue.summary(), issue.statusName(), issue.priorityName(),
-                issue.assigneeName(), issue.versionNames(), props.browse(issue.key()));
+                issue.assigneeName(), issue.versionNames(),
+                issue.fields() == null || issue.fields().labels() == null ? List.of() : List.copyOf(issue.fields().labels()),
+                props.browse(issue.key()));
     }
 }

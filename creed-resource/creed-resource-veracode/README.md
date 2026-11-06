@@ -45,15 +45,22 @@ An issue covers a finding when all three hold:
 
 1. its *Affects Version/s* contain one of the **Jira versions chosen on the page** (none chosen: any version). The
    report's version (or the upload's override) is shown in the table only — it is neither searched nor filed under;
-2. its summary names the CVE, loosely: anywhere, case and separators ignored (`CVE-2021-44228` =
-   `cve 2021 44228` = `CVE_2021_44228`), never inside a longer id; without a CVE, every word of the title (the
-   advisory id, e.g. `SRCCLR-SID-29587`) in any order;
-3. its summary names **every Component(s) of the finding** as whole words in order (`log4j-core 2.14.1`;
-   case and separators ignored): `log4j-api 2.14.1` or `log4j-core 2.14.10` is another issue. Only while
-   `summary-template` contains `{component}` — a template without it never writes one, so it is not asked for.
+2. its summary names the `cve_id`: a CVE loosely — anywhere, case and separators ignored (`CVE-2021-44228` =
+   `cve 2021 44228` = `CVE_2021_44228`), never inside a longer id; an advisory id (`SRCCLR-SID-29587`) as its words
+   in order; **no `cve_id`: "Unknown" and the `cwe_id`** (the CWE tells one Unknown from another);
+3. its summary names the component's **`file_name`** as whole words (`log4j-core-2.14.1.jar`; `log4j-api-2.14.1.jar`
+   or `log4j-core-2.14.10.jar` is another issue) — while `summary-template` contains `{file}`; likewise every
+   Component(s) while it contains `{component}`. A template that never writes them does not ask for them.
 
-The created summary (`creed-platform log4j-core 2.14.1 CVE-2021-44228`) therefore matches itself, and one CVE in
-two libraries is two issues.
+**A finding = one Veracode application + one `cve_id` + one `file_name`** (id
+`creed-platform|CVE-2021-44228@log4j-core-2.14.1.jar`): the same CVE in two jars is two rows and two issues. The
+**Jira issue** is that without the application: the same CVE in the same jar reported by another application is the
+same issue. Such a finding shows *label missing* until the issue carries its application's label; "create" then adds
+the label (`PUT /rest/api/2/issue/{key}` `update.labels.add`, outcome `LABELED`) instead of filing a second issue —
+also within one request, when both applications' findings were missing.
+
+**Several reports in one upload**: `file` may repeat on `POST /analysis/upload`; the response has `uploadId` and
+`reports` (one per file), every finding its `application`. The page filters and groups by it.
 
 **Lookup is a JQL search, batched**: one search per `search-batch-size` (default 50) findings —
 `project = "…" [AND affectedVersion in ("…", …)] AND (summary ~ "\"CVE-2021-44228\"" OR summary ~ … ) ORDER BY key` (the CVE id as written, quoted so its
@@ -65,10 +72,20 @@ array on analyse / create). Creating needs exactly one — the version the issue
 `jira_version_required`; `/jira/connection` returns the list (`versionNames`) for the page's dropdown. A report
 with 300 findings takes 6 searches instead of 300 picker calls plus a read
 per candidate. The project's versions are the
-*Affects Version/s* `allowedValues` of the configured issue type's create screen. Created issues get the summary
-`veracode.jira.summary-template` (default `{project} {component} {cve}`, `{project}` = the report's
-`app_name`, e.g. `creed-platform spring-beans 5.3.17 CVE-2022-22965`), the version, labels `veracode` + the
-CVE, and a wiki-markup description naming the Veracode application, scan and policy.
+*Affects Version/s* `allowedValues` of the configured issue type's create screen.
+
+**Created issues**:
+- summary `veracode.jira.summary-template`, default `{project} - {cve}|{cwe} - {file}` — `{project}` is
+  `veracode.jira.project-name` (a name of this service's own, **not** the Veracode application, which is
+  `{application}`; blank = the project key), `{cve}` / `{cwe}` "Unknown" when absent. E.g.
+  `creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar`;
+- labels: `labels` (`veracode`), `project-name`, and the **application label** (not the `cve_id` — it is in the summary) — group 1 of
+  `veracode.jira.application-label` on the `app_name`, default `^[^-]*-[^-]*-(.+)$`: everything after the second
+  `-` (`AAA-BBB-CCC-DDD` → `CCC-DDD`, `AAA-BBB-CC-DD-EE` → `CC-DD-EE`; no match = the whole name). Spaces become `_`
+  (Jira refuses them);
+- description: one wiki-markup table in the page's order — Title (`cve_id|cwe_id`, NVD / MITRE links), Veracode
+  application, Component file, Component(s), Severity, CVSS, Affected version, Location, Description
+  (the **full** `cve_summary`) — then the source report, scan and policy.
 
 ## Jira token
 

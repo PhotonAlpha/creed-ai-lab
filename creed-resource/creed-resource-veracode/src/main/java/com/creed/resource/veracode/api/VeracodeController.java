@@ -36,6 +36,7 @@ import tools.jackson.databind.json.JsonMapper;
 import java.io.IOException;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -67,8 +68,9 @@ public class VeracodeController {
     }
 
     /**
-     * Analyse an uploaded Veracode detailed report (XML). The file is parsed and kept in memory; the
-     * response's {@code report.id} is the upload id that re-analyse, create and export take.
+     * Analyse uploaded Veracode detailed reports (XML), one or more ({@code file} repeated - several Veracode
+     * applications, say). They are parsed and kept in memory together; the response's {@code uploadId} is what
+     * re-analyse, create and export take.
      *
      * @param affectedVersion the version to show instead of the report's {@code version} (display only)
      * @param fields          create-screen values for {@code autoCreate}, as JSON ({@code {"components":["Security"]}})
@@ -76,17 +78,20 @@ public class VeracodeController {
      *                        none = any. {@code autoCreate} files under the one chosen
      */
     @PostMapping(value = "/analysis/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    AnalysisResponse analyzeUpload(@RequestPart("file") MultipartFile file,
+    AnalysisResponse analyzeUpload(@RequestPart("file") List<MultipartFile> files,
                                    @RequestParam(required = false) String affectedVersion,
                                    @RequestParam(defaultValue = "false") boolean autoCreate,
                                    @RequestParam(required = false) String fields,
                                    @RequestParam(required = false) List<String> jiraVersions,
                                    JiraToken token)
             throws IOException {
-        String name = file.getOriginalFilename() == null || file.getOriginalFilename().isBlank()
-                ? "upload.xml" : file.getOriginalFilename();
-        return analysis.analyzeUpload(name, file.getBytes(), affectedVersion, autoCreate, fields(fields), jiraVersions,
-                token);
+        List<VeracodeAnalysisService.UploadedFile> uploaded = new ArrayList<>();
+        for (MultipartFile file : files) {
+            String name = file.getOriginalFilename() == null || file.getOriginalFilename().isBlank()
+                    ? "upload-" + (uploaded.size() + 1) + ".xml" : file.getOriginalFilename();
+            uploaded.add(new VeracodeAnalysisService.UploadedFile(name, file.getBytes()));
+        }
+        return analysis.analyzeUpload(uploaded, affectedVersion, autoCreate, fields(fields), jiraVersions, token);
     }
 
     /** The bundled sample report, as if uploaded - only with the mocks, where it has a Jira to match. */
@@ -101,8 +106,8 @@ public class VeracodeController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "the sample report is only served with veracode.mock.enabled");
         }
         byte[] xml = new ClassPathResource(SAMPLE).getContentAsByteArray();
-        return analysis.analyzeUpload("veracode-detailedreport-sample.xml", xml, affectedVersion, autoCreate,
-                fields(fields), jiraVersions, token);
+        return analysis.analyzeUpload(List.of(new VeracodeAnalysisService.UploadedFile(
+                "veracode-detailedreport-sample.xml", xml)), affectedVersion, autoCreate, fields(fields), jiraVersions, token);
     }
 
     /** Re-analyse an upload against Jira as it is now. */
@@ -137,8 +142,10 @@ public class VeracodeController {
                                   @RequestParam(required = false) List<String> jiraVersions,
                                   JiraToken token) {
         AnalysisResponse result = analysis.analyze(uploadId, false, Map.of(), jiraVersions, token);
-        String base = result.report().appName() == null ? "report"
-                : result.report().appName().replaceAll("[^A-Za-z0-9._-]+", "_");
+        List<String> apps = result.reports().stream().map(r -> r.appName()).filter(java.util.Objects::nonNull)
+                .distinct().toList();
+        String base = apps.size() != 1 ? (apps.isEmpty() ? "report" : apps.size() + "-applications")
+                : apps.getFirst().replaceAll("[^A-Za-z0-9._-]+", "_");
         String filename = "veracode-" + base + "-" + FILE_TIME.format(result.analyzedAt()) + ".xlsx";
         return ResponseEntity.ok()
                 .contentType(XLSX)

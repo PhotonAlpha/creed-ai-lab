@@ -8,6 +8,7 @@ import com.creed.resource.veracode.api.dto.FindingStatus;
 import com.creed.resource.veracode.api.dto.FindingView;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
+import com.creed.resource.veracode.domain.ReportRow;
 import com.creed.resource.veracode.service.JiraLookupService.IssueRef;
 import com.creed.resource.veracode.service.VeracodeXmlParser.ParsedReport;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,12 +27,17 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Uploaded Veracode XML -> findings -> Jira matches, and the creation of the missing issues.
+ * Uploaded Veracode XML reports -> findings -> Jira matches, and the creation of the missing issues.
  *
  * <p>Jira is never cached: an analysis is a read of Jira as it is now, which is what makes the creation
- * path safe. The report is re-read from {@link UploadedReportStore} by id, and a create request names
+ * path safe. The reports are re-read from {@link UploadedReportStore} by id, and a create request names
  * findings by id with the whole chain re-read first, so a finding someone else filed in the meantime comes
  * back {@code ALREADY_EXISTS} instead of becoming a duplicate.
+ *
+ * <p>An upload may hold several reports - several Veracode applications. A finding is per application, its Jira
+ * issue is not ({@link Finding#issueKey}): when another application already has the issue, or a finding of another
+ * application in the same request just created it, the finding's application label is added to that issue instead
+ * of filing a second one ({@code LABELED}).
  *
  * <p>Every request needs the user's {@link JiraToken}: it goes to every Jira call, so a shared page reads and
  * files as whoever is using it. Without one nothing is parsed or called ({@code jira_token_required}).
@@ -57,33 +64,49 @@ public class VeracodeAnalysisService {
      */
     private final ReentrantLock createLock = new ReentrantLock();
 
-    /** @param versions the page's Jira versions, Jira's spelling - searched, and (one of them) filed under */
-    private record Snapshot(ReportView report, List<Finding> findings, List<String> warnings,
-                            JiraLookupService.CreateMeta meta, List<String> versions,
-                            Map<String, List<IssueRef>> matches) {
+    /** One uploaded file, as the controller hands it over. */
+    public record UploadedFile(String filename, byte[] content) {
     }
 
     /**
-     * Parses and keeps the file, then analyses it; the response's {@code report.id} is the upload id.
+     * @param byApplication each finding's report, for its issue's description
+     * @param versions      the page's Jira versions, Jira's spelling - searched, and (one of them) filed under
+     */
+    private record Snapshot(String uploadId, List<ReportView> reports, Map<String, ReportView> byApplication,
+                            List<Finding> findings, List<String> warnings, JiraLookupService.CreateMeta meta,
+                            List<String> versions, Map<String, List<IssueRef>> matches) {
+
+        ReportView reportOf(Finding f) {
+            return byApplication.getOrDefault(f.application() == null ? "" : f.application(), reports.getFirst());
+        }
+    }
+
+    /**
+     * Parses and keeps the files, then analyses them together; the response's {@code uploadId} is what re-analyse,
+     * create and export take.
      *
-     * @param versionOverride the version shown instead of the report's {@code version}; blank = the report's. Display
-     *                        only, as the report's own: Jira is searched and filed by {@code jiraVersions}
+     * @param versionOverride the version shown instead of each report's {@code version}; blank = the report's.
+     *                        Display only: Jira is searched and filed by {@code jiraVersions}
      * @param fields          create-screen values for {@code autoCreate} (fieldId -> value or values)
      * @param jiraVersions    the Jira versions chosen on the page (see {@link #analyze})
      */
-    public AnalysisResponse analyzeUpload(String filename, byte[] content, String versionOverride, boolean autoCreate,
+    public AnalysisResponse analyzeUpload(List<UploadedFile> files, String versionOverride, boolean autoCreate,
                                           Map<String, Object> fields, List<String> jiraVersions, JiraToken token) {
         token.require();
-        ParsedReport parsed = parser.parse(filename, content);
-        boolean overridden = versionOverride != null && !versionOverride.isBlank();
-        String version = overridden ? versionOverride.trim() : parsed.info().version();
-        if (version == null) {
-            throw new VeracodeXmlParser.ReportFormatException(
-                    "the report has no version (detailedreport/@version): enter the affected version on the page");
+        if (files.isEmpty()) {
+            throw new IllegalArgumentException("no file: upload one or more Veracode detailed reports (XML)");
         }
-        UploadedReportStore.Upload upload = uploads.put(filename, parsed.withVersion(version), version, overridden);
-        log.info("upload {} '{}' ({} bytes): app {}, version {}{}, {} vulnerabilities", upload.id(), filename,
-                content.length, parsed.info().appName(), version, overridden ? " (overridden)" : "", parsed.rows().size());
+        boolean overridden = versionOverride != null && !versionOverride.isBlank();
+        List<UploadedReportStore.ReportFile> reports = new ArrayList<>();
+        for (UploadedFile file : files) {
+            ParsedReport parsed = parser.parse(file.filename(), file.content());
+            String version = overridden ? versionOverride.trim() : parsed.info().version();
+            reports.add(new UploadedReportStore.ReportFile(file.filename(), parsed.withVersion(version), version));
+            log.info("'{}' ({} bytes): app {}, version {}{}, {} vulnerabilities", file.filename(),
+                    file.content().length, parsed.info().appName(), version, overridden ? " (overridden)" : "",
+                    parsed.rows().size());
+        }
+        UploadedReportStore.Upload upload = uploads.put(reports, overridden);
         return analyze(upload.id(), autoCreate, fields, jiraVersions, token);
     }
 
@@ -102,22 +125,29 @@ public class VeracodeAnalysisService {
             Map<String, Object> chosen = autoCreate ? jira.resolveFields(s.meta(), fields) : Map.of();
             String version = autoCreate ? jira.createVersion(s.versions()) : null;
             List<String> warnings = new ArrayList<>(s.warnings());
+            Map<String, IssueRef> createdNow = new HashMap<>();
             List<FindingView> views = new ArrayList<>();
             for (Finding f : s.findings()) {
                 List<IssueRef> issues = s.matches().getOrDefault(f.id(), List.of());
                 FindingStatus status = issues.isEmpty() ? FindingStatus.MISSING : FindingStatus.EXISTS;
-                if (status == FindingStatus.MISSING && autoCreate) {
+                if (autoCreate) {
                     try {
-                        issues = List.of(jira.create(f, version, chosen, s.report(), token));
-                        status = FindingStatus.CREATED;
+                        Result r = file(f, s, version, chosen, createdNow, token);
+                        if (r.outcome() == Outcome.CREATED) {
+                            status = FindingStatus.CREATED;
+                        } else if (r.outcome() == Outcome.LABELED) {
+                            status = FindingStatus.EXISTS;
+                        }
+                        issues = r.issues();
                     } catch (UpstreamException e) {
                         warnings.add(f.id() + ": not created - " + e.getMessage());
                     }
                 }
-                views.add(FindingView.of(f, status, issues));
+                views.add(FindingView.of(f, status, issues, needsLabel(f, issues)));
             }
-            return new AnalysisResponse(s.report(), jiraProps.projectKey(), List.copyOf(s.meta().versions().values()),
-                    s.versions(), s.versions().size() == 1 ? s.versions().getFirst() : null, s.meta().fields(), views, warnings,
+            return new AnalysisResponse(s.uploadId(), s.reports(), jiraProps.projectKey(),
+                    List.copyOf(s.meta().versions().values()), s.versions(),
+                    s.versions().size() == 1 ? s.versions().getFirst() : null, s.meta().fields(), views, warnings,
                     AnalysisResponse.Counts.of(views), Instant.now(clock));
         } finally {
             if (autoCreate) {
@@ -137,9 +167,20 @@ public class VeracodeAnalysisService {
             String version = jira.createVersion(s.versions());
             Map<String, Finding> byId = s.findings().stream()
                     .collect(Collectors.toMap(Finding::id, Function.identity(), (a, b) -> a, LinkedHashMap::new));
+            Map<String, IssueRef> createdNow = new HashMap<>();
             List<Result> results = new ArrayList<>();
             for (String id : findingIds.stream().distinct().toList()) {
-                results.add(createOne(id, byId.get(id), s, version, chosen, token));
+                Finding f = byId.get(id);
+                if (f == null) {
+                    results.add(new Result(id, Outcome.NOT_IN_REPORT, List.of(), "no such finding in this upload"));
+                    continue;
+                }
+                try {
+                    results.add(file(f, s, version, chosen, createdNow, token));
+                } catch (UpstreamException e) {
+                    log.warn("create failed for {}: {}", id, e.getMessage());
+                    results.add(new Result(id, Outcome.FAILED, List.of(), e.getMessage()));
+                }
             }
             return new CreateIssuesResponse(results);
         } finally {
@@ -147,21 +188,37 @@ public class VeracodeAnalysisService {
         }
     }
 
-    private Result createOne(String id, Finding f, Snapshot s, String version, Map<String, Object> fields,
-                             JiraToken token) {
-        if (f == null) {
-            return new Result(id, Outcome.NOT_IN_REPORT, List.of(), "no such finding in " + s.report().fileName());
+    /**
+     * One finding filed: its issue exists (found in Jira, or created by this request for another application's
+     * finding of the same {@link Finding#issueKey}) -> labelled with the finding's application if it is not yet;
+     * none -> created.
+     */
+    private Result file(Finding f, Snapshot s, String version, Map<String, Object> fields,
+                        Map<String, IssueRef> createdNow, JiraToken token) {
+        List<IssueRef> existing = s.matches().getOrDefault(f.id(), List.of());
+        if (existing.isEmpty() && createdNow.containsKey(f.issueKey())) {
+            existing = List.of(createdNow.get(f.issueKey()));
         }
-        List<IssueRef> existing = s.matches().getOrDefault(id, List.of());
         if (!existing.isEmpty()) {
-            return new Result(id, Outcome.ALREADY_EXISTS, existing, null);
+            if (!needsLabel(f, existing)) {
+                return new Result(f.id(), Outcome.ALREADY_EXISTS, existing, null);
+            }
+            IssueRef labelled = jira.addApplicationLabel(existing.getFirst(), f, token);
+            List<IssueRef> issues = new ArrayList<>(existing);
+            issues.set(0, labelled);
+            createdNow.putIfAbsent(f.issueKey(), labelled);
+            return new Result(f.id(), Outcome.LABELED, List.copyOf(issues),
+                    "added label " + jira.applicationLabel(f) + " to " + labelled.key());
         }
-        try {
-            return new Result(id, Outcome.CREATED, List.of(jira.create(f, version, fields, s.report(), token)), null);
-        } catch (UpstreamException e) {
-            log.warn("create failed for {}: {}", id, e.getMessage());
-            return new Result(id, Outcome.FAILED, List.of(), e.getMessage());
-        }
+        IssueRef created = jira.create(f, version, fields, s.reportOf(f), token);
+        createdNow.put(f.issueKey(), created);
+        return new Result(f.id(), Outcome.CREATED, List.of(created), null);
+    }
+
+    /** Issues exist, but none carries the finding's application label yet. */
+    private boolean needsLabel(Finding f, List<IssueRef> issues) {
+        String label = jira.applicationLabel(f);
+        return !issues.isEmpty() && label != null && issues.stream().noneMatch(i -> i.hasLabel(label));
     }
 
     private Snapshot load(String uploadId, List<String> jiraVersions, JiraToken token) {
@@ -169,18 +226,29 @@ public class VeracodeAnalysisService {
             throw new IllegalArgumentException("uploadId is required: upload a Veracode XML report first");
         }
         UploadedReportStore.Upload upload = uploads.get(uploadId.trim());
-        ParsedReport parsed = upload.report();
-        VeracodeXmlParser.ReportInfo info = parsed.info();
-        ReportView report = new ReportView(upload.id(), upload.filename(), info.appName(), info.appId(), info.version(),
-                upload.affectedVersion(), upload.versionOverridden(), info.policyName(), info.policyCompliance(),
-                info.generationDate());
-        List<Finding> findings = Finding.group(parsed.rows());
+        List<ReportView> reports = new ArrayList<>();
+        Map<String, ReportView> byApplication = new LinkedHashMap<>();
+        List<ReportRow> rows = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        for (UploadedReportStore.ReportFile file : upload.reports()) {
+            VeracodeXmlParser.ReportInfo info = file.report().info();
+            ReportView view = new ReportView(file.filename(), info.appName(), info.appId(), info.version(),
+                    file.affectedVersion(), upload.versionOverridden(), info.policyName(), info.policyCompliance(),
+                    info.generationDate());
+            reports.add(view);
+            byApplication.putIfAbsent(info.appName() == null ? "" : info.appName(), view);
+            rows.addAll(file.report().rows());
+            String prefix = upload.reports().size() > 1 ? file.filename() + ": " : "";
+            file.report().warnings().forEach(w -> warnings.add(prefix + w));
+        }
+        List<Finding> findings = Finding.group(rows);
         JiraLookupService.CreateMeta meta = jira.createMeta(token);
         List<String> versions = jira.selectedVersions(meta, jiraVersions);
         Map<String, List<IssueRef>> matches = jira.find(findings, versions, token);
-        log.info("upload {}: {} vulnerabilities -> {} findings, {} matched in Jira, {} warnings", upload.id(),
-                parsed.rows().size(), findings.size(), matches.values().stream().filter(l -> !l.isEmpty()).count(),
-                parsed.warnings().size());
-        return new Snapshot(report, findings, parsed.warnings(), meta, versions, matches);
+        log.info("upload {}: {} report(s), {} vulnerabilities -> {} findings, {} matched in Jira, {} warnings",
+                upload.id(), reports.size(), rows.size(), findings.size(),
+                matches.values().stream().filter(l -> !l.isEmpty()).count(), warnings.size());
+        return new Snapshot(upload.id(), List.copyOf(reports), byApplication, findings, List.copyOf(warnings), meta,
+                versions, matches);
     }
 }

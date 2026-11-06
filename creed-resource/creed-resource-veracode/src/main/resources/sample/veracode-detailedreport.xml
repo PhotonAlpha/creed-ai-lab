@@ -13,7 +13,7 @@
   VeracodeApiTest pins these outcomes - changing a vulnerability changes the test.
 -->
 <detailedreport xmlns="https://www.veracode.com/schema/reports/export/1.0" report_format_version="1.5"
-                account_id="12345" app_name="creed-platform" app_id="1876543" analysis_id="23456789"
+                account_id="12345" app_name="creed-platform-2026-10-06-Creed" app_id="1876543" analysis_id="23456789"
                 static_analysis_unit_id="34567890" sandbox_id="" first_build_submitted_date="2026-09-30 08:12:44 UTC"
                 version="2.3.0" build_id="45678901" submitter="ci-veracode" platform="Not Specified"
                 assurance_level="5" business_criticality="5" generation_date="2026-10-14 10:20:30 UTC"

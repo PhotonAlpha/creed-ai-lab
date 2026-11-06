@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -23,24 +24,26 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class UploadedReportStore {
 
-    /** @param report rows already carry {@code affectedVersion}; {@code versionOverridden} = set on the page */
-    public record Upload(String id, String filename, ParsedReport report, String affectedVersion,
-                         boolean versionOverridden, Instant uploadedAt) {
+    /** One file of an upload; its rows already carry the version shown for them. */
+    public record ReportFile(String filename, ParsedReport report, String affectedVersion) {
+    }
+
+    /** @param reports one per uploaded file, in upload order; {@code versionOverridden} = version set on the page */
+    public record Upload(String id, List<ReportFile> reports, boolean versionOverridden, Instant uploadedAt) {
     }
 
     private final UploadProperties props;
     private final Clock clock;
     private final Map<String, Upload> uploads = new LinkedHashMap<>();
 
-    public synchronized Upload put(String filename, ParsedReport report, String affectedVersion, boolean overridden) {
+    public synchronized Upload put(List<ReportFile> reports, boolean overridden) {
         evictExpired();
         while (uploads.size() >= props.maxEntries()) {
             Iterator<String> oldest = uploads.keySet().iterator();
             oldest.next();
             oldest.remove();
         }
-        Upload upload = new Upload(UUID.randomUUID().toString(), filename, report, affectedVersion, overridden,
-                Instant.now(clock));
+        Upload upload = new Upload(UUID.randomUUID().toString(), List.copyOf(reports), overridden, Instant.now(clock));
         uploads.put(upload.id(), upload);
         return upload;
     }

@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -39,10 +40,12 @@ import java.util.stream.Collectors;
 @Component
 public class ExcelExporter {
 
-    private static final String[] HEADERS = {"Status", "CVE", "Title", "Component(s)", "Severity", "CVSS",
-            "Affected version", "Fixed version", "Jira issue(s)", "Jira status", "Component file",
-            "Description"};
-    private static final int[] WIDTHS = {12, 18, 48, 36, 12, 8, 16, 16, 22, 16, 20, 60};
+    /** The page's columns: Title = {@code cve_id|cwe_id}, Description = the full {@code cve_summary}. */
+    private static final String[] HEADERS = {"Status", "Veracode application", "Title", "Component file",
+            "Component(s)", "Severity", "CVSS", "Affected version", "Jira issue(s)", "Jira status",
+            "Location", "Description"};
+    static final int SEVERITY_COLUMN = 5;
+    private static final int[] WIDTHS = {12, 28, 30, 30, 28, 12, 8, 16, 22, 16, 40, 80};
     /**
      * Severity cell fill by {@link Severity#rank} (Informational 0 ... Very High 5): the hues of the page's severity
      * tags (blue, gold, orange, volcano, red), at a lightness that keeps black text readable and survives printing.
@@ -73,14 +76,15 @@ public class ExcelExporter {
             for (FindingView f : analysis.findings()) {
                 Row row = sheet.createRow(r++);
                 int c = 0;
-                row.createCell(c++).setCellValue(f.status().name());
-                Cell cve = row.createCell(c++);
+                row.createCell(c++).setCellValue(f.status().name() + (f.needsLabel() ? " (label missing)" : ""));
+                row.createCell(c++).setCellValue(nullToEmpty(f.application()));
+                Cell title = row.createCell(c++);
+                title.setCellValue(f.title());
                 if (f.cve() != null) {
-                    cve.setCellValue(f.cve());
-                    cve.setHyperlink(url(helper, "https://nvd.nist.gov/vuln/detail/" + f.cve()));
-                    cve.setCellStyle(link);
+                    title.setHyperlink(url(helper, "https://nvd.nist.gov/vuln/detail/" + f.cve()));
+                    title.setCellStyle(link);
                 }
-                row.createCell(c++).setCellValue(nullToEmpty(f.title()));
+                row.createCell(c++).setCellValue(nullToEmpty(f.fileName()));
                 row.createCell(c++).setCellValue(String.join(", ", f.components()));
                 Cell level = row.createCell(c++);
                 level.setCellValue(nullToEmpty(f.severity()));
@@ -92,8 +96,7 @@ public class ExcelExporter {
                 if (f.cvss() != null) {
                     cvss.setCellValue(f.cvss());
                 }
-                row.createCell(c++).setCellValue(f.affectedVersion());
-                row.createCell(c++).setCellValue(nullToEmpty(f.fixedVersion()));
+                row.createCell(c++).setCellValue(nullToEmpty(f.affectedVersion()));
                 Cell keys = row.createCell(c++);
                 keys.setCellValue(join(f.issues(), IssueRef::key));
                 if (!f.issues().isEmpty() && f.issues().getFirst().url() != null) {
@@ -119,19 +122,25 @@ public class ExcelExporter {
 
     private static void source(Sheet sheet, AnalysisResponse a, CellStyle header) {
         AnalysisResponse.Counts n = a.counts();
-        Object[][] rows = {
-                {"Veracode application", nullToEmpty(a.report().appName())},
-                {"Scan version", nullToEmpty(a.report().scanVersion())},
-                {"Affected version", a.report().affectedVersion() + (a.report().versionOverridden() ? " (set on the page)" : "")},
-                {"Policy", nullToEmpty(a.report().policyName()) + (a.report().policyCompliance() == null ? ""
-                        : " - " + a.report().policyCompliance())},
-                {"Report generated", nullToEmpty(a.report().generatedAt())},
-                {"Uploaded file", a.report().fileName()},
-                {"Jira project", a.projectKey()},
-                {"Jira versions searched", a.selectedVersions().isEmpty() ? "(any)" : String.join(", ", a.selectedVersions())},
-                {"Analysed at", TIME.format(a.analyzedAt())},
-                {"Findings", n.total() + " (exists " + n.exists() + ", missing " + n.missing() + ")"},
-        };
+        List<Object[]> rows = new ArrayList<>();
+        for (ReportView report : a.reports()) {
+            // one block per uploaded report
+            rows.add(new Object[] {"Uploaded file", report.fileName()});
+            rows.add(new Object[] {"Veracode application", nullToEmpty(report.appName())});
+            rows.add(new Object[] {"Scan version", nullToEmpty(report.scanVersion())});
+            rows.add(new Object[] {"Affected version", nullToEmpty(report.affectedVersion())
+                    + (report.versionOverridden() ? " (set on the page)" : "")});
+            rows.add(new Object[] {"Policy", nullToEmpty(report.policyName())
+                    + (report.policyCompliance() == null ? "" : " - " + report.policyCompliance())});
+            rows.add(new Object[] {"Report generated", nullToEmpty(report.generatedAt())});
+        }
+        rows.addAll(List.<Object[]>of(
+                new Object[] {"Jira project", a.projectKey()},
+                new Object[] {"Jira versions searched", a.selectedVersions().isEmpty() ? "(any)"
+                        : String.join(", ", a.selectedVersions())},
+                new Object[] {"Analysed at", TIME.format(a.analyzedAt())},
+                new Object[] {"Findings", n.total() + " (exists " + n.exists() + ", missing " + n.missing()
+                        + ", label missing " + n.needsLabel() + ")"}));
         int r = 0;
         for (Object[] values : rows) {
             Row row = sheet.createRow(r++);

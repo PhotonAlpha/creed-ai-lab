@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Pattern;
 
 /**
  * A Veracode <em>Detailed Report</em> XML ({@code <detailedreport>}, schema
@@ -35,10 +34,6 @@ import java.util.regex.Pattern;
 @Component
 public class VeracodeXmlParser {
 
-    private static final Pattern CVE = Pattern.compile("CVE-\\d{4}-\\d{4,}", Pattern.CASE_INSENSITIVE);
-    /** First sentence: up to the first ". " / ".\n", or the whole text. */
-    private static final Pattern SENTENCE_END = Pattern.compile("\\.(\\s|$)");
-    private static final int TITLE_MAX = 160;
     private static final String[] SEVERITY = {"Informational", "Very Low", "Low", "Medium", "High", "Very High"};
 
     /**
@@ -54,9 +49,7 @@ public class VeracodeXmlParser {
     public record ParsedReport(ReportInfo info, List<ReportRow> rows, List<String> warnings) {
 
         public ParsedReport withVersion(String affectedVersion) {
-            return new ParsedReport(info, rows.stream().map(r -> new ReportRow(r.location(), r.cve(), r.title(),
-                    r.component(), r.severity(), r.cvss(), affectedVersion, r.fixedVersion(), r.description())).toList(),
-                    warnings);
+            return new ParsedReport(info, rows.stream().map(r -> r.withVersion(affectedVersion)).toList(), warnings);
         }
     }
 
@@ -82,6 +75,7 @@ public class VeracodeXmlParser {
         List<ReportRow> rows = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
         Deque<String> path = new ArrayDeque<>();
+        String application = null;
         String component = null;
         String componentFile = null;
         String filePath = null;
@@ -108,7 +102,8 @@ public class VeracodeXmlParser {
                     throw new ReportFormatException("not a Veracode detailed report: the root element is <" + name
                             + ">, expected <detailedreport>");
                 }
-                info = new ReportInfo(attr(xml, "app_name"), attr(xml, "app_id"), attr(xml, "version"),
+                application = attr(xml, "app_name");
+                info = new ReportInfo(application, attr(xml, "app_id"), attr(xml, "version"),
                         attr(xml, "build_id"), attr(xml, "policy_name"), attr(xml, "policy_compliance_status"),
                         attr(xml, "generation_date"));
                 continue;
@@ -128,7 +123,7 @@ public class VeracodeXmlParser {
                     continue;
                 }
                 vulnerabilities++;
-                ReportRow row = row(xml, component, filePath != null ? filePath : componentFile, vulnerabilities, warnings);
+                ReportRow row = row(xml, application, component, componentFile, filePath, vulnerabilities, warnings);
                 if (row != null) {
                     rows.add(row);
                 }
@@ -147,22 +142,22 @@ public class VeracodeXmlParser {
         return new ParsedReport(info, List.copyOf(rows), List.copyOf(warnings));
     }
 
-    private static ReportRow row(XMLStreamReader xml, String component, String file, int n, List<String> warnings) {
+    private static ReportRow row(XMLStreamReader xml, String application, String component, String componentFile,
+                                 String filePath, int n, List<String> warnings) {
         String id = attr(xml, "cve_id");
+        String cwe = attr(xml, "cwe_id");
         String summary = attr(xml, "cve_summary");
-        String location = component + (file == null ? "" : " (" + file + ")");
-        String cve = id != null && CVE.matcher(id).matches() ? id.toUpperCase(Locale.ROOT) : null;
-        // no CVE (a SRCCLR-SID-... advisory): the advisory id is the title - short, and what a Jira summary keeps
-        String title = cve != null ? firstSentence(summary) : id != null ? id : firstSentence(summary);
-        if (title == null) {
-            title = cve;
+        String path = filePath != null ? filePath : componentFile;
+        String location = component + (path == null ? "" : " (" + path + ")");
+        // the jar is the second half of the issue's identity; a component without file_name falls back to its label
+        String fileName = componentFile != null ? componentFile : component;
+        if (id == null && cwe == null) {
+            warnings.add(location + ": vulnerability " + n + " has neither a cve_id nor a cwe_id - kept as Unknown,"
+                    + " but it cannot be looked up in Jira");
         }
-        if (cve == null && title == null) {
-            warnings.add(location + ": vulnerability " + n + " skipped, neither a CVE nor an advisory id or summary");
-            return null;
-        }
-        return new ReportRow(location, cve, title, component, severity(xml), cvss(xml, location, warnings), null,
-                null, summary);
+        return new ReportRow(location, application, id == null ? null : id.toUpperCase(Locale.ROOT),
+                cwe == null ? null : cwe.toUpperCase(Locale.ROOT), fileName, component, severity(xml),
+                cvss(xml, location, warnings), null, summary);
     }
 
     private static String severity(XMLStreamReader xml) {
@@ -184,18 +179,6 @@ public class VeracodeXmlParser {
             warnings.add(location + ": CVSS '" + raw + "' is not a number, left empty");
             return null;
         }
-    }
-
-    static String firstSentence(String text) {
-        if (text == null || text.isBlank()) {
-            return null;
-        }
-        String t = text.strip().replaceAll("\\s+", " ");
-        var end = SENTENCE_END.matcher(t);
-        if (end.find()) {
-            t = t.substring(0, end.start());
-        }
-        return t.length() <= TITLE_MAX ? t : t.substring(0, TITLE_MAX - 1).strip() + "…";
     }
 
     private static String attr(XMLStreamReader xml, String name) {
