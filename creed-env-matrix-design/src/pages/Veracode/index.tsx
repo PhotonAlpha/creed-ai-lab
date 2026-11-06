@@ -259,6 +259,17 @@ export function VeracodePage() {
   };
 
   /**
+   * The backend's configured default versions (`veracode.jira.defaults.affects-versions`, only those this Jira has)
+   * once a connection test answers - when nothing is chosen yet: a choice of the user's, or one restored from the
+   * cache, is kept. A Jira without them changes nothing.
+   */
+  useEffect(() => {
+    const defaults = connection?.defaultVersions ?? [];
+    if (defaults.length && !jiraVersions.length) chooseVersions(defaults);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connection]);
+
+  /**
    * The cache held only the upload id (the analysis was too big for the storage): analyse it again once the
    * token is there. Gone from the backend (restart, TTL) -> the usual "upload expired" message.
    */
@@ -530,11 +541,16 @@ export function VeracodePage() {
       // the report's, for reading only: Jira is searched and filed by the Jira versions above
     },
     {
-      // the whole cve_summary, wrapped - not cut to a first sentence
+      // the whole cve_summary, but folded to 4 lines: a long one made its row a screen tall. Expanding is per
+      // row and only in the browser - the Excel export and the Jira description keep the full text
       title: t('veracode.col.description'),
       dataIndex: 'description',
       width: 420,
-      render: (d: string | null) => <Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{d ?? '—'}</Paragraph>,
+      render: (d: string | null) => (
+        <Paragraph ellipsis={{ rows: 4, expandable: 'collapsible' }} style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+          {d ?? '—'}
+        </Paragraph>
+      ),
     },
     {
       title: t('veracode.col.jira'),

@@ -15,8 +15,8 @@ import java.util.Locale;
  * @param kind     {@code OPTIONS} (a choice from {@code options}), {@code USER} (a login), {@code NUMBER} or
  *                 {@code TEXT}
  * @param multiple the value is a list ({@code schema.type = array})
- * @param defaults preselected values: Jira's default, else the only option of a required field (option ids for
- *                 {@code OPTIONS})
+ * @param defaults preselected values: {@code veracode.jira.defaults.fields} as far as Jira offers them, else Jira's
+ *                 default, else the only option of a required field (option ids for {@code OPTIONS})
  */
 public record CreateField(String fieldId, String name, boolean required, Kind kind, boolean multiple,
                           List<Option> options, List<String> defaults) {
@@ -49,6 +49,29 @@ public record CreateField(String fieldId, String name, boolean required, Kind ki
         }
         String name = meta.name() != null ? meta.name() : meta.fieldId();
         return new CreateField(meta.fieldId(), name, meta.required(), kind, multiple, List.copyOf(options), defaults);
+    }
+
+    /**
+     * The configured values in place of {@link #defaults}: option ids for a choice, the configured ones it does not
+     * offer dropped. None left (or none configured) = unchanged.
+     */
+    CreateField withConfigured(List<String> configured) {
+        List<String> values = new ArrayList<>();
+        for (String value : configured) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            if (kind != Kind.OPTIONS) {
+                values.add(value.trim());
+            } else if (option(value.trim()) != null && !values.contains(option(value.trim()).id())) {
+                values.add(option(value.trim()).id());
+            }
+        }
+        if (values.isEmpty()) {
+            return this;
+        }
+        return new CreateField(fieldId, name, required, kind, multiple, options,
+                List.copyOf(multiple ? values : values.subList(0, 1)));
     }
 
     /** The option for an id, or for a label (any case) - the API takes either. */

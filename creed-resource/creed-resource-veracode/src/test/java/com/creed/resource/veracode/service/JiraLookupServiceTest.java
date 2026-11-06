@@ -187,6 +187,34 @@ class JiraLookupServiceTest {
     }
 
     @Test
+    void configuredDefaultsArePreselectedAsFarAsJiraOffersThem() {
+        FakeJira jira = new FakeJira();
+        jira.fields = List.of(
+                new JiraFieldMeta("versions", "Affects Version/s", true, false, ARRAY, values("2.3.0", "2.4.0"), null),
+                new JiraFieldMeta("components", "Component/s", true, false, ARRAY, values("Security", "Platform"),
+                        JsonMapper.builder().build().readTree("[{\"id\":\"o-Platform\",\"name\":\"Platform\"}]")),
+                new JiraFieldMeta("customfield_4", "Region", true, false, new JiraFieldMeta.Schema("option", null, null, "select"),
+                        options("EMEA", "APAC"), null),
+                new JiraFieldMeta("customfield_5", "Team", true, false, new JiraFieldMeta.Schema("option", null, null, "select"),
+                        options("Red"), null));
+        // by id or by name, any case; values Jira does not offer are dropped
+        JiraLookupService service = new JiraLookupService(jira, properties("{cve}", 3, new JiraProperties.CreateDefaults(
+                List.of("2.4.0", "9.9.9", "2.3.0"), Map.of("COMPONENTS", List.of("security", "Nope"),
+                "region", List.of("APAC"), "customfield_5", List.of("Blue")))));
+
+        JiraLookupService.Connection connection = service.connection(TOKEN);
+        assertThat(connection.defaultVersions()).containsExactly("2.4.0", "2.3.0");
+        // the configured value replaces Jira's default ...
+        assertThat(connection.fields().get(0).defaults()).containsExactly("o-Security");
+        assertThat(connection.fields().get(1).defaults()).containsExactly("o-APAC");
+        // ... and one Jira does not offer leaves what was there (the only option, preselected)
+        assertThat(connection.fields().get(2).defaults()).containsExactly("o-Red");
+
+        // nothing configured: nothing selected for the page
+        assertThat(service(jira).connection(TOKEN).defaultVersions()).isEmpty();
+    }
+
+    @Test
     void theTokenSaysCloudOrDataCenter() {
         FakeJira jira = new FakeJira();
         jira.fields = List.of(
@@ -254,9 +282,13 @@ class JiraLookupServiceTest {
     }
 
     private static JiraProperties properties(String template, int searchBatchSize) {
+        return properties(template, searchBatchSize, new JiraProperties.CreateDefaults(null, null));
+    }
+
+    private static JiraProperties properties(String template, int searchBatchSize, JiraProperties.CreateDefaults defaults) {
         return new JiraProperties("http://jira", "CREED", "Bug", "creed", template, List.of("veracode"),
                 "^[^-]*-[^-]*-(.+)$", "http://jira/browse/{key}", 1, searchBatchSize, 5,
-                Duration.ofSeconds(1), Duration.ofSeconds(1));
+                Duration.ofSeconds(1), Duration.ofSeconds(1), defaults);
     }
 
     /** Pages of one item each (pageSize 1), so paging is walked as well. */

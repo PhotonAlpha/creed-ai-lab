@@ -62,6 +62,12 @@ also within one request, when both applications' findings were missing.
 **Several reports in one upload**: `file` may repeat on `POST /analysis/upload`; the response has `uploadId` and
 `reports` (one per file), every finding its `application`. The page filters and groups by it.
 
+**A `.zip` is the reports in it** (`ReportArchive`): every `.xml` entry at any depth, named
+`<archive>.zip/<path>` (two folders may each hold a `detailedreport.xml`); the `.xsd` Veracode ships beside the
+report, folders, `__MACOSX/` and dot files are skipped. A zip and plain XML files can go in one upload. Limits count
+inflated bytes, not declared sizes: `veracode.upload.max-unzipped-size` (500MB) and `max-archive-reports` (50);
+no `.xml` inside, or an unreadable zip, is `400 unsupported_file`. Entry names that are not UTF-8 are read as GB18030.
+
 **Lookup is a JQL search, batched**: one search per `search-batch-size` (default 50) findings —
 `project = "…" [AND affectedVersion in ("…", …)] AND (summary ~ "\"CVE-2021-44228\"" OR summary ~ … ) ORDER BY key` (the CVE id as written, quoted so its
 hyphens are text, not NOT operators; an advisory without a CVE is searched as plain words), fields
@@ -86,6 +92,19 @@ per candidate. The project's versions are the
 - description: one wiki-markup table in the page's order — Title (`cve_id|cwe_id`, NVD / MITRE links), Veracode
   application, Component file, Component(s), Severity, CVSS, Affected version, Location, Description
   (the **full** `cve_summary`) — then the source report, scan and policy.
+
+**Preselected values** — `veracode.jira.defaults`, applied when the connection test has read Jira, and only as
+far as that Jira offers them (one it lacks is dropped; the page then keeps what it had):
+
+```yaml
+veracode:
+  jira:
+    defaults:
+      affects-versions: [2.3.0]          # the page's "Jira versions", when none is chosen yet (env CREED_JIRA_DEFAULT_VERSIONS)
+      fields:                            # create-screen fields by id or name (case, spaces, punctuation ignored)
+        components: [Security]           # option names or ids
+        Environment Found: [Production]  # overrides Jira's own default
+```
 
 ## Jira token
 

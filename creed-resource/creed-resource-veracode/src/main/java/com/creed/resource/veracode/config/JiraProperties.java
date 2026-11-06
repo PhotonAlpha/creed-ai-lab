@@ -9,6 +9,7 @@ import org.springframework.validation.annotation.Validated;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Where Jira is and what to create there. No credentials: every call carries the token the user typed on the
@@ -36,6 +37,7 @@ import java.util.List;
  *                       (the JQL is a query parameter) - 50 CVE phrases are about 3 KB encoded
  * @param maxConnections pooled connections to Jira (lookups run one after another per request; this bounds
  *                       concurrent requests)
+ * @param defaults       what the page preselects once the connection test has read Jira - only values Jira offers
  */
 @Validated
 @ConfigurationProperties("veracode.jira")
@@ -52,7 +54,46 @@ public record JiraProperties(
         @DefaultValue("50") @Min(1) @Max(100) int searchBatchSize,
         @DefaultValue("20") @Min(1) @Max(200) int maxConnections,
         @DefaultValue("5s") Duration connectTimeout,
-        @DefaultValue("20s") Duration readTimeout) {
+        @DefaultValue("20s") Duration readTimeout,
+        @DefaultValue CreateDefaults defaults) {
+
+    /**
+     * Preselections for the page, not values forced on Jira: one Jira does not offer (a version not released yet,
+     * an option renamed) is dropped, and the page then keeps what it had - so one config serves several projects.
+     *
+     * @param affectsVersions the Jira versions selected (Affects Version/s: what is looked up in and filed under),
+     *                        matched case-insensitively against the issue type's versions
+     * @param fields          create-screen fields by field id ({@code components}, {@code customfield_10100}) or
+     *                        name ({@code Environment Found}), any case: option names (or ids) for a choice, the
+     *                        value itself for text / number / user. Replaces Jira's own default when one matches
+     */
+    public record CreateDefaults(List<String> affectsVersions, Map<String, List<String>> fields) {
+
+        public CreateDefaults {
+            affectsVersions = affectsVersions == null ? List.of() : List.copyOf(affectsVersions);
+            fields = fields == null ? Map.of() : Map.copyOf(fields);
+        }
+
+        /**
+         * The configured values of a field, by id first, then by name; empty when it has none. Compared without case,
+         * spaces or punctuation: relaxed binding drops them from a map key ({@code Environment Found} arrives as
+         * {@code EnvironmentFound} unless written {@code "[Environment Found]"}).
+         */
+        public List<String> of(String fieldId, String name) {
+            for (String wanted : new String[] {fieldId, name}) {
+                for (Map.Entry<String, List<String>> e : fields.entrySet()) {
+                    if (wanted != null && key(e.getKey()).equals(key(wanted))) {
+                        return e.getValue() == null ? List.of() : e.getValue();
+                    }
+                }
+            }
+            return List.of();
+        }
+
+        private static String key(String text) {
+            return text.toLowerCase(java.util.Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]", "");
+        }
+    }
 
     /**
      * Only the page's preselected deployment: the user picks Cloud or Data Center with the token, and that choice

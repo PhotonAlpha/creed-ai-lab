@@ -156,13 +156,15 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 
 ### 5.6 Veracode 分析（`/veracode`）
 - 后端：`creed-resource/creed-resource-veracode`；调用 Jira 使用 Spring `@HttpExchange`，本地先 mock。Jira 客户端**不校验证书和主机名**（按需求）。
-- 报告来源**只有上传的 Veracode 详细报告（XML）**，只读取 SCA 部分（不再读取 Confluence 页面）；报告的影响版本（根节点 `version`，上传前可手工改）**只在表格中展示**，不参与 Jira 查询和创建。
+- 报告来源**只有上传的 Veracode 详细报告（XML，或打包了 .xml / .xsd 的 ZIP：读取其中所有 .xml，含子目录，其他文件忽略）**，只读取 SCA 部分（不再读取 Confluence 页面）；报告的影响版本（根节点 `version`，上传前可手工改）**只在表格中展示**，不参与 Jira 查询和创建。
 - **Jira 版本**是可搜索的多选下拉（版本多时不撑大页面，列表来自测试连接 / 分析结果）：查找时按所选版本过滤（`affectedVersion in`，不选 = 全部版本），
   新建时关联所选版本，所以创建必须正好选一个；切换版本会自动重新分析。
+  默认值在后端配置 `veracode.jira.defaults`：`affects-versions`（测试连接后，若页面还没选 Jira 版本且该 Jira 有这些版本则选中，没有则页面不变）、
+  `fields`（Component/s 等创建字段，按字段 id 或名称；Jira 没有的取值忽略）。
 - 按 CVE（无 CVE 时按公告编号）+ Component(s) + 所选 Jira 版本在 Jira 中查找是否存在：
   存在则列出 Jira 编号、状态、优先级、经办人；不存在则可按需创建（单行 / 所选 / 全部缺失，或分析时自动创建）。
 - 一行 = 一个 Veracode application + 一个 `cve_id` + 一个组件 `file_name`（同一 CVE 在两个 jar 中是两行、两个 Jira）。
-  表格列：状态 / 标题（`cve_id|cwe_id`，缺失为 Unknown）/ 组件文件 / 严重级别 / CVSS / 影响版本 / 描述（完整 `cve_summary`）/ Jira。
+  表格列：状态 / 标题（`cve_id|cwe_id`，缺失为 Unknown）/ 组件文件 / 严重级别 / CVSS / 影响版本 / 描述（完整 `cve_summary`，超过 4 行折叠，可逐行展开 / 收起）/ Jira。
 - 按 Jira 标题匹配：CVE 出现在标题任意位置即可（忽略大小写和 `-` `_` 空格，但不会匹配更长的编号）；无 `cve_id` 时按 `Unknown` + `cwe_id`；
   且组件 `file_name` 要作为完整的词出现在标题中（`log4j-api-2.14.1.jar` 或 `log4j-core-2.14.10.jar` 不算），标题模板含 `{file}` 时生效。
 - 新建 Jira 标题 `{project} - {cve_id}|{cwe_id} - {file_name}`，`{project}` 为 `veracode.jira.project-name`（不是 Veracode application）；

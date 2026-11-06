@@ -27,10 +27,13 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
@@ -277,6 +280,50 @@ class VeracodeApiTest {
         return new MockMultipartFile("file", "gateway.xml", "application/xml", xml.getBytes(StandardCharsets.UTF_8));
     }
 
+    /** {@code entries}: name, content, name, content ... */
+    private static MockMultipartFile zip(String name, Object... entries) throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            for (int i = 0; i < entries.length; i += 2) {
+                zip.putNextEntry(new ZipEntry((String) entries[i]));
+                zip.write(entries[i + 1] instanceof byte[] b ? b : ((String) entries[i + 1]).getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+        }
+        return new MockMultipartFile("file", name, "application/zip", bytes.toByteArray());
+    }
+
+    @Test
+    void aZipIsReadAsTheXmlFilesInIt() throws Exception {
+        // Veracode's download: the report beside its schema; a second report in a folder, macOS' copy skipped
+        MockMultipartFile reports = zip("reports.zip",
+                "detailedreport.xml", sample().getBytes(),
+                "detailedreport.xsd", "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"/>",
+                "gateway/", "",
+                "gateway/detailedreport.xml", otherApplication().getBytes(),
+                "__MACOSX/._detailedreport.xml", "junk");
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(reports).param("jiraVersions", "2.3.0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reports[*].fileName",
+                        contains("reports.zip/detailedreport.xml", "reports.zip/gateway/detailedreport.xml")))
+                .andExpect(jsonPath("$.reports[*].appName", contains("creed-platform-2026-10-06-Creed", "creed-pay-gateway-api")))
+                .andExpect(jsonPath("$.counts.total").value(20));
+        // a zip and a plain XML in one upload
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(zip("one.zip", "a/report.XML", sample().getBytes()))
+                        .file(otherApplication()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reports[*].fileName", contains("one.zip/a/report.XML", "gateway.xml")));
+        // only the schema: nothing to read
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(zip("schema.zip", "detailedreport.xsd", "<x/>")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("unsupported_file"))
+                .andExpect(jsonPath("$.message").value(containsString("schema.zip holds no .xml file")));
+        mvc.perform(multipart("/api/veracode/analysis/upload")
+                        .file(new MockMultipartFile("file", "broken.zip", "application/zip", "PK\u0003\u0004nonsense".getBytes())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("unsupported_file"));
+    }
+
     @Test
     void twoApplicationsShareAnIssueAndEachAddsItsLabel() throws Exception {
         String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).file(otherApplication())
@@ -448,6 +495,9 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.fields[*].fieldId", contains("components", "customfield_10100")))
                 .andExpect(jsonPath("$.fields[0].options[*].label", contains("Security", "Platform", "Payments")))
                 .andExpect(jsonPath("$.fields[1].options[*].id", contains("10200", "10201")))
+                // veracode.jira.defaults of the test profile, as far as the mock has them
+                .andExpect(jsonPath("$.defaultVersions", contains("2.3.0")))
+                .andExpect(jsonPath("$.fields[1].defaults", contains("10201")))
                 .andExpect(jsonPath("$.message").value(containsString("to choose on the page: Component/s, Environment Found")))
                 .andExpect(jsonPath("$.projectKey").value("CREED"));
         mvc.perform(post("/api/veracode/jira/connection").header(JiraToken.HEADER, "invalid"))

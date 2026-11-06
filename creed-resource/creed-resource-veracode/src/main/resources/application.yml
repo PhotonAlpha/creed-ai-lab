@@ -55,6 +55,18 @@ veracode:
     browse-url: https://ethancaoq.atlassian.net/browse/{key}
     # maxResults of the paged createmeta calls (issue types / fields of the issue type)
     page-size: 50
+    # What the page preselects after "test connection" - only values this Jira offers; one it does not (a version not
+    # released yet, an option renamed) is dropped and the page keeps its own choice.
+    # affects-versions: the "Jira versions" select (Affects Version/s, any case). Several = looked up in all of them;
+    #   creating needs exactly one, so name one if the page should be ready to create.
+    # fields: create-screen fields by field id (components, customfield_10100) or name (Environment Found) - case,
+    #   spaces and punctuation are ignored;
+    #   option names (or ids), or the value itself for a text / number / user field. Overrides Jira's own default.
+    defaults:
+      affects-versions: ${CREED_JIRA_DEFAULT_VERSIONS:}
+      fields: {}
+      #  components: [Security]
+      #  Environment Found: [Production]
     max-connections: 20
     connect-timeout: 5s
     read-timeout: 20s
@@ -64,6 +76,10 @@ veracode:
   upload:
     ttl: 2h
     max-entries: 50
+    # A .zip upload is read as the .xml files in it (the .xsd beside them is skipped). Bounded by what it inflates
+    # to, not by its compressed size (that is the multipart limit above).
+    max-unzipped-size: ${CREED_VERACODE_MAX_UNZIPPED:500MB}
+    max-archive-reports: 50
 # Jira request/response log (Logbook, from the Jira client's HttpClient exec chain; RemoteClientsConfiguration).
 # Lines go to the org.zalando.logbook.Logbook logger at TRACE - CREED_VERACODE_LOGBOOK_LEVEL=OFF silences it.
 logbook:

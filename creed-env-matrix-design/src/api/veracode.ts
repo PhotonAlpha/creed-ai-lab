@@ -71,8 +71,11 @@ export interface ReportView {
   generatedAt: string | null;
 }
 
-/** What the upload control accepts: a Veracode detailed report exported as XML. */
-export const UPLOAD_ACCEPT = '.xml';
+/**
+ * What the upload control accepts: a Veracode detailed report exported as XML, or a zip of them (the backend reads
+ * the `.xml` files in it and skips the `.xsd` beside them).
+ */
+export const UPLOAD_ACCEPT = '.xml,.zip';
 
 export interface AnalysisCounts {
   total: number;
@@ -127,8 +130,9 @@ export interface VeracodeSettings {
 
 /**
  * A create-screen field the page asks for (Component/s, required fields Jira has no default for), read with
- * the user's token — so the options are the ones that user may choose. `defaults` are preselected: Jira's
- * default, else the only option of a required field (option ids for OPTIONS).
+ * the user's token — so the options are the ones that user may choose. `defaults` are preselected:
+ * `veracode.jira.defaults.fields` as far as Jira offers them, else Jira's default, else the only option of a
+ * required field (option ids for OPTIONS).
  */
 export interface CreateField {
   fieldId: string;
@@ -173,6 +177,11 @@ export interface JiraConnection {
   versions: number;
   /** Their names — the page's Jira version list before the first analysis. */
   versionNames: string[];
+  /**
+   * `veracode.jira.defaults.affects-versions` that this Jira has, in its spelling: selected when the page has no
+   * Jira version chosen yet. Empty = the page keeps its selection.
+   */
+  defaultVersions: string[];
   /** The create-screen fields the page asks for. */
   fields: CreateField[];
   /** Every type the token may create — the page's issue type choice. */

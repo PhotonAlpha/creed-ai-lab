@@ -158,6 +158,13 @@ it was not checked in a browser (the browser extension could not attach to any p
   upload (`reports`, `uploadId`), a CVE + jar another application already filed is labelled (`LABELED`), not
   duplicated. The mock answers `PUT /rest/api/2/issue/{key}` labels; seeds use the new summary and carry the sample
   application's label. A report without `version` is no longer refused (the version is display only).
+- **Zip uploads** (2026-11-06, asked for): `ReportArchive` expands a `.zip` (by name or `PK\3\4`) into its `.xml`
+  entries before parsing, `.xsd` skipped; inflated-size and count limits in `UploadProperties`; GB18030 retry on a
+  non-UTF-8 entry name (that is a `ZipException` "bad entry name", not an `IllegalArgumentException`).
+- **Configured preselections** (2026-11-06, asked for): `veracode.jira.defaults.affects-versions` → connection
+  `defaultVersions` (only versions Jira has; the page selects them when no Jira version is chosen yet) and
+  `defaults.fields` → `CreateField.defaults` (by field id or name, options by name or id; replaces Jira's default;
+  unknown values dropped). Map keys lose spaces in relaxed binding, so names are compared without them.
 - **`affectedVersion = "x"` with a version the project lacks is a 400**, not "no match". Versions come from the
   issue type's create screen (`versions.allowedValues`; archived ones are absent) and only those are searched; the
   rest are `jiraVersion: null` and cannot be created. No *Affects Version/s* on the create screen, or the issue

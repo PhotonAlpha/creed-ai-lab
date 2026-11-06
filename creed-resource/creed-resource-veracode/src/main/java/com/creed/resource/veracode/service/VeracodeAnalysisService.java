@@ -52,6 +52,7 @@ import java.util.stream.Collectors;
 public class VeracodeAnalysisService {
 
     private final VeracodeXmlParser parser;
+    private final ReportArchive archive;
     private final UploadedReportStore uploads;
     private final JiraLookupService jira;
     private final JiraProperties jiraProps;
@@ -94,11 +95,13 @@ public class VeracodeAnalysisService {
                                           Map<String, Object> fields, List<String> jiraVersions, JiraToken token) {
         token.require();
         if (files.isEmpty()) {
-            throw new IllegalArgumentException("no file: upload one or more Veracode detailed reports (XML)");
+            throw new IllegalArgumentException("no file: upload one or more Veracode detailed reports (XML, or a zip of them)");
         }
         boolean overridden = versionOverride != null && !versionOverride.isBlank();
         List<UploadedReportStore.ReportFile> reports = new ArrayList<>();
-        for (UploadedFile file : files) {
+        // a zip counts as the reports in it
+        List<UploadedFile> xml = files.stream().flatMap(f -> archive.expand(f).stream()).toList();
+        for (UploadedFile file : xml) {
             ParsedReport parsed = parser.parse(file.filename(), file.content());
             String version = overridden ? versionOverride.trim() : parsed.info().version();
             reports.add(new UploadedReportStore.ReportFile(file.filename(), parsed.withVersion(version), version));

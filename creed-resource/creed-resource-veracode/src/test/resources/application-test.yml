@@ -27,3 +27,8 @@ veracode:
     page-size: 2
     # Three findings per search, so the sample report's lookups take several batches.
     search-batch-size: 3
+    # 9.9.9 is not in the mock: dropped. "Environment Found" by name, its option by value
+    defaults:
+      affects-versions: [2.3.0, 9.9.9]
+      fields:
+        Environment Found: [Staging]

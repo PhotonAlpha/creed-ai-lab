@@ -94,12 +94,14 @@ public class JiraLookupService {
      * @param issueTypes     every type the token may create, each with whether it can be filed against a version -
      *                       the page's issue type choice
      * @param versionNames   the versions {@code issueType} can be filed against - the page's Jira version list
+     * @param defaultVersions {@code veracode.jira.defaults.affects-versions} that are among {@code versionNames}, in
+     *                       Jira's spelling: the page selects them; empty = the page keeps its selection
      * @param problem        the first failed check, {@code null} when {@code ok}
      * @param status         Jira's HTTP status on failure, {@code 0} when Jira was not reachable
      */
     public record Connection(boolean ok, String baseUrl, String projectKey, String issueType, boolean tokenAccepted,
                              boolean canCreate, boolean affectsVersion, int versions, List<String> versionNames,
-                             List<CreateField> fields,
+                             List<String> defaultVersions, List<CreateField> fields,
                              List<IssueTypeOption> issueTypes, Problem problem, int status, String message) {
     }
 
@@ -154,7 +156,7 @@ public class JiraLookupService {
             Problem problem = e.status() == 0 ? Problem.UNREACHABLE
                     : e.status() == 401 ? Problem.TOKEN_REJECTED : Problem.PROJECT;
             return new Connection(false, props.baseUrl(), project, wanted, problem != Problem.UNREACHABLE
-                    && problem != Problem.TOKEN_REJECTED, false, false, 0, List.of(), List.of(), List.of(), problem, e.status(),
+                    && problem != Problem.TOKEN_REJECTED, false, false, 0, List.of(), List.of(), List.of(), List.of(), problem, e.status(),
                     e.getMessage());
         }
         List<IssueTypeOption> options = types.stream().map(t -> {
@@ -168,17 +170,17 @@ public class JiraLookupService {
 
         JiraIssueType type = byName(types, wanted);
         if (type == null) {
-            return new Connection(false, props.baseUrl(), project, wanted, true, false, false, 0, List.of(), List.of(), options,
+            return new Connection(false, props.baseUrl(), project, wanted, true, false, false, 0, List.of(), List.of(), List.of(), options,
                     Problem.ISSUE_TYPE, 200, notCreatable(wanted, types));
         }
         List<JiraFieldMeta> fields = screens.get(type.id());
         if (versionsField(fields) == null) {
-            return new Connection(false, props.baseUrl(), project, type.name(), true, true, false, 0, List.of(), List.of(),
+            return new Connection(false, props.baseUrl(), project, type.name(), true, true, false, 0, List.of(), List.of(), List.of(),
                     options, Problem.AFFECTS_VERSION, 200, noAffectsVersion(type) + instead);
         }
         CreateMeta meta = meta(type, fields, token);
         if (meta.versions().isEmpty()) {
-            return new Connection(false, props.baseUrl(), project, type.name(), true, true, true, 0, List.of(), meta.fields(),
+            return new Connection(false, props.baseUrl(), project, type.name(), true, true, true, 0, List.of(), List.of(), meta.fields(),
                     options, Problem.NO_VERSIONS, 200, "project " + project + " has no version to file a "
                     + type.name() + " against: create the versions (releases) in Jira");
         }
@@ -187,7 +189,15 @@ public class JiraLookupService {
                 + meta.versions().size() + " version(s) to file against"
                 + (required.isEmpty() ? "" : "; to choose on the page: " + String.join(", ", required));
         return new Connection(true, props.baseUrl(), project, meta.issueType(), true, true, true,
-                meta.versions().size(), List.copyOf(meta.versions().values()), meta.fields(), options, null, 200, message);
+                meta.versions().size(), List.copyOf(meta.versions().values()), defaultVersions(meta), meta.fields(), options,
+                null, 200, message);
+    }
+
+    /** The configured default versions Jira has, in Jira's spelling and the configured order. */
+    private List<String> defaultVersions(CreateMeta meta) {
+        return props.defaults().affectsVersions().stream()
+                .map(v -> v == null ? null : meta.versions().get(v.trim().toLowerCase(Locale.ROOT)))
+                .filter(java.util.Objects::nonNull).distinct().toList();
     }
 
     /**
@@ -219,6 +229,7 @@ public class JiraLookupService {
                 .filter(f -> JiraFieldMeta.COMPONENTS.equals(f.fieldId())
                         || f.required() && !f.hasDefaultValue() && !FILLED.contains(f.fieldId()))
                 .map(CreateField::of)
+                .map(f -> f.withConfigured(props.defaults().of(f.fieldId(), f.name())))
                 .toList();
         Map<String, String> byLowerCase = new LinkedHashMap<>();
         for (String name : versionsField(fields).allowedNames()) {
