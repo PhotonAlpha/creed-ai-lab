@@ -31,6 +31,12 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 
 ## Rules that are easy to break
 
+- **Confluence downloads: ids in, URLs never.** `POST /analysis/confluence` takes attachment ids; the server re-lists
+  the page and downloads its own `_links.download` under `veracode.confluence.base-url`. Redirects are followed in
+  `ConfluenceService.fetch` (the client has redirects off, like Jira's) and the token goes only to URLs **under the
+  base URL** (`withinBase`: origin + path prefix) — Cloud redirects to its media service, which must not get it. The
+  mock's media endpoint lives outside `/mock/confluence` and 403s a token, so the test catches a leak.
+
 - **Every follow-up names the upload id** (`report.id`): analyse / create / export. `UploadedReportStore`
   holds parsed rows in memory (TTL, max entries) → `upload_expired` 404 after restart / on another instance.
   Over-size uploads need the unscoped `UploadLimitExceptionHandler` (multipart fails before a handler is chosen).

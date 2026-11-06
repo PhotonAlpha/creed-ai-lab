@@ -8,7 +8,10 @@ package com.creed.resource.veracode.api.dto;
  * @param cloud the deployment the token dialog preselects (Jira Cloud when the base URL is {@code *.atlassian.net});
  *              the user can switch it - Cloud sends the Atlassian e-mail too ({@code X-Jira-User}, Basic auth),
  *              Data Center a personal access token alone (Bearer)
+ * @param confluenceBaseUrl {@code null} = no Confluence configured: the page offers uploads only
+ * @param confluenceCloud   the Confluence token dialog's preselected deployment
  */
 public record VeracodeSettings(String projectKey, String issueType, String jiraBaseUrl, boolean mock,
-                               String summaryTemplate, boolean cloud) {
+                               String summaryTemplate, boolean cloud, String confluenceBaseUrl,
+                               boolean confluenceCloud) {
 }

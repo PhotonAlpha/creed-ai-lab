@@ -18,6 +18,7 @@ import {
   Statistic,
   Switch,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Progress,
@@ -31,9 +32,10 @@ import {
 } from '@ant-design/icons';
 import { jiraAuthComplete, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
 import type {
-  Analysis, CreateField, CreateFieldValues, CreateResult, Finding, FindingStatus, IssueRef, JiraAuth, JiraConnection,
-  ReportView, VeracodeSettings,
+  Analysis, ConfluenceAuth, CreateField, CreateFieldValues, CreateResult, Finding, FindingStatus, IssueRef, JiraAuth,
+  JiraConnection, ReportView, VeracodeSettings,
 } from '../../api/veracode';
+import { ConfluenceSource } from './ConfluenceSource';
 import { JiraTokenModal } from './JiraTokenModal';
 import { emptyAuth, jiraTokenStore } from './jiraToken';
 import { pageCache } from './pageCache';
@@ -116,6 +118,9 @@ interface CachedView {
   keyword: string;
   jiraFilters: JiraFilters;
   pageSize: number;
+  /** Where reports come from: an upload, or a Confluence page's attachments. */
+  source?: 'upload' | 'confluence';
+  confluencePageId?: string;
 }
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -154,6 +159,8 @@ export function VeracodePage() {
   const [selected, setSelected] = useState<string[]>([]);
   /** Controlled: a literal `pageSize` would make the size changer a no-op. */
   const [page, setPage] = useState({ current: 1, pageSize: cached?.view.pageSize ?? DEFAULT_PAGE_SIZE });
+  const [source, setSource] = useState<'upload' | 'confluence'>(cached?.view.source ?? 'upload');
+  const [confluencePageId, setConfluencePageId] = useState(cached?.view.confluencePageId ?? '');
 
   const [jiraToken, setJiraToken] = useState(() => jiraTokenStore.load());
   /** Nothing saved: an empty sign-in of the kind the backend suggests (Cloud for `*.atlassian.net`). */
@@ -197,10 +204,10 @@ export function VeracodePage() {
   useEffect(() => {
     pageCache.save<CachedView>(analysis, {
       jiraVersions, applications, groupByApplication, versionOverride, fieldValues, statusFilter, keyword, jiraFilters,
-      pageSize: page.pageSize,
+      pageSize: page.pageSize, source, confluencePageId,
     });
   }, [analysis, jiraVersions, applications, groupByApplication, versionOverride, fieldValues, statusFilter, keyword,
-    jiraFilters, page.pageSize]);
+    jiraFilters, page.pageSize, source, confluencePageId]);
 
   /** Back to the first page whenever the rows change underneath it. */
   useEffect(() => {
@@ -333,6 +340,15 @@ export function VeracodePage() {
     }));
     return false;
   };
+
+  /** Attachments the backend downloads from Confluence, analysed as an upload of them would be. */
+  const analyzeConfluence = (pageId: string, attachmentIds: string[], name: string, confluence: ConfluenceAuth) =>
+    withToken(() => confirmed(() => {
+      setUpload(null);
+      void run(() => veracodeApi.analyzeConfluence(pageId, attachmentIds, options(), auth, confluence),
+        options().autoCreate);
+      message.info(t('veracode.confluence.analysing', { name }));
+    }));
 
   const analyzeSample = () =>
     withToken(() => confirmed(() => void run(() => veracodeApi.analyzeSample(options(), auth), options().autoCreate)));
@@ -706,18 +722,48 @@ export function VeracodePage() {
           {createFields.length > 0 && (
             <JiraFieldsBar fields={createFields} values={fieldValues} onChange={setFieldValues} />
           )}
-          <Upload.Dragger
-            accept={UPLOAD_ACCEPT}
-            multiple
-            showUploadList={false}
-            beforeUpload={beforeUpload}
-            disabled={loading}
-            style={{ marginTop: 16 }}
-          >
-            <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-            <p className="ant-upload-text">{t('veracode.upload.title')}</p>
-            <p className="ant-upload-hint">{t('veracode.upload.hint')}</p>
-          </Upload.Dragger>
+          {(() => {
+            const dragger = (
+              <Upload.Dragger
+                accept={UPLOAD_ACCEPT}
+                multiple
+                showUploadList={false}
+                beforeUpload={beforeUpload}
+                disabled={loading}
+              >
+                <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+                <p className="ant-upload-text">{t('veracode.upload.title')}</p>
+                <p className="ant-upload-hint">{t('veracode.upload.hint')}</p>
+              </Upload.Dragger>
+            );
+            // no Confluence configured: the upload alone, as before
+            if (!settings?.confluenceBaseUrl) return <div style={{ marginTop: 16 }}>{dragger}</div>;
+            return (
+              <Tabs
+                style={{ marginTop: 8 }}
+                activeKey={source}
+                onChange={(key) => setSource(key as 'upload' | 'confluence')}
+                items={[
+                  { key: 'upload', label: t('veracode.source.upload'), children: dragger },
+                  {
+                    key: 'confluence',
+                    label: t('veracode.source.confluence'),
+                    children: (
+                      <ConfluenceSource
+                        baseUrl={settings.confluenceBaseUrl}
+                        cloud={settings.confluenceCloud}
+                        mock={settings.mock}
+                        busy={loading}
+                        pageId={confluencePageId}
+                        onPageIdChange={setConfluencePageId}
+                        onAnalyze={analyzeConfluence}
+                      />
+                    ),
+                  },
+                ]}
+              />
+            );
+          })()}
           {upload && <UploadProgressBar {...upload} autoCreate={options().autoCreate} />}
           {analysis && (
             <>

@@ -126,6 +126,10 @@ export interface VeracodeSettings {
   summaryTemplate: string;
   /** The deployment the token dialog preselects (the base URL is `*.atlassian.net`); the user can switch it. */
   cloud: boolean;
+  /** `null` = no Confluence configured: the page offers uploads only. */
+  confluenceBaseUrl: string | null;
+  /** The Confluence token dialog's preselected deployment. */
+  confluenceCloud: boolean;
 }
 
 /**
@@ -228,6 +232,62 @@ const tokenHeader = (auth: JiraAuth): Record<string, string> => ({
   ...(auth.issueType ? { [JIRA_ISSUE_TYPE_HEADER]: auth.issueType } : {}),
 });
 
+/**
+ * The user's Confluence sign-in, the same two kinds as Jira's (Cloud: e-mail + API token, Data Center: personal
+ * access token) — read with it are the page's attachments, downloaded by the backend. Never stored there.
+ */
+export const CONFLUENCE_TOKEN_HEADER = 'X-Confluence-Token';
+export const CONFLUENCE_USER_HEADER = 'X-Confluence-User';
+
+export interface ConfluenceAuth {
+  deployment: JiraDeployment;
+  token: string;
+  /** Cloud only. */
+  email: string;
+}
+
+export const confluenceAuthComplete = (auth: ConfluenceAuth) =>
+  !!auth.token.trim() && (auth.deployment === 'dataCenter' || !!auth.email.trim());
+
+const confluenceHeader = (auth: ConfluenceAuth): Record<string, string> => ({
+  [CONFLUENCE_TOKEN_HEADER]: auth.token,
+  ...(auth.deployment === 'cloud' && auth.email ? { [CONFLUENCE_USER_HEADER]: auth.email } : {}),
+});
+
+/** `POST /confluence/connection`: a rejected token is `ok: false`, not an error. */
+export interface ConfluenceConnection {
+  ok: boolean;
+  baseUrl: string;
+  /** Whom the token signs in as. */
+  user: string | null;
+  problem: 'UNREACHABLE' | 'TOKEN_REJECTED' | null;
+  status: number;
+  message: string | null;
+}
+
+export interface ConfluenceAttachment {
+  id: string;
+  title: string;
+  mediaType: string | null;
+  /** Bytes, as Confluence lists it. */
+  size: number | null;
+  version: number;
+  /** When this version was uploaded (ISO-8601). */
+  created: string | null;
+  author: string | null;
+  /** `.xml` or `.zip`: the only ones that can be chosen. */
+  supported: boolean;
+}
+
+export interface ConfluencePageAttachments {
+  pageId: string;
+  title: string;
+  spaceKey: string | null;
+  /** The page as a person opens it. */
+  url: string;
+  attachments: ConfluenceAttachment[];
+}
+
 /** Spelled out because `requestAt` drops its own Content-Type as soon as `init.headers` is set. */
 export interface UploadOptions {
   /** Shown instead of the report's version; display only. */
@@ -302,6 +362,32 @@ export const veracodeApi = {
       };
       xhr.onerror = () => reject(new Error(`upload failed: ${BASE} not reachable`));
       xhr.send(form);
+    }),
+
+  testConfluence: (auth: ConfluenceAuth) =>
+    requestAt<ConfluenceConnection>(BASE, '/confluence/connection', { method: 'POST', headers: confluenceHeader(auth) }),
+
+  confluenceAttachments: (pageId: string, auth: ConfluenceAuth) =>
+    requestAt<ConfluencePageAttachments>(BASE, `/confluence/pages/${encodeURIComponent(pageId)}/attachments`,
+      { headers: confluenceHeader(auth) }),
+
+  /**
+   * The backend downloads the chosen attachments with the Confluence token and analyses them as an upload of the
+   * same files would be (a zip is the reports in it); Jira is read with the Jira token as always.
+   */
+  analyzeConfluence: (pageId: string, attachmentIds: string[], options: UploadOptions, auth: JiraAuth,
+    confluence: ConfluenceAuth) =>
+    requestAt<Analysis>(BASE, '/analysis/confluence', {
+      method: 'POST',
+      body: JSON.stringify({
+        pageId,
+        attachmentIds,
+        affectedVersion: options.affectedVersion?.trim() || null,
+        autoCreate: !!options.autoCreate,
+        fields: options.autoCreate ? options.fields : undefined,
+        jiraVersions: options.jiraVersions ?? [],
+      }),
+      headers: { 'Content-Type': 'application/json', ...tokenHeader(auth), ...confluenceHeader(confluence) },
     }),
 
   /** The backend's bundled sample report, as if uploaded — only served with the mocks. */

@@ -1,5 +1,6 @@
 package com.creed.resource.veracode.config;
 
+import com.creed.resource.veracode.client.confluence.ConfluenceClient;
 import com.creed.resource.veracode.client.jira.JiraClient;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.config.ConnectionConfig;
@@ -24,7 +25,8 @@ import org.zalando.logbook.httpclient5.LogbookHttpExecHandler;
 import java.time.Duration;
 
 /**
- * The {@code @HttpExchange} Jira proxy over its own {@link RestClient}, on Apache HttpClient 5.
+ * The {@code @HttpExchange} Jira and Confluence proxies, each over its own {@link RestClient} and pool, on Apache
+ * HttpClient 5. Everything below holds for both.
  *
  * <p>The {@code RestClient.Builder} is Boot's (prototype-scoped, so each injection is a fresh copy):
  * it carries the context's message converters and the {@code http.client.requests} observation.
@@ -75,6 +77,36 @@ public class RemoteClientsConfiguration {
         return HttpServiceProxyFactory.builderFor(RestClientAdapter.create(restClient))
                 .build()
                 .createClient(JiraClient.class);
+    }
+
+    @Bean(destroyMethod = "close")
+    PoolingHttpClientConnectionManager confluenceConnectionManager(ConfluenceProperties props) {
+        return connectionManager(props.connectTimeout(), props.maxConnections());
+    }
+
+    /**
+     * Built even when {@code veracode.confluence.base-url} is blank (the service then refuses before calling).
+     * Attachment downloads go through it too, so their redirects are not followed here either:
+     * {@code ConfluenceService} follows them, dropping the token when one leaves the Confluence host.
+     */
+    @Bean
+    ConfluenceClient confluenceClient(RestClient.Builder builder,
+                                      PoolingHttpClientConnectionManager confluenceConnectionManager,
+                                      Logbook logbook, ConfluenceProperties props) {
+        log.info("Confluence client -> {} (each user's own token, Apache HttpClient 5, TLS not verified)",
+                props.enabled() ? props.baseUrl() : "<off: veracode.confluence.base-url is blank>");
+        builder.requestFactory(new HttpComponentsClientHttpRequestFactory(
+                httpClient(confluenceConnectionManager, props.readTimeout(), logbook)));
+        if (props.enabled()) {
+            builder.baseUrl(props.baseUrl());
+        }
+        return confluenceClient(builder.build());
+    }
+
+    public static ConfluenceClient confluenceClient(RestClient restClient) {
+        return HttpServiceProxyFactory.builderFor(RestClientAdapter.create(restClient))
+                .build()
+                .createClient(ConfluenceClient.class);
     }
 
     static PoolingHttpClientConnectionManager connectionManager(Duration connectTimeout, int maxConnections) {

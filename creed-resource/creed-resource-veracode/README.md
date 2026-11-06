@@ -106,6 +106,30 @@ veracode:
         Environment Found: [Production]  # overrides Jira's own default
 ```
 
+## Confluence attachments
+
+A second report source besides the upload: a Confluence page's attachments (`veracode.confluence.base-url` —
+Cloud `https://<site>.atlassian.net/wiki`, Data Center its context root; blank = the page shows uploads only).
+REST API v1, the same paths on Cloud and Data Center, read **with the user's own Confluence token**
+(`X-Confluence-Token`, plus `X-Confluence-User` = the Atlassian e-mail on Cloud → Basic; Data Center PAT → Bearer).
+
+| Endpoint | |
+|---|---|
+| `POST /api/veracode/confluence/connection` | `user/current`: `{ok, user, problem: UNREACHABLE / TOKEN_REJECTED}` (Cloud answers a bad token as `anonymous`, counted as rejected) |
+| `GET /api/veracode/confluence/pages/{pageId}/attachments` | page title / space / link + every attachment (paged `child/attachment`), `supported` = `.xml` / `.zip`; 404 `confluence_page_not_found` |
+| `POST /api/veracode/analysis/confluence` | `{pageId, attachmentIds, affectedVersion, autoCreate, fields, jiraVersions}` → downloaded and analysed as an upload of the same files (a zip is the reports in it) |
+
+- The request names attachments **by id only**: the server lists the page again and downloads from the listing's
+  `_links.download` under the base URL — never a URL from the request. An id not on that page is a 400. The link's
+  shape varies (Data Center `/download/attachments/{page}/{file}?version=1`, Cloud now
+  `/rest/api/content/{page}/child/attachment/{id}/download`): any path that stays under the base URL once
+  normalised is taken.
+- Redirects are followed by hand: the token goes **only to URLs under the base URL**. Cloud hands downloads to its
+  media service on another host with a signed URL, which gets no `Authorization`. An HTML answer (a login page) fails.
+- `max-download-size` (50MB, by Confluence's listed size and again by the bytes) — the file is read into memory.
+- Mock (`veracode.mock.enabled`): page `98765` holds the sample XML, a zip of both samples + `.xsd` (downloaded via a
+  redirect to `/mock/confluence-media`, which refuses a token) and a PDF; `98766` has none; the token `invalid` is 401.
+
 ## Jira token
 
 The page is shared, and the service has **no Jira account of its own**: every Jira call — lookups, the create

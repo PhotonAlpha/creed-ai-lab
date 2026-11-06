@@ -156,7 +156,11 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 
 ### 5.6 Veracode 分析（`/veracode`）
 - 后端：`creed-resource/creed-resource-veracode`；调用 Jira 使用 Spring `@HttpExchange`，本地先 mock。Jira 客户端**不校验证书和主机名**（按需求）。
-- 报告来源**只有上传的 Veracode 详细报告（XML，或打包了 .xml / .xsd 的 ZIP：读取其中所有 .xml，含子目录，其他文件忽略）**，只读取 SCA 部分（不再读取 Confluence 页面）；报告的影响版本（根节点 `version`，上传前可手工改）**只在表格中展示**，不参与 Jira 查询和创建。
+- 报告来源两种（页面上两个标签页）：**上传 Veracode 详细报告**（XML，或打包了 .xml / .xsd 的 ZIP：读取其中所有 .xml，含子目录，其他文件忽略）；
+  **Confluence 附件**：输入页面 ID（或粘贴页面链接）列出该页面全部附件，勾选 .xml / .zip（其他类型不可选），由后端下载并分析。
+  Confluence 用用户自己的令牌（「Confluence 令牌」对话框，Cloud = 邮箱 + API 令牌，Data Center = 个人访问令牌，可「测试连接」，
+  存储方式同 Jira 令牌，请求头 `X-Confluence-Token` / `X-Confluence-User`）；后端未配置 `veracode.confluence.base-url` 时只显示上传。
+  两种来源都只读取 SCA 部分；报告的影响版本（根节点 `version`，上传前可手工改）**只在表格中展示**，不参与 Jira 查询和创建。
 - **Jira 版本**是可搜索的多选下拉（版本多时不撑大页面，列表来自测试连接 / 分析结果）：查找时按所选版本过滤（`affectedVersion in`，不选 = 全部版本），
   新建时关联所选版本，所以创建必须正好选一个；切换版本会自动重新分析。
   默认值在后端配置 `veracode.jira.defaults`：`affects-versions`（测试连接后，若页面还没选 Jira 版本且该 Jira 有这些版本则选中，没有则页面不变）、

@@ -35,3 +35,5 @@ veracode:
   jira:
     base-url: ${CREED_JIRA_URL:https://localhost:${server.port}/mock/jira}
     browse-url: ${CREED_JIRA_BROWSE_URL:https://localhost:${server.port}/mock/jira/browse/{key}}
+  confluence:
+    base-url: ${CREED_CONFLUENCE_URL:https://localhost:${server.port}/mock/confluence}

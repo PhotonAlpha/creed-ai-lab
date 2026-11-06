@@ -1,5 +1,7 @@
 package com.creed.resource.veracode.api;
 
+import com.creed.resource.veracode.service.ConfluenceService;
+import com.creed.resource.veracode.service.ConfluenceToken;
 import com.creed.resource.veracode.service.JiraLookupService;
 import com.creed.resource.veracode.service.JiraToken;
 import com.creed.resource.veracode.service.UploadedReportStore;
@@ -56,6 +58,22 @@ public class VeracodeExceptionHandler {
     @ExceptionHandler(JiraToken.RequiredException.class)
     ResponseEntity<Map<String, Object>> tokenRequired(JiraToken.RequiredException e) {
         return ResponseEntity.badRequest().body(body("jira_token_required", e.getMessage(), null));
+    }
+
+    /** The page opens its Confluence token dialog on this. */
+    @ExceptionHandler(ConfluenceToken.RequiredException.class)
+    ResponseEntity<Map<String, Object>> confluenceTokenRequired(ConfluenceToken.RequiredException e) {
+        return ResponseEntity.badRequest().body(body("confluence_token_required", e.getMessage(), null));
+    }
+
+    @ExceptionHandler(ConfluenceService.PageNotFoundException.class)
+    ResponseEntity<Map<String, Object>> pageNotFound(ConfluenceService.PageNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body("confluence_page_not_found", e.getMessage(), null));
+    }
+
+    @ExceptionHandler(ConfluenceService.NotConfiguredException.class)
+    ResponseEntity<Map<String, Object>> confluenceOff(ConfluenceService.NotConfiguredException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body("confluence_not_configured", e.getMessage(), null));
     }
 
     /** The page points at its Jira field choices on this. */

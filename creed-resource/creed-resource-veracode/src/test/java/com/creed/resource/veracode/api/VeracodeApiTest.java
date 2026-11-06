@@ -1,8 +1,10 @@
 package com.creed.resource.veracode.api;
 
+import com.creed.resource.veracode.client.confluence.ConfluenceClient;
 import com.creed.resource.veracode.client.jira.JiraClient;
 import com.creed.resource.veracode.config.RemoteClientsConfiguration;
 import com.creed.resource.veracode.mock.MockJiraStore;
+import com.creed.resource.veracode.service.ConfluenceToken;
 import com.creed.resource.veracode.service.JiraToken;
 import com.jayway.jsonpath.JsonPath;
 import org.apache.poi.ss.usermodel.Row;
@@ -325,6 +327,82 @@ class VeracodeApiTest {
     }
 
     @Test
+    void confluenceConnectionNamesTheUser() throws Exception {
+        mvc.perform(post("/api/veracode/confluence/connection").header(ConfluenceToken.HEADER, "pat-wiki-9876"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(true))
+                .andExpect(jsonPath("$.user").value("Mock user-9876"));
+        // Cloud: e-mail + API token as Basic
+        mvc.perform(post("/api/veracode/confluence/connection").header(ConfluenceToken.HEADER, "api-token")
+                        .header(ConfluenceToken.USER_HEADER, "me@example.com"))
+                .andExpect(jsonPath("$.user").value("Mock me@example.com"));
+        mvc.perform(post("/api/veracode/confluence/connection").header(ConfluenceToken.HEADER, "invalid"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ok").value(false))
+                .andExpect(jsonPath("$.problem").value("TOKEN_REJECTED"))
+                .andExpect(jsonPath("$.status").value(401));
+        mvc.perform(post("/api/veracode/confluence/connection"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("confluence_token_required"));
+        mvc.perform(get("/api/veracode/settings"))
+                .andExpect(jsonPath("$.confluenceBaseUrl").value("http://localhost/mock/confluence"))
+                .andExpect(jsonPath("$.confluenceCloud").value(false));
+    }
+
+    @Test
+    void confluenceListsAPagesAttachmentsAcrossPages() throws Exception {
+        // page-size 2 in the test profile: three attachments are two listing pages
+        mvc.perform(get("/api/veracode/confluence/pages/98765/attachments").header(ConfluenceToken.HEADER, TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Veracode reports - creed"))
+                .andExpect(jsonPath("$.spaceKey").value("CREED"))
+                .andExpect(jsonPath("$.url").value("http://localhost/mock/confluence/pages/viewpage.action?pageId=98765"))
+                .andExpect(jsonPath("$.attachments[*].title",
+                        contains("veracode-detailedreport.xml", "veracode-reports.zip", "scan-summary.pdf")))
+                .andExpect(jsonPath("$.attachments[*].supported", contains(true, true, false)))
+                .andExpect(jsonPath("$.attachments[0].mediaType").value("application/xml"))
+                .andExpect(jsonPath("$.attachments[0].author").value("ci-veracode"));
+        mvc.perform(get("/api/veracode/confluence/pages/98766/attachments").header(ConfluenceToken.HEADER, TOKEN))
+                .andExpect(jsonPath("$.attachments", hasSize(0)));
+        mvc.perform(get("/api/veracode/confluence/pages/1/attachments").header(ConfluenceToken.HEADER, TOKEN))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("confluence_page_not_found"));
+        mvc.perform(get("/api/veracode/confluence/pages/abc/attachments").header(ConfluenceToken.HEADER, TOKEN))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/veracode/confluence/pages/98765/attachments").header(ConfluenceToken.HEADER, "invalid"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.error").value("confluence_error"));
+    }
+
+    @Test
+    void confluenceAttachmentsAreDownloadedAndAnalysed() throws Exception {
+        // the xml directly, the zip through the media redirect (which refuses a token): three reports
+        mvc.perform(post("/api/veracode/analysis/confluence").header(ConfluenceToken.HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pageId\":\"98765\",\"attachmentIds\":[\"att1001\",\"att1002\"],\"jiraVersions\":[\"2.3.0\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reports[*].fileName", contains("veracode-detailedreport.xml",
+                        "veracode-reports.zip/reports/veracode-detailedreport-2.xml",
+                        "veracode-reports.zip/reports/veracode-detailedreport.xml")))
+                .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].issues[0].key")
+                        .value("CREED-101"));
+        // the PDF is listed, not analysable; an id from another page is refused, not fetched
+        mvc.perform(post("/api/veracode/analysis/confluence").header(ConfluenceToken.HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"pageId\":\"98765\",\"attachmentIds\":[\"att1003\"]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("unsupported_file"));
+        mvc.perform(post("/api/veracode/analysis/confluence").header(ConfluenceToken.HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"pageId\":\"98766\",\"attachmentIds\":[\"att1001\"]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("not on page 98766")));
+        // no Jira token: refused before anything is downloaded
+        anonymous.perform(post("/api/veracode/analysis/confluence").header(ConfluenceToken.HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"pageId\":\"98765\",\"attachmentIds\":[\"att1001\"]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("jira_token_required"));
+    }
+
+    @Test
     void twoApplicationsShareAnIssueAndEachAddsItsLabel() throws Exception {
         String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).file(otherApplication())
                         .param("jiraVersions", "2.3.0"))
@@ -639,6 +717,17 @@ class VeracodeApiTest {
                     .createRequest(uri, method);
             return RemoteClientsConfiguration.jiraClient(
                     RestClient.builder().baseUrl("http://localhost/mock/jira").requestFactory(factory).build());
+        }
+
+        @Bean
+        @Primary
+        ConfluenceClient mockMvcConfluenceClient(WebApplicationContext context) {
+            AtomicReference<MockMvc> mvc = new AtomicReference<>();
+            ClientHttpRequestFactory factory = (uri, method) -> new MockMvcClientHttpRequestFactory(
+                    mvc.updateAndGet(m -> m != null ? m : MockMvcBuilders.webAppContextSetup(context).build()))
+                    .createRequest(uri, method);
+            return RemoteClientsConfiguration.confluenceClient(
+                    RestClient.builder().baseUrl("http://localhost/mock/confluence").requestFactory(factory).build());
         }
     }
 }

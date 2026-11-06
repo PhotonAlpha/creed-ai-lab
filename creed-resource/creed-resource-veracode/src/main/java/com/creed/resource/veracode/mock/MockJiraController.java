@@ -423,7 +423,7 @@ public class MockJiraController {
     }
 
     /** The login a Bearer token stands for, {@code null} = no token or the rejected one. */
-    private static String user(String authorization) {
+    static String user(String authorization) {
         if (authorization == null) {
             return null;
         }

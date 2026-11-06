@@ -2,10 +2,14 @@ package com.creed.resource.veracode.api;
 
 import com.creed.resource.veracode.api.dto.AnalysisRequest;
 import com.creed.resource.veracode.api.dto.AnalysisResponse;
+import com.creed.resource.veracode.api.dto.ConfluenceAnalysisRequest;
 import com.creed.resource.veracode.api.dto.CreateIssuesRequest;
 import com.creed.resource.veracode.api.dto.CreateIssuesResponse;
 import com.creed.resource.veracode.api.dto.VeracodeSettings;
+import com.creed.resource.veracode.config.ConfluenceProperties;
 import com.creed.resource.veracode.config.JiraProperties;
+import com.creed.resource.veracode.service.ConfluenceService;
+import com.creed.resource.veracode.service.ConfluenceToken;
 import com.creed.resource.veracode.service.ExcelExporter;
 import com.creed.resource.veracode.service.JiraLookupService;
 import com.creed.resource.veracode.service.JiraToken;
@@ -20,6 +24,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -56,6 +61,8 @@ public class VeracodeController {
     private final ExcelExporter excel;
     private final JiraLookupService jiraLookup;
     private final JiraProperties jira;
+    private final ConfluenceService confluence;
+    private final ConfluenceProperties confluenceProps;
     private final JsonMapper jsonMapper;
 
     @Value("${veracode.mock.enabled:false}")
@@ -64,7 +71,7 @@ public class VeracodeController {
     @GetMapping("/settings")
     VeracodeSettings settings() {
         return new VeracodeSettings(jira.projectKey(), jira.issueType(), jira.baseUrl(), mock, jira.summaryTemplate(),
-                jira.looksLikeCloud());
+                jira.looksLikeCloud(), confluenceProps.baseUrl(), confluenceProps.looksLikeCloud());
     }
 
     /**
@@ -108,6 +115,33 @@ public class VeracodeController {
         byte[] xml = new ClassPathResource(SAMPLE).getContentAsByteArray();
         return analysis.analyzeUpload(List.of(new VeracodeAnalysisService.UploadedFile(
                 "veracode-detailedreport-sample.xml", xml)), affectedVersion, autoCreate, fields(fields), jiraVersions, token);
+    }
+
+    /**
+     * Attachments of a Confluence page, read as the user ({@code X-Confluence-Token}), downloaded by this service and
+     * analysed as an upload of the same files: a {@code .zip} is the reports in it. The Jira token is checked first -
+     * no download for an analysis that would be refused.
+     */
+    @PostMapping("/analysis/confluence")
+    AnalysisResponse analyzeConfluence(@RequestBody ConfluenceAnalysisRequest request, JiraToken token,
+                                       ConfluenceToken confluenceToken) {
+        token.require();
+        List<VeracodeAnalysisService.UploadedFile> files =
+                confluence.download(request.pageId(), request.attachmentIds(), confluenceToken);
+        return analysis.analyzeUpload(files, request.affectedVersion(), request.autoCreate(), request.fields(),
+                request.jiraVersions(), token);
+    }
+
+    /** "Test connection" for the Confluence token: whom it signs in as. A rejected token is an answer, not an error. */
+    @PostMapping("/confluence/connection")
+    ConfluenceService.Connection testConfluence(ConfluenceToken token) {
+        return confluence.connection(token);
+    }
+
+    /** The page's attachments, each with whether it can be analysed ({@code .xml} / {@code .zip}). */
+    @GetMapping("/confluence/pages/{pageId}/attachments")
+    ConfluenceService.PageAttachments confluenceAttachments(@PathVariable String pageId, ConfluenceToken token) {
+        return confluence.attachments(pageId, token);
     }
 
     /** Re-analyse an upload against Jira as it is now. */

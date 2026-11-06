@@ -158,6 +158,12 @@ it was not checked in a browser (the browser extension could not attach to any p
   upload (`reports`, `uploadId`), a CVE + jar another application already filed is labelled (`LABELED`), not
   duplicated. The mock answers `PUT /rest/api/2/issue/{key}` labels; seeds use the new summary and carry the sample
   application's label. A report without `version` is no longer refused (the version is display only).
+- **Confluence attachments as a source** (2026-11-07, asked for): `ConfluenceClient` (`@HttpExchange`, own pool,
+  Logbook, TLS unverified) + `ConfluenceService` (connection test, paged listing, download by attachment id from the
+  server's own listing, redirects followed by hand with the token only under the base URL) + `ConfluenceToken`
+  (`X-Confluence-Token` / `-User`, resolved by `JiraTokenArgumentResolver`). `POST /analysis/confluence` feeds the
+  files to `analyzeUpload` (zip expansion included). `MockConfluenceController` (page 98765 / 98766). The page:
+  tabs "上传文件 / Confluence 附件", `ConfluenceSource` + `ConfluenceTokenModal`; page id cached in `pageCache`.
 - **Zip uploads** (2026-11-06, asked for): `ReportArchive` expands a `.zip` (by name or `PK\3\4`) into its `.xml`
   entries before parsing, `.xsd` skipped; inflated-size and count limits in `UploadProperties`; GB18030 retry on a
   non-UTF-8 entry name (that is a `ZipException` "bad entry name", not an `IllegalArgumentException`).
