@@ -59,6 +59,11 @@ public class VeracodeExceptionHandler {
     }
 
     /** The page points at its Jira field choices on this. */
+    @ExceptionHandler(JiraLookupService.VersionRequiredException.class)
+    ResponseEntity<Map<String, Object>> versionRequired(JiraLookupService.VersionRequiredException e) {
+        return ResponseEntity.badRequest().body(body("jira_version_required", e.getMessage(), null));
+    }
+
     @ExceptionHandler(JiraLookupService.FieldsRequiredException.class)
     ResponseEntity<Map<String, Object>> fieldsRequired(JiraLookupService.FieldsRequiredException e) {
         return ResponseEntity.badRequest().body(body("jira_fields_required", e.getMessage(), null));

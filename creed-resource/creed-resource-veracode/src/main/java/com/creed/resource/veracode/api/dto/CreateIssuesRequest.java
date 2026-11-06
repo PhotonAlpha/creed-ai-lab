@@ -13,7 +13,8 @@ import java.util.Map;
  *
  * @param fields the create screen's other fields: fieldId -> value or values (an option by id or label), e.g.
  *               {@code {"components": ["Security"], "customfield_10100": "Production"}}
+ * @param jiraVersions exactly one Jira version: the issues are filed under it
  */
 public record CreateIssuesRequest(@NotBlank String uploadId, @NotEmpty @Size(max = 500) List<String> findingIds,
-                                  Map<String, Object> fields) {
+                                  Map<String, Object> fields, List<String> jiraVersions) {
 }

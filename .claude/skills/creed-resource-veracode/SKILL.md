@@ -40,18 +40,22 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   `software_composition_analysis/vulnerable_components/component/vulnerabilities/vulnerability` is read; static
   flaws are ignored; `mitigation="true"` skipped with a warning; a non-CVE id (`SRCCLR-SID-…`) is the title.
 
-- **Finding = (CVE or normalised title, affected version)**; id `CVE-…@2.3.0` /
+- **Finding = (CVE or normalised title, affected version)** — the id only (`affectedVersion` no longer reaches Jira); id `CVE-…@2.3.0` /
   `title:srcclr sid 29587@2.3.0`. Create requests carry ids only; the server re-reads the upload + Jira under a
   per-process lock → `ALREADY_EXISTS` instead of duplicates. Don't switch to client-supplied finding data.
 - **Lookup = batched JQL search** (2026-11-06, replaced the picker + per-candidate `GET`, asked for: too many calls).
-  `Jql.lookup(project, version, findings)` ORs the `summary ~` terms, `search-batch-size` findings per call, fields
+  `Jql.lookup(project, versions, findings)` ORs the `summary ~` terms (a CVE as the quoted id itself,
+  `"\"CVE-2021-44228\""` — asked for; unquoted, its `-` would be Lucene's NOT), `search-batch-size` findings per call, fields
   inline. Cloud has no `/rest/api/2/search` — `token.cloud()` picks `/rest/api/3/search/jql`. Still no `/myself`,
   `/project/{key}/versions`. Keep the JQL to the three clauses the mock parses (project, affectedVersion, summary ~).
-- **Match = version + CVE (or title words) + every Component(s) as a whole-word run** (`componentsNamed`; only when
+- **Match = a chosen Jira version (any, if none chosen) + CVE (or title words) + every Component(s) as a whole-word run** (`componentsNamed`; only when
   `summary-template` has `{component}`). `summary ~` cannot express "these words in this order next to that CVE",
   so it narrows and Java decides — the search returns another library's issue for the same CVE by design.
 - **Versions = `versions.allowedValues` of the issue type's create screen** (`createMeta()`, two paged calls).
-  Never put an unknown version into JQL — Jira 400s. Unknown → `jiraVersion: null`, not searched, not creatable.
+  They are the page's version list. **The report's version is display only** (2026-11-06, asked for): Jira is
+  searched by the page's `jiraVersions` (`affectedVersion in (...)`, none = no version clause) and created under
+  the one chosen (`createVersion`; none / several → 400 `jira_version_required`, also for `autoCreate`). Names are
+  resolved through `selectedVersions` — an unknown one is a 400 before any JQL (Jira would 400 the search).
   Issue type not creatable / no *Affects Version/s* field → `UpstreamException.setup` (502 with the reason).
 - **Test connection = the create metadata** (`Connection`: `tokenAccepted` = answered and not 401, `canCreate`,
   `issueType`, `versions`, `fields` = what the page asks for) — no user name, the issue resource has no "who am I".

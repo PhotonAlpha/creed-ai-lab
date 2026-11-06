@@ -156,12 +156,14 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 
 ### 5.6 Veracode 分析（`/veracode`）
 - 后端：`creed-resource/creed-resource-veracode`；调用 Jira 使用 Spring `@HttpExchange`，本地先 mock。Jira 客户端**不校验证书和主机名**（按需求）。
-- 报告来源**只有上传的 Veracode 详细报告（XML）**，只读取 SCA 部分（不再读取 Confluence 页面）；影响版本默认取报告根节点 `version`，可在上传前手工指定。
-- 按 CVE（无 CVE 时按公告编号）+ affect version 在 Jira 中查找是否存在：
+- 报告来源**只有上传的 Veracode 详细报告（XML）**，只读取 SCA 部分（不再读取 Confluence 页面）；报告的影响版本（根节点 `version`，上传前可手工改）**只在表格中展示**，不参与 Jira 查询和创建。
+- **Jira 版本**是可搜索的多选下拉（版本多时不撑大页面，列表来自测试连接 / 分析结果）：查找时按所选版本过滤（`affectedVersion in`，不选 = 全部版本），
+  新建时关联所选版本，所以创建必须正好选一个；切换版本会自动重新分析。
+- 按 CVE（无 CVE 时按公告编号）+ Component(s) + 所选 Jira 版本在 Jira 中查找是否存在：
   存在则列出 Jira 编号、状态、优先级、经办人；不存在则可按需创建（单行 / 所选 / 全部缺失，或分析时自动创建）。
 - 按 Jira 标题模糊匹配：CVE 出现在标题任意位置即可（忽略大小写和 `-` `_` 空格，但不会匹配更长的编号）；无 CVE 时标题的每个词都出现即可，不论顺序；
   且表格中的 **Component(s)** 每一个都要作为完整的词出现在标题中（如 `log4j-core 2.14.1`，`log4j-api` 或 `2.14.10` 不算），标题模板含 `{component}` 时生效。
-  查找用批量 JQL 搜索：每个版本每 50 条漏洞一次（Data Center `/rest/api/2/search`，Cloud `/rest/api/3/search/jql`）。
+  查找用批量 JQL 搜索：每 50 条漏洞一次（Data Center `/rest/api/2/search`，Cloud `/rest/api/3/search/jql`）。
 - 创建 Jira 使用**用户自己的访问令牌**：页面「Jira 令牌」中配置并「测试连接」（显示令牌对应的用户、是否能访问项目），
   默认存 sessionStorage，勾选「记住」存 localStorage；随请求以 `X-Jira-Token` 发给后端，后端不保存。未配置时创建按钮不可用。
   对话框先选 **Jira Cloud**（邮箱 + API 令牌，另带 `X-Jira-User`，后端以 Basic 认证）或 **Jira Data Center**（个人访问令牌，后端以 Bearer），两者都调用 REST API v2；`base-url` 为 `*.atlassian.net` 时默认选中 Cloud。
@@ -171,6 +173,9 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 创建的 Jira 标题按 `veracode.jira.summary-template`，默认 `{project} {component} {cve}`，`{project}` 为报告的 Veracode 应用名 `app_name`（如 `creed-platform spring-beans 5.3.17 CVE-2022-22965`）。
 - 表格可按关联 Jira 的属性过滤（状态 / 优先级 / 经办人 / 影响版本，多选），搜索框对 CVE、标题、组件、Jira 号与 Jira 标题做模糊匹配。
 - 支持导出 Excel（Severity 按等级填充背景色）。
+- 统计卡片（漏洞总数 / 已在 Jira / 缺失 / 已创建）按状态用不同背景色（主题 token）；表格分页受控，默认每页 50 条（20 / 50 / 100 / 200）。
+- 刷新页面不丢数据：分析结果、所选 Jira 版本、字段取值、过滤条件、每页条数存 sessionStorage（随标签页关闭清除）；
+  结果超出存储配额时只存上传 id，刷新后自动重新分析（后端上传保留 2 小时）。恢复时提示缓存时间，可重新分析或清除。
 - 上传报告时显示进度：先显示上传百分比和字节数（XMLHttpRequest，fetch 没有上传进度）；上传完成后显示「正在解析并在 Jira 中查找」的进行中进度条（服务端这一步不报告进度，不显示百分比）。
 
 ### 5.7 迁移同步风险（`/migration-risk`）

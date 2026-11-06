@@ -13,7 +13,6 @@ public record CreateIssuesResponse(List<Result> results) {
         /** The report has no such finding. */
         NOT_IN_REPORT,
         /** The project has no such version; Jira would reject the create. */
-        VERSION_NOT_IN_JIRA,
         FAILED
     }
 

@@ -64,7 +64,9 @@ class VeracodeApiTest {
     private static final String TOKEN = "pat-0000-abcd";
 
     /** The create screen's other fields, as the page sends them: an option by label (any case) or by id. */
-    private static final String FIELDS = "\"fields\":{\"components\":[\"security\"],\"customfield_10100\":\"Production\"}";
+    /** The page's create-screen choices and the one Jira version it files under. */
+    private static final String FIELDS = "\"fields\":{\"components\":[\"security\"],\"customfield_10100\":\"Production\"},"
+            + "\"jiraVersions\":[\"2.3.0\"]";
 
     /** Every request carries the user's token, as the page does; {@link #anonymous} carries none. */
     MockMvc mvc;
@@ -84,14 +86,14 @@ class VeracodeApiTest {
 
     /** Uploads the sample; returns the upload id. */
     private String upload() throws Exception {
-        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()))
+        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("jiraVersions", "2.3.0"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         return JsonPath.read(body, "$.report.id");
     }
 
     @Test
     void anUploadedReportIsMatchedAgainstJira() throws Exception {
-        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()))
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("jiraVersions", "2.3.0"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.report.fileName").value("detailedreport.xml"))
                 .andExpect(jsonPath("$.report.appName").value("creed-platform"))
@@ -104,7 +106,10 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.counts.total").value(9))
                 .andExpect(jsonPath("$.counts.exists").value(3))
                 .andExpect(jsonPath("$.counts.missing").value(6))
-                .andExpect(jsonPath("$.counts.versionNotInJira").value(0))
+                // the project's versions are the page's list; the chosen one is what was searched and is filed under
+                .andExpect(jsonPath("$.jiraVersions", contains("2.2.1", "2.3.0", "2.4.0")))
+                .andExpect(jsonPath("$.selectedVersions", contains("2.3.0")))
+                .andExpect(jsonPath("$.createVersion").value("2.3.0"))
                 .andExpect(jsonPath("$.warnings", contains("1 mitigated vulnerability skipped")))
                 .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].status").value("EXISTS"))
                 .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.3.0')].issues[0].key").value("CREED-101"))
@@ -137,17 +142,33 @@ class VeracodeApiTest {
     }
 
     @Test
-    void thePageCanOverrideTheAffectedVersion() throws Exception {
-        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("affectedVersion", "2.5.0"))
+    void theReportVersionIsShownJiraIsSearchedByThePagesVersions() throws Exception {
+        // no Jira version chosen: any version - the 2.2.1 issue now covers CVE-2022-22965 too
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.selectedVersions", hasSize(0)))
+                .andExpect(jsonPath("$.createVersion").value(nullValue()))
+                .andExpect(jsonPath("$.counts.exists").value(4))
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-22965@2.3.0')].status").value("EXISTS"));
+        // the report's version (or the page's override) is display only: 2.5.0 is no CREED version, nothing breaks
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("affectedVersion", "2.5.0")
+                        .param("jiraVersions", "2.2.1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.report.scanVersion").value("2.3.0"))
                 .andExpect(jsonPath("$.report.affectedVersion").value("2.5.0"))
                 .andExpect(jsonPath("$.report.versionOverridden").value(true))
-                // 2.5.0 is not a CREED version: not searched (the JQL would 400), flagged instead.
-                .andExpect(jsonPath("$.counts.versionNotInJira").value(9))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2021-44228@2.5.0')].jiraVersion").value(contains(nullValue())));
-        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("affectedVersion", "2.2.1"))
-                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-22965@2.2.1')].status").value("EXISTS"));
+                .andExpect(jsonPath("$.counts.exists").value(1))
+                .andExpect(jsonPath("$.findings[?(@.id=='CVE-2022-22965@2.5.0')].status").value("EXISTS"));
+        // several versions: any of them; names in any case, answered in Jira's spelling and order
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample())
+                        .param("jiraVersions", "2.3.0").param("jiraVersions", "2.2.1"))
+                .andExpect(jsonPath("$.selectedVersions", contains("2.2.1", "2.3.0")))
+                .andExpect(jsonPath("$.createVersion").value(nullValue()))
+                .andExpect(jsonPath("$.counts.exists").value(4));
+        // a version the project lacks is refused, not put into the JQL (Jira would 400 the search)
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("jiraVersions", "9.9.9"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("project CREED has no version '9.9.9'")));
     }
 
     @Test
@@ -188,18 +209,33 @@ class VeracodeApiTest {
     }
 
     @Test
-    void versionNotInJiraIsNotCreated() throws Exception {
-        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("affectedVersion", "2.5.0"))
-                .andReturn().getResponse().getContentAsString();
-        String uploadId = JsonPath.read(body, "$.report.id");
-        mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, TOKEN).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.5.0\"]," + FIELDS + "}"))
-                .andExpect(jsonPath("$.results[0].outcome").value("VERSION_NOT_IN_JIRA"));
+    void creatingNeedsExactlyOneJiraVersion() throws Exception {
+        String uploadId = upload();
+        String head = "{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"CVE-2022-22965@2.3.0\"],"
+                + "\"fields\":{\"components\":[\"Security\"],\"customfield_10100\":\"Production\"}";
+        for (String versions : new String[] {"", ",\"jiraVersions\":[\"2.3.0\",\"2.4.0\"]"}) {
+            mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content(head + versions + "}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("jira_version_required"));
+        }
+        // auto-create likewise, before anything is created
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("autoCreate", "true")
+                        .param("fields", "{\"components\":[\"Security\"],\"customfield_10100\":\"Production\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("jira_version_required"));
+        assertThat(jira.all()).hasSize(4);
+        // filed under the chosen version, whatever the report says
+        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON)
+                        .content(head + ",\"jiraVersions\":[\"2.4.0\"]}"))
+                .andExpect(jsonPath("$.results[0].outcome").value("CREATED"))
+                .andExpect(jsonPath("$.results[0].issues[0].versions", contains("2.4.0")));
+        assertThat(jira.all()).last().extracting(MockJiraStore.Issue::versions).isEqualTo(List.of("2.4.0"));
     }
 
     @Test
     void autoCreateFilesEveryMissingFindingAndFindsThemAgain() throws Exception {
         String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("autoCreate", "true")
+                        .param("jiraVersions", "2.3.0")
                         .param("fields", "{\"components\":[\"Platform\",\"30001\"],\"customfield_10100\":[\"10201\"]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.counts.created").value(6))
@@ -213,7 +249,7 @@ class VeracodeApiTest {
                         "creed-platform snakeyaml 1.33, snakeyaml 1.30 CVE-2022-1471");
 
         mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uploadId\":\"" + JsonPath.read(body, "$.report.id") + "\"}"))
+                        .content("{\"uploadId\":\"" + JsonPath.read(body, "$.report.id") + "\",\"jiraVersions\":[\"2.3.0\"]}"))
                 .andExpect(jsonPath("$.counts.exists").value(9))
                 .andExpect(jsonPath("$.counts.created").value(0));
     }
@@ -416,7 +452,7 @@ class VeracodeApiTest {
     @Test
     void jiraCloudLooksUpThroughItsOwnSearch() throws Exception {
         // Cloud retired /rest/api/2/search: the same analysis goes through /rest/api/3/search/jql and its page token
-        anonymous.perform(multipart("/api/veracode/analysis/upload").file(sample())
+        anonymous.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("jiraVersions", "2.3.0")
                         .header(JiraToken.HEADER, "api-token").header(JiraToken.USER_HEADER, "me@example.com"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.counts.exists").value(3))

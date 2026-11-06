@@ -43,7 +43,8 @@ stays in memory for 2 h (`veracode.upload.ttl`); create, export and re-analysis 
 
 An issue covers a finding when all three hold:
 
-1. its *Affects Version/s* contain the finding's version;
+1. its *Affects Version/s* contain one of the **Jira versions chosen on the page** (none chosen: any version). The
+   report's version (or the upload's override) is shown in the table only — it is neither searched nor filed under;
 2. its summary names the CVE, loosely: anywhere, case and separators ignored (`CVE-2021-44228` =
    `cve 2021 44228` = `CVE_2021_44228`), never inside a longer id; without a CVE, every word of the title (the
    advisory id, e.g. `SRCCLR-SID-29587`) in any order;
@@ -54,11 +55,15 @@ An issue covers a finding when all three hold:
 The created summary (`creed-platform log4j-core 2.14.1 CVE-2021-44228`) therefore matches itself, and one CVE in
 two libraries is two issues.
 
-**Lookup is a JQL search, batched**: one search per version and per `search-batch-size` (default 50) findings —
-`project = "…" AND affectedVersion = "…" AND (summary ~ "\"CVE 2021 44228\"" OR summary ~ … ) ORDER BY key`, fields
+**Lookup is a JQL search, batched**: one search per `search-batch-size` (default 50) findings —
+`project = "…" [AND affectedVersion in ("…", …)] AND (summary ~ "\"CVE-2021-44228\"" OR summary ~ … ) ORDER BY key` (the CVE id as written, quoted so its
+hyphens are text, not NOT operators; an advisory without a CVE is searched as plain words), fields
 read inline (no per-issue `GET`). Jira's `summary ~` only narrows; rules 1–3 are decided here on what it returns.
 Data Center: `/rest/api/2/search` (`startAt`); Cloud: `/rest/api/3/search/jql` (`nextPageToken`) — Cloud retired
-the v2 search. A report with 300 findings in one version takes 6 searches instead of 300 picker calls plus a read
+the v2 search. Requests carry the page's choice as `jiraVersions` (repeated query parameter on upload / sample / export, a JSON
+array on analyse / create). Creating needs exactly one — the version the issues are filed under — else 400
+`jira_version_required`; `/jira/connection` returns the list (`versionNames`) for the page's dropdown. A report
+with 300 findings takes 6 searches instead of 300 picker calls plus a read
 per candidate. The project's versions are the
 *Affects Version/s* `allowedValues` of the configured issue type's create screen. Created issues get the summary
 `veracode.jira.summary-template` (default `{project} {component} {cve}`, `{project}` = the report's

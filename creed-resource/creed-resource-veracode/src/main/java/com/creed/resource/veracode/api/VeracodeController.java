@@ -70,19 +70,23 @@ public class VeracodeController {
      * Analyse an uploaded Veracode detailed report (XML). The file is parsed and kept in memory; the
      * response's {@code report.id} is the upload id that re-analyse, create and export take.
      *
-     * @param affectedVersion Jira's Affects Version to use instead of the report's {@code version}
+     * @param affectedVersion the version to show instead of the report's {@code version} (display only)
      * @param fields          create-screen values for {@code autoCreate}, as JSON ({@code {"components":["Security"]}})
+     * @param jiraVersions    the Jira versions to look up in, repeated ({@code ?jiraVersions=2.3.0&jiraVersions=2.4.0});
+     *                        none = any. {@code autoCreate} files under the one chosen
      */
     @PostMapping(value = "/analysis/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     AnalysisResponse analyzeUpload(@RequestPart("file") MultipartFile file,
                                    @RequestParam(required = false) String affectedVersion,
                                    @RequestParam(defaultValue = "false") boolean autoCreate,
                                    @RequestParam(required = false) String fields,
+                                   @RequestParam(required = false) List<String> jiraVersions,
                                    JiraToken token)
             throws IOException {
         String name = file.getOriginalFilename() == null || file.getOriginalFilename().isBlank()
                 ? "upload.xml" : file.getOriginalFilename();
-        return analysis.analyzeUpload(name, file.getBytes(), affectedVersion, autoCreate, fields(fields), token);
+        return analysis.analyzeUpload(name, file.getBytes(), affectedVersion, autoCreate, fields(fields), jiraVersions,
+                token);
     }
 
     /** The bundled sample report, as if uploaded - only with the mocks, where it has a Jira to match. */
@@ -90,6 +94,7 @@ public class VeracodeController {
     AnalysisResponse analyzeSample(@RequestParam(required = false) String affectedVersion,
                                    @RequestParam(defaultValue = "false") boolean autoCreate,
                                    @RequestParam(required = false) String fields,
+                                   @RequestParam(required = false) List<String> jiraVersions,
                                    JiraToken token)
             throws IOException {
         if (!mock) {
@@ -97,20 +102,20 @@ public class VeracodeController {
         }
         byte[] xml = new ClassPathResource(SAMPLE).getContentAsByteArray();
         return analysis.analyzeUpload("veracode-detailedreport-sample.xml", xml, affectedVersion, autoCreate,
-                fields(fields), token);
+                fields(fields), jiraVersions, token);
     }
 
     /** Re-analyse an upload against Jira as it is now. */
     @PostMapping("/analysis")
     AnalysisResponse analyze(@RequestBody AnalysisRequest request,
                              JiraToken token) {
-        return analysis.analyze(request.uploadId(), request.autoCreate(), request.fields(), token);
+        return analysis.analyze(request.uploadId(), request.autoCreate(), request.fields(), request.jiraVersions(), token);
     }
 
     @PostMapping("/jira/issues")
     CreateIssuesResponse createIssues(@Valid @RequestBody CreateIssuesRequest request,
                                       JiraToken token) {
-        return analysis.create(request.uploadId(), request.findingIds(), request.fields(), token);
+        return analysis.create(request.uploadId(), request.findingIds(), request.fields(), request.jiraVersions(), token);
     }
 
     /**
@@ -129,8 +134,9 @@ public class VeracodeController {
      */
     @GetMapping("/analysis/export")
     ResponseEntity<byte[]> export(@RequestParam String uploadId,
+                                  @RequestParam(required = false) List<String> jiraVersions,
                                   JiraToken token) {
-        AnalysisResponse result = analysis.analyze(uploadId, false, Map.of(), token);
+        AnalysisResponse result = analysis.analyze(uploadId, false, Map.of(), jiraVersions, token);
         String base = result.report().appName() == null ? "report"
                 : result.report().appName().replaceAll("[^A-Za-z0-9._-]+", "_");
         String filename = "veracode-" + base + "-" + FILE_TIME.format(result.analyzedAt()) + ".xlsx";

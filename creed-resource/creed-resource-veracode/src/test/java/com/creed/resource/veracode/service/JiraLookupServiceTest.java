@@ -66,16 +66,16 @@ class JiraLookupServiceTest {
         Finding text4shell = finding("CVE-2022-42889", "commons-text 1.9");
 
         Map<String, List<JiraLookupService.IssueRef>> found = service(jira, 2)
-                .find(List.of(log4shell, spring4shell, text4shell), Map.of("2.3.0", "2.3.0"), TOKEN);
+                .find(List.of(log4shell, spring4shell, text4shell), List.of("2.3.0"), TOKEN);
 
         assertThat(found.get(log4shell.id())).extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-1");
         assertThat(found.get(spring4shell.id())).extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-3");
         assertThat(found.get(text4shell.id())).isEmpty();
         // three findings, batches of two: two searches, not one call (plus a read per candidate) per finding
         assertThat(jira.jqls).containsExactly(
-                "project = \"CREED\" AND affectedVersion = \"2.3.0\" AND (summary ~ \"\\\"CVE 2021 44228\\\"\" OR "
-                        + "summary ~ \"\\\"CVE 2022 22965\\\"\") ORDER BY key",
-                "project = \"CREED\" AND affectedVersion = \"2.3.0\" AND (summary ~ \"\\\"CVE 2022 42889\\\"\") ORDER BY key");
+                "project = \"CREED\" AND affectedVersion in (\"2.3.0\") AND (summary ~ \"\\\"CVE-2021-44228\\\"\" OR "
+                        + "summary ~ \"\\\"CVE-2022-22965\\\"\") ORDER BY key",
+                "project = \"CREED\" AND affectedVersion in (\"2.3.0\") AND (summary ~ \"\\\"CVE-2022-42889\\\"\") ORDER BY key");
         // Data Center pages by startAt: one issue per page here, so every page was read
         assertThat(jira.pages).isEqualTo(5 + 5);
     }
@@ -89,7 +89,7 @@ class JiraLookupServiceTest {
         Finding log4shell = finding("CVE-2021-44228", "log4j-core 2.14.1");
 
         Map<String, List<JiraLookupService.IssueRef>> found = service(jira, 50)
-                .find(List.of(log4shell), Map.of("2.3.0", "2.3.0"), new JiraToken("api-token", "me@example.com"));
+                .find(List.of(log4shell), List.of("2.3.0"), new JiraToken("api-token", "me@example.com"));
 
         assertThat(found.get(log4shell.id())).extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-1");
         assertThat(jira.cloudPages).isEqualTo(2);
@@ -105,7 +105,7 @@ class JiraLookupServiceTest {
                 "[Veracode] {cve} {title}", List.of("veracode"), "http://jira/browse/{key}", 1, 50, 5,
                 Duration.ofSeconds(1), Duration.ofSeconds(1)));
 
-        assertThat(service.find(List.of(log4shell), Map.of("2.3.0", "2.3.0"), TOKEN).get(log4shell.id()))
+        assertThat(service.find(List.of(log4shell), List.of("2.3.0"), TOKEN).get(log4shell.id()))
                 .extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-2");
     }
 

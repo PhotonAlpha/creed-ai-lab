@@ -21,6 +21,7 @@ import {
   Progress,
   Typography,
   Upload,
+  theme,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { CloudDownloadOutlined, ExperimentOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -30,6 +31,7 @@ import type {
 } from '../../api/veracode';
 import { JiraTokenModal } from './JiraTokenModal';
 import { emptyAuth, jiraTokenStore } from './jiraToken';
+import { pageCache } from './pageCache';
 import { ApiError } from '../../api/client';
 import { useI18n } from '../../locales';
 import type { MessageKey } from '../../locales';
@@ -53,8 +55,8 @@ const SEVERITY_COLOR = ['default', 'blue', 'gold', 'orange', 'volcano', 'red'];
 
 const STATUS_COLOR: Record<FindingStatus, string> = { EXISTS: 'success', MISSING: 'error', CREATED: 'processing' };
 
-/** Only a missing finding whose version exists in Jira can be created — the server would refuse the rest. */
-const creatable = (f: Finding) => f.status === 'MISSING' && f.jiraVersion != null;
+/** A missing finding can be created; the version comes from the page's Jira version choice, not the finding. */
+const creatable = (f: Finding) => f.status === 'MISSING';
 
 /** Lower case, every run of non-letters/digits one space — so `CVE-2021-44228`, `cve 2021 44228` and `CVE_2021_44228` read alike. */
 const fuzzy = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -92,28 +94,50 @@ const matchesJira = (f: Finding, j: JiraFilters) =>
   (j.status.length + j.priority.length + j.assignee.length + j.version.length === 0)
   || f.issues.some((i) => issueMatches(i, j));
 
+/** What survives a reload besides the analysis (see `pageCache`). */
+interface CachedView {
+  jiraVersions: string[];
+  versionOverride: string;
+  fieldValues: CreateFieldValues;
+  statusFilter: StatusFilter;
+  keyword: string;
+  jiraFilters: JiraFilters;
+  pageSize: number;
+}
+
+const DEFAULT_PAGE_SIZE = 50;
+
 const distinct = (values: (string | null)[]) =>
   [...new Set(values.filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b));
 
 export function VeracodePage() {
   const { t } = useI18n();
   const { message, modal } = App.useApp();
+  const { token: design } = theme.useToken();
 
+  /** Read once: the state the tab had before a reload. */
+  const [cached] = useState(() => pageCache.load<CachedView>());
   const [settings, setSettings] = useState<VeracodeSettings | null>(null);
-  /** Overrides the report's `version` as Jira's Affects Version; blank = the report's. */
-  const [versionOverride, setVersionOverride] = useState('');
+  /** Shown instead of the report's `version`; display only — Jira is searched by `jiraVersions`. */
+  const [versionOverride, setVersionOverride] = useState(cached?.view.versionOverride ?? '');
+  /** The Jira versions to look up in (none = any); creating needs exactly one, the version it files under. */
+  const [jiraVersions, setJiraVersions] = useState<string[]>(cached?.view.jiraVersions ?? []);
   const [autoCreate, setAutoCreate] = useState(false);
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [analysis, setAnalysis] = useState<Analysis | null>(cached?.analysis ?? null);
+  /** Set when the analysis on screen came from the cache, not from Jira just now. */
+  const [restoredAt, setRestoredAt] = useState<number | null>(cached?.analysis ? cached.savedAt : null);
   const [loading, setLoading] = useState(false);
   /** The upload under way: bytes sent, then (all sent) the server parsing and asking Jira. */
   const [upload, setUpload] = useState<{ name: string; loaded: number; total: number } | null>(null);
   const [creating, setCreating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
-  const [keyword, setKeyword] = useState('');
-  const [jiraFilters, setJiraFilters] = useState<JiraFilters>(NO_JIRA_FILTERS);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(cached?.view.statusFilter ?? 'ALL');
+  const [keyword, setKeyword] = useState(cached?.view.keyword ?? '');
+  const [jiraFilters, setJiraFilters] = useState<JiraFilters>(cached?.view.jiraFilters ?? NO_JIRA_FILTERS);
   const [selected, setSelected] = useState<string[]>([]);
+  /** Controlled: a literal `pageSize` would make the size changer a no-op. */
+  const [page, setPage] = useState({ current: 1, pageSize: cached?.view.pageSize ?? DEFAULT_PAGE_SIZE });
 
   const [jiraToken, setJiraToken] = useState(() => jiraTokenStore.load());
   /** Nothing saved: an empty sign-in of the kind the backend suggests (Cloud for `*.atlassian.net`). */
@@ -135,7 +159,7 @@ export function VeracodePage() {
     () => analysis?.createFields ?? connection?.fields ?? [],
     [analysis, connection],
   );
-  const [fieldValues, setFieldValues] = useState<CreateFieldValues>({});
+  const [fieldValues, setFieldValues] = useState<CreateFieldValues>(cached?.view.fieldValues ?? {});
   /** Jira's defaults preselected; a choice the user already made for the same field is kept. */
   useEffect(() => {
     setFieldValues((prev) => Object.fromEntries(createFields.map((f) => [
@@ -144,10 +168,26 @@ export function VeracodePage() {
   }, [createFields]);
   const missingFields = createFields.filter((f) => f.required && !fieldValues[f.fieldId]?.length).map((f) => f.name);
   /** Refused server-side otherwise; the buttons say why first. */
-  const canCreate = hasToken && missingFields.length === 0;
+  const canCreate = hasToken && missingFields.length === 0 && jiraVersions.length === 1;
   const createBlocked = !hasToken
     ? t('veracode.token.needed')
-    : missingFields.length > 0 ? t('veracode.fields.missing', { names: missingFields.join(', ') }) : undefined;
+    : jiraVersions.length !== 1
+      ? t('veracode.jiraVersion.chooseOne')
+      : missingFields.length > 0 ? t('veracode.fields.missing', { names: missingFields.join(', ') }) : undefined;
+  /** Before the first analysis the connection test names them. */
+  const versionList = analysis?.jiraVersions ?? connection?.versionNames ?? [];
+
+  /** Everything restorable, written whenever it changes. */
+  useEffect(() => {
+    pageCache.save<CachedView>(analysis, {
+      jiraVersions, versionOverride, fieldValues, statusFilter, keyword, jiraFilters, pageSize: page.pageSize,
+    });
+  }, [analysis, jiraVersions, versionOverride, fieldValues, statusFilter, keyword, jiraFilters, page.pageSize]);
+
+  /** Back to the first page whenever the rows change underneath it. */
+  useEffect(() => {
+    setPage((p) => ({ ...p, current: 1 }));
+  }, [analysis, statusFilter, keyword, jiraFilters]);
 
   /** Guards against an older analysis resolving after a newer one (StrictMode double mount, fast clicks). */
   const requestId = useRef(0);
@@ -160,6 +200,7 @@ export function VeracodePage() {
       const result = await call();
       if (current !== requestId.current) return;
       setAnalysis(result);
+      setRestoredAt(null);
       setSelected([]);
       setJiraFilters(NO_JIRA_FILTERS);
       if (auto && result.counts.created > 0) {
@@ -188,10 +229,25 @@ export function VeracodePage() {
   }, [hasToken]);
 
   const analyze = useCallback(
-    (uploadId: string, auto: boolean) =>
-      withToken(() => void run(() => veracodeApi.analyze(uploadId, auth, auto, fieldValues), auto)),
-    [run, auth, withToken, fieldValues],
+    (uploadId: string, auto: boolean, versions: string[] = jiraVersions) =>
+      withToken(() => void run(() => veracodeApi.analyze(uploadId, auth, versions, auto, fieldValues), auto)),
+    [run, auth, withToken, fieldValues, jiraVersions],
   );
+
+  /** Another Jira version choice is another search: the analysis on screen is redone with it. */
+  const chooseVersions = (versions: string[]) => {
+    setJiraVersions(versions);
+    if (analysis) analyze(analysis.report.id, false, versions);
+  };
+
+  /**
+   * The cache held only the upload id (the analysis was too big for the storage): analyse it again once the
+   * token is there. Gone from the backend (restart, TTL) -> the usual "upload expired" message.
+   */
+  useEffect(() => {
+    if (cached?.uploadId && !cached.analysis && hasToken) analyze(cached.uploadId, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** A token saved earlier is tested once on load, so the toolbar can name its user. */
   useEffect(() => {
@@ -228,7 +284,9 @@ export function VeracodePage() {
       send();
     }
   };
-  const options = () => ({ affectedVersion: versionOverride, autoCreate: autoCreate && canCreate, fields: fieldValues });
+  const options = () => ({
+    affectedVersion: versionOverride, jiraVersions, autoCreate: autoCreate && canCreate, fields: fieldValues,
+  });
 
   /**
    * `false` keeps antd's Upload from posting the file itself; the page sends it so the result lands in
@@ -300,7 +358,7 @@ export function VeracodePage() {
     if (!analysis || ids.length === 0) return;
     setCreating(true);
     try {
-      const { results } = await veracodeApi.createIssues(analysis.report.id, ids, fieldValues, auth);
+      const { results } = await veracodeApi.createIssues(analysis.report.id, ids, fieldValues, jiraVersions, auth);
       applyResults(results);
     } catch (e) {
       if (tokenMissing(e)) setTokenOpen(true);
@@ -318,7 +376,7 @@ export function VeracodePage() {
     }
     setExporting(true);
     try {
-      const { blob, filename } = await veracodeApi.exportXlsx(analysis.report.id, auth);
+      const { blob, filename } = await veracodeApi.exportXlsx(analysis.report.id, auth, jiraVersions);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -347,8 +405,9 @@ export function VeracodePage() {
       ...distinct(issues.map((i) => i.assignee)).map((v) => ({ value: v, label: v })),
       ...(issues.some((i) => !i.assignee) ? [{ value: UNASSIGNED, label: t('veracode.jira.unassigned') }] : []),
     ],
-    version: distinct(issues.flatMap((i) => i.versions)).map((v) => ({ value: v, label: v })),
-  }), [issues, t]);
+    // the project's versions, not the report's: an issue's Affects Version/s is one of them
+    version: (analysis?.jiraVersions ?? distinct(issues.flatMap((i) => i.versions))).map((v) => ({ value: v, label: v })),
+  }), [issues, analysis, t]);
   const jiraFilterCount = Object.values(jiraFilters).filter((v) => v.length > 0).length;
   const missingCreatable = (analysis?.findings ?? []).filter(creatable).map((f) => f.id);
 
@@ -404,16 +463,7 @@ export function VeracodePage() {
       title: t('veracode.col.affectedVersion'),
       dataIndex: 'affectedVersion',
       width: 150,
-      render: (v: string, f) => (
-        <Space size={4}>
-          {v}
-          {f.jiraVersion == null && (
-            <Tooltip title={t('veracode.versionNotInJiraHint', { project: analysis?.projectKey ?? '' })}>
-              <Tag color="warning">{t('veracode.versionNotInJira')}</Tag>
-            </Tooltip>
-          )}
-        </Space>
-      ),
+      // the report's, for reading only: Jira is searched and filed by the Jira versions above
     },
     { title: t('veracode.col.fixedVersion'), dataIndex: 'fixedVersion', width: 140 },
     {
@@ -465,6 +515,23 @@ export function VeracodePage() {
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <ProCard bordered>
           <Space wrap align="center">
+            <Tooltip title={t('veracode.jiraVersion.hint')}>
+              <Select
+                mode="multiple"
+                allowClear
+                showSearch
+                // a long list stays one line: the tags collapse into "+N", the options scroll in the dropdown
+                maxTagCount="responsive"
+                value={jiraVersions}
+                onChange={chooseVersions}
+                options={versionList.map((v) => ({ value: v, label: v }))}
+                placeholder={t('veracode.jiraVersion.placeholder')}
+                notFoundContent={t('veracode.jiraVersion.none')}
+                status={autoCreate && jiraVersions.length !== 1 ? 'warning' : undefined}
+                disabled={loading}
+                style={{ width: 300 }}
+              />
+            </Tooltip>
             <Tooltip title={t('veracode.versionOverrideHint')}>
               <Input
                 value={versionOverride}
@@ -557,7 +624,12 @@ export function VeracodePage() {
               </Descriptions.Item>
               <Descriptions.Item label={t('veracode.project')}>{analysis.projectKey}</Descriptions.Item>
               <Descriptions.Item label={t('veracode.jiraVersions')}>
-                {analysis.jiraVersions.join(', ') || '—'}
+                {/* one line however many: the full list is in the tooltip and the version dropdown */}
+                <Text ellipsis={{ tooltip: analysis.selectedVersions.join(', ') }} style={{ maxWidth: 260 }}>
+                  {analysis.selectedVersions.length === 0
+                    ? t('veracode.jiraVersion.any', { count: analysis.jiraVersions.length })
+                    : analysis.selectedVersions.join(', ')}
+                </Text>
               </Descriptions.Item>
               <Descriptions.Item label={t('veracode.analyzedAt')}>
                 {new Date(analysis.analyzedAt).toLocaleString()}
@@ -567,6 +639,26 @@ export function VeracodePage() {
         </ProCard>
 
         {error && <Alert type="error" showIcon message={t('veracode.failed')} description={error} />}
+
+        {analysis && restoredAt && (
+          <Alert
+            type="info"
+            showIcon
+            closable
+            onClose={() => setRestoredAt(null)}
+            message={t('veracode.cache.restored', { time: new Date(restoredAt).toLocaleString() })}
+            action={(
+              <Space>
+                <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => analyze(analysis.report.id, false)}>
+                  {t('veracode.reanalyze')}
+                </Button>
+                <Button size="small" onClick={() => { pageCache.clear(); setAnalysis(null); setRestoredAt(null); }}>
+                  {t('veracode.cache.clear')}
+                </Button>
+              </Space>
+            )}
+          />
+        )}
 
         {analysis && analysis.warnings.length > 0 && (
           <Alert
@@ -579,20 +671,19 @@ export function VeracodePage() {
 
         {counts && (
           <Row gutter={16}>
+            {/* each count in the colour of its status tag, from the theme's tokens */}
             {([
-              ['total', counts.total],
-              ['EXISTS', counts.exists],
-              ['MISSING', counts.missing],
-              ['CREATED', counts.created],
-              ['versionNotInJira', counts.versionNotInJira],
-            ] as const).map(([key, value]) => (
-              <Col key={key} xs={12} md={8} xl={4}>
-                <ProCard bordered>
+              ['total', counts.total, design.colorInfoBg, design.colorInfoBorder, design.colorInfoText],
+              ['EXISTS', counts.exists, design.colorSuccessBg, design.colorSuccessBorder, design.colorSuccessText],
+              ['MISSING', counts.missing, design.colorErrorBg, design.colorErrorBorder, design.colorErrorText],
+              ['CREATED', counts.created, design.colorPrimaryBg, design.colorPrimaryBorder, design.colorPrimaryText],
+            ] as const).map(([key, value, background, border, color]) => (
+              <Col key={key} xs={12} md={6}>
+                <ProCard bordered style={{ background, borderColor: border }}>
                   <Statistic
-                    title={key === 'total' ? t('veracode.stat.total')
-                      : key === 'versionNotInJira' ? t('veracode.versionNotInJira')
-                        : t(`veracode.status.${key}` as MessageKey)}
+                    title={key === 'total' ? t('veracode.stat.total') : t(`veracode.status.${key}` as MessageKey)}
                     value={value}
+                    valueStyle={{ color }}
                   />
                 </ProCard>
               </Col>
@@ -617,6 +708,7 @@ export function VeracodePage() {
               />
               <Input.Search
                 allowClear
+                defaultValue={keyword}
                 placeholder={t('veracode.search')}
                 onSearch={setKeyword}
                 onChange={(e) => !e.target.value && setKeyword('')}
@@ -684,7 +776,14 @@ export function VeracodePage() {
               loading={loading}
               columns={columns}
               dataSource={rows}
-              pagination={{ pageSize: 20, showSizeChanger: true }}
+              pagination={{
+                current: page.current,
+                pageSize: page.pageSize,
+                showSizeChanger: true,
+                pageSizeOptions: [20, 50, 100, 200],
+                showTotal: (total) => t('veracode.pageTotal', { total }),
+                onChange: (current, pageSize) => setPage({ current: pageSize === page.pageSize ? current : 1, pageSize }),
+              }}
               // Numeric width, not 'max-content': with a fixed-right column the latter collapses the last
               // scrolling column (see the creed-env-matrix skill).
               scroll={{ x: 1710 }}

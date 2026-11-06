@@ -6,17 +6,15 @@ import com.creed.resource.veracode.service.JiraLookupService.IssueRef;
 import java.util.List;
 
 /**
- * @param jiraVersion  Jira's spelling of {@code affectedVersion}; {@code null} when the project has no
- *                     such version - nothing was searched, and an issue cannot be created until it exists
+ * @param affectedVersion the report's version (or the page's override): shown, never searched or filed under -
+ *                        Jira is read and written by the Jira versions chosen on the page
  */
 public record FindingView(String id, String cve, String title, List<String> components, String severity,
                           Double cvss, String affectedVersion, String fixedVersion, String description,
-                          List<String> locations, FindingStatus status, String jiraVersion,
-                          List<IssueRef> issues) {
+                          List<String> locations, FindingStatus status, List<IssueRef> issues) {
 
-    public static FindingView of(Finding f, FindingStatus status, String jiraVersion, List<IssueRef> issues) {
+    public static FindingView of(Finding f, FindingStatus status, List<IssueRef> issues) {
         return new FindingView(f.id(), f.cve(), f.title(), f.components(), f.severity(), f.cvss(),
-                f.affectedVersion(), f.fixedVersion(), f.description(), f.locations(), status, jiraVersion,
-                List.copyOf(issues));
+                f.affectedVersion(), f.fixedVersion(), f.description(), f.locations(), status, List.copyOf(issues));
     }
 }

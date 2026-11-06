@@ -40,9 +40,9 @@ import java.util.stream.Collectors;
 public class ExcelExporter {
 
     private static final String[] HEADERS = {"Status", "CVE", "Title", "Component(s)", "Severity", "CVSS",
-            "Affected version", "Jira version", "Fixed version", "Jira issue(s)", "Jira status", "Component file",
+            "Affected version", "Fixed version", "Jira issue(s)", "Jira status", "Component file",
             "Description"};
-    private static final int[] WIDTHS = {12, 18, 48, 36, 12, 8, 16, 14, 16, 22, 16, 20, 60};
+    private static final int[] WIDTHS = {12, 18, 48, 36, 12, 8, 16, 16, 22, 16, 20, 60};
     /**
      * Severity cell fill by {@link Severity#rank} (Informational 0 ... Very High 5): the hues of the page's severity
      * tags (blue, gold, orange, volcano, red), at a lightness that keeps black text readable and survives printing.
@@ -93,7 +93,6 @@ public class ExcelExporter {
                     cvss.setCellValue(f.cvss());
                 }
                 row.createCell(c++).setCellValue(f.affectedVersion());
-                row.createCell(c++).setCellValue(f.jiraVersion() == null ? "(not in Jira)" : f.jiraVersion());
                 row.createCell(c++).setCellValue(nullToEmpty(f.fixedVersion()));
                 Cell keys = row.createCell(c++);
                 keys.setCellValue(join(f.issues(), IssueRef::key));
@@ -129,9 +128,9 @@ public class ExcelExporter {
                 {"Report generated", nullToEmpty(a.report().generatedAt())},
                 {"Uploaded file", a.report().fileName()},
                 {"Jira project", a.projectKey()},
+                {"Jira versions searched", a.selectedVersions().isEmpty() ? "(any)" : String.join(", ", a.selectedVersions())},
                 {"Analysed at", TIME.format(a.analyzedAt())},
-                {"Findings", n.total() + " (exists " + n.exists() + ", missing " + n.missing()
-                        + ", version not in Jira " + n.versionNotInJira() + ")"},
+                {"Findings", n.total() + " (exists " + n.exists() + ", missing " + n.missing() + ")"},
         };
         int r = 0;
         for (Object[] values : rows) {

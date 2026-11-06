@@ -57,22 +57,22 @@ public class VeracodeAnalysisService {
      */
     private final ReentrantLock createLock = new ReentrantLock();
 
+    /** @param versions the page's Jira versions, Jira's spelling - searched, and (one of them) filed under */
     private record Snapshot(ReportView report, List<Finding> findings, List<String> warnings,
-                            JiraLookupService.CreateMeta meta, Map<String, List<IssueRef>> matches) {
-
-        Map<String, String> jiraVersions() {
-            return meta.versions();
-        }
+                            JiraLookupService.CreateMeta meta, List<String> versions,
+                            Map<String, List<IssueRef>> matches) {
     }
 
     /**
      * Parses and keeps the file, then analyses it; the response's {@code report.id} is the upload id.
      *
-     * @param versionOverride the Affects Version to use instead of the report's {@code version}; blank = the report's
+     * @param versionOverride the version shown instead of the report's {@code version}; blank = the report's. Display
+     *                        only, as the report's own: Jira is searched and filed by {@code jiraVersions}
      * @param fields          create-screen values for {@code autoCreate} (fieldId -> value or values)
+     * @param jiraVersions    the Jira versions chosen on the page (see {@link #analyze})
      */
     public AnalysisResponse analyzeUpload(String filename, byte[] content, String versionOverride, boolean autoCreate,
-                                          Map<String, Object> fields, JiraToken token) {
+                                          Map<String, Object> fields, List<String> jiraVersions, JiraToken token) {
         token.require();
         ParsedReport parsed = parser.parse(filename, content);
         boolean overridden = versionOverride != null && !versionOverride.isBlank();
@@ -84,24 +84,29 @@ public class VeracodeAnalysisService {
         UploadedReportStore.Upload upload = uploads.put(filename, parsed.withVersion(version), version, overridden);
         log.info("upload {} '{}' ({} bytes): app {}, version {}{}, {} vulnerabilities", upload.id(), filename,
                 content.length, parsed.info().appName(), version, overridden ? " (overridden)" : "", parsed.rows().size());
-        return analyze(upload.id(), autoCreate, fields, token);
+        return analyze(upload.id(), autoCreate, fields, jiraVersions, token);
     }
 
-    public AnalysisResponse analyze(String uploadId, boolean autoCreate, Map<String, Object> fields, JiraToken token) {
+    /**
+     * @param jiraVersions issues are looked up among these Jira versions (empty = any version); creating files under
+     *                     the one chosen, so {@code autoCreate} needs exactly one ({@code jira_version_required})
+     */
+    public AnalysisResponse analyze(String uploadId, boolean autoCreate, Map<String, Object> fields,
+                                    List<String> jiraVersions, JiraToken token) {
         token.require();
         if (autoCreate) {
             createLock.lock();
         }
         try {
-            Snapshot s = load(uploadId, token);
+            Snapshot s = load(uploadId, jiraVersions, token);
             Map<String, Object> chosen = autoCreate ? jira.resolveFields(s.meta(), fields) : Map.of();
+            String version = autoCreate ? jira.createVersion(s.versions()) : null;
             List<String> warnings = new ArrayList<>(s.warnings());
             List<FindingView> views = new ArrayList<>();
             for (Finding f : s.findings()) {
-                String version = JiraLookupService.jiraVersion(s.jiraVersions(), f);
                 List<IssueRef> issues = s.matches().getOrDefault(f.id(), List.of());
                 FindingStatus status = issues.isEmpty() ? FindingStatus.MISSING : FindingStatus.EXISTS;
-                if (status == FindingStatus.MISSING && autoCreate && version != null) {
+                if (status == FindingStatus.MISSING && autoCreate) {
                     try {
                         issues = List.of(jira.create(f, version, chosen, s.report(), token));
                         status = FindingStatus.CREATED;
@@ -109,10 +114,10 @@ public class VeracodeAnalysisService {
                         warnings.add(f.id() + ": not created - " + e.getMessage());
                     }
                 }
-                views.add(FindingView.of(f, status, version, issues));
+                views.add(FindingView.of(f, status, issues));
             }
-            return new AnalysisResponse(s.report(), jiraProps.projectKey(), List.copyOf(s.jiraVersions().values()),
-                    s.meta().fields(), views, warnings,
+            return new AnalysisResponse(s.report(), jiraProps.projectKey(), List.copyOf(s.meta().versions().values()),
+                    s.versions(), s.versions().size() == 1 ? s.versions().getFirst() : null, s.meta().fields(), views, warnings,
                     AnalysisResponse.Counts.of(views), Instant.now(clock));
         } finally {
             if (autoCreate) {
@@ -121,18 +126,20 @@ public class VeracodeAnalysisService {
         }
     }
 
+    /** @param jiraVersions exactly one: the version the issues are filed under (and looked up in, first) */
     public CreateIssuesResponse create(String uploadId, List<String> findingIds, Map<String, Object> fields,
-                                       JiraToken token) {
+                                       List<String> jiraVersions, JiraToken token) {
         token.require();
         createLock.lock();
         try {
-            Snapshot s = load(uploadId, token);
+            Snapshot s = load(uploadId, jiraVersions, token);
             Map<String, Object> chosen = jira.resolveFields(s.meta(), fields);
+            String version = jira.createVersion(s.versions());
             Map<String, Finding> byId = s.findings().stream()
                     .collect(Collectors.toMap(Finding::id, Function.identity(), (a, b) -> a, LinkedHashMap::new));
             List<Result> results = new ArrayList<>();
             for (String id : findingIds.stream().distinct().toList()) {
-                results.add(createOne(id, byId.get(id), s, chosen, token));
+                results.add(createOne(id, byId.get(id), s, version, chosen, token));
             }
             return new CreateIssuesResponse(results);
         } finally {
@@ -140,14 +147,10 @@ public class VeracodeAnalysisService {
         }
     }
 
-    private Result createOne(String id, Finding f, Snapshot s, Map<String, Object> fields, JiraToken token) {
+    private Result createOne(String id, Finding f, Snapshot s, String version, Map<String, Object> fields,
+                             JiraToken token) {
         if (f == null) {
             return new Result(id, Outcome.NOT_IN_REPORT, List.of(), "no such finding in " + s.report().fileName());
-        }
-        String version = JiraLookupService.jiraVersion(s.jiraVersions(), f);
-        if (version == null) {
-            return new Result(id, Outcome.VERSION_NOT_IN_JIRA, List.of(),
-                    "project " + jiraProps.projectKey() + " has no version '" + f.affectedVersion() + "'");
         }
         List<IssueRef> existing = s.matches().getOrDefault(id, List.of());
         if (!existing.isEmpty()) {
@@ -161,7 +164,7 @@ public class VeracodeAnalysisService {
         }
     }
 
-    private Snapshot load(String uploadId, JiraToken token) {
+    private Snapshot load(String uploadId, List<String> jiraVersions, JiraToken token) {
         if (uploadId == null || uploadId.isBlank()) {
             throw new IllegalArgumentException("uploadId is required: upload a Veracode XML report first");
         }
@@ -173,10 +176,11 @@ public class VeracodeAnalysisService {
                 info.generationDate());
         List<Finding> findings = Finding.group(parsed.rows());
         JiraLookupService.CreateMeta meta = jira.createMeta(token);
-        Map<String, List<IssueRef>> matches = jira.find(findings, meta.versions(), token);
+        List<String> versions = jira.selectedVersions(meta, jiraVersions);
+        Map<String, List<IssueRef>> matches = jira.find(findings, versions, token);
         log.info("upload {}: {} vulnerabilities -> {} findings, {} matched in Jira, {} warnings", upload.id(),
                 parsed.rows().size(), findings.size(), matches.values().stream().filter(l -> !l.isEmpty()).count(),
                 parsed.warnings().size());
-        return new Snapshot(report, findings, parsed.warnings(), meta, matches);
+        return new Snapshot(report, findings, parsed.warnings(), meta, versions, matches);
     }
 }

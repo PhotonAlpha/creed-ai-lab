@@ -30,14 +30,13 @@ export interface Finding {
   components: string[];
   severity: string | null;
   cvss: number | null;
+  /** The report's version (or the page's override): shown only, never searched or filed under. */
   affectedVersion: string;
   fixedVersion: string | null;
   description: string | null;
   /** "log4j-core 2.14.1 (app.war#zip:WEB-INF/lib/log4j-core-2.14.1.jar)" — the components in the report. */
   locations: string[];
   status: FindingStatus;
-  /** Jira's spelling of the version; null = the project has no such version (cannot be created). */
-  jiraVersion: string | null;
   issues: IssueRef[];
 }
 
@@ -68,13 +67,17 @@ export interface AnalysisCounts {
   exists: number;
   missing: number;
   created: number;
-  versionNotInJira: number;
 }
 
 export interface Analysis {
   report: ReportView;
   projectKey: string;
+  /** Every version the issue type can be filed against — the page's Jira version list. */
   jiraVersions: string[];
+  /** The chosen ones, Jira's spelling: searched (`affectedVersion in`); empty = any version. */
+  selectedVersions: string[];
+  /** What a created issue is filed under: the one chosen version; null with none or several chosen. */
+  createVersion: string | null;
   /** What creating needs from the page, read through the user's token. */
   createFields: CreateField[];
   findings: Finding[];
@@ -83,7 +86,7 @@ export interface Analysis {
   analyzedAt: string;
 }
 
-export type CreateOutcome = 'CREATED' | 'ALREADY_EXISTS' | 'NOT_IN_REPORT' | 'VERSION_NOT_IN_JIRA' | 'FAILED';
+export type CreateOutcome = 'CREATED' | 'ALREADY_EXISTS' | 'NOT_IN_REPORT' | 'FAILED';
 
 export interface CreateResult {
   findingId: string;
@@ -149,6 +152,8 @@ export interface JiraConnection {
   affectsVersion: boolean;
   /** Versions the issue type can be filed against. */
   versions: number;
+  /** Their names — the page's Jira version list before the first analysis. */
+  versionNames: string[];
   /** The create-screen fields the page asks for. */
   fields: CreateField[];
   /** Every type the token may create — the page's issue type choice. */
@@ -197,7 +202,10 @@ const tokenHeader = (auth: JiraAuth): Record<string, string> => ({
 
 /** Spelled out because `requestAt` drops its own Content-Type as soon as `init.headers` is set. */
 export interface UploadOptions {
+  /** Shown instead of the report's version; display only. */
   affectedVersion?: string;
+  /** Jira versions to look up in (none = any); creating files under the one chosen. */
+  jiraVersions?: string[];
   autoCreate?: boolean;
   /** Create-screen values for `autoCreate`. */
   fields?: CreateFieldValues;
@@ -209,11 +217,17 @@ export interface UploadProgress {
   total: number;
 }
 
-const uploadQuery = ({ affectedVersion, autoCreate, fields }: UploadOptions) => new URLSearchParams({
+/** Repeated `jiraVersions=` parameters — what Spring binds to a `List<String>`. */
+const withVersions = (params: URLSearchParams, jiraVersions: string[] = []) => {
+  jiraVersions.forEach((v) => params.append('jiraVersions', v));
+  return params;
+};
+
+const uploadQuery = ({ affectedVersion, autoCreate, fields, jiraVersions }: UploadOptions) => withVersions(new URLSearchParams({
   autoCreate: String(!!autoCreate),
   ...(affectedVersion?.trim() ? { affectedVersion: affectedVersion.trim() } : {}),
   ...(autoCreate && fields ? { fields: JSON.stringify(fields) } : {}),
-});
+}), jiraVersions);
 
 const json = (body: unknown, auth: JiraAuth): RequestInit => ({
   method: 'POST',
@@ -225,8 +239,8 @@ export const veracodeApi = {
   settings: () => requestAt<VeracodeSettings>(BASE, '/settings'),
 
   /** Re-analyse an upload against Jira as it is now. */
-  analyze: (uploadId: string, auth: JiraAuth, autoCreate = false, fields?: CreateFieldValues) =>
-    requestAt<Analysis>(BASE, '/analysis', json({ uploadId, autoCreate, fields }, auth)),
+  analyze: (uploadId: string, auth: JiraAuth, jiraVersions: string[], autoCreate = false, fields?: CreateFieldValues) =>
+    requestAt<Analysis>(BASE, '/analysis', json({ uploadId, autoCreate, fields, jiraVersions }, auth)),
 
   /**
    * Multipart, so not through `requestAt`: that sets a JSON Content-Type whenever there is a body, and
@@ -268,8 +282,8 @@ export const veracodeApi = {
    * Findings go by id: the server re-reads the page and re-checks Jira before creating, so a stale
    * screen or a double click comes back ALREADY_EXISTS instead of a duplicate.
    */
-  createIssues: (uploadId: string, findingIds: string[], fields: CreateFieldValues, auth: JiraAuth) =>
-    requestAt<{ results: CreateResult[] }>(BASE, '/jira/issues', json({ uploadId, findingIds, fields }, auth)),
+  createIssues: (uploadId: string, findingIds: string[], fields: CreateFieldValues, jiraVersions: string[], auth: JiraAuth) =>
+    requestAt<{ results: CreateResult[] }>(BASE, '/jira/issues', json({ uploadId, findingIds, fields, jiraVersions }, auth)),
 
   /** What the token may create in the project, and the create-screen fields the page has to ask for. */
   testConnection: (auth: JiraAuth) =>
@@ -279,8 +293,9 @@ export const veracodeApi = {
    * A fresh analysis as .xlsx. Fetched rather than opened as a link so a failure shows the server's
    * message instead of a browser download of an error page.
    */
-  exportXlsx: async (uploadId: string, auth: JiraAuth) => {
-    const response = await fetch(`${BASE}/analysis/export?${new URLSearchParams({ uploadId })}`, { headers: tokenHeader(auth) });
+  exportXlsx: async (uploadId: string, auth: JiraAuth, jiraVersions: string[]) => {
+    const query = withVersions(new URLSearchParams({ uploadId }), jiraVersions);
+    const response = await fetch(`${BASE}/analysis/export?${query}`, { headers: tokenHeader(auth) });
     if (!response.ok) {
       throw await parseError(response);
     }

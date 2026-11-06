@@ -30,7 +30,7 @@ import java.util.regex.Pattern;
  * Stand-in for the Jira endpoints the service calls - create and createmeta ({@code /rest/api/2/issue/**}), search
  * (Data Center {@code /rest/api/2/search}, Cloud {@code /rest/api/3/search/jql}) - backed by {@link MockJiraStore}.
  *
- * <p>Search understands exactly the JQL {@code Jql} builds - {@code project = "..."}, {@code affectedVersion = "..."},
+ * <p>Search understands exactly the JQL {@code Jql} builds - {@code project = "..."}, {@code affectedVersion in ("...", ...)},
  * {@code summary ~ "..."} OR'ed - and keeps the Jira behaviours the real code has to survive: an unknown version in
  * the JQL is a 400, {@code summary ~} matches tokens, not substrings ({@code CVE-2021-4104} finds a summary with
  * {@code CVE 2021 4104} too; a quoted value is a phrase, an unquoted one plain words in any order), and so it
@@ -54,7 +54,8 @@ public class MockJiraController {
 
     private static final String LITERAL = "\"((?:[^\"\\\\]|\\\\.)*)\"";
     private static final Pattern PROJECT = Pattern.compile("project\\s*=\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
-    private static final Pattern VERSION = Pattern.compile("affectedVersion\\s*=\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
+    private static final Pattern VERSIONS = Pattern.compile("affectedVersion\\s+in\\s*\\(([^)]*)\\)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern A_LITERAL = Pattern.compile(LITERAL);
     private static final Pattern SUMMARY = Pattern.compile("summary\\s*~\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
     static final String REJECTED_TOKEN = "invalid";
     static final List<String> COMPONENTS = List.of("Security", "Platform", "Payments");
@@ -198,13 +199,18 @@ public class MockJiraController {
             return error(HttpStatus.BAD_REQUEST, "The value '" + unescape(project.group(1))
                     + "' does not exist for the field 'project'.", null);
         }
-        String version = null;
-        Matcher v = VERSION.matcher(jql);
+        // no clause = any version
+        List<String> versions = new ArrayList<>();
+        Matcher v = VERSIONS.matcher(jql);
         if (v.find()) {
-            version = unescape(v.group(1));
-            if (store.versions().stream().noneMatch(version::equalsIgnoreCase)) {
-                return error(HttpStatus.BAD_REQUEST,
-                        "The value '" + version + "' does not exist for the field 'affectedVersion'.", null);
+            Matcher literal = A_LITERAL.matcher(v.group(1));
+            while (literal.find()) {
+                String version = unescape(literal.group(1));
+                if (store.versions().stream().noneMatch(version::equalsIgnoreCase)) {
+                    return error(HttpStatus.BAD_REQUEST,
+                            "The value '" + version + "' does not exist for the field 'affectedVersion'.", null);
+                }
+                versions.add(version);
             }
         }
         // phrase -> contained as is; plain words -> all present, any order
@@ -219,9 +225,8 @@ public class MockJiraController {
                 words.add(List.of(Finding.normalise(term).split(" ")));
             }
         }
-        String affected = version;
         return store.all().stream()
-                .filter(i -> affected == null || i.versions().stream().anyMatch(affected::equalsIgnoreCase))
+                .filter(i -> versions.isEmpty() || i.versions().stream().anyMatch(iv -> versions.stream().anyMatch(iv::equalsIgnoreCase)))
                 .filter(i -> phrases.isEmpty() && words.isEmpty()
                         || phrases.stream().anyMatch(p -> (" " + Finding.normalise(i.summary()) + " ").contains(" " + p + " "))
                         || words.stream().anyMatch(w -> List.of(Finding.normalise(i.summary()).split(" ")).containsAll(w)))

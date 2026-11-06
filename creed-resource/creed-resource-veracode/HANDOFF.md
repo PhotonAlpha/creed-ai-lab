@@ -149,6 +149,10 @@ it was not checked in a browser (the browser extension could not attach to any p
   candidate, and its `hs` history section ignored `currentJQL`). `Jql.lookup` ORs the findings' `summary ~` terms,
   `search-batch-size` (50) per call; DC `/rest/api/2/search`, Cloud `/rest/api/3/search/jql` (v2 search retired there).
   A match also needs every Component(s) in the summary (`componentsNamed`) while the template has `{component}`.
+- **Versions are the page's, not the report's** (2026-11-06, asked for): `jiraVersions` on every request, `affectedVersion
+  in (...)` (none = any), create files under the one chosen (else 400 `jira_version_required`). `FindingView.jiraVersion`,
+  `counts.versionNotInJira` and outcome `VERSION_NOT_IN_JIRA` are gone; the response has `selectedVersions` /
+  `createVersion`, the connection `versionNames`. The page caches its state in sessionStorage (`pageCache`).
 - **`affectedVersion = "x"` with a version the project lacks is a 400**, not "no match". Versions come from the
   issue type's create screen (`versions.allowedValues`; archived ones are absent) and only those are searched; the
   rest are `jiraVersion: null` and cannot be created. No *Affects Version/s* on the create screen, or the issue

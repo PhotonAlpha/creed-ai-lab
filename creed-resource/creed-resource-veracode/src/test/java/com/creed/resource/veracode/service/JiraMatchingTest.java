@@ -52,8 +52,10 @@ class JiraMatchingTest {
         JiraIssue issue = new JiraIssue("1", "CREED-1", new JiraIssue.Fields("CVE-2022-22965 Spring4Shell", null,
                 List.of(JiraVersion.named("2.2.1")), List.of(), null, null, null));
 
-        assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.2.1"), "2.2.1", false)).isTrue();
-        assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.3.0"), "2.3.0", false)).isFalse();
+        assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.2.1"), List.of("2.2.1"), false)).isTrue();
+        assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.3.0"), List.of("2.3.0"), false)).isFalse();
+        // no version chosen on the page: any version covers it
+        assertThat(JiraLookupService.covers(issue, finding("CVE-2022-22965", "x", "2.3.0"), List.of(), false)).isTrue();
     }
 
     @Test
@@ -81,10 +83,15 @@ class JiraMatchingTest {
 
         // a CVE is a phrase; a title is lower-cased words, so its "OR" is not an operator
         // one search for many findings: their terms OR'ed, the same CVE once
-        assertThat(Jql.lookup("CREED", "2.3.0", List.of(log4shell, traversal, log4shell))).isEqualTo(
-                "project = \"CREED\" AND affectedVersion = \"2.3.0\" AND (summary ~ \"\\\"CVE 2021 44228\\\"\""
+        assertThat(Jql.lookup("CREED", List.of("2.3.0"), List.of(log4shell, traversal, log4shell))).isEqualTo(
+                "project = \"CREED\" AND affectedVersion in (\"2.3.0\") AND (summary ~ \"\\\"CVE-2021-44228\\\"\""
                         + " OR summary ~ \"path traversal routerfunctions or more\") ORDER BY key");
-        assertThat(Jql.lookup("CREED", "2.3.0", List.of(finding(null, "***", "2.3.0")))).isNull();
+        assertThat(Jql.lookup("CREED", List.of("2.3.0"), List.of(finding(null, "***", "2.3.0")))).isNull();
+        // several versions, or none (no version clause at all)
+        assertThat(Jql.lookup("CREED", List.of("2.3.0", "2.4.0"), List.of(log4shell))).isEqualTo(
+                "project = \"CREED\" AND affectedVersion in (\"2.3.0\", \"2.4.0\") AND (summary ~ \"\\\"CVE-2021-44228\\\"\") ORDER BY key");
+        assertThat(Jql.lookup("CREED", List.of(), List.of(log4shell))).isEqualTo(
+                "project = \"CREED\" AND (summary ~ \"\\\"CVE-2021-44228\\\"\") ORDER BY key");
         assertThat(Jql.quote("a\\b\"c")).isEqualTo("\"a\\\\b\\\"c\"");
     }
 

@@ -34,8 +34,8 @@ import java.util.regex.Pattern;
  *
  * <p>An issue covers a finding when (all three):
  * <ul>
- *   <li>its Affects Version/s include the finding's affected version - the same CVE fixed in 2.2.1 is still open
- *       for 2.3.0, which is why the version is part of the key;</li>
+ *   <li>its Affects Version/s include one of the Jira versions chosen on the page (none chosen: any). The report's
+ *       own version is shown only - it is not searched by or filed under (asked for, 2026-11-06);</li>
  *   <li>its summary names the finding, loosely: the CVE id anywhere, case and separators ignored
  *       ({@code cve 2021 44228}, {@code CVE_2021_44228}) but never as part of a longer id; without a CVE, every
  *       word of the title (an advisory id such as {@code SRCCLR-SID-29587}), in any order;</li>
@@ -82,11 +82,13 @@ public class JiraLookupService {
      * @param fields         what the page asks for before creating (Component/s, required fields without a default)
      * @param issueTypes     every type the token may create, each with whether it can be filed against a version -
      *                       the page's issue type choice
+     * @param versionNames   the versions {@code issueType} can be filed against - the page's Jira version list
      * @param problem        the first failed check, {@code null} when {@code ok}
      * @param status         Jira's HTTP status on failure, {@code 0} when Jira was not reachable
      */
     public record Connection(boolean ok, String baseUrl, String projectKey, String issueType, boolean tokenAccepted,
-                             boolean canCreate, boolean affectsVersion, int versions, List<CreateField> fields,
+                             boolean canCreate, boolean affectsVersion, int versions, List<String> versionNames,
+                             List<CreateField> fields,
                              List<IssueTypeOption> issueTypes, Problem problem, int status, String message) {
     }
 
@@ -141,7 +143,7 @@ public class JiraLookupService {
             Problem problem = e.status() == 0 ? Problem.UNREACHABLE
                     : e.status() == 401 ? Problem.TOKEN_REJECTED : Problem.PROJECT;
             return new Connection(false, props.baseUrl(), project, wanted, problem != Problem.UNREACHABLE
-                    && problem != Problem.TOKEN_REJECTED, false, false, 0, List.of(), List.of(), problem, e.status(),
+                    && problem != Problem.TOKEN_REJECTED, false, false, 0, List.of(), List.of(), List.of(), problem, e.status(),
                     e.getMessage());
         }
         List<IssueTypeOption> options = types.stream().map(t -> {
@@ -155,17 +157,17 @@ public class JiraLookupService {
 
         JiraIssueType type = byName(types, wanted);
         if (type == null) {
-            return new Connection(false, props.baseUrl(), project, wanted, true, false, false, 0, List.of(), options,
+            return new Connection(false, props.baseUrl(), project, wanted, true, false, false, 0, List.of(), List.of(), options,
                     Problem.ISSUE_TYPE, 200, notCreatable(wanted, types));
         }
         List<JiraFieldMeta> fields = screens.get(type.id());
         if (versionsField(fields) == null) {
-            return new Connection(false, props.baseUrl(), project, type.name(), true, true, false, 0, List.of(),
+            return new Connection(false, props.baseUrl(), project, type.name(), true, true, false, 0, List.of(), List.of(),
                     options, Problem.AFFECTS_VERSION, 200, noAffectsVersion(type) + instead);
         }
         CreateMeta meta = meta(type, fields, token);
         if (meta.versions().isEmpty()) {
-            return new Connection(false, props.baseUrl(), project, type.name(), true, true, true, 0, meta.fields(),
+            return new Connection(false, props.baseUrl(), project, type.name(), true, true, true, 0, List.of(), meta.fields(),
                     options, Problem.NO_VERSIONS, 200, "project " + project + " has no version to file a "
                     + type.name() + " against: create the versions (releases) in Jira");
         }
@@ -174,7 +176,7 @@ public class JiraLookupService {
                 + meta.versions().size() + " version(s) to file against"
                 + (required.isEmpty() ? "" : "; to choose on the page: " + String.join(", ", required));
         return new Connection(true, props.baseUrl(), project, meta.issueType(), true, true, true,
-                meta.versions().size(), meta.fields(), options, null, 200, message);
+                meta.versions().size(), List.copyOf(meta.versions().values()), meta.fields(), options, null, 200, message);
     }
 
     /**
@@ -328,42 +330,78 @@ public class JiraLookupService {
         }
     }
 
-    public static String jiraVersion(Map<String, String> projectVersions, Finding finding) {
-        return projectVersions.get(finding.affectedVersion().trim().toLowerCase(Locale.ROOT));
+    /**
+     * The page's Jira version choice in Jira's spelling, in the project's order. The report's version plays no
+     * part (asked for, 2026-11-06): it is shown, never searched or filed under.
+     *
+     * @param chosen version names, any case; {@code null} / empty = no version chosen
+     * @throws IllegalArgumentException a version the issue type cannot be filed against
+     */
+    public List<String> selectedVersions(CreateMeta meta, List<String> chosen) {
+        if (chosen == null || chosen.isEmpty()) {
+            return List.of();
+        }
+        Set<String> wanted = new LinkedHashSet<>();
+        for (String name : chosen) {
+            if (name == null || name.isBlank()) {
+                continue;
+            }
+            String version = meta.versions().get(name.trim().toLowerCase(Locale.ROOT));
+            if (version == null) {
+                throw new IllegalArgumentException("project " + props.projectKey() + " has no version '" + name.trim()
+                        + "' to file a " + meta.issueType() + " against");
+            }
+            wanted.add(version);
+        }
+        return meta.versions().values().stream().filter(wanted::contains).toList();
     }
 
     /**
-     * @return finding id -> covering issues, for every finding whose version exists in Jira (absent
-     * from the map: version unknown to Jira, so nothing was searched)
+     * The version a created issue is filed against: the one selected version. None or several is
+     * {@link VersionRequiredException} - answered before anything is created.
      */
-    public Map<String, List<IssueRef>> find(List<Finding> findings, Map<String, String> projectVersions,
-                                            JiraToken token) {
-        Map<String, List<IssueRef>> result = new LinkedHashMap<>();
-        Map<String, List<Finding>> byVersion = new LinkedHashMap<>();
-        for (Finding f : findings) {
-            String version = jiraVersion(projectVersions, f);
-            if (version != null) {
-                result.put(f.id(), new ArrayList<>());
-                byVersion.computeIfAbsent(version, v -> new ArrayList<>()).add(f);
-            }
+    public String createVersion(List<String> selected) {
+        if (selected.size() != 1) {
+            throw new VersionRequiredException(selected);
         }
+        return selected.getFirst();
+    }
+
+    /** Creating without exactly one Jira version chosen on the page. */
+    public static class VersionRequiredException extends RuntimeException {
+        public VersionRequiredException(List<String> selected) {
+            super(selected.isEmpty()
+                    ? "choose the Jira version to file the issues against (Jira versions on the page)"
+                    : "choose one Jira version to file the issues against, not " + selected.size() + " ("
+                            + String.join(", ", selected) + ")");
+        }
+    }
+
+    /**
+     * One JQL search per {@code search-batch-size} findings, {@code affectedVersion in (...)} the selected versions
+     * (none selected = any version, or none).
+     *
+     * @param versions from {@link #selectedVersions}
+     * @return finding id -> covering issues, every finding present
+     */
+    public Map<String, List<IssueRef>> find(List<Finding> findings, List<String> versions, JiraToken token) {
+        Map<String, List<IssueRef>> result = new LinkedHashMap<>();
+        findings.forEach(f -> result.put(f.id(), new ArrayList<>()));
         boolean withComponents = props.summaryTemplate().contains("{component}");
-        byVersion.forEach((version, all) -> {
-            for (int from = 0; from < all.size(); from += props.searchBatchSize()) {
-                List<Finding> batch = all.subList(from, Math.min(all.size(), from + props.searchBatchSize()));
-                String jql = Jql.lookup(props.projectKey(), version, batch);
-                if (jql == null) {
-                    continue;
-                }
-                for (JiraIssue issue : search(jql, token)) {
-                    for (Finding f : batch) {
-                        if (covers(issue, f, version, withComponents)) {
-                            result.get(f.id()).add(toRef(issue));
-                        }
+        for (int from = 0; from < findings.size(); from += props.searchBatchSize()) {
+            List<Finding> batch = findings.subList(from, Math.min(findings.size(), from + props.searchBatchSize()));
+            String jql = Jql.lookup(props.projectKey(), versions, batch);
+            if (jql == null) {
+                continue;
+            }
+            for (JiraIssue issue : search(jql, token)) {
+                for (Finding f : batch) {
+                    if (covers(issue, f, versions, withComponents)) {
+                        result.get(f.id()).add(toRef(issue));
                     }
                 }
             }
-        });
+        }
         return result;
     }
 
@@ -436,8 +474,10 @@ public class JiraLookupService {
         return summary.length() <= 255 ? summary : summary.substring(0, 254) + "…";
     }
 
-    static boolean covers(JiraIssue issue, Finding finding, String jiraVersion, boolean withComponents) {
-        boolean versionMatches = issue.versionNames().stream().anyMatch(v -> v.equalsIgnoreCase(jiraVersion));
+    /** @param versions the selected Jira versions; empty = any */
+    static boolean covers(JiraIssue issue, Finding finding, List<String> versions, boolean withComponents) {
+        boolean versionMatches = versions.isEmpty()
+                || issue.versionNames().stream().anyMatch(v -> versions.stream().anyMatch(v::equalsIgnoreCase));
         return versionMatches && summaryNames(issue.summary(), finding)
                 && (!withComponents || componentsNamed(issue.summary(), finding));
     }
