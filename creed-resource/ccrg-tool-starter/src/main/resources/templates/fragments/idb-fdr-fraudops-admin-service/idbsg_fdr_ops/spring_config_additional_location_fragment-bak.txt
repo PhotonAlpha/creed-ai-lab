@@ -1,0 +1,5 @@
+[# th:object="${routeDefinition}"]
+    [# th:with="appEnvironment=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |QUA/*{environment}| : *{environment},appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+        optional:file:[(${rootPath})]/[(*{countryCode})]/[(*{app})]/[(${appEnvironment})]/application/config/idb-fdr-fraudops-admin-service/logback.properties
+    [/]
+[/]

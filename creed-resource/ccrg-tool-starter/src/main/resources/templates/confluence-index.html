@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<div th:fragment="content">
+    <div>
+        <ac:structured-macro ac:name="toc"></ac:structured-macro>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+            <tr>
+                <th>
+                    Model
+                </th>
+                <th>
+                    URL
+                </th>
+            </tr>
+            </thead>
+            <tbody>
+            <th:block th:each="group, iterStat: ${routes}">
+            <tr>
+                <td th:text="${group?.projectName}">IDB GST</td>
+                <td>
+                    <a th:href="${group?.sourceArtifactoryUrl}" th:text="${group?.sourceArtifactoryUrl}">
+                        https://jfrog.com/artifactory/creed</a>
+                    <th:block th:if="!${#strings.equals(group?.sourceArtifactoryUrl, group?.comparisonArtifactoryUrl)}">
+                        <div>VS</div>
+                        <a th:href="${group?.comparisonArtifactoryUrl}" th:text="${group?.comparisonArtifactoryUrl}">
+                            https://jfrog.com/artifactory/creed</a>
+                    </th:block>
+                </td>
+            </tr>
+            </th:block>
+            </tbody>
+        </table>
+    </div>
+
+
+    <th:block th:each="group, iterStat: ${routes}">
+        <h2 th:text="|IDB ${group.sourceReleaseName} VS ${group.comparisonReleaseName}|">Default</h2>
+
+        <th:block th:each="entry, iterStat: ${group.routeFormGrouping}">
+            <h5 th:text="|IDB ${entry.key}|">Default</h5>
+
+            <div class="table-wrap">
+                <table th:border="1">
+                    <thead>
+                    <tr>
+                        <th>
+                            No.
+                        </th>
+                        <th>
+                            Application
+                        </th>
+                        <th th:text="${group.sourceReleaseName}">
+                        </th>
+                        <th>
+                            <div th:text="${group.comparisonReleaseName}">
+                            </div>
+                        </th>
+                        <th>
+                            Report
+                        </th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <th:block th:each="entryL2, iterStatL2: ${entry.value}">
+                        <th:block th:each="item, itemStat: ${entryL2.value}">
+                            <tr>
+                                <td th:text="|${itemStat.count}|"></td>
+                                <td th:if="${itemStat.index == 0}" th:rowspan="${#lists.size(entryL2.value)}" th:text="|${entryL2.key == 'NA' ? entry.key : entryL2.key}|"></td>
+                                <td th:text="${item.routes[0]?.instance}"></td>
+                                <td th:text="${item.routes[1]?.instance}"></td>
+                                <td>
+                                    <ul>
+                                        <li>
+                                            <ac:link><ri:attachment th:ri:filename="${item?.simpleAttachmentContent?.title}"/></ac:link>
+<!--                                            <a th:href="${item.simpleAttachmentContent?.webui}" th:text="${item?.simpleAttachmentContent?.title}">NA</a>-->
+                                        </li>
+                                    </ul>
+                                </td>
+                            </tr>
+                        </th:block>
+                    </th:block>
+                    </tbody>
+                </table>
+            </div>
+
+        </th:block>
+    </th:block>
+</div>
+</html>

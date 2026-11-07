@@ -1,0 +1,16 @@
+[# th:object="${routeDefinition}"]
+    [# th:if="*{#strings.containsIgnoreCase(instance,'DR')}"]
+        file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/config/ssl/gebngssl_cs.properties,optional:file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/config/jwt/gebng_jwt.properties,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/config/logback.properties
+    [/]
+    [# th:if="*{#strings.containsIgnoreCase(instance,'ITG')}"]
+        file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/[(*{instance})]/config/ssl/gebngssl_cs.properties,optional:file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/[(*{instance})]/config/jwt/gebng_jwt.properties,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/[(*{instance})]/config/logback.properties
+    [/]
+    [# th:if="*{!#strings.containsIgnoreCase(instance,'DR') and !#strings.containsIgnoreCase(instance,'ITG')}" th:with="appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+        [# th:with="appEnvironment=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |QUA/*{environment}| : *{environment},appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+            [# th:with="lcVar=*{#strings.containsIgnoreCase(profiles,'lc')? '-lc': ''}"]
+                file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(${appInstance})]/application/config/idb-fdr-ccs-gw[(${lcVar})]/logback.properties
+            [/]
+        [/]
+    [/]
+[/]
+

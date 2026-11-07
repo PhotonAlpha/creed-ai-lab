@@ -1,0 +1,437 @@
+
+###
+POST http://localhost:8600/api/system/report/generate-comparison
+Content-Type: application/json
+
+{
+  "compareAll": true,
+  "baseRelease": "",
+  "routes": [
+    {
+      "releaseName": "Release_GD_R26.0_4658",
+      "projectName": "idbconfigs",
+      "countryCode": "GD",
+      "app": "MS",
+      "environment": "PDN",
+      "instance": "PDN073",
+      "node": "",
+      "zone": "ADC",
+      "module": "group-a"
+    },
+    {
+      "releaseName": "Release_GD_R26.0_4658",
+      "projectName": "idbconfigs",
+      "countryCode": "GD",
+      "app": "MS",
+      "environment": "QR",
+      "instance": "QUA107",
+      "node": "",
+      "zone": "TDC",
+      "module": "group-a"
+    }
+  ]
+}
+
+<> 2025-06-11T184144.200.json
+<> 2025-06-11T182449.200.json
+<> 2025-06-11T182326.200.json
+
+
+###generate-report-batch
+POST http://localhost:8600/api/system/report/generate-report-batch
+Content-Type: application/json
+
+{"batch":[{"compareAll":true,"baseRelease":"","routes":[{"releaseName":"Release_HK_R25.0_4093","projectName":"idbconfigs","countryCode":"HK","app":"MS","environment":"UAT3","instance":"QUA107","node":"","zone":"TDC"},{"releaseName":"Release_HK_R25.0_4093","projectName":"idbconfigs","countryCode":"HK","app":"MS","environment":"PDN","instance":"PDN044","node":"","zone":"TDC"}]}]}
+
+
+### generate-comparison
+POST http://localhost:8600/api/system/report/generate-comparison
+Content-Type: application/json
+
+{
+  "compareAll": true,
+  "baseRelease": "",
+  "routes": [
+    {
+      "releaseName": "Release_HK_R25.0_4093",
+      "projectName": "idbconfigs",
+      "countryCode": "HK",
+      "app": "CCS_AGGREGATOR",
+      "environment": "PDN",
+      "instance": "PDN042",
+      "node": "",
+      "zone": "adc,nxg",
+      "module": ""
+    },
+    {
+      "releaseName": "Release_HK_R25.0_4093",
+      "projectName": "idbconfigs",
+      "countryCode": "HK",
+      "app": "CCS_AGGREGATOR",
+      "environment": "NFT",
+      "instance": "QUA170",
+      "node": "",
+      "zone": "adc,nxg",
+      "module": ""
+    }
+  ]
+}
+
+### generate-comparison empty
+POST http://localhost:8600/api/system/report/generate-comparison
+Content-Type: application/json
+
+{
+  "compareAll": true,
+  "baseRelease": "",
+  "routes": [
+    {
+      "releaseName": "Release_HK_R25.0_4093",
+      "projectName": "idbconfigs",
+      "countryCode": "HK",
+      "app": "MS",
+      "environment": "PDN",
+      "instance": "PDN044",
+      "node": "",
+      "zone": "TDC"
+    },
+    {
+      "releaseName": "Release_HK_R25.0_4093",
+      "projectName": "idbconfigs",
+      "countryCode": "HK",
+      "app": "MS",
+      "environment": "PDN",
+      "instance": "PDN044",
+      "node": "",
+      "zone": "TDC"
+    }
+  ]
+}
+
+### generate-pdf
+POST http://localhost:8600/api/system/report/generate-pdf
+Content-Type: application/json
+
+{
+  "compareAll": true,
+  "baseRelease": "",
+  "routes": [
+    {
+      "releaseName": "Release_123123",
+      "projectName": "idbconfigs",
+      "countryCode": "SG",
+      "app": "MS",
+      "environment": "PDN1",
+      "instance": "PDN0081",
+      "node": "",
+      "zone": "ADC",
+      "module": "dashboard"
+    },
+    {
+      "releaseName": "Release_123123",
+      "projectName": "idbconfigs",
+      "countryCode": "SG",
+      "app": "MS",
+      "environment": "UAT82",
+      "instance": "QUA107",
+      "node": "",
+      "zone": "TDC",
+      "module": "dashboard"
+    }
+  ]
+}
+
+### generate-pdf HK
+POST http://localhost:8600/api/system/report/generate-pdf
+Content-Type: application/json
+
+{
+  "compareAll": true,
+  "baseRelease": "",
+  "routes": [
+    {
+      "releaseName": "Release_HK_R25.0_4093",
+      "projectName": "idbconfigs",
+      "countryCode": "HK",
+      "app": "CCS_AGGREGATOR",
+      "environment": "PDN",
+      "instance": "PDN042",
+      "node": "",
+      "zone": "adc,nxg",
+      "module": ""
+    },
+    {
+      "releaseName": "Release_HK_R25.0_4093",
+      "projectName": "idbconfigs",
+      "countryCode": "HK",
+      "app": "CCS_AGGREGATOR",
+      "environment": "NFT",
+      "instance": "QUA170",
+      "node": "",
+      "zone": "adc,nxg",
+      "module": ""
+    }
+  ]
+}
+
+
+### path-walk - for ENV
+POST http://localhost:8600/api/v2/system/dict/path-walk
+Content-Type: application/json
+
+{
+  "projectName": "idbproxy",
+  "releaseName": "Release_SG_R25.0_1737",
+  "countryCode": "SG",
+  "app": "CCS",
+  "dictType": "ENVIRONMENT"
+}
+
+### path-walk INSTANCE
+POST http://localhost:8600/api/v2/system/dict/path-walk
+Content-Type: application/json
+
+{
+  "projectName": "idbproxy",
+  "releaseName": "Release_SG_R25.0_1737",
+  "countryCode": "SG",
+  "app": "CCS",
+  "environment": "PDN",
+  "dictType": "INSTANCE"
+}
+
+
+
+### curl 'http://localhost:8600/api/system/report/generate-pdf-batch'
+POST http://localhost:8600/api/system/report/generate-pdf-batch
+Content-Type: application/json
+
+{
+  "batch": [
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R28.0_5102",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "UAT71",
+          "instance": "QUA079",
+          "node": "",
+          "zone": "TDC"
+        },
+        {
+          "releaseName": "Release_SG_R28.0_5102",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "PDN1",
+          "instance": "PDN0071",
+          "node": "",
+          "zone": "ADC"
+        }
+      ]
+    },
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R28.0_5102",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "CCS",
+          "environment": "UAT71",
+          "instance": "QUA177",
+          "node": "",
+          "zone": "bau,gst-bau,gst-qr,gst-uat3,qr"
+        },
+        {
+          "releaseName": "Release_SG_R28.0_5102",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "CCS",
+          "environment": "PDN1",
+          "instance": "PDN0051",
+          "node": "",
+          "zone": "adc,nxg"
+        }
+      ]
+    },
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R28.0_5102",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "CCS_LC",
+          "environment": "UAT71",
+          "instance": "QUA177",
+          "node": "",
+          "zone": "bau,gst-bau,gst-qr,gst-uat3,qr"
+        },
+        {
+          "releaseName": "Release_SG_R28.0_5102",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "CCS_LC",
+          "environment": "PDN1",
+          "instance": "PDN0051",
+          "node": "",
+          "zone": "adc,nxg,lc"
+        }
+      ]
+    },
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R28.0_5102",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "CCS_AGGREGATOR",
+          "environment": "UAT71",
+          "instance": "QUA177",
+          "node": "",
+          "zone": "bau,gst-bau,gst-qr,gst-uat3,qr"
+        },
+        {
+          "releaseName": "Release_SG_R28.0_5102",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "CCS_AGGREGATOR",
+          "environment": "PDN1",
+          "instance": "PDN0051",
+          "node": "",
+          "zone": "adc,nxg"
+        }
+      ]
+    }
+  ],
+  "connectionId": "5a5373a7-a3d8-46cf-b673-0e3d08d0c45c"
+}
+
+### list-instances
+POST http://localhost:8600/api/prompt/list-instances
+Content-Type: application/json
+
+{"projectName":"idbconfigs","baselineRelease":"Release_SG_R28.0_5102","comparisonRelease":"Release_SG_R28.0_5102","app":"MS"}
+
+### generative PDN VS PDN
+POST http://localhost:8600/api/prompt/generative
+Content-Type: application/json
+
+{
+  "projectName": "idbnotificationservice",
+  "baselineRelease": "Release_HK_R25.0_2238",
+  "comparisonRelease": "Release_HK_R25.0_2238",
+  "countryCode": "HK",
+  "app": "MS",
+  "baselineInstanceMatrix": {
+    "NFT1": [
+      "QUA061",
+      "QUA062",
+      "QUA063",
+      "QUA064"
+    ]
+  },
+  "comparisonInstanceMatrix": {
+    "PDN": [
+      "PDN043",
+      "PDN044",
+      "PDN143",
+      "PDN144"
+    ]
+  }
+}
+### generative QUA VS PDN
+POST http://localhost:8600/api/prompt/generative
+Content-Type: application/json
+
+{
+  "baselineInstanceMatrix": {
+    "UAT62": [
+      "QUA079",
+      "QUA080"
+    ],
+    "UAT61": [
+      "QUA079",
+      "QUA080"
+    ]
+  },
+  "comparisonInstanceMatrix": {
+    "PDN1": [
+      "PDN0071",
+      "PDN1081",
+      "PDN1071",
+      "PDN0081"
+    ],
+    "PDN2": [
+      "PDN0072",
+      "PDN0082",
+      "PDN1072",
+      "PDN1082"
+    ]
+  },
+  "baselineRelease": "Release_SG_R24.0_3877",
+  "comparisonRelease": "Release_SG_R25.0_4434",
+  "projectName": "idbconfigs",
+  "countryCode": "SG",
+  "app": "MS"
+}
+
+
+### list-all
+GET http://localhost:8600/api/admin/install/list-all
+
+### uninstall
+POST http://localhost:8600/api/admin/uninstall
+Content-Type: application/json
+
+{
+  "uninstallList": [
+    {
+      "releaseName": "Release_HK_R24.0_1412",
+      "projectName": "idbproxy-test"
+    }
+  ]
+}
+
+### list-releases
+POST http://localhost:8600/api/admin/artifactory/list-releases
+Content-Type: application/json
+
+{
+  "releaseName": "",
+  "projectName": "idbconfigs"
+}
+
+### list-builds
+POST http://localhost:8600/api/admin/artifactory/list-builds
+Content-Type: application/json
+
+{
+  "releaseName": "Release_SG_R25.0",
+  "projectName": "idbconfigs"
+}
+
+
+###
+POST http://localhost:8600/api/secure/decrypt
+Content-Type: application/json
+
+{
+  "encryptedSymmetricKey": "ezg6EkETagE+CzBz8esl0nlebCgUzwdz8png8kYTH9cAbHoqJFokSWED+dwrmcERQ34Wi2BtjalkFmQwr5FY0rqjF0oN8wkDCovoBT9N5cUh2ShCRFGUEcspPAkfBCvt",
+  "encryptedData": "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"
+}
+
+
+
+###
+GET http://localhost:8600/api/prompt/list-reports?pageNo=1&pageSize=10
+Content-Type: application/json

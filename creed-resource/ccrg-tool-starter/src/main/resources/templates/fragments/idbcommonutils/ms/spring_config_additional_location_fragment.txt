@@ -1,0 +1,5 @@
+[#th:block th:object="${routeDefinition}" th:with="appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+[#th:block th:if="*{!#strings.isEmpty(module)}"]
+file:[(${rootPath})]/[(*{countryCode})]/LX/[(${appInstance})]/application/config/[(*{module})]/logback.properties
+[/th:block]
+[/th:block]

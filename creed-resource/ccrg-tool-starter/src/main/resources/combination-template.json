@@ -1,0 +1,213 @@
+{
+  "batch": [
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "UAT61",
+          "instance": "QUA079",
+          "node": "",
+          "zone": "TDC"
+        },
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "PDN1",
+          "instance": "PDN0071",
+          "node": "",
+          "zone": "ADC"
+        }
+      ]
+    },
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "UAT61",
+          "instance": "QUA080",
+          "node": "",
+          "zone": "TDC"
+        },
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "PDN1",
+          "instance": "PDN0081",
+          "node": "",
+          "zone": "ADC"
+        }
+      ]
+    },
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "UAT61",
+          "instance": "QUA079",
+          "node": "",
+          "zone": "TDC"
+        },
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "PDN1",
+          "instance": "PDN1071",
+          "node": "",
+          "zone": "TDC"
+        }
+      ]
+    },
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "UAT61",
+          "instance": "QUA080",
+          "node": "",
+          "zone": "TDC"
+        },
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "PDN1",
+          "instance": "PDN1081",
+          "node": "",
+          "zone": "TDC"
+        }
+      ]
+    },
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "UAT62",
+          "instance": "QUA079",
+          "node": "",
+          "zone": "TDC"
+        },
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "PDN2",
+          "instance": "PDN0072",
+          "node": "",
+          "zone": "ADC"
+        }
+      ]
+    },
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "UAT62",
+          "instance": "QUA079",
+          "node": "",
+          "zone": "TDC"
+        },
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "PDN2",
+          "instance": "PDN1072",
+          "node": "",
+          "zone": "TDC"
+        }
+      ]
+    },
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "UAT62",
+          "instance": "QUA080",
+          "node": "",
+          "zone": "TDC"
+        },
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "PDN2",
+          "instance": "PDN0082",
+          "node": "",
+          "zone": "ADC"
+        }
+      ]
+    },
+    {
+      "compareAll": true,
+      "baseRelease": "",
+      "routes": [
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "UAT62",
+          "instance": "QUA080",
+          "node": "",
+          "zone": "TDC"
+        },
+        {
+          "releaseName": "Release_SG_R25.0_4323",
+          "projectName": "idbconfigs",
+          "countryCode": "SG",
+          "app": "MS",
+          "environment": "PDN2",
+          "instance": "PDN1082",
+          "node": "",
+          "zone": "TDC"
+        }
+      ]
+    }
+  ],
+  "connectionId": "8007dcf8-b27b-41d8-b2cb-22ff813f74af"
+}

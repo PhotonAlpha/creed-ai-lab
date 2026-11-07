@@ -1,0 +1,9 @@
+[#th:block th:each="extra : ${extraTypes}"]
+INSERT INTO system_extra_type VALUES ([(${extra.id})], '[(${extra.type})]', '[(${extra.val})]');[/th:block]
+[#th:block th:each="dict : ${systemDicts}"]
+INSERT INTO system_dict VALUES ([(${dict.id})],[(${dict.parentId})], '[(${dict.name})]', [(${dict.sort})], [(${dict.status.status})]);
+[#th:block th:if="${dict.node != null}"]INSERT INTO system_node_extra_type (extra_type_id,dict_id) values ([(${dict.node.id})],[(${dict.id})]);[/th:block]
+[#th:block th:if="${dict.zone != null}"]INSERT INTO system_zone_extra_type (extra_type_id,dict_id) values ([(${dict.zone.id})],[(${dict.id})]);[/th:block]
+[/th:block]
+
+ALTER TABLE system_dict ALTER COLUMN "ID" RESTART WITH (SELECT MAX(ID) + 1 FROM  system_dict);

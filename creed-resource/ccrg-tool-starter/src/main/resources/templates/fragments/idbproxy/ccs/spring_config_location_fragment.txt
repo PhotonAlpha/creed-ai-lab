@@ -1,0 +1,3 @@
+[# th:object="${routeDefinition}" th:with="appEnvironment=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |QUA/*{environment}| : *{environment},appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/config_proxy/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/env_config/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(${appInstance})]/config_proxy/
+[/]

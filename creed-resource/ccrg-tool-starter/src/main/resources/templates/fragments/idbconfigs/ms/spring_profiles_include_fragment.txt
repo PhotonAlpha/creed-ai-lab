@@ -1,0 +1,7 @@
+${spring.profiles.active},
+${spring.profiles.active}-${country_code:SG},
+${zone:TDC},
+currency-pair-${country_code:SG},
+whitelist-customers-perf-${country_code:SG},
+api-loadbalancer-${spring.profiles.active}-${country_code:SG},
+notification-${country_code:SG}.yml

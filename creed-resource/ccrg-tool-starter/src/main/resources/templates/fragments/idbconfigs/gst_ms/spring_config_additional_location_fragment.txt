@@ -1,0 +1,11 @@
+[#th:block th:object="${routeDefinition}"]
+    [#th:block th:if="*{#strings.containsIgnoreCase(instance,'DR')}"]
+        file:[(${rootPath})]/[(*{countryCode})]/LX/[(*{environment})]/config/ssl/gebngssl_ms.properties,file:[(${rootPath})]/[(*{countryCode})]/LX/config/logback.properties
+    [/th:block]
+    [#th:block th:if="*{#strings.containsIgnoreCase(instance,'ITG')}"]
+        file:[(${rootPath})]/[(*{countryCode})]/LX/[(*{environment})]/[(*{instance})]/config/ssl/gebngssl_ms.properties,file:[(${rootPath})]/[(*{countryCode})]/LX/config/logback.properties
+    [/th:block]
+    [#th:block th:if="*{!#strings.containsIgnoreCase(instance,'DR') and !#strings.containsIgnoreCase(instance,'ITG')}" th:with="appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+        file:[(${rootPath})]/[(*{countryCode})]/LX/[(${appInstance})]/config/ssl/gebngssl_ms.properties,file:[(${rootPath})]/[(*{countryCode})]/LX/config/logback.properties
+    [/th:block]
+[/th:block]

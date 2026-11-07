@@ -1,0 +1,14 @@
+[#th:block th:object="${routeDefinition}"]
+    [#th:block th:if="*{#strings.containsIgnoreCase(instance,'DR')}"]
+        file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/config/ssl/gebngssl_cs.properties,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/config/jwt/gebng_jwt.properties,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/config/logback.properties
+    [/th:block]
+    [#th:block th:if="*{#strings.containsIgnoreCase(instance,'ITG')}"]
+        file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/[(*{instance})]/config/ssl/gebngssl_cs.properties,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/[(*{instance})]/config/jwt/gebng_jwt.properties,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/[(*{instance})]/config/logback.properties
+    [/th:block]
+    [#th:block th:if="*{!#strings.containsIgnoreCase(instance,'DR') and !#strings.containsIgnoreCase(instance,'ITG')}" th:with="appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+        [#th:block th:with="appEnvironment=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |QUA/*{environment}| : *{environment},appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+        file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(${appInstance})]/config/ssl/gebngssl_cs.properties,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(${appInstance})]/config/jwt/gebng_jwt.properties,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(${appEnvironment})]/config/logback-aggregator.properties
+        [/th:block]
+    [/th:block]
+[/th:block]
+

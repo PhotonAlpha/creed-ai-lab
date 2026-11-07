@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<div th:fragment="pdf">
+    <table class="table table-hover table-borderless"
+                       style="table-layout: fixed; word-break: break-all; word-wrap: break-word; ">
+
+                    <colgroup>
+                        <col style="width: 40px;">
+                        <col style="width: auto;">
+                        <col style="width: 40px;">
+                        <col style="width: auto;">
+                    </colgroup>
+
+                    <tbody>
+                    <tr>
+                        <th scope="col" colspan="4" class="text-center">
+                            <div class="alert alert-primary mb-0" role="alert">
+                                Matching Data
+                            </div>
+                        </th>
+                    </tr>
+                    <tr>
+                        <th scope="col" colspan="2" class="border-bottom">
+                            <p class="mb-1 font-8">
+                                Country:
+                                <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.countryCode}"></span>
+                            </p>
+                            <p class="mb-1 font-8">
+                                Profiles:
+                                <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.profile}"></span>
+                            </p>
+                            <p class="mb-1 font-8">
+                                Environment:
+                                <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.environment}"></span>
+                            </p>
+                            <p class="mb-1 font-8">
+                                Instance:
+                                <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.instance}"></span>
+                            </p>
+                            <p class="font-6 mb-1">
+                                Files Considered for Comparison:
+                                <!--TODO-->
+                                <p class="font-6 mb-1" th:each="str : ${#strings.listSplit(leftReport?.reportDetails?.fileNames,',')}">
+                                    <span class="fw-lighter text-primary" th:text="${str}"></span>
+                                </p>
+                            </p>
+                        </th>
+                        <th scope="col" colspan="2" class="border-bottom">
+                            <p class="mb-1 font-8">
+                                Country:
+                                <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.countryCode}"></span>
+                            </p>
+                            <p class="mb-1 font-8">
+                                Profiles:
+                                <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.profile}"></span>
+                            </p>
+                            <p class="mb-1 font-8">
+                                Environment:
+                                <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.environment}"></span>
+                            </p>
+                            <p class="mb-1 font-8">
+                                Instance:
+                                <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.instance}"></span>
+                            </p>
+                            <p class="font-6 mb-1">
+                                Files Considered for Comparison:
+                                <!--TODO-->
+                                <p class="font-6 mb-1" th:each="str : ${#strings.listSplit(rightReport?.reportDetails?.fileNames,',')}">
+                                    <span class="fw-lighter text-primary" th:text="${str}"></span>
+                                </p>
+                            </p>
+                        </th>
+                    </tr>
+                    <tr th:each="dis,iterStat : ${displayList}">
+                        <td class="font-10 border-start border-end text-center p-0 align-middle"
+                            th:text="${iterStat?.index +1 }"></td>
+                        <th:block th:if="${#strings.isEmpty(dis?.left?.value)}">
+                            <td th:class="empty-line">
+                            </td>
+                        </th:block>
+                        <th:block th:unless="${#strings.isEmpty(dis?.left?.value)}">
+                            <td th:class="|font-10 ${dis?.left?.deltaType == 'DELETE' ? 'removed-line' : ''} ${dis?.left?.deltaType == 'CHANGE'  ? 'added-line': ''}|">
+                                <span style="white-space: pre-wrap" th:utext="${dis?.left?.value }"></span>
+                                <span th:if="${!#strings.isEmpty(dis?.left?.origin)}" th:text="${dis?.left?.origin}" class="pl-2px font-6 alert alert-secondary m-0 p-0" role="alert"></span>
+                            </td>
+                        </th:block>
+
+                        <td class="font-10 border-start border-end text-center p-0 align-middle"
+                            th:text="${iterStat?.index +1 }"></td>
+                        <th:block th:if="${#strings.isEmpty(dis?.right?.value)}">
+                            <td th:class="empty-line">
+                            </td>
+                        </th:block>
+                        <th:block th:unless="${#strings.isEmpty(dis?.right?.value)}">
+                            <td th:class="|font-10 ${dis?.right?.deltaType == 'DELETE' ? 'removed-line' : ''} ${dis?.right?.deltaType == 'CHANGE'  ? 'added-line': ''}|">
+                                <span style="white-space: pre-wrap" th:utext="${dis?.right?.value}"></span>
+                                <span th:if="${!#strings.isEmpty(dis?.right?.origin)}" th:text="${dis?.right?.origin}" class="pl-2px font-6 alert alert-secondary m-0 p-0" role="alert"></span>
+                            </td>
+                        </th:block>
+
+                    </tr>
+                    </tbody>
+                </table>
+</div>
+</html>

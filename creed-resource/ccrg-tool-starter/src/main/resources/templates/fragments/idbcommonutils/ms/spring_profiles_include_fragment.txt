@@ -1,0 +1,5 @@
+toggles,
+${country_code:SG},
+${spring.profiles.active}-${country_code:SG},
+api-loadbalancer-${spring.profiles.active}-${country_code:SG},
+${zone:TDC}

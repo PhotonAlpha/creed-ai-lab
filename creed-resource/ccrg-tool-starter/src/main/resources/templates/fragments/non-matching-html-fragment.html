@@ -1,0 +1,277 @@
+<!--/*@thymesVar id="reportPropertiesOverview" type="com.creed.parent.controller.vo.ReportPropertiesOverviewVo"*/-->
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<div th:fragment="noneMatchingHtml">
+    <table class="table table-hover table-borderless"
+           th:with="leftReport=${reportPropertiesOverview?.nonMatchingPropertiesOverview?.leftPropertyReview},rightReport=${reportPropertiesOverview?.nonMatchingPropertiesOverview?.rightPropertyReview},displayList=${reportPropertiesOverview?.nonMatchingPropertiesOverview?.displayList}"
+           style="table-layout: fixed; word-break: break-all; word-wrap: break-word; ">
+
+        <colgroup>
+            <col style="width: 40px;">
+            <col style="width: auto;">
+            <col style="width: 40px;">
+            <col style="width: auto;">
+        </colgroup>
+
+        <tbody>
+        <tr>
+            <th scope="col" colspan="4" class="text-center">
+                <div class="alert alert-primary mb-0" role="alert">
+                    Non Matching Data
+                </div>
+            </th>
+        </tr>
+        <tr>
+            <th scope="col" colspan="2" class="border-bottom">
+                <p class="mb-1 font-8">
+                    Country:
+                    <span class="fw-lighter text-primary"
+                          th:text="${leftReport?.reportDetails?.countryCode}"></span>
+                </p>
+                <p class="mb-1 font-8">
+                    Profiles:
+                    <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.profile}"></span>
+                </p>
+                <p class="mb-1 font-8">
+                    Environment:
+                    <span class="fw-lighter text-primary"
+                          th:text="${leftReport?.reportDetails?.environment}"></span>
+                </p>
+                <p class="mb-1 font-8">
+                    Instance:
+                    <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.instance}"></span>
+                </p>
+                <span class="font-6 mb-1">
+                        Files Considered for Comparison:
+                        <p class="font-6 mb-1"
+                           th:each="str : ${#strings.listSplit(leftReport?.reportDetails?.fileNames,',')}">
+                            <span class="fw-lighter text-primary" th:text="${str}"></span>
+                        </p>
+                    </span>
+            </th>
+            <th scope="col" colspan="2" class="border-bottom">
+                <p class="mb-1 font-8">
+                    Country:
+                    <span class="fw-lighter text-primary"
+                          th:text="${rightReport?.reportDetails?.countryCode}"></span>
+                </p>
+                <p class="mb-1 font-8">
+                    Profiles:
+                    <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.profile}"></span>
+                </p>
+                <p class="mb-1 font-8">
+                    Environment:
+                    <span class="fw-lighter text-primary"
+                          th:text="${rightReport?.reportDetails?.environment}"></span>
+                </p>
+                <p class="mb-1 font-8">
+                    Instance:
+                    <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.instance}"></span>
+                </p>
+                <span class="font-6 mb-1">
+                        Files Considered for Comparison:
+                        <p class="font-6 mb-1"
+                           th:each="str : ${#strings.listSplit(rightReport?.reportDetails?.fileNames,',')}">
+                            <span class="fw-lighter text-primary" th:text="${str}"></span>
+                        </p>
+                    </span>
+            </th>
+        </tr>
+        <tr>
+            <th scope="col" colspan="4" class="border-bottom font-6 mb-1">
+                <div class="alert alert-info p-1" role="alert">
+                        <span class="font-10 mb-1">
+                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor"
+                                  class="bi bi-exclamation-triangle-fill flex-shrink-0 me-2" viewBox="0 0 16 16"
+                                  role="img" aria-label="Info:">
+                                <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/>
+                            </svg>
+                            Object Change List:
+                        </span>
+                    <hr class="mt-1 mb-1">
+                    <th:block th:if="${#lists.isEmpty(leftReport?.changeFiles)}">
+                        <p class="font-6 mb-1">
+                            <span class="fw-lighter text-primary text-body"> NA </span>
+                        </p>
+                    </th:block>
+                    <p class="font-6 mb-1"
+                       th:each="str : ${leftReport?.changeFiles}">
+                        <span class="fw-lighter text-primary text-body" th:text="${str}"></span>
+                    </p>
+                </div>
+            </th>
+        </tr>
+        <tr>
+            <td colspan="4" class="border-bottom p-0 pb-2">
+                <div class="card mb-3">
+                    <div class="row card-header bg-light d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center gap-2 col-6">
+                            <div class="flex-fill alert alert-danger text-center pb-1 pt-1 mb-0 font-10" role="alert">
+                                <span th:text="|New Properties in ${leftReport?.reportDetails?.releaseName}|"></span>
+                                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"
+                                      style="left: 100px">
+                                                [[${#lists.size(leftReport?.missingProperties)}]]
+                                                <span class="visually-hidden">unread messages</span>
+                                            </span>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center gap-2 col-6">
+                            <div class="flex-fill alert alert-success text-center pb-1 pt-1 mb-0 font-10"
+                                 role="alert">
+                                <span th:text="|New Properties in ${rightReport?.reportDetails?.releaseName}|"></span>
+                                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                                                [[${#lists.size(rightReport?.missingProperties)}]]
+                                                <span class="visually-hidden">unread messages</span>
+                                            </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="collapse show" th:id="'file'">
+                        <table class="diff-table font-monospace small mb-0 table table-hover table-borderless">
+                            <colgroup>
+                                <col class="col-num">
+                                <col class="col-code">
+                                <col class="col-num">
+                                <col class="col-code">
+                            </colgroup>
+                            <tbody>
+                            <th:block th:with="
+                                        leftSize=${leftReport?.missingProperties != null ? #lists.size(leftReport.missingProperties) : 0},
+                                        rightSize=${rightReport?.missingProperties != null ? #lists.size(rightReport.missingProperties) : 0},
+                                        maxSize=${leftSize > rightSize ? leftSize : rightSize}
+                                    ">
+                                <th:block th:if="${maxSize == 0}">
+                                    <tr>
+                                        <td class="blob-num" th:classappend="'context-num'" th:text="1"></td>
+                                        <td class="blob-code " th:classappend="'context-code'">
+                                            NA
+                                        </td>
+                                        <td class="blob-num" th:classappend="'context-num'" th:text="1"></td>
+                                        <td class="blob-code " th:classappend="'context-code'">
+                                            NA
+                                        </td>
+                                    </tr>
+                                </th:block>
+
+                                <tr th:if="${maxSize > 0}" th:each="index : ${#numbers.sequence(0, maxSize - 1)}">
+                                    <td class="blob-num" th:classappend="'context-num'" th:text="${index + 1}"></td>
+                                    <td class="blob-code " th:classappend="'context-code'" th:class="${index < leftSize ? '' : 'empty-line'}">
+                                        <th:block th:if="${index < leftSize}"
+                                                  th:with="prop=${leftReport?.missingProperties[index]}">
+                                            <div class="border-bottom border-secondary-subtle">
+                                                    <span class="code-content"
+                                                          data-bs-toggle="popover" data-bs-trigger="click hover focus"
+                                                          data-bs-placement="top" data-bs-html="true"
+                                                          th:attr="data-bs-content='<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${prop?.origin}"
+                                                          th:text="|${prop?.propertyName}=|"
+                                                    ></span>
+                                                <strong class="text-primary" th:text="${prop?.propertyValue}">This
+                                                    line rendered as bold text.</strong>
+                                            </div>
+                                        </th:block>
+                                    </td>
+                                    <td class="blob-num" th:classappend="'context-num'" th:text="${index + 1}"></td>
+                                    <td class="blob-code " th:classappend="'context-code'" th:class="${index < rightSize ? '' : 'empty-line'}">
+                                        <th:block th:if="${index < rightSize}"
+                                                  th:with="prop=${rightReport?.missingProperties[index]}">
+                                            <div class="border-bottom border-secondary-subtle">
+                                                    <span class="code-content"
+                                                          data-bs-toggle="popover" data-bs-trigger="click hover focus"
+                                                          data-bs-placement="top" data-bs-html="true"
+                                                          th:attr="data-bs-content='<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${prop?.origin}"
+                                                          th:text="|${prop?.propertyName}=|">
+                                                    </span>
+                                                    <strong class="text-primary" th:text="${prop?.propertyValue}">This line rendered as bold text.</strong>
+                                            </div>
+                                        </th:block>
+                                    </td>
+                                </tr>
+                            </th:block>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </td>
+        </tr>
+        <tr>
+            <td colspan="4" class="p-0">
+                <div class="alert alert-info text-center pb-1 pt-1 mb-1" role="alert">
+                    Comparison results
+                </div>
+            </td>
+        </tr>
+        <th:block
+                th:if="${displayList.size() == 1 && #strings.isEmpty(displayList[0].left?.value) && #strings.isEmpty(displayList[0].right?.value)}">
+            <tr>
+                <td class="blob-num" th:classappend="'context-num'"
+                    th:text="|1|"></td>
+                <td>
+                    <div class="blob-code " th:classappend="'context-code'"  role="alert">
+                        Data not found!
+                    </div>
+                </td>
+                <td class="blob-num" th:classappend="'context-num'"
+                    th:text="|1|"></td>
+                <td>
+                    <div class="blob-code " th:classappend="'context-code'"  role="alert">
+                        Data not found!
+                    </div>
+                </td>
+            </tr>
+        </th:block>
+        <th:block
+                th:unless="${displayList.size() == 1 && #strings.isEmpty(displayList[0].left?.value) && #strings.isEmpty(displayList[0].right?.value)}">
+            <table class="diff-table font-monospace small mb-0 table table-hover table-borderless">
+                <colgroup>
+                    <col class="col-num">
+                    <col class="col-code">
+                    <col class="col-num">
+                    <col class="col-code">
+                </colgroup>
+                <tbody>
+                <tr th:each="dis,iterStat : ${displayList}">
+                    <td class="blob-num" th:classappend="'context-num'" th:text="${iterStat?.index +1 }"></td>
+
+                    <th:block th:if="${#strings.isEmpty(dis?.left?.value)}">
+                        <td th:class="empty-line">
+                        </td>
+                    </th:block>
+                    <th:block th:unless="${#strings.isEmpty(dis?.left?.value)}">
+                        <td class="blob-code " th:classappend="'context-code'" th:class="|${#strings.isEmpty(dis?.left?.value) ? 'empty-line' : ''} ${dis?.left?.deltaType == 'DELETE' ? 'del-code' : ''} ${dis?.left?.deltaType == 'CHANGE'  ? 'add-code': ''}|">
+                            <div >
+                                <span style="white-space: pre-wrap"
+                                      class="code-content"
+                                      data-bs-toggle="popover" data-bs-trigger="click hover focus"
+                                      data-bs-placement="top" data-bs-html="true"
+                                      th:attrappend="data-bs-content=${!#strings.isEmpty(dis?.left?.origin)} ? '<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${dis?.left?.origin} : null"
+                                      th:utext="${dis?.left?.value?: ''} + ${!#strings.isEmpty(dis?.left?.origin) ? '<i class=&quot;ps-2 bi bi-file-earmark-code me-1&quot;></i>' : ''}"></span>
+                            </div>
+                        </td>
+                    </th:block>
+
+                    <td class="blob-num" th:classappend="'context-num'" th:text="${iterStat?.index +1 }"></td>
+
+                    <th:block th:if="${#strings.isEmpty(dis?.right?.value)}">
+                        <td th:class="empty-line">
+                        </td>
+                    </th:block>
+                    <th:block th:unless="${#strings.isEmpty(dis?.right?.value)}">
+                        <td class="blob-code " th:classappend="'context-code'" th:class="|${dis?.right?.deltaType == 'DELETE' ? 'del-code' : ''} ${dis?.right?.deltaType == 'CHANGE'  ? 'add-code': ''}|">
+                            <div >
+                                <span style="white-space: pre-wrap"
+                                      class="code-content"
+                                      data-bs-toggle="popover" data-bs-trigger="click hover focus"
+                                      data-bs-placement="top" data-bs-html="true"
+                                      th:attrappend="data-bs-content=${!#strings.isEmpty(dis?.right?.origin)} ? '<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${dis?.right?.origin} : null"
+                                      th:utext="${dis?.right?.value?: ''} + ${!#strings.isEmpty(dis?.right?.origin) ? '<i class=&quot;ps-2 bi bi-file-earmark-code me-1&quot;></i>' : ''}"></span>
+                            </div>
+                        </td>
+                    </th:block>
+                </tr>
+                </tbody>
+            </table>
+        </th:block>
+        </tbody>
+    </table>
+</div>
+</html>

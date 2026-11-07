@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration debug="true" scan="true">
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="CCSGW"/>
+    <springProperty scope="context" name="countryCode" source="country_code" defaultValue="GST"/>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread][%X{traceId:-},%X{spanId:-}] %-36.36logger{36}[%line] : %m%n</pattern>
+        </encoder>
+    </appender>
+    <property scope="context" name="log-pattern" value="%d{dd-MM-yyyy HH:mm:ss.SSS} ${LOG_LEVEL_PATTERN:-%5p} [%thread][%X{traceId:-},%X{spanId:-}] %-40.40logger{39}[%line] : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
+    <property scope="context" name="log-directory" value="./logs" />
+    <property scope="context" name="instance" value="comparison-console" />
+
+    <appender name="rolling" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${log-directory}/${instance}.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${log-directory}/${instance}.log-%d{yyyy-MM-dd}.%i</fileNamePattern>
+            <!-- each file should be at most 250MB, keep 60 days worth of history,
+                but at most 20GB -->
+            <maxFileSize>250MB</maxFileSize>
+            <maxHistory>20</maxHistory>
+            <totalSizeCap>10GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${log-pattern} </pattern>
+            <charset>utf8</charset>
+        </encoder>
+    </appender>
+
+    <logger name="com.itextpdf.styledxmlparser.css" level="OFF" />
+    <logger name="org.springframework" level="WARN" />
+    <logger name="org.hibernate" level="WARN" />
+    <logger name="com.zaxxer.hikari" level="WARN" />
+    <logger name="freemarker.configuration" level="WARN" />
+
+    <root level="INFO">
+        <appender-ref ref="STDOUT" />
+        <appender-ref ref="rolling" />
+    </root>
+
+</configuration>

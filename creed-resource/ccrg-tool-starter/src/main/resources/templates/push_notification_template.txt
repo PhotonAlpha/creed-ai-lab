@@ -1,0 +1,5 @@
+[#th:block th:each="extra : ${keyPairs}"]
+[#th:block th:remove="tag" th:if="*{#strings.containsIgnoreCase(extra.first,'huawei-push-notification-properties.iosClientSecret')}"]
+# HUAWEI push token
+[/th:block][(${extra.first})]=[(${extra.second})]
+[/th:block]

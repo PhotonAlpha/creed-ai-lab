@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Creed Server Report (Offline)</title>
+    <style th:utext="${bootstrapCss}">/* bootstrap css inlined here */</style>
+    <style>
+        body { background-color: #f5f7fa; }
+        .report-header { background: linear-gradient(90deg, #2b5876, #4e4376); color: #fff; }
+        .badge-env-prod    { background-color: #198754; }
+        .badge-env-staging { background-color: #fd7e14; }
+        .badge-env-dev     { background-color: #0d6efd; }
+        .badge-slot-blue   { background-color: #0d6efd; }
+        .badge-slot-green  { background-color: #198754; }
+        .table thead th    { white-space: nowrap; }
+        code.ip            { font-size: 0.95em; }
+        @media print {
+            .no-print { display: none !important; }
+            body { background: #fff; }
+        }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark report-header shadow-sm">
+    <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">Creed &middot; Server Inventory Report</span>
+        <span class="text-light small">
+            Generated at <span th:text="${generatedAt}">2026-05-21 00:00:00</span>
+            &middot; offline snapshot
+        </span>
+    </div>
+</nav>
+
+<div class="container my-4">
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1">Server Topology</h4>
+            <p class="text-muted mb-0">
+                Host / IP / App / Country / Service / Env / Zone / Slot
+            </p>
+        </div>
+        <div>
+            <span class="badge bg-secondary fs-6">
+                Total: <span th:text="${total}">0</span>
+            </span>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped align-middle mb-0">
+                    <thead class="table-dark">
+                    <tr>
+                        <th scope="col">#</th>
+                        <th scope="col">Host</th>
+                        <th scope="col">IP</th>
+                        <th scope="col">App</th>
+                        <th scope="col">Country</th>
+                        <th scope="col">Service</th>
+                        <th scope="col">Env</th>
+                        <th scope="col">Zone</th>
+                        <th scope="col">Slot</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="s, iter : ${servers}">
+                        <th scope="row" th:text="${iter.count}">1</th>
+                        <td th:text="${s.host}">creed-host</td>
+                        <td><code class="ip" th:text="${s.ip}">0.0.0.0</code></td>
+                        <td th:text="${s.app}">creed-app</td>
+                        <td>
+                            <span class="badge bg-light text-dark border" th:text="${s.country}">CN</span>
+                        </td>
+                        <td th:text="${s.service}">service</td>
+                        <td>
+                            <span class="badge"
+                                  th:classappend="${'badge-env-' + s.env}"
+                                  th:text="${s.env}">env</span>
+                        </td>
+                        <td th:text="${s.zone}">zone</td>
+                        <td>
+                            <span class="badge"
+                                  th:classappend="${'badge-slot-' + s.slot}"
+                                  th:text="${s.slot}">slot</span>
+                        </td>
+                    </tr>
+                    <tr th:if="${#lists.isEmpty(servers)}">
+                        <td colspan="9" class="text-center text-muted py-4">No server records.</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <p class="text-muted small mt-3 mb-0">
+        Powered by Spring Boot &middot; Thymeleaf &middot; Bootstrap 5 &middot; offline export
+    </p>
+</div>
+
+<script th:utext="${bootstrapJs}">/* bootstrap js inlined here */</script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+[#th:block th:object="${routeDefinition}" th:with="appEnvironment=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |QUA/*{environment}| : *{environment},appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+file:[(${rootPath})]/configs/global/logback-edag.properties
+[/th:block]

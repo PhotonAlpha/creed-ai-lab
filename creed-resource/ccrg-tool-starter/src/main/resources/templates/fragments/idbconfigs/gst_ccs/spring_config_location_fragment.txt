@@ -1,0 +1,13 @@
+[#th:block th:object="${routeDefinition}"]
+    [#th:block th:if="*{#strings.containsIgnoreCase(instance,'DR')}"]
+        classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/config/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/config/
+    [/th:block]
+    [#th:block th:if="*{#strings.containsIgnoreCase(instance,'ITG')}"]
+        classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/config/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/[(*{instance})]/config/
+    [/th:block]
+    [#th:block th:if="*{!#strings.containsIgnoreCase(instance,'DR')  and !#strings.containsIgnoreCase(instance,'ITG')}" th:with="appEnvironment=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |QUA/*{environment}| : *{environment},appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+        [#th:block th:with="appEnvironment=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |QUA/*{environment}| : *{environment},appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+        classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/config/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(${appEnvironment})]/config/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(${appInstance})]/config/
+        [/th:block]
+    [/th:block]
+[/th:block]

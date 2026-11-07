@@ -1,0 +1,5 @@
+[# th:object="${routeDefinition}"]
+    [# th:with="appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+       classpath:/,file:[(${rootPath})]/[(*{countryCode})]/[(*{app})]/[(${appInstance})]/application/config/idb-fdr-integration-service-opi/
+    [/]
+[/]

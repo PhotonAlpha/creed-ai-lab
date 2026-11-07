@@ -1,0 +1,8 @@
+${country_code:SG},
+bau,
+global-config,
+${zone:ADC},
+validation,
+routes-${spring.profiles.active:prd},
+whitelist-headers,
+template

@@ -1,0 +1,37 @@
+spring:
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 60MB
+
+server:
+  tomcat:
+    mbeanregistry:
+      enabled: true
+  port: 8600
+
+management:
+  health:
+    defaults:
+      enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    prometheus:
+      access: unrestricted
+
+
+access:
+  arti:
+    wui: https://example.com/ui/repos/tree/General
+    token-key: xxx
+    token-value: xxx
+  confluence:
+    token: xxx
+    project-id: include
+    ancestor-id: 386415517
+  
+properties-matrix:
+  root-path: /config

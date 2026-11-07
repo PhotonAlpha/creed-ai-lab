@@ -1,0 +1,6 @@
+toggles,
+firebase-oauth2-http,
+bau,
+${country_code:SG},
+${spring.profiles.active},
+${zone:TDC}

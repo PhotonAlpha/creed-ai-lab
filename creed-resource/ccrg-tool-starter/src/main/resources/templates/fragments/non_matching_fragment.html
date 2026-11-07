@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<div th:fragment="pdf">
+    <table class="table table-hover table-borderless"
+               style="table-layout: fixed; word-break: break-all; word-wrap: break-word; ">
+
+            <colgroup>
+                <col style="width: 40px;">
+                <col style="width: auto;">
+                <col style="width: 40px;">
+                <col style="width: auto;">
+            </colgroup>
+
+            <tbody>
+            <tr>
+                <th scope="col" colspan="4" class="text-center">
+                    <div class="alert alert-primary mb-0" role="alert">
+                        Non Matching Data
+                    </div>
+                </th>
+            </tr>
+            <tr>
+                <th scope="col" colspan="2" class="border-bottom">
+                    <p class="mb-1 font-8">
+                        Country:
+                        <span class="fw-lighter text-primary"
+                              th:text="${leftReport?.reportDetails?.countryCode}"></span>
+                    </p>
+                    <p class="mb-1 font-8">
+                        Profiles:
+                        <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.profile}"></span>
+                    </p>
+                    <p class="mb-1 font-8">
+                        Environment:
+                        <span class="fw-lighter text-primary"
+                              th:text="${leftReport?.reportDetails?.environment}"></span>
+                    </p>
+                    <p class="mb-1 font-8">
+                        Instance:
+                        <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.instance}"></span>
+                    </p>
+                    <span class="font-6 mb-1">
+                        Files Considered for Comparison:
+                        <p class="font-6 mb-1"
+                           th:each="str : ${#strings.listSplit(leftReport?.reportDetails?.fileNames,',')}">
+                            <span class="fw-lighter text-primary" th:text="${str}"></span>
+                        </p>
+                    </span>
+                </th>
+                <th scope="col" colspan="2" class="border-bottom">
+                    <p class="mb-1 font-8">
+                        Country:
+                        <span class="fw-lighter text-primary"
+                              th:text="${rightReport?.reportDetails?.countryCode}"></span>
+                    </p>
+                    <p class="mb-1 font-8">
+                        Profiles:
+                        <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.profile}"></span>
+                    </p>
+                    <p class="mb-1 font-8">
+                        Environment:
+                        <span class="fw-lighter text-primary"
+                              th:text="${rightReport?.reportDetails?.environment}"></span>
+                    </p>
+                    <p class="mb-1 font-8">
+                        Instance:
+                        <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.instance}"></span>
+                    </p>
+                    <span class="font-6 mb-1">
+                        Files Considered for Comparison:
+                        <p class="font-6 mb-1"
+                           th:each="str : ${#strings.listSplit(rightReport?.reportDetails?.fileNames,',')}">
+                            <span class="fw-lighter text-primary" th:text="${str}"></span>
+                        </p>
+                    </span>
+                </th>
+            </tr>
+            <tr>
+                <th scope="col" colspan="4" class="border-bottom font-6 mb-1">
+                    <div class="alert alert-info p-1" role="alert">
+                        <span class="font-10 mb-1">
+                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" class="bi bi-exclamation-triangle-fill flex-shrink-0 me-2" viewBox="0 0 16 16" role="img" aria-label="Info:">
+                                <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/>
+                            </svg>
+                            Object Change List:
+                        </span>
+                        <hr class="mt-1 mb-1">
+                        <th:block th:if="${#lists.isEmpty(leftReport?.changeFiles)}">
+                            <p class="font-6 mb-1" >
+                                <span class="fw-lighter text-primary text-body"> NA </span>
+                            </p>
+                        </th:block>
+                        <p class="font-6 mb-1"
+                           th:each="str : ${leftReport?.changeFiles}">
+                            <span class="fw-lighter text-primary text-body" th:text="${str}"></span>
+                        </p>
+                    </div>
+                </th>
+            </tr>
+            <tr>
+                <td colspan="4" class="border-bottom p-0 pb-2">
+                    <div class="card">
+
+                        <div class="card-body p-0">
+                            <table class="mb-0 table table-bordered"
+                                   style="table-layout: fixed; word-break: break-all; word-wrap: break-word; page-break-before: avoid">
+                                <tbody>
+                                <tr>
+                                    <th scope="col">
+                                        <div class="alert alert-danger text-center pb-1 pt-1 mb-0 font-10" role="alert" >
+                                            <span th:text="|New Properties in ${leftReport?.reportDetails?.releaseName}|"></span>
+                                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="left: 100px">
+                                                [[${#lists.size(leftReport?.missingProperties)}]]
+                                                <span class="visually-hidden">unread messages</span>
+                                            </span>
+                                        </div>
+                                    </th>
+                                    <th scope="col">
+                                        <div class="alert alert-success text-center pb-1 pt-1 mb-0 font-10" role="alert">
+                                            <span th:text="|New Properties in ${rightReport?.reportDetails?.releaseName}|"></span>
+                                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                                                [[${#lists.size(rightReport?.missingProperties)}]]
+                                                <span class="visually-hidden">unread messages</span>
+                                            </span>
+                                        </div>
+                                    </th>
+                                </tr>
+                                <tr>
+                                    <td class="font-8 p-1">
+                                        <ul class="list-group">
+                                            <th:block th:if="${#lists.isEmpty(leftReport?.missingProperties)}">
+                                                <li class="list-group-item p-1 border-0"
+                                                    style="background-color: transparent">
+                                                    NA
+                                                </li>
+                                            </th:block>
+                                            <li class="list-group-item p-1 border-0"
+                                                style="background-color: transparent"
+                                                th:each="prop, propStat : ${leftReport?.missingProperties}">
+                                                <div class="font-10 m-0 p-0">
+                                                    <span class="pr-1" th:text="|${propStat?.count}. |"></span>
+                                                    <span th:text="|${prop?.propertyName}=|"></span>
+                                                    <strong class="text-primary" th:text="${prop?.propertyValue}">This
+                                                        line rendered as bold text.</strong>
+                                                </div>
+                                                <div th:text="|${prop?.origin}|"
+                                                     class="pl-2px font-6 alert alert-secondary p-0 m-0"
+                                                     role="alert"></div>
+                                            </li>
+                                        </ul>
+                                    </td>
+                                    <td class="font-8 p-1">
+                                        <ul class="list-group">
+                                            <th:block th:if="${#lists.isEmpty(rightReport?.missingProperties)}">
+                                                <li class="list-group-item p-1 border-0"
+                                                    style="background-color: transparent">
+                                                    NA
+                                                </li>
+                                            </th:block>
+                                            <li class="list-group-item p-1 border-0"
+                                                style="background-color: transparent"
+                                                th:each="prop, propStat : ${rightReport?.missingProperties}">
+                                                <div class="font-10 m-0 p-0">
+                                                    <span class="pr-1" th:text="|${propStat?.count}. |"></span>
+                                                    <span th:text="|${prop?.propertyName}=|"></span>
+                                                    <strong class="text-primary" th:text="${prop?.propertyValue}">This
+                                                        line rendered as bold text.</strong>
+                                                </div>
+                                                <div th:text="|${prop?.origin}|"
+                                                     class="pl-2px font-6 alert alert-secondary p-0 m-0"
+                                                     role="alert"></div>
+                                            </li>
+                                        </ul>
+                                    </td>
+                                </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="4" class="p-0">
+                    <div class="alert alert-info text-center pb-1 pt-1 mb-1" role="alert">
+                        Comparison results
+                    </div>
+                </td>
+            </tr>
+            <th:block
+                    th:if="${displayList.size() == 1 && #strings.isEmpty(displayList[0].left?.value) && #strings.isEmpty(displayList[0].right?.value)}">
+                <tr>
+                    <td class="font-10 border-start border-end text-center p-0 align-middle"
+                        th:text="|1|"></td>
+                    <td>
+                        <div class="alert alert-success" role="alert">
+                            Data not found!
+                        </div>
+                    </td>
+                    <td class="font-10 border-start border-end text-center p-0 align-middle"
+                        th:text="|1|"></td>
+                    <td>
+                        <div class="alert alert-success" role="alert">
+                            Data not found!
+                        </div>
+                    </td>
+
+                </tr>
+            </th:block>
+            <th:block
+                    th:unless="${displayList.size() == 1 && #strings.isEmpty(displayList[0].left?.value) && #strings.isEmpty(displayList[0].right?.value)}">
+                <tr th:each="dis,iterStat : ${displayList}">
+                    <td class="font-10 border-start border-end text-center p-0 align-middle"
+                        th:text="${iterStat?.index +1 }"></td>
+                    <th:block th:if="${#strings.isEmpty(dis?.left?.value)}">
+                        <td th:class="empty-line">
+                        </td>
+                    </th:block>
+                    <th:block th:unless="${#strings.isEmpty(dis?.left?.value)}">
+                        <td th:class="|font-10 ${dis?.left?.deltaType == 'DELETE' ? 'removed-line' : ''} ${dis?.left?.deltaType == 'CHANGE'  ? 'added-line': ''}|">
+                            <span style="white-space: pre-wrap" th:utext="${dis?.left?.value }"></span>
+                            <span th:if="${!#strings.isEmpty(dis?.left?.origin)}" th:text="${dis?.left?.origin}"
+                                  class="pl-2px font-6 alert alert-secondary m-0 p-0" role="alert"></span>
+                        </td>
+                    </th:block>
+
+                    <td class="font-10 border-start border-end text-center p-0 align-middle"
+                        th:text="${iterStat?.index +1 }"></td>
+                    <th:block th:if="${#strings.isEmpty(dis?.right?.value)}">
+                        <td th:class="empty-line">
+                        </td>
+                    </th:block>
+                    <th:block th:unless="${#strings.isEmpty(dis?.right?.value)}">
+                        <td th:class="|font-10 ${dis?.right?.deltaType == 'DELETE' ? 'removed-line' : ''} ${dis?.right?.deltaType == 'CHANGE'  ? 'added-line': ''}|">
+                            <span style="white-space: pre-wrap" th:utext="${dis?.right?.value}"></span>
+                            <span th:if="${!#strings.isEmpty(dis?.right?.origin)}" th:text="${dis?.right?.origin}"
+                                  class="pl-2px font-6 alert alert-secondary m-0 p-0" role="alert"></span>
+                        </td>
+                    </th:block>
+
+                </tr>
+            </th:block>
+            </tbody>
+        </table>
+</div>
+</html>

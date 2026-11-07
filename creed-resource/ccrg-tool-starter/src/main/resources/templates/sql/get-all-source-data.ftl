@@ -1,0 +1,6 @@
+SELECT * FROM T_PROPERTIES
+    WHERE IS_ACTIVE = true
+<#if KEY_FILTER?? && KEY_FILTER?has_content>
+    AND `KEY` LIKE '%${KEY_FILTER}%'
+</#if>
+    ORDER BY `KEY`

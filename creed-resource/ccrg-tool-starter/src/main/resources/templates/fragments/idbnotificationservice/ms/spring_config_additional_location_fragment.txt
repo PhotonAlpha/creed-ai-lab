@@ -1,0 +1,3 @@
+[#th:block th:object="${routeDefinition}" th:with="appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+file:[(${rootPath})]/[(*{countryCode})]/LX/[(${appInstance})]/config/notification-services-ssl/gebngssl_ms.properties,file:[(${rootPath})]/global/LX/application/config/notification-services/logback.properties
+[/th:block]

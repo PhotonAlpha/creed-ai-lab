@@ -1,0 +1,15 @@
+[# th:object="${routeDefinition}"]
+    [# th:if="*{#strings.containsIgnoreCase(instance,'DR')}"]
+        classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/config/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/config/
+    [/]
+    [# th:if="*{#strings.containsIgnoreCase(instance,'ITG')}"]
+        classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/config/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(*{environment})]/[(*{instance})]/config/
+    [/]
+    [# th:if="*{!#strings.containsIgnoreCase(instance,'DR')  and !#strings.containsIgnoreCase(instance,'ITG')}" th:with="appEnvironment=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |QUA/*{environment}| : *{environment},appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+        [# th:with="appEnvironment=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |QUA/*{environment}| : *{environment},appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+            [# th:with="lcVar=*{#strings.containsIgnoreCase(profiles,'lc')? '-lc': ''}"]
+                classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX_APP/[(${appInstance})]/application/config/idb-fdr-ccs-gw[(${lcVar})]/
+            [/]
+        [/]
+    [/]
+[/]

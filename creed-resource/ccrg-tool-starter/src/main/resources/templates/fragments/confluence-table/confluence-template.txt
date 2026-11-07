@@ -1,0 +1,16 @@
+| Country | UAT Instance | NFT Instance | PDN Instance |
+| ------- | ------------ | ------------ | ------------ |
+| SG      | LXIDBUSGV079 | QUA001       | LXIDBUSGV001 |
+|         | LXIDBUSGV080 | QUA002       | LXIDBUSGV002 |
+|         |              | QUA003       | LXIDBUSGV003 |
+|         |              | QUA004       | LXIDBUSGV004 |
+|         |              |              |              |
+|         |              |              |              |
+|         |              |              |              |
+|         |              |              |              |
+|         |              |              |              |
+|         |              |              |              |
+| HK      |              |              |              |
+|         |              |              |              |
+|         |              |              |              |
+|         |              |              |              |

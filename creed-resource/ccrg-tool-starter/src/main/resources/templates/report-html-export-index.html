@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <!--<link rel="stylesheet" th:href="@{/webjars/bootstrap/css/bootstrap.min.css}">
+    &lt;!&ndash;    <link th:href="@{/pdf/css/custom-html.css}" rel="stylesheet" type="text/css">&ndash;&gt;
+    <link th:href="@{/webjars/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css}" rel="stylesheet">
+    <link th:href="@{/pdf/css/style.css}" rel="stylesheet">-->
+
+    <style th:utext="${bootstrapCss}">/* bootstrap css inlined here */</style>
+    <style th:utext="${bootstrapIconsCss}">/* bootstrap-icons css (font embedded) inlined here */</style>
+    <style th:utext="${styleCss}">/* project diff styles inlined here */</style>
+    <meta charset="UTF-8">
+    <title>Comparison Report Online</title>
+</head>
+<body>
+<div class="container-fluid py-3">
+    <header>
+        <div class="d-flex flex-column flex-md-row align-items-center pb-3 mb-4 border-bottom">
+            <p class="fs-4 bg-body-tertiary" th:text="|${contextInformation?.title}|"></p>
+            <nav class="d-inline-flex mt-2 mt-md-0 ms-md-auto navbar-brand">
+                <img th:src="${logo}" style="background: #1234c6;" alt="logo"/>
+            </nav>
+        </div>
+    </header>
+    <main>
+        <ul class="nav nav-pills">
+            <li class="nav-item">
+                <button class="nav-link active"
+                        data-bs-toggle="tab"
+                        data-bs-target="#div1">
+                    Non Matching Report
+                </button>
+            </li>
+
+            <li class="nav-item">
+                <button class="nav-link"
+                        data-bs-toggle="tab"
+                        data-bs-target="#div2">
+                    Matching Report
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content mt-3">
+            <div class="tab-pane fade show active" id="div1">
+                <div th:replace="~{${noneMatchingFragmentTemplate} :: ${noneMatchingFragmentName}}"></div>
+            </div>
+
+            <div class="tab-pane fade" id="div2">
+                <div th:replace="~{${matchingFragmentTemplate} :: ${matchingFragmentName}}"></div>
+            </div>
+        </div>
+    </main>
+    <footer class="pt-4 my-md-5 pt-md-5 border-top">
+        <a
+                href="/"
+                class="d-flex align-items-center link-body-emphasis text-decoration-none"
+        >
+            <img class="mr-5px" th:src="${favIcon}" alt="favIcon">
+            <span class="ps-2 text-muted small " th:text="|${contextInformation?.footer}|">
+                Powered by Spring Boot &middot; Thymeleaf &middot; Bootstrap 5
+            </span>
+        </a>
+    </footer>
+</div>
+
+<script th:utext="${bootstrapJs}">/* bootstrap js inlined here */</script>
+<script>
+    // Show a popover with the file path + line number when hovering a code line.
+    document.querySelectorAll('.code-content[data-bs-toggle="popover"]')
+        .forEach(el => {
+            const pop = new bootstrap.Popover(el, {
+                container: 'body',
+                customClass: 'my-popover-width'
+            });
+
+            el.addEventListener('click', () => {
+                setTimeout(() => {
+                    pop.hide();
+                }, 20000);
+            });
+        });
+
+</script>
+</body>
+</html>

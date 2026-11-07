@@ -1,0 +1,31 @@
+[# th:object="${routeDefinition}"]
+    [# th:if="*{#strings.containsIgnoreCase(instance,'DR')}"]
+        [# th:if="*{!#strings.isEmpty(module)}"]
+            classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX/config/,optional:file:[(${rootPath})]/[(*{countryCode})]/LX/env_config/,file:[(${rootPath})]/[(*{countryCode})]/LX/[(*{environment})]/application/config/[(*{application})]/
+        [/]
+        [# th:if="*{#strings.isEmpty(module)}"]
+            classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX/config/,optional:file:[(${rootPath})]/[(*{countryCode})]/LX/env_config/
+        [/]
+    [/]
+    [# th:if="*{#strings.containsIgnoreCase(instance,'ITG')}"]
+        [# th:if="*{!#strings.isEmpty(module)}"]
+            [# th:if="*{#strings.equals(module, "gebng-feedprocessing") || #strings.equals(module, "gebng-report-to-web")}"]
+                classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX/[(${appEnvironment})]/batch/application/[(*{module})]/config/
+            [/]
+            [# th:unless="*{#strings.equals(module, "gebng-feedprocessing") || #strings.equals(module, "gebng-report-to-web")}"]
+                classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX/config/,optional:file:[(${rootPath})]/[(*{countryCode})]/LX/env_config/,file:[(${rootPath})]/[(*{countryCode})]/LX/[(*{environment})]/[(*{instance})]/application/config/[(*{application})]/
+            [/]
+        [/]
+        [# th:if="*{#strings.isEmpty(module)}"]
+            classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX/config/,optional:file:[(${rootPath})]/[(*{countryCode})]/LX/env_config/
+        [/]
+    [/]
+    [# th:if="*{!#strings.containsIgnoreCase(instance,'DR')  and !#strings.containsIgnoreCase(instance,'ITG')}" th:with="appEnvironment=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |QUA/*{environment}| : *{environment},appInstance=(*{#strings.containsIgnoreCase(instance,'QUA')}) ? |*{instance}/*{environment}| : *{instance}"]
+        [# th:if="*{!#strings.isEmpty(module)}"]
+        classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX/config/,optional:file:[(${rootPath})]/[(*{countryCode})]/LX/env_config/,file:[(${rootPath})]/[(*{countryCode})]/LX/[(${appInstance})]/application/config/,file:[(${rootPath})]/[(*{countryCode})]/LX/[(${appInstance})]/application/config/[(*{application})]/
+        [/]
+        [# th:unless="*{!#strings.isEmpty(module)}"]
+        classpath:/,file:[(${rootPath})]/[(*{countryCode})]/LX/config/,optional:file:[(${rootPath})]/[(*{countryCode})]/LX/env_config/,file:[(${rootPath})]/[(*{countryCode})]/LX/[(${appInstance})]/application/config/
+        [/]
+    [/]
+[/]
