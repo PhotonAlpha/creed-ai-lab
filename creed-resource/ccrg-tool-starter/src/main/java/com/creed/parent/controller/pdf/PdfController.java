@@ -21,11 +21,13 @@ import com.creed.parent.controller.pdf.dto.BootstrapPath;
 import com.creed.parent.controller.pdf.dto.ContextInformation;
 import com.creed.parent.controller.vo.*;
 import com.creed.parent.dal.model.DiffDisplay;
+import com.creed.parent.exception.ServiceException;
 import com.creed.parent.service.DiffService;
 import com.creed.parent.service.PropertiesService;
 import com.creed.parent.service.ReportGenerationService;
 import com.creed.parent.service.report.AssetService;
 import com.creed.parent.service.report.ReportMetadataInfo;
+import com.creed.parent.service.report.impl.HTMLReportGeneratorImpl;
 import com.creed.parent.service.report.impl.PDFReportGeneratorImpl;
 import com.creed.parent.utils.PdfUtils;
 import com.creed.parent.utils.json.JacksonUtils;
@@ -40,6 +42,9 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.servlet.i18n.SessionLocaleResolver;
@@ -261,6 +266,31 @@ public class PdfController {
         // , taskExecutor);
         generateHtml(locale, params);
         return tmpName;
+    }
+
+    @Resource(name = "htmlReportGenerator")
+    private HTMLReportGeneratorImpl htmlReportGenerator;
+
+    /**
+     * The HTML comparison report (Non Matching / Matching / Overall Comparison) rendered straight into
+     * the browser — the same model and template as the downloaded file, nothing written to disk.
+     * GET compares the built-in {@link #getRequestData()} sample; POST takes a {@code RouteFormVo}
+     * (two routes) as JSON.
+     */
+    @RequestMapping(value = "/report/html-preview", method = {RequestMethod.GET, RequestMethod.POST})
+    public String previewHtmlReport(@RequestBody(required = false) RouteFormVo routeForm, Model model, HttpServletRequest request) {
+        RouteFormVo routeFormVo = Optional.ofNullable(routeForm)
+                .orElseGet(() -> JacksonUtils.parseObject(getRequestData(), RouteFormVo.class));
+        List<RouteInfoVo> routes = Optional.ofNullable(routeFormVo.getRoutes()).orElse(Collections.emptyList());
+        if (routes.size() < 2) {
+            throw new ServiceException(400, "Two routes are required for a comparison, got " + routes.size());
+        }
+        new SessionLocaleResolver().setLocale(request, null, Locale.ENGLISH);
+
+        List<EnvironmentConfigurationVo> environmentConfiguration = propertiesService.getAllProperties(routes);
+        ReportMetadataInfo metadataInfo = new ReportMetadataInfo(UUID.randomUUID().toString(), routeFormVo);
+        model.addAllAttributes(htmlReportGenerator.buildReportModel(environmentConfiguration, metadataInfo));
+        return HTMLReportGeneratorImpl.REPORT_TEMPLATE;
     }
 
     public static String getCurrentBaseUrl() {

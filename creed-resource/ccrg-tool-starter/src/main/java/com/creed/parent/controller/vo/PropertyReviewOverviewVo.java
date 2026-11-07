@@ -23,5 +23,8 @@ import java.util.List;
 public class PropertyReviewOverviewVo {
     private List<PropertyReviewVo> nonMatchingProperties;
     private List<PropertyReviewVo> matchingProperties;
+    /** Every property of both sources, matching or not — the "Overall Comparison" view. */
+    private List<PropertyReviewVo> overallProperties;
+    private OverallSummaryVo overallSummary;
     private String customFilename;
 }

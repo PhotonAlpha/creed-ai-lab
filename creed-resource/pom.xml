@@ -22,5 +22,6 @@
         <module>creed-resource-env-matrix</module>
         <module>creed-resource-veracode</module>
         <module>creed-resource-migration-risk</module>
+        <module>ccrg-tool-starter</module>
     </modules>
 </project>

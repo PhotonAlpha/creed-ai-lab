@@ -60,6 +60,14 @@ public class DiffService {
         return constructDiffDisplayList(leftPropertyReview, rightPropertyReview, commonConsumer());
     }
 
+    /**
+     * The whole file side by side: EQUAL rows included (DiffUtils is called with
+     * {@code includeEqualParts}), every changed row marked on both sides.
+     */
+    public List<DiffDisplay> overallDisplayList(PropertyReviewVo leftPropertyReview, PropertyReviewVo rightPropertyReview) {
+        return constructDiffDisplayList(leftPropertyReview, rightPropertyReview, overallConsumer());
+    }
+
     protected List<DiffDisplay> constructDiffDisplayList(PropertyReviewVo leftPropertyReview, PropertyReviewVo rightPropertyReview, BiConsumer<DeltaType, Pair<List<String>, DiffInfo>> originEnricher) {
 
         //calculate the differences
@@ -139,6 +147,25 @@ public class DiffService {
                 diffInfo.setDeltaType(type.name());
             }
             diffInfo.setOrigin(extractOriginFunc.apply(originList, diffInfo));
+        };
+    }
+
+    /**
+     * Like {@link #diffConsumer()}, but INSERT counts as a change too: a line only the right side has
+     * must be green in the overall view, whereas {@code diffConsumer} leaves it as INSERT, which the
+     * template does not colour. EQUAL rows keep their type so the page can hide them.
+     */
+    protected BiConsumer<DeltaType, Pair<List<String>, DiffInfo>> overallConsumer() {
+        return (type, pair) -> {
+            DiffInfo diffInfo = pair.getRight();
+            if (DeltaType.EQUAL.equals(type)) {
+                diffInfo.setDeltaType(DeltaType.EQUAL.name());
+            } else if (DiffPosition.LEFT.equals(diffInfo.getPosition())) {
+                diffInfo.setDeltaType(DeltaType.DELETE.name());
+            } else {
+                diffInfo.setDeltaType(DeltaType.CHANGE.name());
+            }
+            diffInfo.setOrigin(extractOriginFunc.apply(pair.getLeft(), diffInfo));
         };
     }
 

@@ -39,6 +39,15 @@
                     Matching Report
                 </button>
             </li>
+
+            <!--/* Only when the generator supplied it: PdfController renders this page without one. */-->
+            <li class="nav-item" th:if="${reportPropertiesOverview?.overallPropertiesOverview != null}">
+                <button class="nav-link"
+                        data-bs-toggle="tab"
+                        data-bs-target="#div3">
+                    Overall Comparison
+                </button>
+            </li>
         </ul>
 
         <div class="tab-content mt-3">
@@ -48,6 +57,11 @@
 
             <div class="tab-pane fade" id="div2">
                 <div th:replace="~{${matchingFragmentTemplate} :: ${matchingFragmentName}}"></div>
+            </div>
+
+            <!--/* th:if on the wrapper, not on the th:replace element: fragment inclusion runs before th:if. */-->
+            <div class="tab-pane fade" id="div3" th:if="${reportPropertiesOverview?.overallPropertiesOverview != null}">
+                <div th:replace="~{${overallFragmentTemplate} :: ${overallFragmentName}}"></div>
             </div>
         </div>
     </main>

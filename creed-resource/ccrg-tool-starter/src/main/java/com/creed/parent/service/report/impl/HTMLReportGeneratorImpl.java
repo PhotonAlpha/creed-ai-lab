@@ -3,6 +3,7 @@ package com.creed.parent.service.report.impl;
 import com.creed.parent.constant.ReportTypeEnum;
 import com.creed.parent.controller.pdf.dto.ContextInformation;
 import com.creed.parent.controller.vo.EnvironmentConfigurationVo;
+import com.creed.parent.controller.vo.OverallSummaryVo;
 import com.creed.parent.controller.vo.PropertiesOverviewVo;
 import com.creed.parent.controller.vo.PropertiesVo;
 import com.creed.parent.controller.vo.PropertyReviewOverviewVo;
@@ -90,16 +91,18 @@ public class HTMLReportGeneratorImpl implements ReportGenerator {
     @Resource
     AssetService assetService;
 
+    /** The page every HTML comparison renders — the download and the {@code PdfController} preview alike. */
+    public static final String REPORT_TEMPLATE = "report-html-export-index";
+
     @Override
     public void generateReport(List<EnvironmentConfigurationVo> environmentConfiguration, ReportTypeEnum reportType, Locale locale, ReportMetadataInfo metadata, OutputStream os) {
         if (CollectionUtils.isEmpty(environmentConfiguration)) {
             log.warn("!!environmentConfiguration is empty!!");
             return;
         }
-        // 1. 根据properties进行分组
-        PropertyReviewOverviewVo propertyReviewOverview = generateComparison(environmentConfiguration, metadata);
-        // 2. 根据分组结果开始生成HTML
-        log.info("propertyReviewOverview {} {} with Locale:{}...", reportType, JacksonUtils.toJsonString(propertyReviewOverview), locale);
+        log.info("propertyReviewOverview {} with Locale:{}...", reportType, locale);
+        // outside the try: generateComparison's ServiceException must reach the caller unwrapped, as before
+        Map<String, Object> model = buildReportModel(environmentConfiguration, metadata);
         try {
             StopWatch stopWatch = new StopWatch();
             stopWatch.start("generateComparison data");
@@ -109,39 +112,9 @@ public class HTMLReportGeneratorImpl implements ReportGenerator {
 
             Context context = new Context();
             context.setLocale(locale);
+            context.setVariables(model);
 
-            ContextInformation contextInformation = new ContextInformation();
-            contextInformation.setFooter("Power By Comparator Tool");
-            contextInformation.setTitle("Comparison Report");
-            context.setVariable("contextInformation", contextInformation);
-            context.setVariable("bootstrapCss", assetService.getBootstrapCss());
-            context.setVariable("bootstrapIconsCss", assetService.getBootstrapIconsCss());
-            context.setVariable("styleCss", assetService.getStyleCss());
-            context.setVariable("bootstrapJs", assetService.getBootstrapJs());
-            context.setVariable("favIcon", assetService.getFavicon());
-            context.setVariable("logo", assetService.getLogoImg());
-
-            context.setVariable("noneMatchingFragmentTemplate", "fragments/non-matching-html-fragment");
-            context.setVariable("noneMatchingFragmentName", "noneMatchingHtml");
-
-            context.setVariable("matchingFragmentTemplate", "fragments/matching-html-fragment");
-            context.setVariable("matchingFragmentName", "matchingHtml");
-
-            List<PropertyReviewVo> nonMatchingProperties = propertyReviewOverview.getNonMatchingProperties();
-            PropertyReviewVo leftPropertyReviewN = nonMatchingProperties.get(0);
-            PropertyReviewVo rightPropertyReviewN = nonMatchingProperties.get(1);
-            List<DiffDisplay> diffDisplaysN = diffService.diffDisplayList(leftPropertyReviewN, rightPropertyReviewN);
-            PropertiesOverviewVo nonMatchingRecord = new PropertiesOverviewVo(leftPropertyReviewN, rightPropertyReviewN, diffDisplaysN);
-
-            List<PropertyReviewVo> matchingProperties = propertyReviewOverview.getMatchingProperties();
-            PropertyReviewVo leftPropertyReview = matchingProperties.get(0);
-            PropertyReviewVo rightPropertyReview = matchingProperties.get(1);
-            List<DiffDisplay> diffDisplays = diffService.nonDiffDisplayList(leftPropertyReview, rightPropertyReview);
-            PropertiesOverviewVo matchingRecord = new PropertiesOverviewVo(leftPropertyReview, rightPropertyReview, diffDisplays);
-            context.setVariable("reportPropertiesOverview", new ReportPropertiesOverviewVo(nonMatchingRecord, matchingRecord));
-
-            String html = templateEngine.process("report-html-export-index", context);
-
+            String html = templateEngine.process(REPORT_TEMPLATE, context);
 
             stopWatch.stop();
             log.info(">>stopWatch for generate HTML<<{}", stopWatch.prettyPrint(TimeUnit.MILLISECONDS));
@@ -156,6 +129,62 @@ public class HTMLReportGeneratorImpl implements ReportGenerator {
             log.error("Upload Exception: ", e);
             throw new ServiceException(500, ExceptionUtils.getMessage(e));
         }
+    }
+
+    /**
+     * Every variable {@link #REPORT_TEMPLATE} reads: assets inlined, all three tabs. Shared by the
+     * download above and the preview endpoint, so a page in the browser is exactly the file a user gets.
+     */
+    public Map<String, Object> buildReportModel(List<EnvironmentConfigurationVo> environmentConfiguration, ReportMetadataInfo metadata) {
+        // 1. 根据properties进行分组
+        PropertyReviewOverviewVo propertyReviewOverview = generateComparison(environmentConfiguration, metadata);
+        // The whole comparison as JSON — every property twice, plus the overall copy. DEBUG only.
+        if (log.isDebugEnabled()) {
+            log.debug("propertyReviewOverview {}", JacksonUtils.toJsonString(propertyReviewOverview));
+        }
+        // 2. 根据分组结果开始生成HTML
+        Map<String, Object> model = new HashMap<>();
+        ContextInformation contextInformation = new ContextInformation();
+        contextInformation.setFooter("Power By Comparator Tool");
+        contextInformation.setTitle("Comparison Report");
+        model.put("contextInformation", contextInformation);
+        model.put("bootstrapCss", assetService.getBootstrapCss());
+        model.put("bootstrapIconsCss", assetService.getBootstrapIconsCss());
+        model.put("styleCss", assetService.getStyleCss());
+        model.put("bootstrapJs", assetService.getBootstrapJs());
+        model.put("favIcon", assetService.getFavicon());
+        model.put("logo", assetService.getLogoImg());
+
+        model.put("noneMatchingFragmentTemplate", "fragments/non-matching-html-fragment");
+        model.put("noneMatchingFragmentName", "noneMatchingHtml");
+
+        model.put("matchingFragmentTemplate", "fragments/matching-html-fragment");
+        model.put("matchingFragmentName", "matchingHtml");
+
+        model.put("overallFragmentTemplate", "fragments/overall-html-fragment");
+        model.put("overallFragmentName", "overallHtml");
+
+        List<PropertyReviewVo> nonMatchingProperties = propertyReviewOverview.getNonMatchingProperties();
+        PropertyReviewVo leftPropertyReviewN = nonMatchingProperties.get(0);
+        PropertyReviewVo rightPropertyReviewN = nonMatchingProperties.get(1);
+        List<DiffDisplay> diffDisplaysN = diffService.diffDisplayList(leftPropertyReviewN, rightPropertyReviewN);
+        PropertiesOverviewVo nonMatchingRecord = new PropertiesOverviewVo(leftPropertyReviewN, rightPropertyReviewN, diffDisplaysN);
+
+        List<PropertyReviewVo> matchingProperties = propertyReviewOverview.getMatchingProperties();
+        PropertyReviewVo leftPropertyReview = matchingProperties.get(0);
+        PropertyReviewVo rightPropertyReview = matchingProperties.get(1);
+        List<DiffDisplay> diffDisplays = diffService.nonDiffDisplayList(leftPropertyReview, rightPropertyReview);
+        PropertiesOverviewVo matchingRecord = new PropertiesOverviewVo(leftPropertyReview, rightPropertyReview, diffDisplays);
+
+        List<PropertyReviewVo> overallProperties = propertyReviewOverview.getOverallProperties();
+        PropertyReviewVo leftPropertyReviewO = overallProperties.get(0);
+        PropertyReviewVo rightPropertyReviewO = overallProperties.get(1);
+        List<DiffDisplay> diffDisplaysO = diffService.overallDisplayList(leftPropertyReviewO, rightPropertyReviewO);
+        PropertiesOverviewVo overallRecord = new PropertiesOverviewVo(leftPropertyReviewO, rightPropertyReviewO, diffDisplaysO);
+
+        model.put("reportPropertiesOverview", new ReportPropertiesOverviewVo(nonMatchingRecord, matchingRecord,
+                overallRecord, propertyReviewOverview.getOverallSummary()));
+        return model;
     }
 
     @Override
@@ -206,7 +235,54 @@ public class HTMLReportGeneratorImpl implements ReportGenerator {
         List<PropertyReviewVo> matchingProperties = computeMatching(activeSources, sourceUniqueKVMappingFunc, targetUniqueKVMappingFunc, reportDetailsPair);
         log.debug(">>nonMatchingProperties:{}", JacksonUtils.toJsonString(nonMatchingProperties));
 
-        return PropertyReviewOverviewVo.builder().nonMatchingProperties(nonMatchingProperties).matchingProperties(matchingProperties).build();
+        Map<String, PropertiesVo> allSource1 = byPropertyName(activeSources.get(1));
+        Map<String, PropertiesVo> allSource2 = byPropertyName(activeSources.get(2));
+        List<PropertyReviewVo> overallProperties = computeOverall(allSource1, allSource2, reportDetailsPair);
+
+        return PropertyReviewOverviewVo.builder()
+                .nonMatchingProperties(nonMatchingProperties)
+                .matchingProperties(matchingProperties)
+                .overallProperties(overallProperties)
+                .overallSummary(summarize(allSource1, allSource2))
+                .build();
+    }
+
+    /** First occurrence wins on a repeated name — the same merge the matching / non-matching maps use. */
+    private Map<String, PropertiesVo> byPropertyName(List<PropertiesVo> properties) {
+        return properties.stream().collect(Collectors.toMap(PropertiesVo::getPropertyName, Function.identity(), (o, n) -> o));
+    }
+
+    /**
+     * Every property of both sources, matching or not: the union of names. Rendered through
+     * DiffUtils with EQUAL parts it is the whole file side by side, which neither the matching nor the
+     * non-matching half can show on its own — each has only one kind of line.
+     */
+    protected List<PropertyReviewVo> computeOverall(Map<String, PropertiesVo> allSource1,
+                                                    Map<String, PropertiesVo> allSource2,
+                                                    Supplier<Pair<ReportDetails, ReportDetails>> reportDetailsPair) {
+        Set<String> allKeys = new HashSet<>(allSource1.keySet());
+        allKeys.addAll(allSource2.keySet());
+        return getPropertyReviewList(reportDetailsPair, allKeys, allSource1, allSource2);
+    }
+
+    protected OverallSummaryVo summarize(Map<String, PropertiesVo> allSource1, Map<String, PropertiesVo> allSource2) {
+        int identical = 0;
+        int changed = 0;
+        for (Map.Entry<String, PropertiesVo> entry : allSource1.entrySet()) {
+            PropertiesVo other = allSource2.get(entry.getKey());
+            if (other == null) {
+                continue;
+            }
+            // compared as rendered: the YAML holds Objects.toString(value, "")
+            if (Objects.equals(Objects.toString(entry.getValue().getPropertyValue(), ""), Objects.toString(other.getPropertyValue(), ""))) {
+                identical++;
+            } else {
+                changed++;
+            }
+        }
+        int onlyInBaseline = allSource1.size() - identical - changed;
+        int onlyInComparison = allSource2.size() - identical - changed;
+        return new OverallSummaryVo(identical + changed + onlyInBaseline + onlyInComparison, identical, changed, onlyInBaseline, onlyInComparison);
     }
 
     private List<ReportDetails> builReportDetails(List<EnvironmentConfigurationVo> environmentConfiguration) {
