@@ -246,6 +246,12 @@ Complete and verified in a browser against the real backend.
   - Claude-in-Chrome could not screenshot any page in this session (even a JSON URL); headless
     Chrome over CDP (`--remote-debugging-port`) was used instead.
 - **i18n** en / zh-CN throughout, including the antd locale bundle; persisted in `localStorage`.
+- **Page style setting (2026-11-08):** Pro's `SettingDrawer` (gear handle, right edge) —
+  light/dark, theme colour, nav mode, content width, fixed header/sider, split menus, regional
+  hide switches, colour weak. State in `src/layoutSettings.tsx` (`env-matrix.layout-settings`),
+  read by the root ConfigProvider (algorithm + `colorPrimary`) and spread onto ProLayout. Checked
+  in headless Chrome: default/zh, dark + side + purple/en, top + fixed width, and hiding the menu
+  survives a reload. No reset button (open item if wanted).
 - `antd lint src` → 0 issues. `tsc -b` and `vite build` clean.
 
 ## Landmines

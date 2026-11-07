@@ -6,9 +6,10 @@ import '@ant-design/v5-patch-for-react-19';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { App as AntdApp, ConfigProvider } from 'antd';
+import { App as AntdApp, ConfigProvider, theme } from 'antd';
 import { ProConfigProvider, enUSIntl, zhCNIntl } from '@ant-design/pro-components';
 import { I18nProvider, useI18n } from './locales';
+import { LayoutSettingsProvider, useLayoutSettings } from './layoutSettings';
 import { App } from './App';
 import './index.css';
 
@@ -19,11 +20,16 @@ import './index.css';
  */
 function Root() {
   const { lang, antdLocale } = useI18n();
+  const { settings } = useLayoutSettings();
   return (
     <ConfigProvider
       locale={antdLocale}
       theme={{
+        // Driven from the page-style drawer. ProLayout's own `navTheme` only darkens its subtree;
+        // switching the algorithm here also reaches App's token-bridged CSS variables and portals.
+        algorithm: settings.navTheme === 'realDark' ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
+          colorPrimary: settings.colorPrimary,
           // Slightly tighter than the default so a wide matrix fits more columns on screen.
           borderRadius: 6,
           fontSize: 13,
@@ -54,7 +60,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <I18nProvider>
-        <Root />
+        <LayoutSettingsProvider>
+          <Root />
+        </LayoutSettingsProvider>
       </I18nProvider>
     </BrowserRouter>
   </StrictMode>,

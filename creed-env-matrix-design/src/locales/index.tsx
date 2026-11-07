@@ -24,6 +24,19 @@ const ANTD_LOCALES: Record<Lang, Locale> = {
 };
 
 const STORAGE_KEY = 'env-matrix.lang';
+/**
+ * ProLayout's SettingDrawer has no locale prop: it reads umi's `umi_locale` key on every render, so
+ * mirroring the language there is what keeps the drawer's labels in step with the toggle.
+ */
+const PRO_LAYOUT_LOCALE_KEY = 'umi_locale';
+
+function mirrorToProLayout(lang: Lang) {
+  try {
+    localStorage.setItem(PRO_LAYOUT_LOCALE_KEY, lang);
+  } catch {
+    // The drawer falls back to navigator.language.
+  }
+}
 
 interface I18nValue {
   lang: Lang;
@@ -46,9 +59,15 @@ function initialLang(): Lang {
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>(initialLang);
+  const [lang, setLangState] = useState<Lang>(() => {
+    const initial = initialLang();
+    mirrorToProLayout(initial);
+    return initial;
+  });
 
   const setLang = useCallback((next: Lang) => {
+    // Before the state change, so the re-render it triggers already reads the new language.
+    mirrorToProLayout(next);
     setLangState(next);
     localStorage.setItem(STORAGE_KEY, next);
     document.documentElement.lang = next;

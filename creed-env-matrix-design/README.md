@@ -694,6 +694,24 @@ error, not a silent fallback. **When you change UI copy, update both files.**
 
 ---
 
+## 8a. Page style setting
+
+Ant Design Pro's settings drawer — the gear handle on the right edge of every page:
+
+- **Page style**: light or dark (the dark one switches antd's algorithm for the whole app, not
+  just the menu).
+- **Theme colour**, **navigation mode** (side / top / mix), content width, fixed header, fixed
+  sidebar, split menus (mix only).
+- **Regional settings**: hide the header, footer, menu or menu header.
+- **Colour weak** mode.
+
+The default is Pro's own: mix layout, light, `#1677FF`. Choices persist in `localStorage`
+(`env-matrix.layout-settings`), never in the URL — the drawer's default of writing every setting
+into the query string is turned off. The drawer's labels follow the language toggle. It has no
+"reset" button: clear that key to get the defaults back.
+
+---
+
 ## 9. Notes on dependencies
 
 - **antd 5, not 6.** `@ant-design/pro-components@2.8.10` declares `antd: ^4.24.15 || ^5.11.2` and

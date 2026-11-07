@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { ProLayout } from '@ant-design/pro-components';
+import { ProLayout, SettingDrawer } from '@ant-design/pro-components';
 import { Button, theme } from 'antd';
 import {
   ApartmentOutlined,
@@ -21,6 +21,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import { useI18n } from './locales';
+import { useLayoutSettings } from './layoutSettings';
 import { MatrixPage } from './pages/Matrix';
 import { ConfigPage } from './pages/Config';
 import { TopologyPage } from './pages/Topology';
@@ -39,6 +40,7 @@ export function App() {
   const { t, toggleLang } = useI18n();
   const { pathname } = useLocation();
   const { token } = theme.useToken();
+  const { settings, setSettings } = useLayoutSettings();
 
   /**
    * Bridges antd design tokens into the CSS variables `index.css` uses for cell highlighting. This
@@ -60,12 +62,9 @@ export function App() {
       <ProLayout
         title={t('app.title')}
         logo={false}
-        // Ant Design Pro's default: header across the top, the menu in a collapsible left sider
-        layout="mix"
-        fixedHeader
-        fixSiderbar
+        // layout / navTheme / fixed header & sider / content width / split menus: from the drawer
+        {...settings}
         siderWidth={208}
-        contentWidth="Fluid"
         location={{ pathname }}
         route={{
           path: '/',
@@ -123,6 +122,22 @@ export function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </ProLayout>
+      {/*
+        * Ant Design Pro's "page style setting" drawer (the handle on the right edge). Persisted by
+        * LayoutSettingsProvider instead of the drawer's default of writing every setting into the
+        * query string, which would leak into every link and into pages that read their own params.
+        * No copy button / hint: they exist to paste into a umi `defaultSettings`, which this app
+        * does not have, and the clipboard API is unavailable over plain HTTP.
+        */}
+      <SettingDrawer
+        pathname={pathname}
+        enableDarkTheme
+        disableUrlParams
+        hideCopyButton
+        hideHintAlert
+        settings={settings}
+        onSettingChange={setSettings}
+      />
     </div>
   );
 }

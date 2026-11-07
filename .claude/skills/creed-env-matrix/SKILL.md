@@ -292,6 +292,22 @@ code. The value is read with `loadEnv` because a Vite config file runs *before* 
 
 **Conventions**: one root `ConfigProvider` in `main.tsx` (+ `AntdApp` so `App.useApp()` gives themed `message`/`modal`); cell highlighting via `onCell`→`className` and antd tokens bridged to CSS variables — **no `.ant-*` overrides**; `zh-CN.ts` typed as `Record<keyof typeof enUS, string>` so a missing translation is a compile error. Per the repo's antd skill, query `antd info <Component> --format json --version 5.29.3` before writing component code.
 
+### Page style setting (`src/layoutSettings.tsx`)
+
+Pro's `SettingDrawer`, controlled from a context above the root `ConfigProvider`:
+
+- **Dark mode is the root algorithm, not just `navTheme`.** ProLayout's `realDark` only wraps its own
+  subtree in a dark provider; App's token-bridged CSS variables (`theme.useToken()` above ProLayout)
+  would stay light. Same for `colorPrimary`: the drawer's own apply path is antd-4-only.
+- **`disableUrlParams`** — by default the drawer mirrors every setting into the query string.
+- **The drawer has no locale prop**; it reads umi's `umi_locale` localStorage key on each render.
+  `locales/index.tsx` mirrors the language there *before* `setState`, so the re-render already reads it.
+- **Saved keys are whitelisted** (`EDITABLE_KEYS`): the drawer hands back title/menu/logo too. The four
+  `*Render` keys are `false` or absent, so they are listed explicitly — deriving the list from the
+  defaults silently dropped the "regional settings" switches.
+- **Colour weak** sets `body.style.filter` from an effect — the drawer only does it on toggle, so a
+  stored `true` came back unfiltered after reload.
+
 ## CCRG pages (`pages/Ccrg`, `/ccrg/*`)
 
 The old Vue `ccrg-tool-ui` migrated page for page (Pull config, GenReport, Batch export, Crossover,
