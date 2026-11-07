@@ -1,6 +1,7 @@
 package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.domain.ReportRow;
+import com.creed.resource.veracode.domain.Severity;
 import org.springframework.stereotype.Component;
 
 import javax.xml.stream.XMLInputFactory;
@@ -46,10 +47,11 @@ public class VeracodeXmlParser {
     }
 
     /** {@code rows} carry no affected version yet: {@link #withVersion} sets it once the effective one is known. */
-    public record ParsedReport(ReportInfo info, List<ReportRow> rows, List<String> warnings) {
+    public record ParsedReport(ReportInfo info, List<ReportRow> rows, List<String> warnings, ScaSummary sca) {
 
         public ParsedReport withVersion(String affectedVersion) {
-            return new ParsedReport(info, rows.stream().map(r -> r.withVersion(affectedVersion)).toList(), warnings);
+            return new ParsedReport(info, rows.stream().map(r -> r.withVersion(affectedVersion)).toList(), warnings,
+                    sca);
         }
     }
 
@@ -82,6 +84,14 @@ public class VeracodeXmlParser {
         int components = 0;
         int mitigated = 0;
         int vulnerabilities = 0;
+        // <software_composition_analysis>'s own statistics, and the per-level counts (Very High first)
+        Integer thirdParty = null;
+        Boolean violatesPolicy = null;
+        Integer violatedPolicy = null;
+        Integer blacklisted = null;
+        int[] bySeverity = new int[ScaSummary.LEVELS.size()];
+        int unknownSeverity = 0;
+        Double maxCvss = null;
         while (xml.hasNext()) {
             int event = xml.next();
             if (event == XMLStreamConstants.END_ELEMENT) {
@@ -108,7 +118,13 @@ public class VeracodeXmlParser {
                         attr(xml, "generation_date"));
                 continue;
             }
-            if ("component".equals(name) && "vulnerable_components".equals(parent)) {
+            if ("software_composition_analysis".equals(name)) {
+                thirdParty = count(xml, "third_party_components", warnings);
+                String violate = attr(xml, "violate_policy");
+                violatesPolicy = violate == null ? null : Boolean.valueOf(violate);
+                violatedPolicy = count(xml, "components_violated_policy", warnings);
+                blacklisted = count(xml, "blacklisted_components", warnings);
+            } else if ("component".equals(name) && "vulnerable_components".equals(parent)) {
                 components++;
                 String library = attr(xml, "library");
                 String version = attr(xml, "version");
@@ -126,6 +142,15 @@ public class VeracodeXmlParser {
                 ReportRow row = row(xml, application, component, componentFile, filePath, vulnerabilities, warnings);
                 if (row != null) {
                     rows.add(row);
+                    int rank = Severity.rank(row.severity());
+                    if (rank >= 0) {
+                        bySeverity[ScaSummary.LEVELS.size() - 1 - rank]++;
+                    } else {
+                        unknownSeverity++;
+                    }
+                    if (row.cvss() != null && (maxCvss == null || row.cvss() > maxCvss)) {
+                        maxCvss = row.cvss();
+                    }
                 }
             }
         }
@@ -139,7 +164,13 @@ public class VeracodeXmlParser {
         if (mitigated > 0) {
             warnings.add(mitigated + " mitigated vulnerabilit" + (mitigated == 1 ? "y" : "ies") + " skipped");
         }
-        return new ParsedReport(info, List.copyOf(rows), List.copyOf(warnings));
+        List<ScaSummary.SeverityCount> levels = new ArrayList<>();
+        for (int i = 0; i < bySeverity.length; i++) {
+            levels.add(new ScaSummary.SeverityCount(ScaSummary.LEVELS.get(i), bySeverity[i]));
+        }
+        ScaSummary sca = new ScaSummary(thirdParty, violatesPolicy, violatedPolicy, blacklisted, components,
+                rows.size(), mitigated, List.copyOf(levels), unknownSeverity, maxCvss);
+        return new ParsedReport(info, List.copyOf(rows), List.copyOf(warnings), sca);
     }
 
     private static ReportRow row(XMLStreamReader xml, String application, String component, String componentFile,
@@ -177,6 +208,20 @@ public class VeracodeXmlParser {
             return Double.valueOf(raw);
         } catch (NumberFormatException e) {
             warnings.add(location + ": CVSS '" + raw + "' is not a number, left empty");
+            return null;
+        }
+    }
+
+    /** A count attribute; one that is not a number is a warning and {@code null}, never a failed upload. */
+    private static Integer count(XMLStreamReader xml, String name, List<String> warnings) {
+        String raw = attr(xml, name);
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(raw);
+        } catch (NumberFormatException e) {
+            warnings.add("software_composition_analysis: " + name + " '" + raw + "' is not a number, left empty");
             return null;
         }
     }

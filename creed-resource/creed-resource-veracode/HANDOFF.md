@@ -47,7 +47,7 @@ External config: `application.yml` / `application-<profile>.yml` in `CREED_VERAC
 | `POST /analysis` `{uploadId, autoCreate?, fields?}` | re-analyse an upload against Jira as it is now |
 | `POST /jira/issues` `{uploadId, findingIds[], fields}` | per-id `outcome`: CREATED / ALREADY_EXISTS / NOT_IN_REPORT / VERSION_NOT_IN_JIRA / FAILED; `fields` = the create screen's other fields (`{"components":["Security"],"customfield_10100":"Production"}`) |
 | `POST /jira/connection` | `{ok, projectKey, issueType, tokenAccepted, canCreate, versions, fields, status, message}` from the create metadata — a refused token is `ok:false` + Jira's status, not an error |
-| `GET /analysis/export?uploadId=` | xlsx (sheets *Findings*, *Source*) from a **fresh** analysis; *Severity* filled by level (`ExcelExporter.SEVERITY_FILL`, the page's tag hues: Very High red … Very Low blue, Informational grey) |
+| `GET /analysis/export?uploadId=` | xlsx (sheets *Findings*, *SCA summary*, *Source*) from a **fresh** analysis; *Severity* filled by level (`ExcelExporter.SEVERITY_FILL`, the page's tag hues: Very High red … Very Low blue, Informational grey) |
 
 Every endpoint but `/settings` needs the user's Jira token in `X-Jira-Token` — no fallback. Jira Cloud adds the
 Atlassian e-mail in `X-Jira-User` (→ Basic), Data Center sends the PAT alone (→ Bearer); the page asks which
@@ -158,6 +158,17 @@ it was not checked in a browser (the browser extension could not attach to any p
   upload (`reports`, `uploadId`), a CVE + jar another application already filed is labelled (`LABELED`), not
   duplicated. The mock answers `PUT /rest/api/2/issue/{key}` labels; seeds use the new summary and carry the sample
   application's label. A report without `version` is no longer refused (the version is display only).
+- **SCA statistics** (2026-11-08, asked for): `VeracodeXmlParser` also reads `<software_composition_analysis>`'s
+  `third_party_components` / `violate_policy` / `components_violated_policy` / `blacklisted_components` and counts
+  vulnerable components, vulnerabilities per level, max CVSS and mitigated → `ScaSummary` on `ParsedReport` and
+  `ReportView.sca` (JSON `reports[i].sca`). Counts are the report's (before `Finding.group`). A missing attribute is
+  `null` (page "—", empty cell), a non-number one a warning. The page's "SCA statistics" table and the workbook's
+  *SCA summary* sheet (second; severity headers in `SEVERITY_FILL`, a *Total* row with several reports, no sum for
+  yes/no, Max CVSS = the highest) show the same thing. Tests: `VeracodeXmlParserTest.summarisesTheScaSection`,
+  `VeracodeApiTest` (sample: 57 / 8 / 6 / 0, 10 vulnerabilities, 1 mitigated; two reports → Total 114 / 20).
+  Checked in headless Chrome against a local instance on the mock Jira (zh + en).
+- **Build on JDK 25**: javac 21.0.11 crashes compiling this module ("inconsistent stack types at join point", also
+  without these changes) — set `JAVA_HOME` to the JDK 25 under `~/Desktop/workspace/tools/jdk/`.
 - **Confluence attachments as a source** (2026-11-07, asked for): `ConfluenceClient` (`@HttpExchange`, own pool,
   Logbook, TLS unverified) + `ConfluenceService` (connection test, paged listing, download by attachment id from the
   server's own listing, redirects followed by hand with the token only under the base URL) + `ConfluenceToken`

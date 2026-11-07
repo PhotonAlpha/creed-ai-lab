@@ -33,7 +33,7 @@ import {
 import { jiraAuthComplete, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
 import type {
   Analysis, ConfluenceAuth, CreateField, CreateFieldValues, CreateResult, Finding, FindingStatus, IssueRef, JiraAuth,
-  JiraConnection, ReportView, VeracodeSettings,
+  JiraConnection, ReportView, ScaSummary, VeracodeSettings,
 } from '../../api/veracode';
 import { ConfluenceSource } from './ConfluenceSource';
 import { JiraTokenModal } from './JiraTokenModal';
@@ -830,6 +830,7 @@ export function VeracodePage() {
                 ]}
                 style={{ marginTop: 8 }}
               />
+              <ScaSummaryTable reports={analysis.reports} />
             </>
           )}
         </ProCard>
@@ -1122,5 +1123,100 @@ function UploadProgressBar({ name, loaded, total, autoCreate }: { name: string; 
       </Typography.Text>
       <Progress percent={sent ? 100 : percent} status="active" showInfo={!sent} />
     </div>
+  );
+}
+
+/**
+ * The reports' SCA statistics, one row per report and a total when there are several — the same table as the
+ * workbook's "SCA summary" sheet. A count the report does not state is "—", not 0.
+ */
+function ScaSummaryTable({ reports }: { reports: ReportView[] }) {
+  const { t } = useI18n();
+  const rows = reports.filter((r): r is ReportView & { sca: ScaSummary } => r.sca != null);
+  if (rows.length === 0) return null;
+  const levels = rows[0].sca.bySeverity.map((l) => l.severity);
+  const stated = (n: number | null) => n ?? '—';
+  const sum = (pick: (s: ScaSummary) => number | null) => rows.reduce((acc, r) => acc + (pick(r.sca) ?? 0), 0);
+  const maxCvss = rows.reduce<number | null>(
+    (acc, r) => (r.sca.maxCvss != null && (acc == null || r.sca.maxCvss > acc) ? r.sca.maxCvss : acc), null);
+  const levelColor = (severity: string) => SEVERITY_COLOR[Math.max(0, severityRank(severity))];
+
+  const columns: TableColumnsType<ReportView & { sca: ScaSummary }> = [
+    {
+      title: t('veracode.sca.report'),
+      key: 'report',
+      fixed: 'left',
+      width: 220,
+      render: (_, r) => (
+        <Text ellipsis={{ tooltip: r.fileName }} style={{ maxWidth: 200 }}>{r.appName ?? r.fileName}</Text>
+      ),
+    },
+    { title: t('veracode.sca.thirdParty'), key: 'thirdParty', align: 'right', render: (_, r) => stated(r.sca.thirdPartyComponents) },
+    { title: t('veracode.sca.vulnerableComponents'), key: 'vulnerable', align: 'right', render: (_, r) => r.sca.vulnerableComponents },
+    {
+      title: t('veracode.sca.policy'),
+      key: 'policy',
+      render: (_, r) => r.sca.violatesPolicy == null ? '—' : (
+        <Space size={4}>
+          <Tag color={r.sca.violatesPolicy ? 'error' : 'success'}>
+            {t(r.sca.violatesPolicy ? 'veracode.sca.yes' : 'veracode.sca.no')}
+          </Tag>
+          {r.sca.componentsViolatedPolicy != null
+            && t('veracode.sca.policyComponents', { count: r.sca.componentsViolatedPolicy })}
+        </Space>
+      ),
+    },
+    { title: t('veracode.sca.blacklisted'), key: 'blacklisted', align: 'right', render: (_, r) => stated(r.sca.blacklistedComponents) },
+    {
+      title: <Tooltip title={t('veracode.sca.vulnerabilitiesHint')}>{t('veracode.sca.vulnerabilities')}</Tooltip>,
+      key: 'vulnerabilities',
+      align: 'right',
+      render: (_, r) => <Text strong>{r.sca.vulnerabilities}</Text>,
+    },
+    ...levels.map((severity, i) => ({
+      title: <Tag color={levelColor(severity)} style={{ marginInlineEnd: 0 }}>{severity}</Tag>,
+      key: `level-${severity}`,
+      align: 'right' as const,
+      // a zero stays plain so the levels that do have findings stand out
+      render: (_: unknown, r: ReportView & { sca: ScaSummary }) => {
+        const n = r.sca.bySeverity[i]?.count ?? 0;
+        return n > 0 ? <Tag color={levelColor(severity)} style={{ marginInlineEnd: 0 }}>{n}</Tag> : 0;
+      },
+    })),
+    { title: t('veracode.sca.unknown'), key: 'unknown', align: 'right', render: (_, r) => r.sca.unknownSeverity },
+    { title: t('veracode.sca.maxCvss'), key: 'maxCvss', align: 'right', render: (_, r) => r.sca.maxCvss ?? '—' },
+    { title: t('veracode.sca.mitigated'), key: 'mitigated', align: 'right', render: (_, r) => r.sca.mitigated },
+  ];
+
+  return (
+    <>
+      <Typography.Title level={5} style={{ marginTop: 16 }}>{t('veracode.sca.title')}</Typography.Title>
+      <Table<ReportView & { sca: ScaSummary }>
+        size="small"
+        rowKey="fileName"
+        pagination={false}
+        dataSource={rows}
+        columns={columns}
+        // as wide as its headers: a fixed width broke the English ones mid-word
+        scroll={{ x: 'max-content' }}
+        summary={() => rows.length < 2 ? null : (
+          <Table.Summary.Row>
+            <Table.Summary.Cell index={0}><Text strong>{t('veracode.sca.total')}</Text></Table.Summary.Cell>
+            <Table.Summary.Cell index={1} align="right">{sum((s) => s.thirdPartyComponents)}</Table.Summary.Cell>
+            <Table.Summary.Cell index={2} align="right">{sum((s) => s.vulnerableComponents)}</Table.Summary.Cell>
+            {/* yes / no has no sum */}
+            <Table.Summary.Cell index={3} />
+            <Table.Summary.Cell index={4} align="right">{sum((s) => s.blacklistedComponents)}</Table.Summary.Cell>
+            <Table.Summary.Cell index={5} align="right"><Text strong>{sum((s) => s.vulnerabilities)}</Text></Table.Summary.Cell>
+            {levels.map((_, i) => (
+              <Table.Summary.Cell key={i} index={6 + i} align="right">{sum((s) => s.bySeverity[i]?.count ?? 0)}</Table.Summary.Cell>
+            ))}
+            <Table.Summary.Cell index={6 + levels.length} align="right">{sum((s) => s.unknownSeverity)}</Table.Summary.Cell>
+            <Table.Summary.Cell index={7 + levels.length} align="right">{maxCvss ?? '—'}</Table.Summary.Cell>
+            <Table.Summary.Cell index={8 + levels.length} align="right">{sum((s) => s.mitigated)}</Table.Summary.Cell>
+          </Table.Summary.Row>
+        )}
+      />
+    </>
   );
 }

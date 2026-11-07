@@ -237,7 +237,7 @@ public class VeracodeAnalysisService {
             VeracodeXmlParser.ReportInfo info = file.report().info();
             ReportView view = new ReportView(file.filename(), info.appName(), info.appId(), info.version(),
                     file.affectedVersion(), upload.versionOverridden(), info.policyName(), info.policyCompliance(),
-                    info.generationDate());
+                    info.generationDate(), file.report().sca());
             reports.add(view);
             byApplication.putIfAbsent(info.appName() == null ? "" : info.appName(), view);
             rows.addAll(file.report().rows());

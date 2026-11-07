@@ -118,6 +118,12 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 - **`spring.config.additional-location` is a default property set in `main()` (`application()`)**, so
   `@SpringBootTest` never sees it — test it through `CreedResourceVeracodeApplication.application()`
   (`ExternalConfigDirTest`). It is not honoured from `application.yml`: Boot reads it before any config file is loaded.
+- **SCA statistics = `ScaSummary` per report** (`ReportView.sca`, page table + xlsx *SCA summary*): stated
+  attributes of `<software_composition_analysis>` are `Integer`/`Boolean`, `null` when absent — never default them
+  to 0, which would claim SCA found nothing. Counted values are the report's own (mitigated excluded, before
+  `Finding.group`), so `vulnerabilities` ≥ the finding count. `bySeverity` always lists all six levels, Very High
+  first, so every report has the same columns. An analysis cached in the page before this has `sca` absent → the
+  table skips it.
 - **No "Fixed version" field (removed 2026-11-06)**: the detailed report XML's SCA `component` / `vulnerability`
   carry no fix / safe version, so the column was always empty since the XML became the only source. Bringing it
   back needs another source (e.g. Veracode's SCA REST API), not a parser tweak.

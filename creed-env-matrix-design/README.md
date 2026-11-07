@@ -532,7 +532,12 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   and after a restart it has to be uploaded again.
 - **Filters**: Jira status / priority / assignee / affects version; the search box fuzzy-matches CVE, title,
   component, Jira key and Jira title.
-- **Export Excel** downloads a fresh analysis (sheet *Findings* + sheet *Source*).
+- **SCA statistics** under the reports table, one row per report (a *Total* row with several): third-party
+  components, vulnerable components, policy violation (+ how many components violate it), blacklisted components,
+  vulnerabilities, the count per severity (Very High … Informational), max CVSS, mitigated (skipped). Counted as
+  the report lists them — one CVE listed twice for a jar counts twice here and once in the findings table. A count
+  the report does not state shows "—", not 0.
+- **Export Excel** downloads a fresh analysis (sheets *Findings*, *SCA summary* — the same statistics — and *Source*).
 
 ### Migration sync risk (`/migration-risk`)
 

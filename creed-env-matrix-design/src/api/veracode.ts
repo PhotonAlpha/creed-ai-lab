@@ -69,6 +69,28 @@ export interface ReportView {
   policyName: string | null;
   policyCompliance: string | null;
   generatedAt: string | null;
+  /** `null` only in an analysis cached before the field existed. */
+  sca: ScaSummary | null;
+}
+
+/**
+ * A report's SCA statistics: what `<software_composition_analysis>` states (`null` when the report does not), and
+ * what was counted in its `vulnerable_components`. Counts are the report's, before one CVE listed twice for a jar
+ * is merged into one finding — `vulnerabilities` can exceed the findings table.
+ */
+export interface ScaSummary {
+  thirdPartyComponents: number | null;
+  violatesPolicy: boolean | null;
+  componentsViolatedPolicy: number | null;
+  blacklistedComponents: number | null;
+  vulnerableComponents: number;
+  /** Mitigated ones excluded — they are `mitigated`. */
+  vulnerabilities: number;
+  mitigated: number;
+  /** Very High first; all six levels, 0 included. */
+  bySeverity: { severity: string; count: number }[];
+  unknownSeverity: number;
+  maxCvss: number | null;
 }
 
 /**

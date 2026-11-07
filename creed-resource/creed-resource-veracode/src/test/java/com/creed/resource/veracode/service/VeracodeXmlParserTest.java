@@ -18,6 +18,54 @@ class VeracodeXmlParserTest {
     }
 
     @Test
+    void summarisesTheScaSection() {
+        ParsedReport report = parse("""
+                <detailedreport app_name="shop" version="1.0">
+                  <software_composition_analysis third_party_components="40" violate_policy="true"
+                                                 components_violated_policy="2" blacklisted_components="x">
+                    <vulnerable_components>
+                      <component library="a" file_name="a.jar"><vulnerabilities>
+                        <vulnerability cve_id="CVE-1" severity="5" cvss_score="9.8"/>
+                        <vulnerability cve_id="CVE-2" severity="4" cvss_score="7.5"/>
+                        <vulnerability cve_id="CVE-3" severity="4" mitigation="true" cvss_score="10.0"/>
+                      </vulnerabilities></component>
+                      <component library="b" file_name="b.jar"><vulnerabilities>
+                        <vulnerability cve_id="CVE-4" severity_desc="Whatever"/>
+                        <vulnerability cve_id="CVE-5" severity="0"/>
+                      </vulnerabilities></component>
+                    </vulnerable_components>
+                  </software_composition_analysis>
+                </detailedreport>
+                """);
+
+        ScaSummary sca = report.sca();
+        assertThat(sca.thirdPartyComponents()).isEqualTo(40);
+        assertThat(sca.violatesPolicy()).isTrue();
+        assertThat(sca.componentsViolatedPolicy()).isEqualTo(2);
+        // not a number: empty and a warning, never a failed upload
+        assertThat(sca.blacklistedComponents()).isNull();
+        assertThat(report.warnings()).anyMatch(w -> w.contains("blacklisted_components 'x'"));
+        assertThat(sca.vulnerableComponents()).isEqualTo(2);
+        // the mitigated one is neither counted nor the highest CVSS
+        assertThat(sca.vulnerabilities()).isEqualTo(4);
+        assertThat(sca.mitigated()).isEqualTo(1);
+        assertThat(sca.maxCvss()).isEqualTo(9.8);
+        assertThat(sca.bySeverity()).extracting(ScaSummary.SeverityCount::severity)
+                .containsExactlyElementsOf(ScaSummary.LEVELS);
+        assertThat(sca.bySeverity()).extracting(ScaSummary.SeverityCount::count).containsExactly(1, 1, 0, 0, 0, 1);
+        assertThat(sca.unknownSeverity()).isEqualTo(1);
+    }
+
+    @Test
+    void aReportWithoutAnScaSectionHasNoStatedCounts() {
+        ScaSummary sca = parse("<detailedreport app_name=\"shop\"/>").sca();
+        assertThat(sca.thirdPartyComponents()).isNull();
+        assertThat(sca.violatesPolicy()).isNull();
+        assertThat(sca.vulnerabilities()).isZero();
+        assertThat(sca.maxCvss()).isNull();
+    }
+
+    @Test
     void readsOnlyTheScaSectionWithAnyNamespace() {
         ParsedReport report = parse("""
                 <detailedreport xmlns="https://www.veracode.com/schema/reports/export/9.9" app_name="shop" version="1.0"

@@ -107,6 +107,16 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.reports[0].versionOverridden").value(false))
                 .andExpect(jsonPath("$.reports[0].policyName").value("Creed Default"))
                 .andExpect(jsonPath("$.reports[0].policyCompliance").value("Did Not Pass"))
+                // the sample's software_composition_analysis: stated, then counted (one mitigated, skipped)
+                .andExpect(jsonPath("$.reports[0].sca.thirdPartyComponents").value(57))
+                .andExpect(jsonPath("$.reports[0].sca.violatesPolicy").value(true))
+                .andExpect(jsonPath("$.reports[0].sca.componentsViolatedPolicy").value(6))
+                .andExpect(jsonPath("$.reports[0].sca.blacklistedComponents").value(0))
+                .andExpect(jsonPath("$.reports[0].sca.vulnerableComponents").value(8))
+                .andExpect(jsonPath("$.reports[0].sca.vulnerabilities").value(10))
+                .andExpect(jsonPath("$.reports[0].sca.mitigated").value(1))
+                .andExpect(jsonPath("$.reports[0].sca.maxCvss").value(10.0))
+                .andExpect(jsonPath("$.reports[0].sca.bySeverity[0].severity").value("Very High"))
                 .andExpect(jsonPath("$.projectKey").value("CREED"))
                 // the same CVE in two snakeyaml jars is two findings now: 10, not 9
                 .andExpect(jsonPath("$.counts.total").value(10))
@@ -524,11 +534,50 @@ class VeracodeApiTest {
             }
             assertThat(fills).hasSizeGreaterThan(1);
             assertThat(new java.util.HashSet<>(fills.values())).hasSameSizeAs(fills.values());
+            Sheet sca = wb.getSheet("SCA summary");
+            assertThat(wb.getSheetIndex(sca)).isEqualTo(1);
+            assertThat(sca.getRow(0).getCell(2).getStringCellValue()).isEqualTo("Third-party components");
+            assertThat(sca.getRow(0).getCell(8).getStringCellValue()).isEqualTo("Very High");
+            Row report = sca.getRow(1);
+            assertThat(report.getCell(0).getStringCellValue()).isEqualTo("detailedreport.xml");
+            assertThat(report.getCell(2).getNumericCellValue()).isEqualTo(57);
+            assertThat(report.getCell(3).getNumericCellValue()).isEqualTo(8);
+            assertThat(report.getCell(4).getStringCellValue()).isEqualTo("Yes");
+            assertThat(report.getCell(7).getNumericCellValue()).isEqualTo(10);
+            double levels = 0;
+            for (int c = 8; c < 14; c++) {
+                levels += report.getCell(c).getNumericCellValue();
+            }
+            // every counted vulnerability has one of the six levels in the sample
+            assertThat(levels).isEqualTo(10);
+            // one report: no Total row
+            assertThat(sca.getLastRowNum()).isEqualTo(1);
             Sheet source = wb.getSheet("Source");
             // a block per uploaded report, then the analysis
             assertThat(source.getRow(0).getCell(1).getStringCellValue()).isEqualTo("detailedreport.xml");
             assertThat(source.getRow(1).getCell(1).getStringCellValue()).isEqualTo("creed-platform-2026-10-06-Creed");
             assertThat(source.getRow(6).getCell(1).getStringCellValue()).isEqualTo("CREED");
+        }
+    }
+
+    @Test
+    void theScaSummarySheetTotalsSeveralReports() throws Exception {
+        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).file(otherApplication()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        byte[] xlsx = mvc.perform(get("/api/veracode/analysis/export")
+                        .param("uploadId", JsonPath.<String>read(body, "$.uploadId")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+
+        try (XSSFWorkbook wb = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
+            Sheet sca = wb.getSheet("SCA summary");
+            assertThat(sca.getRow(2).getCell(1).getStringCellValue()).isEqualTo("creed-pay-gateway-api");
+            Row total = sca.getRow(3);
+            assertThat(total.getCell(0).getStringCellValue()).isEqualTo("Total");
+            assertThat(total.getCell(2).getNumericCellValue()).isEqualTo(114);
+            assertThat(total.getCell(7).getNumericCellValue()).isEqualTo(20);
+            // yes/no has no sum; Max CVSS is the highest, not a sum
+            assertThat(total.getCell(4)).isNull();
+            assertThat(total.getCell(15).getNumericCellValue()).isEqualTo(10.0);
         }
     }
 

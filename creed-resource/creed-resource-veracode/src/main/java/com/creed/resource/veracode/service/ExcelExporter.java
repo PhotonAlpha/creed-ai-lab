@@ -31,7 +31,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * One workbook per analysis: sheet "Findings" (one row per finding, the Jira columns last) and sheet
+ * One workbook per analysis: sheet "Findings" (one row per finding, the Jira columns last), sheet "SCA summary"
+ * (one row per report: {@link ScaSummary}, the page's SCA statistics table) and sheet
  * "Source" (Veracode app, scan, policy, file, project, time, warnings) so a forwarded file still says what it was computed from.
  *
  * <p>A finding with several issues gets all their keys in one cell; the hyperlink can only point at one,
@@ -112,12 +113,99 @@ public class ExcelExporter {
             sheet.createFreezePane(0, 1);
             sheet.setAutoFilter(new CellRangeAddress(0, Math.max(0, r - 1), 0, HEADERS.length - 1));
 
+            scaSummary(wb.createSheet("SCA summary"), analysis.reports(), header, severity);
             source(wb.createSheet("Source"), analysis, header);
             wb.write(out);
             return out.toByteArray();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /**
+     * One row per report, the severity columns headed in their level's fill, and a Total row when there are
+     * several. A count the report does not state stays empty - not 0, which would claim SCA found nothing.
+     */
+    private static void scaSummary(Sheet sheet, List<ReportView> reports, CellStyle header, CellStyle[] severity) {
+        List<String> headers = new ArrayList<>(List.of("Uploaded file", "Veracode application",
+                "Third-party components", "Vulnerable components", "Violates policy", "Components violating policy",
+                "Blacklisted components", "Vulnerabilities"));
+        int firstLevel = headers.size();
+        headers.addAll(ScaSummary.LEVELS);
+        headers.addAll(List.of("Unknown severity", "Max CVSS", "Mitigated (skipped)"));
+        Row head = sheet.createRow(0);
+        for (int i = 0; i < headers.size(); i++) {
+            Cell c = head.createCell(i);
+            c.setCellValue(headers.get(i));
+            int level = i - firstLevel;
+            c.setCellStyle(level >= 0 && level < ScaSummary.LEVELS.size()
+                    ? severity[ScaSummary.LEVELS.size() - 1 - level] : header);
+            sheet.setColumnWidth(i, (i < 2 ? 30 : 14) * 256);
+        }
+        int r = 1;
+        long[] total = new long[headers.size()];
+        Double maxCvss = null;
+        for (ReportView report : reports) {
+            ScaSummary sca = report.sca();
+            Row row = sheet.createRow(r++);
+            row.createCell(0).setCellValue(report.fileName());
+            row.createCell(1).setCellValue(nullToEmpty(report.appName()));
+            if (sca == null) {
+                continue;
+            }
+            List<Object> values = new ArrayList<>(List.of(nullable(sca.thirdPartyComponents()),
+                    sca.vulnerableComponents(),
+                    sca.violatesPolicy() == null ? "" : sca.violatesPolicy() ? "Yes" : "No",
+                    nullable(sca.componentsViolatedPolicy()), nullable(sca.blacklistedComponents()),
+                    sca.vulnerabilities()));
+            sca.bySeverity().forEach(level -> values.add(level.count()));
+            values.add(sca.unknownSeverity());
+            values.add(sca.maxCvss() == null ? "" : sca.maxCvss());
+            values.add(sca.mitigated());
+            for (int i = 0; i < values.size(); i++) {
+                Cell cell = row.createCell(i + 2);
+                Object value = values.get(i);
+                if (value instanceof Integer n) {
+                    cell.setCellValue(n);
+                    total[i + 2] += n;
+                } else if (value instanceof Double d) {
+                    cell.setCellValue(d);
+                } else {
+                    cell.setCellValue(value.toString());
+                }
+            }
+            if (sca.maxCvss() != null && (maxCvss == null || sca.maxCvss() > maxCvss)) {
+                maxCvss = sca.maxCvss();
+            }
+        }
+        if (reports.size() > 1) {
+            Row row = sheet.createRow(r);
+            Cell label = row.createCell(0);
+            label.setCellValue("Total");
+            label.setCellStyle(header);
+            int maxCvssColumn = headers.indexOf("Max CVSS");
+            for (int i = 2; i < headers.size(); i++) {
+                // a yes/no column has no sum; the highest CVSS is the highest of the reports'
+                if (i == headers.indexOf("Violates policy")) {
+                    continue;
+                }
+                Cell cell = row.createCell(i);
+                if (i == maxCvssColumn) {
+                    if (maxCvss != null) {
+                        cell.setCellValue(maxCvss);
+                    }
+                } else {
+                    cell.setCellValue(total[i]);
+                }
+                cell.setCellStyle(header);
+            }
+        }
+        sheet.createFreezePane(2, 1);
+    }
+
+    /** {@code null} as an empty cell rather than 0. */
+    private static Object nullable(Integer n) {
+        return n == null ? "" : n;
     }
 
     private static void source(Sheet sheet, AnalysisResponse a, CellStyle header) {
