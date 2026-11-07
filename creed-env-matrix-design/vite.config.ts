@@ -49,6 +49,15 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           xfwd: true,
         },
+        // ccrg-tool-starter (the old ccrg-tool-ui's backend, :8600) serves `/api/admin`, `/api/prompt`,
+        // `/api/system/...` — names the catch-all below would send to env-matrix. The UI calls
+        // `/api/ccrg/...` and the prefix is stripped here. Same first-match rule as above.
+        '/api/ccrg': {
+          target: env.VITE_CCRG_TARGET ?? 'http://localhost:8600',
+          changeOrigin: true,
+          xfwd: true,
+          rewrite: (path) => path.replace(/^\/api\/ccrg/, '/api'),
+        },
         '/api': {
           target: env.VITE_API_TARGET ?? 'http://localhost:3001',
           changeOrigin: true,

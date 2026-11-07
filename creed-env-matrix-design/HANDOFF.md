@@ -348,6 +348,16 @@ Other constraints:
 
 ## Open items
 
+- **CCRG pages (`/ccrg/*`, 2026-11-07) are verified only against a throwaway stub.** They were migrated
+  from `ccrg-tool-ui` (Vue) and typecheck/build clean; rendering was checked in headless Chrome against a
+  stand-in for :8600, but no cascade was clicked through and the real backend was never reached:
+  `creed-resource/ccrg-tool-starter` does not build yet (`${mapstruct.version}` undefined in its pom).
+  First real run: check the `path-walk` cascades, the SSE progress (`/api/ccrg/sse/{id}` through the
+  Vite proxy) and both report downloads.
+- **`creed-gateway-proxy` does not route `/api/ccrg/**`.** It serves the built frontend and sends `/api/**`
+  to env-matrix, so in the deployed shape the CCRG pages have no backend until it gets a route that
+  strips `/ccrg` and targets ccrg-tool-starter (same rewrite as `vite.config.ts`).
+
 - **The arrows are participant level, by design.** A release declares which slices talk; nothing
   records which *endpoint* calls which, and drawing an endpoint-to-endpoint arrow would assert
   something the data cannot support. If per-endpoint call edges are ever wanted they need their own

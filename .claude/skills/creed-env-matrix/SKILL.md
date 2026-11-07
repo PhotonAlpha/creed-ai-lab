@@ -292,6 +292,26 @@ code. The value is read with `loadEnv` because a Vite config file runs *before* 
 
 **Conventions**: one root `ConfigProvider` in `main.tsx` (+ `AntdApp` so `App.useApp()` gives themed `message`/`modal`); cell highlighting via `onCell`→`className` and antd tokens bridged to CSS variables — **no `.ant-*` overrides**; `zh-CN.ts` typed as `Record<keyof typeof enUS, string>` so a missing translation is a compile error. Per the repo's antd skill, query `antd info <Component> --format json --version 5.29.3` before writing component code.
 
+## CCRG pages (`pages/Ccrg`, `/ccrg/*`)
+
+The old Vue `ccrg-tool-ui` migrated page for page (Pull config, GenReport, Batch export, Crossover,
+ShortcutGO, Secure, Dict). Backend `creed-resource/ccrg-tool-starter` (:8600), shares nothing with
+env-matrix. README "CCRG comparator" has the page table.
+
+- **`/api/ccrg` is stripped back to `/api` by the proxy** — the backend's `/api/admin`, `/api/prompt`,
+  `/api/system/*` would otherwise hit the env-matrix catch-all. Any other proxy (gateway-proxy) needs the
+  same rewrite.
+- **Envelope success is `code = 0`, not 200.** The old UI read `data.code || 200`, so 0 only worked by
+  being falsy. `api/ccrg.ts` accepts 0, 200 and a missing code.
+- **Report downloads answer HTTP 200 both ways** — a file on success, an `R` JSON on failure. Decide by
+  `content-type`, never by status.
+- **Batch and Crossover are one component** (`Comparison`, keyed by `mode` in `App.tsx`); `model.ts` says
+  what differs. Each page saves under its own localStorage key — the Vue pages shared one.
+- Cascade handlers take the source *as it was when picked* and mutate a `structuredClone`: answers arrive
+  after state has moved on, and the batch mode writes to both sources.
+- Pull config's tree needs **controlled** `expandedRowKeys`: `defaultExpandAllRows` only sees rows present
+  on the first render, which is empty.
+
 ## Topology graph (`pages/Topology`, `/topology`)
 
 The filtered slice as a graph: one **card node per endpoint**, boxed into a G6 **combo per

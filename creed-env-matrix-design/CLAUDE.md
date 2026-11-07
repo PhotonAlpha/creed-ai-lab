@@ -62,6 +62,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   `creed-resource-veracode`，明文 HTTP，Jira 在后端进程内 mock，自带示例 Veracode XML）。
 - 迁移同步风险：`/api/migration-risk` 单独代理到 `VITE_MIGRATION_RISK_TARGET`（`.env`：`http://localhost:18098`，
   `creed-resource-migration-risk`，明文 HTTP，后端自带示例仓库）。
+- CCRG 比较工具：`/api/ccrg` 单独代理到 `VITE_CCRG_TARGET`（`.env`：`http://localhost:8600`，
+  `creed-resource/ccrg-tool-starter`，明文 HTTP），代理去掉 `/ccrg` 前缀。
 - Splunk 会话代理：Node BFF（`server/bff.js`），审计默认存内存，开关 `SPLUNK_AUDIT_STORE=pg` / `mysql` 时写入 PostgreSQL / MySQL。
 
 ## 4. 目录结构（目标）
@@ -76,7 +78,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 │   │   ├── Splunk       # Splunk 会话代理（/splunk）
 │   │   ├── Aes          # AES 加解密（/aes）
 │   │   ├── Veracode     # Veracode 报告分析（/veracode，后端 creed-resource-veracode）
-│   │   └── MigrationRisk # 迁移同步风险（/migration-risk，后端 creed-resource-migration-risk）
+│   │   ├── MigrationRisk # 迁移同步风险（/migration-risk，后端 creed-resource-migration-risk）
+│   │   └── Ccrg         # CCRG 比较工具（/ccrg/*，迁移自 ccrg-tool-ui，后端 ccrg-tool-starter）
 │   └── api/             # 前端 API 封装
 ├── server/
 │   ├── index.(js|ts)    # mock API 服务
@@ -204,6 +207,13 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   同一 release 再次分析时，内容没变的文件沿用上次的结论。留空则只分析不保存。
 - 「对比视图」：后端 Thymeleaf 页面 `/api/migration-risk/view/diff`，RefactoringMiner 的左右对比（Monaco）视图，左边 repo1、右边 repo2；
   只有一个按钮「repo1 对比 repo2」。基线时代的「上游改动」视图和三方对比视图已去掉。
+
+### 5.8 CCRG 比较工具（`/ccrg/*`）
+- 旧 Vue 应用 `ccrg-tool-ui` 的全部页面迁移到此：拉取配置 / 生成报告 / 批量导出 / 跨项目比较 / 快捷跳转 / 安全管理 / 字典管理，
+  菜单为一个分组。页面布局参考 `ccrg-tool-ui/ui-current.png`：上方查询卡片，下方表格卡片 + 底部操作按钮。
+- 后端响应为 `R<T>` 信封 `{code, data, msg}`，成功 `code = 0`；报告下载成功返回文件、失败返回 JSON（HTTP 都是 200），按 content-type 区分。
+- 批量导出与跨项目比较共用 `pages/Ccrg/Comparison`（`mode`），差异见 `model.ts`。各页面保存的表单使用各自的 localStorage 键。
+- 详细说明见 `README.md` / `README.zh-CN.md` 的「CCRG 比较工具」一节。
 
 ## 6. 命令
 

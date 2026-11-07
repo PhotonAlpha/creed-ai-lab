@@ -4,13 +4,21 @@ import { ProLayout } from '@ant-design/pro-components';
 import { Button, theme } from 'antd';
 import {
   ApartmentOutlined,
+  BookOutlined,
   BranchesOutlined,
   BugOutlined,
+  CloudDownloadOutlined,
+  DiffOutlined,
+  FileTextOutlined,
   GlobalOutlined,
   KeyOutlined,
+  LinkOutlined,
   LockOutlined,
+  SafetyOutlined,
   SettingOutlined,
+  SwapOutlined,
   TableOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 import { useI18n } from './locales';
 import { MatrixPage } from './pages/Matrix';
@@ -20,6 +28,12 @@ import { SplunkPage } from './pages/Splunk';
 import { AesPage } from './pages/Aes';
 import { VeracodePage } from './pages/Veracode';
 import { MigrationRiskPage } from './pages/MigrationRisk';
+import { InstallPage } from './pages/Ccrg/Install';
+import { PromptPage } from './pages/Ccrg/Prompt';
+import { ComparisonPage } from './pages/Ccrg/Comparison';
+import { ShortcutPage } from './pages/Ccrg/Shortcut';
+import { SecurePage } from './pages/Ccrg/Secure';
+import { DictPage } from './pages/Ccrg/Dict';
 
 export function App() {
   const { t, toggleLang } = useI18n();
@@ -36,6 +50,9 @@ export function App() {
     '--env-matrix-conflict-border': token.colorError,
     '--env-matrix-dirty-border': token.colorWarning,
     '--env-matrix-selected-bg': token.controlItemBgActive,
+    '--ccrg-group-bg': token.colorSuccessBg,
+    '--ccrg-today-bg': token.colorSuccessBg,
+    '--ccrg-yesterday-bg': token.colorWarningBg,
   } as CSSProperties;
 
   return (
@@ -60,6 +77,21 @@ export function App() {
             { path: '/aes', name: t('nav.aes'), icon: <LockOutlined /> },
             { path: '/veracode', name: t('nav.veracode'), icon: <BugOutlined /> },
             { path: '/migration-risk', name: t('nav.migrationRisk'), icon: <BranchesOutlined /> },
+            {
+              // The old ccrg-tool-ui (Vue), migrated; backend is ccrg-tool-starter behind /api/ccrg.
+              path: '/ccrg',
+              name: t('nav.ccrg'),
+              icon: <ToolOutlined />,
+              routes: [
+                { path: '/ccrg/install', name: t('nav.ccrg.install'), icon: <CloudDownloadOutlined /> },
+                { path: '/ccrg/report', name: t('nav.ccrg.report'), icon: <FileTextOutlined /> },
+                { path: '/ccrg/batch', name: t('nav.ccrg.batch'), icon: <DiffOutlined /> },
+                { path: '/ccrg/crossover', name: t('nav.ccrg.crossover'), icon: <SwapOutlined /> },
+                { path: '/ccrg/shortcut', name: t('nav.ccrg.shortcut'), icon: <LinkOutlined /> },
+                { path: '/ccrg/secure', name: t('nav.ccrg.secure'), icon: <SafetyOutlined /> },
+                { path: '/ccrg/dict', name: t('nav.ccrg.dict'), icon: <BookOutlined /> },
+              ],
+            },
           ],
         }}
         menuItemRender={(item, dom) => <Link to={item.path ?? '/'}>{dom}</Link>}
@@ -79,6 +111,15 @@ export function App() {
           <Route path="/aes" element={<AesPage />} />
           <Route path="/veracode" element={<VeracodePage />} />
           <Route path="/migration-risk" element={<MigrationRiskPage />} />
+          <Route path="/ccrg" element={<Navigate to="/ccrg/install" replace />} />
+          <Route path="/ccrg/install" element={<InstallPage />} />
+          <Route path="/ccrg/report" element={<PromptPage />} />
+          {/* keyed: one component, two saved forms — a shared instance would carry state across */}
+          <Route path="/ccrg/batch" element={<ComparisonPage key="batch" mode="batch" />} />
+          <Route path="/ccrg/crossover" element={<ComparisonPage key="crossover" mode="crossover" />} />
+          <Route path="/ccrg/shortcut" element={<ShortcutPage />} />
+          <Route path="/ccrg/secure" element={<SecurePage />} />
+          <Route path="/ccrg/dict" element={<DictPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </ProLayout>

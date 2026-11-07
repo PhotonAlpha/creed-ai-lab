@@ -576,6 +576,35 @@ keeps unchanged verdicts, marks NEW / CHANGED / SAME, sets *synced* automaticall
 compare → export → RefactoringMiner → Java → other files → save, with a progress bar and *Cancel*. The RefactoringMiner
 run reports nothing until it ends — without a baseline it covers every differing Java file, minutes on a big project.
 
+### CCRG comparator (`/ccrg/*`)
+
+The old Vue app `ccrg-tool-ui` (Element Plus), migrated page for page onto this shell. Its backend is
+**`creed-resource/ccrg-tool-starter`** (plain HTTP :8600), reached through Vite's `/api/ccrg` proxy entry
+(`VITE_CCRG_TARGET`), which strips `/ccrg` again — the backend serves `/api/admin`, `/api/prompt`,
+`/api/system/...`, names the catch-all `/api` entry would otherwise send to env-matrix. Every answer is the
+`R<T>` envelope `{code, data, msg}`; success is `code = 0`.
+
+| Page | Route | What it does |
+|---|---|---|
+| Pull config | `/ccrg/install` | Installed releases as one tree per project; install project → release → build from Artifactory; uninstall a row, a project, or the selection |
+| GenReport | `/ccrg/report` | Compare two releases of one project / country / app, publish xlsx or HTML to Confluence (progress over SSE); list, open, delete the generated pages |
+| Batch export | `/ccrg/batch` | Combinations of two sources of the **same** project → one xlsx / HTML download |
+| Crossover | `/ccrg/crossover` | The same form, each source picking **its own** project |
+| ShortcutGO | `/ccrg/shortcut` | project → branch → release → Artifactory builds; GO copies the name and opens the build |
+| Secure management | `/ccrg/secure` | Decrypt a value with its hex symmetric key |
+| Dict management | `/ccrg/dict` | The config-folder tree the cascades walk: CRUD, copy, JSON export / import, `data.sql` dump |
+
+- **Batch vs Crossover** is one component (`pages/Ccrg/Comparison`, `mode`); `model.ts` documents the
+  difference. Within a combination, a country / app picked while both sources sit on the same release is
+  copied to the other source and locked.
+- Saved forms ("Save configuration") are per page in `localStorage` (`ccrg.batch`, `ccrg.crossover`,
+  `ccrg.prompt`, `ccrg.shortcut`). The old pages shared one key between Batch and Crossover.
+- "Create from template" is the form as JSON — copy out to share, paste in to replace.
+- Left as in the old UI: *Merge Confluence pages* is disabled. Made to work: *Reload release folder*
+  (was a no-op), Pull config's search (client-side, was a stub), the Confluence "view" link
+  (`VITE_CCRG_CONFLUENCE_BASE`; the old URL was two hosts pasted together). The guideline banner shows only
+  when `VITE_CCRG_GUIDELINE_URL` is set. Dropped: Batch's unreachable zip-upload dialog.
+
 ## 6. API
 
 Base path `/api/env-matrix`. Filters are repeated query parameters —

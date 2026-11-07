@@ -503,6 +503,32 @@ Camel XML 路由在所有路由文件中按 route id 逐步比较（from、to、
 「分析」作为后端任务运行，页面通过 Server-Sent Events 跟踪：打开 → 比较文件 → 导出 → RefactoringMiner → 比较 Java → 其他文件 → 保存，
 带进度条和「取消」。RefactoringMiner 在一次调用结束前不汇报进度 —— 没有基线时它要处理所有不同的 Java 文件，大项目需要几分钟。
 
+### CCRG 比较工具（`/ccrg/*`）
+
+旧的 Vue 应用 `ccrg-tool-ui`（Element Plus）逐页迁移到本框架。后端为 **`creed-resource/ccrg-tool-starter`**
+（明文 HTTP :8600），经 Vite 的 `/api/ccrg` 代理（`VITE_CCRG_TARGET`）访问，代理会去掉 `/ccrg` —— 后端的
+`/api/admin`、`/api/prompt`、`/api/system/...` 否则会被兜底的 `/api` 规则发往 env-matrix。所有响应都是
+`R<T>` 信封 `{code, data, msg}`，成功为 `code = 0`。
+
+| 页面 | 路由 | 功能 |
+|---|---|---|
+| 拉取配置 | `/ccrg/install` | 已安装的 release，每个项目一棵树；从 Artifactory 按 项目 → release → 构建号 安装；卸载单行、整个项目或所选 |
+| 生成报告 | `/ccrg/report` | 比较同一项目 / 国家 / 应用的两个 release，以 xlsx 或 HTML 发布到 Confluence（SSE 进度）；列出、打开、删除已生成页面 |
+| 批量导出 | `/ccrg/batch` | 多个组合，每个组合两个来源，**同一**项目 → 下载一份 xlsx / HTML |
+| 跨项目比较 | `/ccrg/crossover` | 同一表单，每个来源**各自**选择项目 |
+| 快捷跳转 | `/ccrg/shortcut` | 项目 → 分支 → release → Artifactory 构建；GO 复制名称并打开该构建 |
+| 安全管理 | `/ccrg/secure` | 用十六进制对称密钥解密一个值 |
+| 字典管理 | `/ccrg/dict` | 级联下拉所遍历的配置目录树：增删改、复制、JSON 导出 / 导入、导出 `data.sql` |
+
+- **批量导出与跨项目比较**是同一个组件（`pages/Ccrg/Comparison`，`mode` 区分），差异写在 `model.ts`。
+  同一组合内，两个来源处于同一 release 时选择的国家 / 应用会复制到另一个来源并锁定。
+- 「保存配置」按页面分别存 `localStorage`（`ccrg.batch`、`ccrg.crossover`、`ccrg.prompt`、`ccrg.shortcut`）。
+  旧页面中批量导出和跨项目比较共用一个键，互相覆盖。
+- 「从模板创建」即表单的 JSON —— 复制出来分享，粘贴进去替换。
+- 与旧 UI 一致：「合并 Confluence 页面」仍不可用。改为可用：「重新加载 Release 目录」（旧版无动作）、拉取配置的搜索
+  （前端过滤，旧版为占位）、Confluence「查看」链接（`VITE_CCRG_CONFLUENCE_BASE`；旧 URL 是两个主机拼在一起）。
+  只有设置 `VITE_CCRG_GUIDELINE_URL` 时才显示指南横幅。移除：批量导出中无法打开的 zip 上传对话框。
+
 ## 6. API
 
 基础路径 `/api/env-matrix`。过滤条件使用可重复的查询参数 —— `?tier=UAT&tier=SIT&scheme=https`

@@ -43,3 +43,16 @@ body,
 .env-matrix-row--dirty td:first-child {
   box-shadow: inset 2px 0 0 var(--env-matrix-dirty-border);
 }
+
+/*
+ * CCRG pages (the migrated ccrg-tool-ui): project rows of the Pull Config tree, and the GenReport
+ * pages generated today / yesterday. Token colours via the variables App.tsx bridges.
+ */
+.ccrg-row--group > td,
+.ccrg-row--today > td {
+  background-color: var(--ccrg-today-bg);
+}
+
+.ccrg-row--yesterday > td {
+  background-color: var(--ccrg-yesterday-bg);
+}
