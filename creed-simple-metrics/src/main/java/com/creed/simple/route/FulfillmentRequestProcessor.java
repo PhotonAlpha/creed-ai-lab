@@ -1,6 +1,6 @@
 package com.creed.simple.route;
 
-import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.ORIGINAL_REQUEST;
+import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.originalRequest;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
@@ -31,7 +31,7 @@ public class FulfillmentRequestProcessor implements Processor {
     @Override
     @SuppressWarnings("unchecked")
     public void process(Exchange exchange) {
-      log.info("FulfillmentRequestProcessor process:{}", exchange.getProperty(ORIGINAL_REQUEST, String.class));
+      log.info("FulfillmentRequestProcessor process:{}", originalRequest(exchange));
         Map<String, Object> body = exchange.getMessage().getBody(Map.class);
         boolean failCatalog = body != null && Boolean.TRUE.equals(body.get("failCatalog"));
         boolean failOrder = body != null && Boolean.TRUE.equals(body.get("failOrder"));

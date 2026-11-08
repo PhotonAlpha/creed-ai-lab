@@ -1,4 +1,4 @@
-# 在每个 processor 里拿到原始 REST 请求：exchange property `originalRequest`
+# 在每个 processor 里拿到原始 REST 请求：只读的 `originalRequest`
 
 需求：`/camel/api/fulfillment` 的每个 processor（包括 multicast 分支和 wireTap）都要知道原始请求。本文记录
 为什么 `getUnitOfWork().getOriginalInMessage()` 不行、统一的做法、`RoutePolicyFactory` 为什么能起作用、本模块两个
@@ -39,10 +39,24 @@ Camel 4.23.0 源码。
 读取：
 
 ```java
-import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.ORIGINAL_REQUEST;
+import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.originalRequest;
 
-exchange.getProperty(ORIGINAL_REQUEST, String.class)
+originalRequest(exchange)   // 没有 JSON 请求体时为 null
 ```
+
+### 只读（2026-11-08）
+
+原始请求不再存成普通 exchange property，而是 **safe-copy property**（`ExchangeExtension.setSafeCopyProperty`）：
+
+- **route 代码改不到它**：safe-copy property 在 exchange 里单独一个 map，`setProperty` / `removeProperty` /
+  `removeProperties("*")`（XML DSL 的 `<removeProperties pattern="*"/>`）都不碰这个 map；值是只有工厂类能创建的
+  不可变 record，key 是私有的。要改它只能显式调用内部 API `getExchangeExtension()`，不会是误操作。
+- **副本照样带着**：`AbstractExchange` 的拷贝构造会复制 safe-copy property，所以 multicast 分支、wireTap 副本
+  （`Exchange.copy()` / `createCorrelatedCopy`）都能读到。
+- 普通 property 做不到只读：properties 就是一个普通 Map，而 `DefaultExchange` 是 `final`，没有可拦截的写入点。
+- 代价：Simple 的 `${exchangeProperty.originalRequest}` 读不到它，XML 里要用就调 `originalRequest(exchange)`（如 `${bean:...}`）。
+- 测试：`OriginalRequestRoutePolicyFactoryTest`（`setProperty` / `removeProperties("*")` 之后、`parallelProcessing`
+  multicast 两个分支各自尝试删除 / 覆盖之后、wireTap 副本里，读到的都是原始请求；只存一次；只处理 servlet + JSON）。
 
 ## 3. `RoutePolicyFactory` 为什么能起作用
 
@@ -84,8 +98,8 @@ exchange.getProperty(ORIGINAL_REQUEST, String.class)
 | | `RestApiAuditRoutePolicyFactory` | `OriginalRequestRoutePolicyFactory` |
 |---|---|---|
 | 目的 | 每个 REST 请求结束时打一行审计日志 | 让每个 processor 都能拿到原始请求体 |
-| `onExchangeBegin` 做什么 | 记下 `CamelHttpMethod` / `CamelHttpUri` / `CamelHttpQuery`，挂一个 `RestApiAuditSynchronization`（`addOnCompletion`） | 读 JSON body 成 String、放回 body、存进 property `originalRequest` |
-| "已做过"的标记 | property `CreedRestApiAuditAttached` | property `originalRequest` 本身 |
+| `onExchangeBegin` 做什么 | 记下 `CamelHttpMethod` / `CamelHttpUri` / `CamelHttpQuery`，挂一个 `RestApiAuditSynchronization`（`addOnCompletion`） | 读 JSON body 成 String、放回 body、存成只读的 safe-copy property `originalRequest` |
+| "已做过"的标记 | property `CreedRestApiAuditAttached` | `originalRequest(exchange) != null` |
 | 为什么必须在入口做 | 后面的 `fetch-*` route 会 `removeHeaders pattern="CamelHttp*"`，到结束时请求行已经没了 | binding 之后 body 变成 Map，原始流也已读完 |
 | 输出 | 请求结束（UnitOfWork 完成）时：`CAMEL-AUDIT POST /camel/api/fulfillment status=200 in 27ms exchangeId=... route=...`，失败是 WARN | 不输出，只留下 property 给后面的 processor 用 |
 | 适用请求 | 所有 REST 请求 | 只有 `Content-Type` 含 `json` 的 |
@@ -140,16 +154,15 @@ property 挂在 exchange 上：后面处理的还是这个 exchange、或者是 
 
 ```java
 producerTemplate.send(uri, e -> {
-    e.setProperty(ORIGINAL_REQUEST, exchange.getProperty(ORIGINAL_REQUEST));
+    OriginalRequestRoutePolicyFactory.carryOver(exchange, e);   // 目标已有时不覆盖
     // ...
 });
 ```
 
 另外几点：
 
-- **复制是浅拷贝**，副本和原 exchange 指向同一个值。存 String（不可变）是安全的；改存 Map 之类可变对象，并行分支之间
-  会互相影响。
-- 在分支里改这个 property 只改到副本，不会传回主 exchange。
+- **复制是浅拷贝**，副本和原 exchange 共享同一个不可变 record（`safeCopy()` 返回自身），并行分支之间互不影响。
+- 分支里的 `setProperty("originalRequest", …)` 只是新建一个同名的普通 property，`originalRequest(exchange)` 不读它。
 - 每个请求的 body 在内存里留到 exchange 结束——JSON 接口没问题，不适合很大的请求体。
 
 ## 7. 验证

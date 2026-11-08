@@ -1,6 +1,6 @@
 package com.creed.simple.route;
 
-import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.ORIGINAL_REQUEST;
+import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.originalRequest;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
@@ -33,7 +33,7 @@ public class FulfillmentFilterProcessor implements Processor {
     @Override
     @SuppressWarnings("unchecked")
     public void process(Exchange exchange) {
-        log.info("fulfillmentFilterProcessor process:{}", exchange.getProperty(ORIGINAL_REQUEST, String.class));
+        log.info("fulfillmentFilterProcessor process:{}", originalRequest(exchange));
         Map<String, Object> aggregate = exchange.getMessage().getBody(Map.class);
         // Keys match the "source" header set by the fetch routes: "catalog" and "order".
         JsonNode catalog = (JsonNode) aggregate.get("catalog");

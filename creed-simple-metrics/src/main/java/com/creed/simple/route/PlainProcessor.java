@@ -1,6 +1,6 @@
 package com.creed.simple.route;
 
-import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.ORIGINAL_REQUEST;
+import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.originalRequest;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
@@ -12,6 +12,6 @@ import org.springframework.stereotype.Component;
 public class PlainProcessor implements Processor {
     @Override
     public void process(Exchange exchange) throws Exception {
-        log.info("PlainProcessor process:{}", exchange.getProperty(ORIGINAL_REQUEST, String.class));
+        log.info("PlainProcessor process:{}", originalRequest(exchange));
     }
 }

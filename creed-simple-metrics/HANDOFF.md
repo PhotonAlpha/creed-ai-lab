@@ -20,6 +20,12 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Current state
 
+- 2026-11-08: **the original request is read-only** — `OriginalRequestRoutePolicyFactory` stores it as a safe-copy
+  property (private key, immutable record); route code reads `originalRequest(exchange)` (the six fulfillment
+  processors switched), `carryOver(from, to)` for a `ProducerTemplate` exchange. `setProperty` / `removeProperties("*")`
+  cannot reach it, multicast / wireTap copies still carry it: `OriginalRequestRoutePolicyFactoryTest` (6). Module
+  tests 172, 2 errors that fail without this change too (`LoadBalancedRestClientConfigurationTest`,
+  `RestClientSuppliersTest`: the partner CLI keystore is missing). Build with JDK 25 (javac 21.0.11 crashes on this repo).
 - 2026-11-06: **original REST request in every processor** — `config/OriginalRequestRoutePolicyFactory` puts the
   inbound JSON body into the exchange property `originalRequest` before REST binding (once per `servlet:` exchange,
   JSON only, body put back as a String). The fulfillment processors log it. Verified on :8096 against the live

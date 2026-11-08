@@ -1,6 +1,6 @@
 package com.creed.simple.route;
 
-import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.ORIGINAL_REQUEST;
+import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.originalRequest;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
@@ -45,7 +45,7 @@ public class RemoteClusterProcessor implements Processor {
     @Override
     public void process(Exchange exchange) {
         String clusterUrl = exchange.getMessage().getHeader("clusterUrl", String.class);
-        log.info("remoteClusterProcessor {}:{}", clusterUrl, exchange.getProperty(ORIGINAL_REQUEST, String.class));
+        log.info("remoteClusterProcessor {}:{}", clusterUrl, originalRequest(exchange));
         boolean resilient = exchange.getMessage().getHeader("resilient", false, Boolean.class);
         try {
             JsonNode body = clusterRestClient.get()

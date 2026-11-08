@@ -1,6 +1,6 @@
 package com.creed.simple.route;
 
-import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.ORIGINAL_REQUEST;
+import static com.creed.simple.config.OriginalRequestRoutePolicyFactory.originalRequest;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
@@ -28,7 +28,7 @@ public class FailureResponseProcessor implements Processor {
     @Override
     @SuppressWarnings("unchecked")
     public void process(Exchange exchange) {
-        log.info("failureResponseProcessor process:{}", exchange.getProperty(ORIGINAL_REQUEST, String.class));
+        log.info("failureResponseProcessor process:{}", originalRequest(exchange));
         Map<String, Object> aggregate = exchange.getMessage().getBody(Map.class);
         int downstreamStatus = exchange.getMessage().getHeader("downstreamStatus", 502, Integer.class);
         // Map a downstream 5xx to 502 (bad gateway); pass a downstream 4xx through unchanged.

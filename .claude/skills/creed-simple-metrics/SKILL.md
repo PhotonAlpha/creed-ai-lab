@@ -117,18 +117,22 @@ pitfalls, hc5 entity-is-a-one-shot-stream lesson). Summary:
 
 ### The original REST request in every processor (`config/OriginalRequestRoutePolicyFactory`)
 
-Property `originalRequest` (`ORIGINAL_REQUEST`) = the inbound JSON body as received, set once per `servlet:`
+`originalRequest(exchange)` = the inbound JSON body as received, set once per `servlet:`
 exchange in a route policy's `onExchangeBegin` — which runs **before** the REST binding advice
 (`RouteReifier` adds the policy advice first), so the body is still raw, not the `bindingMode="json"` Map. It is a
 one-shot stream: read it, then put it back as a String (binding unmarshals that the same). JSON content types only:
-a multipart upload (tutorial API-8) must keep its stream. Exchange properties are copied into multicast branches
-and wireTap copies, so every processor on every pool sees it. **Don't use
+a multipart upload (tutorial API-8) must keep its stream. **Read-only (2026-11-08)**: stored as a *safe-copy
+property* (`ExchangeExtension.setSafeCopyProperty`, private key, immutable record) — `setProperty` /
+`removeProperty` / `removeProperties("*")` never touch that map, and `Exchange.copy()` carries it into multicast
+branches and wireTap copies, so every processor on every pool sees it. Don't turn it back into an ordinary property:
+those are a plain map and `DefaultExchange` is `final`, so nothing can guard one. Simple's
+`${exchangeProperty.originalRequest}` cannot see it. **Don't use
 `getUnitOfWork().getOriginalInMessage()`** instead: it throws `IllegalStateException` while
 `allowUseOriginalMessage` is off (Camel 4 default), and when on, each multicast branch / wireTap copy has its own
 UoW whose "original" is the body at the split; on the main exchange a second read of the cached stream is empty.
 **Not reached**: `wireTap copy="false"` (new empty exchange), anything sent with `ProducerTemplate` (new exchange —
-copy the property over by hand), an `AggregationStrategy` that builds its own result exchange, anything off-JVM.
-Shallow copy: keep the value immutable (a String). Full table + verification: `docs/camel-original-request-property.md`.
+`carryOver(from, to)`), an `AggregationStrategy` that builds its own result exchange, anything off-JVM.
+Shallow copy: the record is immutable, so copies share it. Full table + verification: `docs/camel-original-request-property.md`.
 Both `RoutePolicyFactory`s: discovered by `AbstractCamelContextFactoryBean` (`findByTypeWithName`), one policy on
 **every** route, `onExchangeBegin` fires on each route an exchange (or its multicast / wireTap copy) enters — hence the
 `servlet:` + "already done" property guard; exceptions thrown there are swallowed as a WARN, so a policy cannot reject a
