@@ -188,7 +188,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   对话框先选 **Jira Cloud**（邮箱 + API 令牌，另带 `X-Jira-User`，后端以 Basic 认证）或 **Jira Data Center**（个人访问令牌，后端以 Bearer），两者都调用 REST API v2；`base-url` 为 `*.atlassian.net` 时默认选中 Cloud。
   「测试连接」逐项显示检查结果（令牌 → 能否创建该问题类型 → 是否有影响版本字段 → 项目是否有版本），失败项给出在 Jira 中的修复方法；
   问题类型可在对话框中选择（标出哪些类型有影响版本字段），随令牌保存，以 `X-Jira-Issue-Type` 发给后端，默认取 `veracode.jira.issue-type`。
-- 页面布局默认与 Ant Design Pro 一致：ProLayout `layout="mix"`，顶部标题栏 + 左侧可折叠菜单；可在「整体风格设置」抽屉中修改（见 README 第 8a 节）。
+- 页面布局默认与 Ant Design Pro 一致：ProLayout `layout="mix"`，顶部标题栏 + 左侧可折叠菜单（ProLayout 只给第一级菜单画图标，子菜单图标由 `App.tsx` 的 `withMenuIcon` 补上）；可在「整体风格设置」抽屉中修改（见 README 第 8a 节）。
 - 表格可按关联 Jira 的属性过滤（状态 / 优先级 / 经办人 / 影响版本，多选），搜索框对 CVE、标题、组件、Jira 号与 Jira 标题做模糊匹配。
 - SCA 统计：报告表下方按报告列出 `<software_composition_analysis>` 的统计（第三方组件 / 违反策略及违规组件数 / 黑名单组件）与计数
   （有漏洞的组件 / 漏洞数 / 各严重级别 / 最高 CVSS / 已缓解），多个报告时带合计行。

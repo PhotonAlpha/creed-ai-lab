@@ -1,4 +1,5 @@
-import type { CSSProperties } from 'react';
+import { Children, cloneElement, isValidElement } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ProLayout, SettingDrawer } from '@ant-design/pro-components';
 import { Button, theme } from 'antd';
@@ -35,6 +36,20 @@ import { ComparisonPage } from './pages/Ccrg/Comparison';
 import { ShortcutPage } from './pages/Ccrg/Shortcut';
 import { SecurePage } from './pages/Ccrg/Secure';
 import { DictPage } from './pages/Ccrg/Dict';
+
+/**
+ * ProLayout draws a menu icon only on the first level (BaseMenu: `level === 0`), so the CCRG pages' icons vanished
+ * inside their group. It still renders the icon slot there, hidden: fill it when ProLayout left it empty. With split
+ * menus the same items are level 0 and already carry their icon, which this leaves alone.
+ */
+function withMenuIcon(dom: ReactNode, icon: ReactNode): ReactNode {
+  if (!icon || !isValidElement<{ children?: ReactNode }>(dom)) return dom;
+  const [slot, ...rest] = Children.toArray(dom.props.children);
+  if (!isValidElement<{ style?: CSSProperties; children?: ReactNode }>(slot) || slot.props.style?.display !== 'none') {
+    return dom;
+  }
+  return cloneElement(dom, undefined, cloneElement(slot, { style: undefined }, icon), ...rest);
+}
 
 export function App() {
   const { t, toggleLang } = useI18n();
@@ -93,7 +108,7 @@ export function App() {
             },
           ],
         }}
-        menuItemRender={(item, dom) => <Link to={item.path ?? '/'}>{dom}</Link>}
+        menuItemRender={(item, dom) => <Link to={item.path ?? '/'}>{withMenuIcon(dom, item.icon)}</Link>}
         actionsRender={() => [
           <Button key="lang" type="text" icon={<GlobalOutlined />} onClick={toggleLang}>
             {t('nav.lang')}
