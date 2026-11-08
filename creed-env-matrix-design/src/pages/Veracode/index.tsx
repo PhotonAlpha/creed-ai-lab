@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
 import {
   Alert,
@@ -28,7 +29,7 @@ import {
 } from 'antd';
 import type { TableColumnsType } from 'antd';
 import {
-  CloudDownloadOutlined, ExperimentOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined, TagOutlined, TagsOutlined,
+  CloudDownloadOutlined, CloudUploadOutlined, ExperimentOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined, TagOutlined, TagsOutlined,
 } from '@ant-design/icons';
 import { jiraAuthComplete, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
 import type {
@@ -39,6 +40,11 @@ import { ConfluenceSource } from './ConfluenceSource';
 import { JiraTokenModal } from './JiraTokenModal';
 import { emptyAuth, jiraTokenStore } from './jiraToken';
 import { pageCache } from './pageCache';
+import { SastPanel, SastSummaryTable } from './SastPanel';
+import { JiraFieldsBar } from './JiraFieldsBar';
+import { SastJiraPanel } from './SastJiraPanel';
+import { ConfluenceExportModal } from './ConfluenceExportModal';
+import { SEVERITY_COLOR, severityRank } from './severity';
 import { ApiError } from '../../api/client';
 import { useI18n } from '../../locales';
 import type { MessageKey } from '../../locales';
@@ -47,18 +53,6 @@ const { Text, Paragraph } = Typography;
 
 type StatusFilter = 'ALL' | FindingStatus;
 
-/** Veracode's scale, highest first; anything else sorts last. Same order as the backend's `Severity`. */
-const SEVERITY_RANK: Record<string, number> = {
-  'very high': 5,
-  critical: 5,
-  high: 4,
-  medium: 3,
-  low: 2,
-  'very low': 1,
-  informational: 0,
-};
-const severityRank = (s: string | null) => (s ? SEVERITY_RANK[s.trim().toLowerCase()] ?? -1 : -1);
-const SEVERITY_COLOR = ['default', 'blue', 'gold', 'orange', 'volcano', 'red'];
 
 const STATUS_COLOR: Record<FindingStatus, string> = { EXISTS: 'success', MISSING: 'error', CREATED: 'processing' };
 
@@ -167,6 +161,10 @@ export function VeracodePage() {
   /** Controlled: a literal `pageSize` would make the size changer a no-op. */
   const [page, setPage] = useState({ current: 1, pageSize: cached?.view.pageSize ?? DEFAULT_PAGE_SIZE });
   const [source, setSource] = useState<'upload' | 'confluence'>(cached?.view.source ?? 'upload');
+  /** `?tab=sast` links straight to the SAST tab. */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get('tab') === 'sast' ? 'sast' : 'sca';
+  const setTab = (next: 'sca' | 'sast') => setSearchParams(next === 'sast' ? { tab: 'sast' } : {}, { replace: true });
   const [confluencePageId, setConfluencePageId] = useState(cached?.view.confluencePageId ?? '');
 
   const [jiraToken, setJiraToken] = useState(() => jiraTokenStore.load());
@@ -178,6 +176,7 @@ export function VeracodePage() {
   );
   const [connection, setConnection] = useState<JiraConnection | null>(null);
   const [tokenOpen, setTokenOpen] = useState(false);
+  const [confluenceExportOpen, setConfluenceExportOpen] = useState(false);
   /** The page is shared: every Jira call goes with the user's own token, the backend has none to fall back on. */
   const hasToken = jiraAuthComplete(auth);
 
@@ -831,6 +830,7 @@ export function VeracodePage() {
                 style={{ marginTop: 8 }}
               />
               <ScaSummaryTable reports={analysis.reports} />
+              <SastSummaryTable reports={analysis.reports} />
             </>
           )}
         </ProCard>
@@ -866,170 +866,228 @@ export function VeracodePage() {
           />
         )}
 
-        {counts && (
-          <Row gutter={16}>
-            {/* each count in the colour of its status tag, from the theme's tokens */}
-            {([
-              ['total', counts.total, design.colorInfoBg, design.colorInfoBorder, design.colorInfoText],
-              ['EXISTS', counts.exists, design.colorSuccessBg, design.colorSuccessBorder, design.colorSuccessText],
-              ['MISSING', counts.missing, design.colorErrorBg, design.colorErrorBorder, design.colorErrorText],
-              ['CREATED', counts.created, design.colorPrimaryBg, design.colorPrimaryBorder, design.colorPrimaryText],
-              ['needsLabel', counts.needsLabel, design.colorWarningBg, design.colorWarningBorder, design.colorWarningText],
-            ] as const).map(([key, value, background, border, color]) => (
-              <Col key={key} xs={12} md={8} xl={4} flex="auto">
-                <ProCard bordered style={{ background, borderColor: border }}>
-                  <Statistic
-                    title={key === 'total' ? t('veracode.stat.total')
-                      : key === 'needsLabel' ? t('veracode.needsLabel') : t(`veracode.status.${key}` as MessageKey)}
-                    value={value}
-                    valueStyle={{ color }}
-                  />
-                </ProCard>
-              </Col>
-            ))}
-          </Row>
-        )}
+        {/* SCA and SAST share the report, the token and the export; each has its own Jira target and table */}
+        <Tabs
+          activeKey={tab}
+          onChange={(key) => setTab(key as 'sca' | 'sast')}
+          items={[
+            {
+              key: 'sca',
+              label: t('veracode.tab.sca', { count: analysis?.counts.total ?? 0 }),
+              children: (
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              {counts && (
+                <Row gutter={16}>
+                  {/* each count in the colour of its status tag, from the theme's tokens */}
+                  {([
+                    ['total', counts.total, design.colorInfoBg, design.colorInfoBorder, design.colorInfoText],
+                    ['EXISTS', counts.exists, design.colorSuccessBg, design.colorSuccessBorder, design.colorSuccessText],
+                    ['MISSING', counts.missing, design.colorErrorBg, design.colorErrorBorder, design.colorErrorText],
+                    ['CREATED', counts.created, design.colorPrimaryBg, design.colorPrimaryBorder, design.colorPrimaryText],
+                    ['needsLabel', counts.needsLabel, design.colorWarningBg, design.colorWarningBorder, design.colorWarningText],
+                  ] as const).map(([key, value, background, border, color]) => (
+                    <Col key={key} xs={12} md={8} xl={4} flex="auto">
+                      <ProCard bordered style={{ background, borderColor: border }}>
+                        <Statistic
+                          title={key === 'total' ? t('veracode.stat.total')
+                            : key === 'needsLabel' ? t('veracode.needsLabel') : t(`veracode.status.${key}` as MessageKey)}
+                          value={value}
+                          valueStyle={{ color }}
+                        />
+                      </ProCard>
+                    </Col>
+                  ))}
+                </Row>
+              )}
 
-        <ProCard
-          bordered
-          title={t('veracode.findings')}
-          extra={(
-            <Space wrap>
-              <Segmented<StatusFilter>
-                value={statusFilter}
-                onChange={setStatusFilter}
-                options={[
-                  { value: 'ALL', label: t('veracode.filter.all') },
-                  { value: 'EXISTS', label: t('veracode.status.EXISTS') },
-                  { value: 'MISSING', label: t('veracode.status.MISSING') },
-                  { value: 'CREATED', label: t('veracode.status.CREATED') },
-                ]}
-              />
-              {severalApplications && (
-                <>
-                  <Select
-                    mode="multiple"
-                    allowClear
-                    maxTagCount="responsive"
-                    placeholder={t('veracode.application.filter')}
-                    value={applications}
-                    onChange={setApplications}
-                    options={applicationList.map((a) => ({ value: a, label: a || '—' }))}
-                    style={{ width: 240 }}
-                  />
-                  <Space size={4}>
-                    <Switch size="small" checked={groupByApplication} onChange={setGroupByApplication} />
-                    <Text>{t('veracode.application.group')}</Text>
+              <ProCard
+                bordered
+                title={t('veracode.findings')}
+                extra={(
+                  <Space wrap>
+                    <Segmented<StatusFilter>
+                      value={statusFilter}
+                      onChange={setStatusFilter}
+                      options={[
+                        { value: 'ALL', label: t('veracode.filter.all') },
+                        { value: 'EXISTS', label: t('veracode.status.EXISTS') },
+                        { value: 'MISSING', label: t('veracode.status.MISSING') },
+                        { value: 'CREATED', label: t('veracode.status.CREATED') },
+                      ]}
+                    />
+                    {severalApplications && (
+                      <>
+                        <Select
+                          mode="multiple"
+                          allowClear
+                          maxTagCount="responsive"
+                          placeholder={t('veracode.application.filter')}
+                          value={applications}
+                          onChange={setApplications}
+                          options={applicationList.map((a) => ({ value: a, label: a || '—' }))}
+                          style={{ width: 240 }}
+                        />
+                        <Space size={4}>
+                          <Switch size="small" checked={groupByApplication} onChange={setGroupByApplication} />
+                          <Text>{t('veracode.application.group')}</Text>
+                        </Space>
+                      </>
+                    )}
+                    <Input.Search
+                      allowClear
+                      defaultValue={keyword}
+                      placeholder={t('veracode.search')}
+                      onSearch={setKeyword}
+                      onChange={(e) => !e.target.value && setKeyword('')}
+                      style={{ width: 280 }}
+                    />
+                    <Tooltip title={createBlocked}>
+                      <span>
+                        <Popconfirm
+                          title={t('veracode.createSelectedConfirm', { count: selected.length, project: analysis?.projectKey ?? '' })}
+                          onConfirm={() => create(selected)}
+                          disabled={selected.length === 0 || !canCreate}
+                        >
+                          <Button variant="outlined" {...CREATE_BUTTON} disabled={selected.length === 0 || !canCreate} loading={creating}>
+                            {t('veracode.createSelected', { count: selected.length })}
+                          </Button>
+                        </Popconfirm>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title={createBlocked}>
+                      <span>
+                        <Popconfirm
+                          title={t('veracode.createSelectedConfirm', { count: allMissing.length, project: analysis?.projectKey ?? '' })}
+                          onConfirm={() => create(allMissing)}
+                          disabled={allMissing.length === 0 || !canCreate}
+                        >
+                          <Button variant="solid" {...CREATE_BUTTON} disabled={allMissing.length === 0 || !canCreate} loading={creating}>
+                            {t('veracode.createAllMissing', { count: allMissing.length })}
+                          </Button>
+                        </Popconfirm>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title={createBlocked ?? t('veracode.labelAllHint')}>
+                      <span>
+                        <Popconfirm
+                          title={t('veracode.labelAllConfirm', { count: allUnlabelled.length })}
+                          onConfirm={() => create(allUnlabelled)}
+                          disabled={allUnlabelled.length === 0 || !canCreate}
+                        >
+                          <Button variant="solid" {...LABEL_BUTTON} icon={<TagsOutlined />}
+                                  disabled={allUnlabelled.length === 0 || !canCreate} loading={creating}>
+                            {t('veracode.labelAll', { count: allUnlabelled.length })}
+                          </Button>
+                        </Popconfirm>
+                      </span>
+                    </Tooltip>
+                    <Button icon={<CloudDownloadOutlined />} onClick={exportXlsx} loading={exporting} disabled={!analysis}>
+                      {t('veracode.export')}
+                    </Button>
+                    {settings?.confluenceBaseUrl && (
+                      <Tooltip title={t('veracode.confluenceExport.hint')}>
+                        <Button icon={<CloudUploadOutlined />} disabled={!analysis}
+                                onClick={() => (hasToken ? setConfluenceExportOpen(true) : setTokenOpen(true))}>
+                          {t('veracode.confluenceExport.button')}
+                        </Button>
+                      </Tooltip>
+                    )}
                   </Space>
-                </>
-              )}
-              <Input.Search
-                allowClear
-                defaultValue={keyword}
-                placeholder={t('veracode.search')}
-                onSearch={setKeyword}
-                onChange={(e) => !e.target.value && setKeyword('')}
-                style={{ width: 280 }}
-              />
-              <Tooltip title={createBlocked}>
-                <span>
-                  <Popconfirm
-                    title={t('veracode.createSelectedConfirm', { count: selected.length, project: analysis?.projectKey ?? '' })}
-                    onConfirm={() => create(selected)}
-                    disabled={selected.length === 0 || !canCreate}
-                  >
-                    <Button variant="outlined" {...CREATE_BUTTON} disabled={selected.length === 0 || !canCreate} loading={creating}>
-                      {t('veracode.createSelected', { count: selected.length })}
-                    </Button>
-                  </Popconfirm>
-                </span>
-              </Tooltip>
-              <Tooltip title={createBlocked}>
-                <span>
-                  <Popconfirm
-                    title={t('veracode.createSelectedConfirm', { count: allMissing.length, project: analysis?.projectKey ?? '' })}
-                    onConfirm={() => create(allMissing)}
-                    disabled={allMissing.length === 0 || !canCreate}
-                  >
-                    <Button variant="solid" {...CREATE_BUTTON} disabled={allMissing.length === 0 || !canCreate} loading={creating}>
-                      {t('veracode.createAllMissing', { count: allMissing.length })}
-                    </Button>
-                  </Popconfirm>
-                </span>
-              </Tooltip>
-              <Tooltip title={createBlocked ?? t('veracode.labelAllHint')}>
-                <span>
-                  <Popconfirm
-                    title={t('veracode.labelAllConfirm', { count: allUnlabelled.length })}
-                    onConfirm={() => create(allUnlabelled)}
-                    disabled={allUnlabelled.length === 0 || !canCreate}
-                  >
-                    <Button variant="solid" {...LABEL_BUTTON} icon={<TagsOutlined />}
-                            disabled={allUnlabelled.length === 0 || !canCreate} loading={creating}>
-                      {t('veracode.labelAll', { count: allUnlabelled.length })}
-                    </Button>
-                  </Popconfirm>
-                </span>
-              </Tooltip>
-              <Button icon={<CloudDownloadOutlined />} onClick={exportXlsx} loading={exporting} disabled={!analysis}>
-                {t('veracode.export')}
-              </Button>
-            </Space>
-          )}
-        >
-          {analysis && issues.length > 0 && (
-            <Space wrap style={{ marginBottom: 16 }}>
-              {(['status', 'priority', 'assignee', 'version'] as const).map((key) => (
-                <Select
-                  key={key}
-                  mode="multiple"
-                  allowClear
-                  maxTagCount="responsive"
-                  placeholder={t(`veracode.jira.${key}` as MessageKey)}
-                  options={filterOptions[key]}
-                  value={jiraFilters[key]}
-                  onChange={(value: string[]) => setJiraFilters((prev) => ({ ...prev, [key]: value }))}
-                  style={{ width: 200 }}
-                />
-              ))}
-              {jiraFilterCount > 0 && (
-                <Button type="link" onClick={() => setJiraFilters(NO_JIRA_FILTERS)}>
-                  {t('veracode.jira.reset', { count: jiraFilterCount })}
-                </Button>
-              )}
-              <Text type="secondary">{t('veracode.jira.filterHint')}</Text>
-            </Space>
-          )}
-          {analysis && severalApplications && groupByApplication ? (
-            // one collapsible table per Veracode application; the selection spans them all
-            <Collapse
-              defaultActiveKey={applicationList}
-              items={applicationList
-                .filter((a) => applications.length === 0 || applications.includes(a))
-                .map((a) => {
-                  const own = rows.filter((f) => (f.application ?? '') === a);
-                  return {
-                    key: a,
-                    label: (
-                      <Space>
-                        <Text strong>{a || '—'}</Text>
-                        <Tag>{t('veracode.application.count', { count: own.length })}</Tag>
-                        {own.some((f) => f.status === 'MISSING') && (
-                          <Tag color="error">{own.filter((f) => f.status === 'MISSING').length} {t('veracode.status.MISSING')}</Tag>
-                        )}
-                      </Space>
-                    ),
-                    children: findingsTable(own, false),
-                  };
-                })}
-            />
-          ) : analysis || loading ? (
-            findingsTable(rows, true)
-          ) : (
-            <Empty description={t('veracode.empty')} />
-          )}
-        </ProCard>
+                )}
+              >
+                {analysis && issues.length > 0 && (
+                  <Space wrap style={{ marginBottom: 16 }}>
+                    {(['status', 'priority', 'assignee', 'version'] as const).map((key) => (
+                      <Select
+                        key={key}
+                        mode="multiple"
+                        allowClear
+                        maxTagCount="responsive"
+                        placeholder={t(`veracode.jira.${key}` as MessageKey)}
+                        options={filterOptions[key]}
+                        value={jiraFilters[key]}
+                        onChange={(value: string[]) => setJiraFilters((prev) => ({ ...prev, [key]: value }))}
+                        style={{ width: 200 }}
+                      />
+                    ))}
+                    {jiraFilterCount > 0 && (
+                      <Button type="link" onClick={() => setJiraFilters(NO_JIRA_FILTERS)}>
+                        {t('veracode.jira.reset', { count: jiraFilterCount })}
+                      </Button>
+                    )}
+                    <Text type="secondary">{t('veracode.jira.filterHint')}</Text>
+                  </Space>
+                )}
+                {analysis && severalApplications && groupByApplication ? (
+                  // one collapsible table per Veracode application; the selection spans them all
+                  <Collapse
+                    defaultActiveKey={applicationList}
+                    items={applicationList
+                      .filter((a) => applications.length === 0 || applications.includes(a))
+                      .map((a) => {
+                        const own = rows.filter((f) => (f.application ?? '') === a);
+                        return {
+                          key: a,
+                          label: (
+                            <Space>
+                              <Text strong>{a || '—'}</Text>
+                              <Tag>{t('veracode.application.count', { count: own.length })}</Tag>
+                              {own.some((f) => f.status === 'MISSING') && (
+                                <Tag color="error">{own.filter((f) => f.status === 'MISSING').length} {t('veracode.status.MISSING')}</Tag>
+                              )}
+                            </Space>
+                          ),
+                          children: findingsTable(own, false),
+                        };
+                      })}
+                  />
+                ) : analysis || loading ? (
+                  findingsTable(rows, true)
+                ) : (
+                  <Empty description={t('veracode.empty')} />
+                )}
+              </ProCard>
+                </Space>
+              ),
+            },
+            {
+              key: 'sast',
+              label: t('veracode.tab.sast', { count: analysis?.sast?.counts.total ?? 0 }),
+              children: (
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  {/* an analysis cached before SAST went to Jira has no `sast`: re-analyse to get it */}
+                  {analysis?.sast ? (
+                    <SastJiraPanel
+                      analysis={analysis}
+                      sast={analysis.sast}
+                      auth={auth}
+                      hasToken={hasToken}
+                      scaVersions={jiraVersions}
+                      onTokenNeeded={() => setTokenOpen(true)}
+                      onUpdate={(update) => setAnalysis((prev) => (prev ? update(prev) : prev))}
+                    />
+                  ) : (
+                    <Empty description={t(analysis ? 'veracode.sastJira.reanalyze' : 'veracode.empty')} />
+                  )}
+                  {analysis?.sastFlaws && analysis.sastFlaws.length > 0 && (
+                    <SastPanel flaws={analysis.sastFlaws} multipleApplications={analysis.reports.length > 1} />
+                  )}
+                </Space>
+              ),
+            },
+          ]}
+        />
       </Space>
+      {analysis && settings && (
+        <ConfluenceExportModal
+          open={confluenceExportOpen}
+          analysis={analysis}
+          settings={settings}
+          auth={auth}
+          jiraVersions={jiraVersions}
+          onClose={() => setConfluenceExportOpen(false)}
+        />
+      )}
       <JiraTokenModal
         open={tokenOpen}
         auth={auth}
@@ -1043,63 +1101,6 @@ export function VeracodePage() {
         onCancel={() => setTokenOpen(false)}
       />
     </PageContainer>
-  );
-}
-
-/**
- * The create screen's fields this page fills (Component/s, required fields without a Jira default). Options come
- * from Jira through the user's token; values are option ids, or the typed text.
- */
-function JiraFieldsBar({ fields, values, onChange }: {
-  fields: CreateField[];
-  values: CreateFieldValues;
-  onChange: (values: CreateFieldValues) => void;
-}) {
-  const { t } = useI18n();
-  const set = (fieldId: string, value: string[]) => onChange({ ...values, [fieldId]: value });
-  return (
-    <Space wrap align="center" style={{ marginTop: 16 }}>
-      <Tooltip title={t('veracode.fields.hint')}>
-        <Text strong>{t('veracode.fields.title')}</Text>
-      </Tooltip>
-      {fields.map((f) => {
-        const value = values[f.fieldId] ?? [];
-        const label = <Text>{f.required && <Text type="danger">* </Text>}{f.name}</Text>;
-        const control = f.kind === 'OPTIONS' ? (
-          <Select
-            mode={f.multiple ? 'multiple' : undefined}
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            maxTagCount="responsive"
-            status={f.required && value.length === 0 ? 'warning' : undefined}
-            value={f.multiple ? value : value[0]}
-            onChange={(v: string | string[] | undefined) => set(f.fieldId, v == null ? [] : Array.isArray(v) ? v : [v])}
-            options={f.options.map((o) => ({ value: o.id, label: o.label }))}
-            placeholder={t('veracode.fields.choose', { name: f.name })}
-            style={{ minWidth: 200 }}
-          />
-        ) : f.multiple ? (
-          <Select
-            mode="tags"
-            value={value}
-            onChange={(v: string[]) => set(f.fieldId, v)}
-            status={f.required && value.length === 0 ? 'warning' : undefined}
-            placeholder={t('veracode.fields.type', { name: f.name })}
-            style={{ minWidth: 200 }}
-          />
-        ) : (
-          <Input
-            value={value[0] ?? ''}
-            onChange={(e) => set(f.fieldId, e.target.value.trim() ? [e.target.value] : [])}
-            status={f.required && value.length === 0 ? 'warning' : undefined}
-            placeholder={t(f.kind === 'USER' ? 'veracode.fields.user' : 'veracode.fields.type', { name: f.name })}
-            style={{ width: 200 }}
-          />
-        );
-        return <Space key={f.fieldId} size={4}>{label}{control}</Space>;
-      })}
-    </Space>
   );
 }
 

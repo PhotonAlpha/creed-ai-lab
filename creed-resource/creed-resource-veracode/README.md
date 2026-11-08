@@ -1,7 +1,9 @@
 # creed-resource-veracode
 
 Reads an uploaded **Veracode detailed report (XML)**, finds the Jira issues that cover its SCA findings,
-creates the missing ones with the user's own Jira token and exports the result to Excel. UI: the
+creates the missing ones with the user's own Jira token and exports the result to Excel. Its SAST (static-analysis)
+flaws go to Jira too: one issue per CWE + flaw category, `{project} - CWE-89 - {category}`, in their own project and
+issue type (`veracode.jira.sast`), found and filed by that summary alone. UI: the
 `/veracode` page of `creed-env-matrix-design`.
 
 ```
@@ -12,6 +14,7 @@ Veracode detailed report (XML upload)       Jira project
                                          │          POST /rest/api/2/issue       (missing ones, user's token)
                                          ▼
                              EXISTS / MISSING / CREATED  ──► UI table · xlsx
+  └─ severity / category / cwe / staticflaws / flaw  ──► open flaws by CWE + category ──► summary search / create (SAST project)
 ```
 
 Jira is a Spring `@HttpExchange` interface (`JiraClient`) built with `HttpServiceProxyFactory` over its own
@@ -174,4 +177,7 @@ an option by id or label, any case); they are checked against the screen first: 
 
 See `application.yml`. Everything external is `${CREED_…}`; locally Jira is the in-process mock
 (`/mock/jira`, project `CREED`) and `POST /api/veracode/analysis/sample` analyses the bundled
-`sample/veracode-detailedreport.xml`.
+`sample/veracode-detailedreport.xml`. `sample/veracode-detailedreport-2.xml` is a second project
+(`creed-gateway-2026-10-08-Gateway`, same version) to upload together with it: it shares some SCA findings
+(existing issues that lack its label, one missing issue for both) and the SQL-injection SAST issue, and has
+its own findings, a mitigated one and a fixed flaw - the header comment lists them.

@@ -2,6 +2,8 @@ package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.api.dto.AnalysisResponse;
 import com.creed.resource.veracode.api.dto.FindingView;
+import com.creed.resource.veracode.domain.SastFlaw;
+import com.creed.resource.veracode.domain.SastIssue;
 import com.creed.resource.veracode.domain.Severity;
 import com.creed.resource.veracode.service.JiraLookupService.IssueRef;
 import org.apache.poi.common.usermodel.HyperlinkType;
@@ -26,13 +28,15 @@ import java.io.UncheckedIOException;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
  * One workbook per analysis: sheet "Findings" (one row per finding, the Jira columns last), sheet "SCA summary"
- * (one row per report: {@link ScaSummary}, the page's SCA statistics table) and sheet
+ * (one row per report: {@link ScaSummary}, the page's SCA statistics table), sheets "SAST flaws" (every static
+ * flaw, the most severe first) and "SAST summary" ({@link SastSummary}), and sheet
  * "Source" (Veracode app, scan, policy, file, project, time, warnings) so a forwarded file still says what it was computed from.
  *
  * <p>A finding with several issues gets all their keys in one cell; the hyperlink can only point at one,
@@ -114,6 +118,8 @@ public class ExcelExporter {
             sheet.setAutoFilter(new CellRangeAddress(0, Math.max(0, r - 1), 0, HEADERS.length - 1));
 
             scaSummary(wb.createSheet("SCA summary"), analysis.reports(), header, severity);
+            sastFlaws(wb.createSheet("SAST flaws"), analysis, helper, header, link, wrap, severity);
+            sastSummary(wb.createSheet("SAST summary"), analysis.reports(), header, severity);
             source(wb.createSheet("Source"), analysis, header);
             wb.write(out);
             return out.toByteArray();
@@ -197,6 +203,143 @@ public class ExcelExporter {
                 } else {
                     cell.setCellValue(total[i]);
                 }
+                cell.setCellStyle(header);
+            }
+        }
+        sheet.createFreezePane(2, 1);
+    }
+
+    private static final String[] SAST_HEADERS = {"Status", "Veracode application", "Issue ID", "Severity", "CWE",
+            "CWE name", "Category", "Module", "Source file", "Line", "Remediation status", "Mitigation status",
+            "Affects policy", "First found", "Jira issue(s)", "Jira status", "Description"};
+    private static final int[] SAST_WIDTHS = {12, 28, 10, 12, 10, 40, 30, 24, 44, 8, 16, 20, 12, 22, 22, 16, 80};
+    static final int SAST_SEVERITY_COLUMN = 3;
+
+    /** The Jira columns are the flaw's SAST issue's (CWE + category); empty for a fixed or mitigated flaw. */
+    private static void sastFlaws(Sheet sheet, AnalysisResponse analysis, CreationHelper helper, CellStyle header,
+                                  CellStyle link, CellStyle wrap, CellStyle[] severity) {
+        List<SastFlaw> flaws = analysis.sastFlaws();
+        java.util.Map<String, List<IssueRef>> jira = new java.util.HashMap<>();
+        if (analysis.sast() != null) {
+            analysis.sast().issues().forEach(i -> jira.put(i.id(), i.issues()));
+        }
+        Row head = sheet.createRow(0);
+        for (int i = 0; i < SAST_HEADERS.length; i++) {
+            Cell c = head.createCell(i);
+            c.setCellValue(SAST_HEADERS[i]);
+            c.setCellStyle(header);
+            sheet.setColumnWidth(i, SAST_WIDTHS[i] * 256);
+        }
+        // the page's default order: the most severe first, then by file and line
+        List<SastFlaw> sorted = flaws.stream()
+                .sorted(Comparator.comparingInt((SastFlaw f) -> -Severity.rank(f.severity()))
+                        .thenComparing(f -> nullToEmpty(f.sourceFile()))
+                        .thenComparing(f -> f.line() == null ? 0 : f.line()))
+                .toList();
+        int r = 1;
+        for (SastFlaw f : sorted) {
+            Row row = sheet.createRow(r++);
+            int c = 0;
+            row.createCell(c++).setCellValue(f.fixed() ? "Fixed" : f.mitigated() ? "Mitigated" : "Open");
+            row.createCell(c++).setCellValue(nullToEmpty(f.application()));
+            row.createCell(c++).setCellValue(nullToEmpty(f.issueId()));
+            Cell level = row.createCell(c++);
+            level.setCellValue(nullToEmpty(f.severity()));
+            int rank = Severity.rank(f.severity());
+            if (rank >= 0) {
+                level.setCellStyle(severity[rank]);
+            }
+            Cell cwe = row.createCell(c++);
+            cwe.setCellValue(nullToEmpty(f.cwe()));
+            if (f.cwe() != null) {
+                cwe.setHyperlink(url(helper, "https://cwe.mitre.org/data/definitions/"
+                        + f.cwe().substring("CWE-".length()) + ".html"));
+                cwe.setCellStyle(link);
+            }
+            row.createCell(c++).setCellValue(nullToEmpty(f.cweName()));
+            row.createCell(c++).setCellValue(nullToEmpty(f.category()));
+            row.createCell(c++).setCellValue(nullToEmpty(f.module()));
+            row.createCell(c++).setCellValue(nullToEmpty(f.sourceFile()));
+            Cell line = row.createCell(c++);
+            if (f.line() != null) {
+                line.setCellValue(f.line());
+            }
+            row.createCell(c++).setCellValue(nullToEmpty(f.remediationStatus()));
+            row.createCell(c++).setCellValue(nullToEmpty(f.mitigationStatus()));
+            row.createCell(c++).setCellValue(f.affectsPolicy() == null ? "" : f.affectsPolicy() ? "Yes" : "No");
+            row.createCell(c++).setCellValue(nullToEmpty(f.firstFound()));
+            String issueId = SastIssue.idOf(f);
+            List<IssueRef> issues = issueId == null ? List.of() : jira.getOrDefault(issueId, List.of());
+            Cell keys = row.createCell(c++);
+            keys.setCellValue(join(issues, IssueRef::key));
+            if (!issues.isEmpty() && issues.getFirst().url() != null) {
+                keys.setHyperlink(url(helper, issues.getFirst().url()));
+                keys.setCellStyle(link);
+            }
+            row.createCell(c++).setCellValue(join(issues, i -> nullToEmpty(i.status())));
+            Cell description = row.createCell(c);
+            description.setCellValue(nullToEmpty(f.description()));
+            description.setCellStyle(wrap);
+        }
+        sheet.createFreezePane(0, 1);
+        sheet.setAutoFilter(new CellRangeAddress(0, Math.max(0, r - 1), 0, SAST_HEADERS.length - 1));
+    }
+
+    /**
+     * One row per report and a Total row with several, like {@link #scaSummary}: the static analysis' rating and
+     * score, the report's stated flaw counts, then the counted ones - the severity columns count open flaws.
+     */
+    private static void sastSummary(Sheet sheet, List<ReportView> reports, CellStyle header, CellStyle[] severity) {
+        List<String> headers = new ArrayList<>(List.of("Uploaded file", "Veracode application", "Rating", "Score",
+                "Total flaws (stated)", "Not mitigated (stated)", "Flaws listed", "Open", "Mitigated", "Fixed",
+                "Open affecting policy"));
+        int firstLevel = headers.size();
+        headers.addAll(ScaSummary.LEVELS);
+        headers.add("Unknown severity");
+        Row head = sheet.createRow(0);
+        for (int i = 0; i < headers.size(); i++) {
+            Cell c = head.createCell(i);
+            c.setCellValue(headers.get(i));
+            int level = i - firstLevel;
+            c.setCellStyle(level >= 0 && level < ScaSummary.LEVELS.size()
+                    ? severity[ScaSummary.LEVELS.size() - 1 - level] : header);
+            sheet.setColumnWidth(i, (i < 2 ? 30 : 14) * 256);
+        }
+        int r = 1;
+        long[] total = new long[headers.size()];
+        for (ReportView report : reports) {
+            SastSummary sast = report.sast();
+            Row row = sheet.createRow(r++);
+            row.createCell(0).setCellValue(report.fileName());
+            row.createCell(1).setCellValue(nullToEmpty(report.appName()));
+            if (sast == null) {
+                continue;
+            }
+            row.createCell(2).setCellValue(nullToEmpty(sast.rating()));
+            List<Object> values = new ArrayList<>(List.of(nullable(sast.score()), nullable(sast.totalFlaws()),
+                    nullable(sast.flawsNotMitigated()), sast.flaws(), sast.open(), sast.mitigated(), sast.fixed(),
+                    sast.affectsPolicy()));
+            sast.bySeverity().forEach(level -> values.add(level.count()));
+            values.add(sast.unknownSeverity());
+            for (int i = 0; i < values.size(); i++) {
+                Cell cell = row.createCell(i + 3);
+                if (values.get(i) instanceof Integer n) {
+                    cell.setCellValue(n);
+                    total[i + 3] += n;
+                } else {
+                    cell.setCellValue(values.get(i).toString());
+                }
+            }
+        }
+        if (reports.size() > 1) {
+            Row row = sheet.createRow(r);
+            Cell label = row.createCell(0);
+            label.setCellValue("Total");
+            label.setCellStyle(header);
+            // rating and score are per scan: no sum
+            for (int i = 4; i < headers.size(); i++) {
+                Cell cell = row.createCell(i);
+                cell.setCellValue(total[i]);
                 cell.setCellStyle(header);
             }
         }

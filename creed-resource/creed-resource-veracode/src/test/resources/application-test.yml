@@ -32,6 +32,14 @@ veracode:
       affects-versions: [2.3.0, 9.9.9]
       fields:
         Environment Found: [Staging]
+    # SAST: the mock's project, another issue type than SCA's Bug - "creed-sast - CWE-89 - <category>"
+    sast:
+      project-key: CREED
+      issue-type: Vulnerability
+      project-name: creed-sast
+      labels: [veracode-sast]
+      defaults:
+        affects-versions: [9.9.9, 2.4.0]
   confluence:
     # Never called over the network either: the test swaps the client onto MockMvc.
     base-url: http://localhost/mock/confluence

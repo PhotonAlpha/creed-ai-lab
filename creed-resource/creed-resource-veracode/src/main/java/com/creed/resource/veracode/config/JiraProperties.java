@@ -38,6 +38,7 @@ import java.util.Map;
  * @param maxConnections pooled connections to Jira (lookups run one after another per request; this bounds
  *                       concurrent requests)
  * @param defaults       what the page preselects once the connection test has read Jira - only values Jira offers
+ * @param sast           where SAST (static-analysis) issues go - their own project, issue type, labels and summary
  */
 @Validated
 @ConfigurationProperties("veracode.jira")
@@ -55,7 +56,44 @@ public record JiraProperties(
         @DefaultValue("20") @Min(1) @Max(200) int maxConnections,
         @DefaultValue("5s") Duration connectTimeout,
         @DefaultValue("20s") Duration readTimeout,
-        @DefaultValue CreateDefaults defaults) {
+        @DefaultValue CreateDefaults defaults,
+        @DefaultValue Sast sast) {
+
+    /**
+     * SAST issues: one per CWE + flaw category ({@code categoryname}), looked up and created by their summary alone -
+     * no Affects Version/s clause in the search (asked for, 2026-11-08). Blank values fall back to the SCA ones.
+     *
+     * @param projectKey      the project SAST issues are looked up in and created in
+     * @param issueType       their issue type
+     * @param projectName     {@code {project}} in the summary, and a label - like the SCA {@code project-name}
+     * @param summaryTemplate {@code {project}}, {@code {cwe}} ({@code CWE-89}), {@code {category}} (the flaw's
+     *                        {@code categoryname}), {@code {jiraProject}}. An issue matches when its summary names the
+     *                        CWE and the category, so both must stay in it
+     * @param labels          added to every created SAST issue, with {@code projectName}
+     * @param defaults        preselected create-screen values of the SAST issue type (Affects Version/s, fields)
+     */
+    public record Sast(String projectKey, String issueType, String projectName,
+                       @DefaultValue("{project} - {cwe} - {category}") String summaryTemplate,
+                       List<String> labels, @DefaultValue CreateDefaults defaults) {
+
+        public Sast {
+            labels = labels == null ? List.of() : List.copyOf(labels);
+        }
+    }
+
+    /** The project SAST issues go to: {@code sast.project-key}, else the SCA one. */
+    public String sastProjectKey() {
+        return sast.projectKey() == null || sast.projectKey().isBlank() ? projectKey : sast.projectKey().trim();
+    }
+
+    public String sastIssueType() {
+        return sast.issueType() == null || sast.issueType().isBlank() ? issueType : sast.issueType().trim();
+    }
+
+    /** SAST's {@code {project}}: {@code sast.project-name}, else its project key. */
+    public String sastProject() {
+        return sast.projectName() == null || sast.projectName().isBlank() ? sastProjectKey() : sast.projectName().trim();
+    }
 
     /**
      * Preselections for the page, not values forced on Jira: one Jira does not offer (a version not released yet,

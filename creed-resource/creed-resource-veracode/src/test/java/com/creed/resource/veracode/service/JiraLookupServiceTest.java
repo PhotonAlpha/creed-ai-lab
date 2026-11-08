@@ -11,6 +11,8 @@ import com.creed.resource.veracode.client.jira.JiraSearchResult;
 import com.creed.resource.veracode.client.jira.JiraVersion;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
+import com.creed.resource.veracode.domain.SastFlaw;
+import com.creed.resource.veracode.domain.SastIssue;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -277,6 +279,48 @@ class JiraLookupServiceTest {
         return service(jira, 50);
     }
 
+    private static SastIssue sastIssue(String cwe, String category) {
+        SastFlaw flaw = new SastFlaw("app", "1", "High", cwe, null, category, "a.war", "com/x/A.java", 1, null, "New",
+                "Not Mitigated", false, false, true, null, null);
+        return SastIssue.group(List.of(flaw)).getFirst();
+    }
+
+    @Test
+    void aSastIssueIsItsCweAndCategoryInTheSummary() {
+        JiraLookupService service = service(new FakeJira(), 50);
+        SastIssue sql = sastIssue("CWE-89", "SQL Injection");
+
+        // the summary is the template; the SAST project falls back to the SCA one (no sast.project-key)
+        assertThat(service.sastSummary(sql)).isEqualTo("IDB VERACODE STSA - CWE-89 - SQL Injection");
+        // spaces cannot be in a Jira label; the project name is the configured label already
+        assertThat(service.sastLabels()).containsExactly("IDB_VERACODE_STSA", "veracode");
+        assertThat(JiraLookupService.coversSast("IDB VERACODE STSA - cwe 89 - sql injection", sql)).isTrue();
+        // another CWE number, another category: not this issue
+        assertThat(JiraLookupService.coversSast("IDB VERACODE STSA - CWE-890 - SQL Injection", sql)).isFalse();
+        assertThat(JiraLookupService.coversSast("IDB VERACODE STSA - CWE-89 - Blind SQL", sql)).isFalse();
+        assertThat(JiraLookupService.coversSast("IDB VERACODE STSA - CWE-89 - SQL Injection in reports", sql)).isTrue();
+    }
+
+    @Test
+    void theSastSearchHasNoVersionClause() {
+        String jql = Jql.sastLookup("SEC", List.of(sastIssue("CWE-89", "SQL Injection"), sastIssue(null, "Odd: thing")));
+
+        assertThat(jql).isEqualTo("project = \"SEC\" AND (summary ~ \"\\\"CWE-89\\\"\" OR summary ~ \"odd thing\")"
+                + " ORDER BY key");
+    }
+
+    @Test
+    void sastCreateMetaDoesNotNeedAffectsVersion() {
+        FakeJira jira = new FakeJira();
+        jira.fields = List.of(new JiraFieldMeta("summary", "Summary", true, false, null, null, null));
+
+        JiraLookupService.CreateMeta meta = service(jira, 50).sastCreateMeta(TOKEN);
+
+        assertThat(meta.affectsVersion()).isFalse();
+        assertThat(meta.versionRequired()).isFalse();
+        assertThat(meta.versions()).isEmpty();
+    }
+
     private static JiraLookupService service(JiraClient jira, int searchBatchSize) {
         return new JiraLookupService(jira, properties("{project} - {cve}|{cwe} - {file}", searchBatchSize));
     }
@@ -288,7 +332,9 @@ class JiraLookupServiceTest {
     private static JiraProperties properties(String template, int searchBatchSize, JiraProperties.CreateDefaults defaults) {
         return new JiraProperties("http://jira", "CREED", "Bug", "creed", template, List.of("veracode"),
                 "^[^-]*-[^-]*-(.+)$", "http://jira/browse/{key}", 1, searchBatchSize, 5,
-                Duration.ofSeconds(1), Duration.ofSeconds(1), defaults);
+                Duration.ofSeconds(1), Duration.ofSeconds(1), defaults,
+                new JiraProperties.Sast(null, null, "IDB VERACODE STSA", "{project} - {cwe} - {category}",
+                        List.of("IDB VERACODE STSA", "veracode"), new JiraProperties.CreateDefaults(null, null)));
     }
 
     /** Pages of one item each (pageSize 1), so paging is walked as well. */

@@ -26,7 +26,7 @@ veracode:
   # (POST /api/veracode/analysis/sample). The Jira URLs below point at the mock by default; set
   # CREED_VERACODE_MOCK=false together with the real URL.
   mock:
-    enabled: ${CREED_VERACODE_MOCK:true}
+    enabled: ${CREED_VERACODE_MOCK:false}
 
   jira:
     # Lookup = JQL search, search-batch-size findings per call (DC /rest/api/2/search, Cloud /rest/api/3/search/jql);
@@ -70,6 +70,23 @@ veracode:
     max-connections: 20
     connect-timeout: 5s
     read-timeout: 20s
+    # SAST (static-analysis) flaws: one issue per CWE + flaw category (categoryname), open flaws only (fixed and
+    # mitigated ones are never filed). Looked up AND created by the summary alone - no Affects Version/s clause in the
+    # search; when the issue type's screen requires the field, creating files under the version chosen for SAST on
+    # the page. Own project / issue type / labels; a blank one falls back to the SCA value above.
+    sast:
+      project-key: ${CREED_JIRA_SAST_PROJECT:DT}
+      issue-type: ${CREED_JIRA_SAST_ISSUE_TYPE:Defect}
+      # {project} in the summary, and a label (spaces become _ in a label)
+      project-name: IDB VERACODE STSA
+      # {project}, {cwe} (CWE-89), {category} (the flaw's categoryname), {jiraProject}. Matching needs the CWE and the
+      # category in the summary: keep both.
+      summary-template: "{project} - {cwe} - {category}"
+      labels: ["IDB VERACODE STSA"]
+      # like jira.defaults, for the SAST issue type's create screen (affects-versions = the SAST version select)
+      defaults:
+        affects-versions: []
+        fields: {}
 
   # A Confluence page's attachments as a report source (the page lists them, the user picks .xml / .zip, this service
   # downloads and analyses them). Like Jira: no account here, every call uses the user's own token (X-Confluence-Token,
@@ -81,6 +98,13 @@ veracode:
     page-size: 50
     # Larger attachments are not downloaded (read into memory whole); a zip is then bounded by upload.max-unzipped-size
     max-download-size: ${CREED_CONFLUENCE_MAX_DOWNLOAD:50MB}
+    # "Export to Confluence": a child page of the page the user names, in its space, as the user (their Confluence
+    # token). Layout: sample/confluence-template.png, template: templates/veracode/confluence-report.html.
+    # {project} = the reports' Veracode application(s), {version} = their version - both editable on the page.
+    export-title: "{project} - {version} - Reports (SAST,SCA) - {timestamp}"
+    export-timestamp: yyyy-MM-dd HH-mm-ss
+    # {timestamp}'s zone; blank = this server's
+    export-time-zone: ${CREED_CONFLUENCE_EXPORT_ZONE:}
     max-connections: 10
     connect-timeout: 5s
     read-timeout: 60s

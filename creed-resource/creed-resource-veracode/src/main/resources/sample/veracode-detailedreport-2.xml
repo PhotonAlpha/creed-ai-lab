@@ -1,148 +1,172 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Sample Veracode detailed report (export schema 1.0), cut down to what creed-resource-veracode reads, for the
-  mock Jira (project CREED, versions 2.2.1 / 2.3.0 / 2.4.0). Against its seeded issues:
-    CVE-2021-44228, CVE-2020-36518, CVE-2021-4104   exist (CREED-101 / -103 / -104)
-    CVE-2022-22965                                   filed for 2.2.1 only -> missing for 2.3.0
-    CVE-2022-1471                                    two snakeyaml versions, one finding
-    SRCCLR-SID-29587                                 no CVE: matched and filed by the advisory id
-    CVE-2019-17571                                   mitigated -> skipped
-  The static-analysis section is ignored here (only software_composition_analysis is read) but is kept valid
-  for DefectDojo's "Veracode Scan" parser, which also reads it: last_update_time, recommendations/para and
-  mitigations/mitigation/@date are attributes that parser requires.
-  VeracodeApiTest pins these outcomes - changing a vulnerability changes the test.
+  Second sample Veracode detailed report: another project (application creed-gateway-2026-10-08-Gateway), to analyse
+  together with veracode-detailedreport.xml (creed-platform) - several projects on one page, one Confluence export.
+  Same mock Jira (project CREED, versions 2.2.1 / 2.3.0 / 2.4.0) and the same scan version 2.3.0. It overlaps the
+  platform report on purpose:
+  SCA
+    CVE-2021-44228, CVE-2020-36518   same CVE + same jar as the platform: the existing issue (CREED-101 / -103),
+                                     which lacks this application's label -> "add label"
+    CVE-2021-45046                   same CVE + jar as the platform, missing in Jira: created once, labelled for both
+    CVE-2016-1000027, CVE-2021-43797 this project only -> missing
+    CVE-2020-8908                    mitigated -> skipped
+  SAST
+    issue 1  SQL Injection (CWE-89), High            open - the same CWE + category as the platform's: one Jira for both
+    issue 2  Basic XSS (CWE-80), Medium             open, this project only
+    issue 3  Hard-coded password (CWE-259), High     fixed (remediation_status="Fixed")
+    issue 4  CRLF Injection into logs (CWE-117)      mitigated (mitigation_status="accepted"), as in the platform
+  Mock Confluence page 98765 serves it inside veracode-reports.zip. Kept valid for DefectDojo's "Veracode Scan" parser
+  like the first sample (last_update_time, recommendations/para, mitigations/mitigation/@date).
 -->
 <detailedreport xmlns="https://www.veracode.com/schema/reports/export/1.0" report_format_version="1.5"
-                account_id="12345" app_name="creed-platform-2026-11-06-Creed" app_id="1876543" analysis_id="23456789"
-                static_analysis_unit_id="34567890" sandbox_id="" first_build_submitted_date="2026-09-30 08:12:44 UTC"
-                version="2.3.1" build_id="45678901" submitter="ci-veracode" platform="Not Specified"
-                assurance_level="5" business_criticality="5" generation_date="2026-10-14 10:20:30 UTC"
-                veracode_level="VL1" total_flaws="1" flaws_not_mitigated="1" teams="creed" life_cycle_stage="Deployed"
-                is_latest_build="true" last_update_time="2026-10-14 10:20:30 UTC" policy_name="Creed Default" policy_version="3"
+                account_id="12345" app_name="creed-gateway-2026-10-08-Gateway" app_id="1876601" analysis_id="23456811"
+                static_analysis_unit_id="34567912" sandbox_id="" first_build_submitted_date="2026-10-02 07:45:10 UTC"
+                version="2.3.0" build_id="45678955" submitter="ci-veracode" platform="Not Specified"
+                assurance_level="4" business_criticality="4" generation_date="2026-10-15 06:05:12 UTC"
+                veracode_level="VL1" total_flaws="3" flaws_not_mitigated="2" teams="creed-gateway" life_cycle_stage="Deployed"
+                is_latest_build="true" last_update_time="2026-10-15 06:05:12 UTC" policy_name="Creed Default" policy_version="3"
                 policy_compliance_status="Did Not Pass" policy_rules_status="Did Not Pass" grace_period_expired="false"
                 scan_overdue="false">
-  <static-analysis rating="B" score="88" submitted_date="2026-10-14 09:01:02 UTC" published_date="2026-10-14 10:15:00 UTC"
-                   version="2.3.0" analysis_size_bytes="3456789" engine_version="20261001">
-    <modules><module name="creed-platform.war" compiler="JAVAC_17" os="Java J2SE 17" architecture="JVM" loc="120345"
-                     score="88" numflawssev0="0" numflawssev1="0" numflawssev2="0" numflawssev3="0" numflawssev4="1" numflawssev5="0"/></modules>
+  <static-analysis rating="C" score="79" submitted_date="2026-10-15 05:10:40 UTC" published_date="2026-10-15 06:00:00 UTC"
+                   version="2.3.0" analysis_size_bytes="2109876" engine_version="20261001">
+    <modules><module name="creed-gateway.jar" compiler="JAVAC_21" os="Java J2SE 21" architecture="JVM" loc="64210"
+                     score="79" numflawssev0="0" numflawssev1="0" numflawssev2="0" numflawssev3="2" numflawssev4="1" numflawssev5="0"/></modules>
   </static-analysis>
   <severity level="4">
     <category categoryid="19" categoryname="SQL Injection" pcirelated="true">
       <recommendations>
-        <para text="Use parameterized prepared statements rather than dynamically constructing SQL queries.">
-          <bulletitem text="Validate the sort column against an allow-list of known column names."/>
-        </para>
+        <para text="Use parameterized prepared statements rather than dynamically constructing SQL queries."/>
       </recommendations>
       <cwe cweid="89" cwename="Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')">
         <staticflaws>
           <flaw severity="4" categoryname="Improper Neutralization of Special Elements used in an SQL Command" count="1"
-                issueid="1" module="creed-platform.war" type="executeQuery" description="Sort column concatenated into a native query."
-                cweid="89" remediationeffort="3" exploitLevel="1" categoryid="19" pcirelated="true" date_first_occurrence="2026-09-30 08:30:00 UTC"
-                remediation_status="New" cia_impact="ppp" grace_period_expires="2026-10-30 08:30:00 UTC" affects_policy_compliance="true"
-                mitigation_status="none" mitigation_status_desc="Not Mitigated" sourcefile="ReportQueryBuilder.java" line="88"
-                sourcefilepath="com/creed/report/" scope="com.creed.report.ReportQueryBuilder" functionprototype="java.util.List build(java.lang.String)"
-                functionrelativelocation="40"/>
+                issueid="1" module="creed-gateway.jar" type="createNativeQuery" description="The route id from the path is concatenated into a native query."
+                cweid="89" remediationeffort="3" exploitLevel="1" categoryid="19" pcirelated="true" date_first_occurrence="2026-10-02 08:00:00 UTC"
+                remediation_status="New" cia_impact="ppp" grace_period_expires="2026-11-01 08:00:00 UTC" affects_policy_compliance="true"
+                mitigation_status="none" mitigation_status_desc="Not Mitigated" sourcefile="RouteRepository.java" line="63"
+                sourcefilepath="com/creed/gateway/route/" scope="com.creed.gateway.route.RouteRepository"
+                functionprototype="java.util.Optional findByRouteId(java.lang.String)" functionrelativelocation="9"/>
+        </staticflaws>
+      </cwe>
+    </category>
+    <category categoryid="10" categoryname="Credentials Management" pcirelated="true">
+      <recommendations>
+        <para text="Read credentials from a secret store or the environment; never from source code."/>
+      </recommendations>
+      <cwe cweid="259" cwename="Use of Hard-coded Password">
+        <staticflaws>
+          <flaw severity="4" categoryname="Use of Hard-coded Password" count="1"
+                issueid="3" module="creed-gateway.jar" type="javax.net.ssl.KeyManagerFactory.init" description="The keystore password is a string literal."
+                cweid="259" remediationeffort="2" exploitLevel="1" categoryid="10" pcirelated="true" date_first_occurrence="2026-10-02 08:00:00 UTC"
+                remediation_status="Fixed" cia_impact="ppn" grace_period_expires="2026-11-01 08:00:00 UTC" affects_policy_compliance="false"
+                mitigation_status="none" mitigation_status_desc="Not Mitigated" sourcefile="TlsConfiguration.java" line="31"
+                sourcefilepath="com/creed/gateway/config/" scope="com.creed.gateway.config.TlsConfiguration"
+                functionprototype="javax.net.ssl.SSLContext sslContext()" functionrelativelocation="15"/>
         </staticflaws>
       </cwe>
     </category>
   </severity>
-  <software_composition_analysis third_party_components="57" violate_policy="true" components_violated_policy="6"
+  <severity level="3">
+    <category categoryid="20" categoryname="Cross-Site Scripting (XSS)" pcirelated="true">
+      <recommendations>
+        <para text="HTML-encode untrusted data before writing it into a page."/>
+      </recommendations>
+      <cwe cweid="80" cwename="Improper Neutralization of Script-Related HTML Tags in a Web Page (Basic XSS)">
+        <staticflaws>
+          <flaw severity="3" categoryname="Improper Neutralization of Script-Related HTML Tags in a Web Page (Basic XSS)" count="1"
+                issueid="2" module="creed-gateway.jar" type="java.io.PrintWriter.write" description="The rejected path is echoed into the error page unencoded."
+                cweid="80" remediationeffort="2" exploitLevel="1" categoryid="20" pcirelated="true" date_first_occurrence="2026-10-15 05:30:00 UTC"
+                remediation_status="New" cia_impact="ppn" grace_period_expires="2027-01-13 05:30:00 UTC" affects_policy_compliance="true"
+                mitigation_status="none" mitigation_status_desc="Not Mitigated" sourcefile="GatewayErrorPage.java" line="48"
+                sourcefilepath="com/creed/gateway/web/" scope="com.creed.gateway.web.GatewayErrorPage"
+                functionprototype="void render(jakarta.servlet.http.HttpServletResponse, java.lang.String)" functionrelativelocation="22"/>
+        </staticflaws>
+      </cwe>
+    </category>
+    <category categoryid="17" categoryname="CRLF Injection" pcirelated="false">
+      <recommendations>
+        <para text="Encode or strip CR/LF from untrusted data before it is logged."/>
+      </recommendations>
+      <cwe cweid="117" cwename="Improper Output Neutralization for Logs">
+        <staticflaws>
+          <flaw severity="3" categoryname="Improper Output Neutralization for Logs" count="1"
+                issueid="4" module="creed-gateway.jar" type="org.slf4j.Logger.warn" description="The client id header is logged without neutralising line breaks."
+                cweid="117" remediationeffort="2" exploitLevel="0" categoryid="17" pcirelated="false" date_first_occurrence="2026-10-02 08:00:00 UTC"
+                remediation_status="Open" cia_impact="npn" grace_period_expires="2026-12-31 08:00:00 UTC" affects_policy_compliance="false"
+                mitigation_status="accepted" mitigation_status_desc="Mitigation Accepted" sourcefile="ClientIdFilter.java" line="39"
+                sourcefilepath="com/creed/gateway/filter/" scope="com.creed.gateway.filter.ClientIdFilter"
+                functionprototype="void doFilter(jakarta.servlet.ServletRequest, jakarta.servlet.ServletResponse, jakarta.servlet.FilterChain)"
+                functionrelativelocation="11">
+            <mitigations>
+              <mitigation action="Mitigate by Design" description="The JSON log encoder escapes control characters." user="gateway-team" date="2026-10-05 10:00:00 UTC"/>
+              <mitigation action="Approve Mitigation" description="Verified in logback-spring.xml." user="security-lead" date="2026-10-06 09:00:00 UTC"/>
+            </mitigations>
+          </flaw>
+        </staticflaws>
+      </cwe>
+    </category>
+  </severity>
+  <software_composition_analysis third_party_components="41" violate_policy="true" components_violated_policy="4"
                                  blacklisted_components="0" sca_service_available="true">
     <vulnerable_components>
-      <component component_id="c1-log4j-core" file_name="log4j-core-2.14.1.jar" sha1="9141212b8507ab50a45525b545b39d224614528b"
+      <component component_id="g1-log4j-core" file_name="log4j-core-2.14.1.jar" sha1="9141212b8507ab50a45525b545b39d224614528b"
                  vulnerabilities="2" max_cvss_score="10.0" version="2.14.1" library="log4j-core" vendor="org.apache.logging.log4j"
-                 description="The Apache Log4j Implementation" added_date="2026-09-30 08:40:00 UTC"
+                 description="The Apache Log4j Implementation" added_date="2026-10-02 08:10:00 UTC"
                  component_affects_policy_compliance="true" new="false" blacklisted="false">
-        <file_paths><file_path value="creed-platform.war#zip:WEB-INF/lib/log4j-core-2.14.1.jar"/></file_paths>
+        <file_paths><file_path value="creed-gateway.jar#zip:BOOT-INF/lib/log4j-core-2.14.1.jar"/></file_paths>
         <licenses><license name="Apache License 2.0" spdx_id="Apache-2.0" license_url="http://www.apache.org/licenses/LICENSE-2.0" risk_rating="2"/></licenses>
         <vulnerabilities>
-          <vulnerability cve_id="CVE-2021-44228" cvss_score="10.0" severity="5" cwe_id="CWE-502" first_found_date="2026-09-30 08:40:00 UTC"
+          <vulnerability cve_id="CVE-2021-44228" cvss_score="10.0" severity="5" cwe_id="CWE-502" first_found_date="2026-10-02 08:10:00 UTC"
                          cve_summary="Apache Log4j2 JNDI features do not protect against attacker-controlled LDAP and other JNDI related endpoints. An attacker who can control log messages can execute arbitrary code."
                          severity_desc="Very High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
-          <vulnerability cve_id="CVE-2021-45046" cvss_score="9.0" severity="5" cwe_id="CWE-917" first_found_date="2026-09-30 08:40:00 UTC"
+          <vulnerability cve_id="CVE-2021-45046" cvss_score="9.0" severity="5" cwe_id="CWE-917" first_found_date="2026-10-02 08:10:00 UTC"
                          cve_summary="The fix to address CVE-2021-44228 in Apache Log4j 2.15.0 was incomplete in certain non-default configurations."
                          severity_desc="Very High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
         </vulnerabilities>
       </component>
-      <component component_id="c2-spring-beans" file_name="spring-beans-5.3.17.jar" sha1="b6a7b4c3ee2c4b2f13d6d6f8d5a2c1e8f9a0b1c2"
-                 vulnerabilities="1" max_cvss_score="9.8" version="5.3.17" library="spring-beans" vendor="org.springframework"
-                 description="Spring Beans" added_date="2026-09-30 08:40:00 UTC" component_affects_policy_compliance="true" new="false" blacklisted="false">
-        <file_paths><file_path value="creed-platform.war#zip:WEB-INF/lib/spring-beans-5.3.17.jar"/></file_paths>
+      <component component_id="g2-spring-web" file_name="spring-web-5.3.17.jar" sha1="0c5c1f7e3a2b4d6f8e9a1b2c3d4e5f6a7b8c9d0e"
+                 vulnerabilities="1" max_cvss_score="9.8" version="5.3.17" library="spring-web" vendor="org.springframework"
+                 description="Spring Web" added_date="2026-10-02 08:10:00 UTC" component_affects_policy_compliance="true" new="true" blacklisted="false">
+        <file_paths><file_path value="creed-gateway.jar#zip:BOOT-INF/lib/spring-web-5.3.17.jar"/></file_paths>
         <vulnerabilities>
-          <vulnerability cve_id="CVE-2022-22965" cvss_score="9.8" severity="5" cwe_id="CWE-94"
-                         cve_summary="Spring Framework RCE via data binding on JDK 9+. A Spring MVC or WebFlux application running on JDK 9+ may be vulnerable."
+          <vulnerability cve_id="CVE-2016-1000027" cvss_score="9.8" severity="5" cwe_id="CWE-502"
+                         cve_summary="Pivotal Spring Framework HttpInvokerServiceExporter deserializes untrusted Java objects, which can lead to remote code execution."
                          severity_desc="Very High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
         </vulnerabilities>
       </component>
-      <component component_id="c3-commons-text" file_name="commons-text-1.9.jar" sha1="ba6ac8c2807490944a0a27f6f8e68cb5596b8d95"
-                 vulnerabilities="1" max_cvss_score="9.8" version="1.9" library="commons-text" vendor="org.apache.commons"
-                 added_date="2026-09-30 08:40:00 UTC" component_affects_policy_compliance="true" new="true" blacklisted="false">
-        <file_paths><file_path value="creed-platform.war#zip:WEB-INF/lib/commons-text-1.9.jar"/></file_paths>
-        <vulnerabilities>
-          <vulnerability cve_id="CVE-2022-42889" cvss_score="9.8" severity="5" cwe_id="CWE-94"
-                         cve_summary="Apache Commons Text variable interpolation allows remote code execution. StringSubstitutor default lookups (script, dns, url) are unsafe."
-                         severity_desc="Very High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
-        </vulnerabilities>
-      </component>
-      <component component_id="c4-snakeyaml-133" file_name="snakeyaml-1.33.jar" sha1="2cd0a87ff7df953f810c344bdf2fe3340b954c69"
-                 vulnerabilities="1" max_cvss_score="8.3" version="1.33" library="snakeyaml" vendor="org.yaml"
-                 component_affects_policy_compliance="true" new="false" blacklisted="false">
-        <file_paths><file_path value="creed-platform.war#zip:WEB-INF/lib/snakeyaml-1.33.jar"/></file_paths>
-        <vulnerabilities>
-          <vulnerability cve_id="CVE-2022-1471" cvss_score="8.3" severity="4" cwe_id="CWE-502"
-                         cve_summary="SnakeYaml's Constructor class does not restrict types which can be instantiated during deserialization."
-                         severity_desc="High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
-        </vulnerabilities>
-      </component>
-      <component component_id="c5-snakeyaml-130" file_name="snakeyaml-1.30.jar" sha1="8fde7fe2586328ac3c68db92045e1c8759125000"
-                 vulnerabilities="1" max_cvss_score="8.3" version="1.30" library="snakeyaml" vendor="org.yaml"
-                 component_affects_policy_compliance="true" new="false" blacklisted="false">
-        <file_paths><file_path value="creed-batch.jar#zip:BOOT-INF/lib/snakeyaml-1.30.jar"/></file_paths>
-        <vulnerabilities>
-          <vulnerability cve_id="CVE-2022-1471" cvss_score="8.3" severity="4" cwe_id="CWE-502"
-                         cve_summary="SnakeYaml's Constructor class does not restrict types which can be instantiated during deserialization."
-                         severity_desc="High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
-        </vulnerabilities>
-      </component>
-      <component component_id="c6-jackson-databind" file_name="jackson-databind-2.12.6.jar" sha1="fac216b606c1086e36acea6e572ee61572ad1670"
+      <component component_id="g3-jackson-databind" file_name="jackson-databind-2.12.6.jar" sha1="fac216b606c1086e36acea6e572ee61572ad1670"
                  vulnerabilities="1" max_cvss_score="7.5" version="2.12.6" library="jackson-databind" vendor="com.fasterxml.jackson.core"
                  component_affects_policy_compliance="true" new="false" blacklisted="false">
-        <file_paths><file_path value="creed-platform.war#zip:WEB-INF/lib/jackson-databind-2.12.6.jar"/></file_paths>
+        <file_paths><file_path value="creed-gateway.jar#zip:BOOT-INF/lib/jackson-databind-2.12.6.jar"/></file_paths>
         <vulnerabilities>
           <vulnerability cve_id="CVE-2020-36518" cvss_score="7.5" severity="4" cwe_id="CWE-787"
                          cve_summary="jackson-databind allows a Java StackOverflow exception and denial of service via a large depth of nested objects."
                          severity_desc="High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
         </vulnerabilities>
       </component>
-      <component component_id="c7-log4j" file_name="log4j-1.2.17.jar" sha1="5af35056b4d257e4b64b9e8069c0746e8b08629f"
-                 vulnerabilities="3" max_cvss_score="9.8" version="1.2.17" library="log4j" vendor="log4j"
-                 component_affects_policy_compliance="true" new="false" blacklisted="false">
-        <file_paths><file_path value="creed-legacy.war#zip:WEB-INF/lib/log4j-1.2.17.jar"/></file_paths>
+      <component component_id="g4-netty-codec-http" file_name="netty-codec-http-4.1.68.Final.jar" sha1="a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6"
+                 vulnerabilities="1" max_cvss_score="6.5" version="4.1.68.Final" library="netty-codec-http" vendor="io.netty"
+                 component_affects_policy_compliance="false" new="true" blacklisted="false">
+        <file_paths><file_path value="creed-gateway.jar#zip:BOOT-INF/lib/netty-codec-http-4.1.68.Final.jar"/></file_paths>
         <vulnerabilities>
-          <vulnerability cve_id="CVE-2021-4104" cvss_score="7.5" severity="4" cwe_id="CWE-502"
-                         cve_summary="Log4j 1.2 JMSAppender deserialization of untrusted data when the attacker has write access to the configuration."
-                         severity_desc="High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
-          <vulnerability cve_id="CVE-2022-23302" cvss_score="8.8" severity="4" cwe_id="CWE-502"
-                         cve_summary="JMSSink in all versions of Log4j 1.x is vulnerable to deserialization of untrusted data."
-                         severity_desc="High" mitigation="false" vulnerability_affects_policy_compliance="true"/>
-          <vulnerability cve_id="CVE-2019-17571" cvss_score="9.8" severity="5" cwe_id="CWE-502"
-                         cve_summary="Included in Log4j 1.2 is a SocketServer class that is vulnerable to deserialization of untrusted data."
-                         severity_desc="Very High" mitigation="true" vulnerability_affects_policy_compliance="false">
-            <mitigations>
-              <mitigation action="Mitigate by Design" description="SocketServer is never started: no log4j network receiver is configured."
-                          user="security-lead" date="2026-10-01 09:00:00 UTC"/>
-            </mitigations>
-          </vulnerability>
+          <vulnerability cve_id="CVE-2021-43797" cvss_score="6.5" severity="3" cwe_id="CWE-444"
+                         cve_summary="Netty skips control chars in header names, which may lead to HTTP request smuggling behind a proxy that does not."
+                         severity_desc="Medium" mitigation="false" vulnerability_affects_policy_compliance="false"/>
         </vulnerabilities>
       </component>
-      <component component_id="c8-netty-codec" file_name="netty-codec-4.1.68.Final.jar" sha1="d1c2b3a4e5f60718293a4b5c6d7e8f9012345678"
-                 vulnerabilities="1" max_cvss_score="5.3" version="4.1.68.Final" library="netty-codec" vendor="io.netty"
-                 component_affects_policy_compliance="false" new="true" blacklisted="false">
-        <file_paths><file_path value="creed-platform.war#zip:WEB-INF/lib/netty-codec-4.1.68.Final.jar"/></file_paths>
+      <component component_id="g5-guava" file_name="guava-30.1-jre.jar" sha1="00d0c3ce2311c9e36e73228da25a6e99b2ab826f"
+                 vulnerabilities="1" max_cvss_score="3.3" version="30.1-jre" library="guava" vendor="com.google.guava"
+                 component_affects_policy_compliance="false" new="false" blacklisted="false">
+        <file_paths><file_path value="creed-gateway.jar#zip:BOOT-INF/lib/guava-30.1-jre.jar"/></file_paths>
         <vulnerabilities>
-          <vulnerability cve_id="SRCCLR-SID-29587" cvss_score="5.3" severity="3" cwe_id="CWE-400"
-                         cve_summary="Denial of service: the Bzip2 decoder does not limit the decompressed size of a chunk."
-                         severity_desc="Medium" mitigation="false" vulnerability_affects_policy_compliance="false"/>
+          <vulnerability cve_id="CVE-2020-8908" cvss_score="3.3" severity="2" cwe_id="CWE-732"
+                         cve_summary="Guava Files.createTempDir() creates a directory readable by other users of the system."
+                         severity_desc="Low" mitigation="true" vulnerability_affects_policy_compliance="false">
+            <mitigations>
+              <mitigation action="Mitigate by Design" description="createTempDir is not used; the container runs as a single user."
+                          user="gateway-team" date="2026-10-05 10:00:00 UTC"/>
+            </mitigations>
+          </vulnerability>
         </vulnerabilities>
       </component>
     </vulnerable_components>

@@ -3,6 +3,7 @@ package com.creed.resource.veracode.api;
 import com.creed.resource.veracode.client.confluence.ConfluenceClient;
 import com.creed.resource.veracode.client.jira.JiraClient;
 import com.creed.resource.veracode.config.RemoteClientsConfiguration;
+import com.creed.resource.veracode.mock.MockConfluenceController;
 import com.creed.resource.veracode.mock.MockJiraStore;
 import com.creed.resource.veracode.service.ConfluenceToken;
 import com.creed.resource.veracode.service.JiraToken;
@@ -18,22 +19,32 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.ClientHttpRequest;
 import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.mock.http.client.MockClientHttpRequest;
+import org.springframework.mock.http.client.MockClientHttpResponse;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.client.MockMvcClientHttpRequestFactory;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -65,6 +76,9 @@ class VeracodeApiTest {
     @Autowired
     MockJiraStore jira;
 
+    @Autowired
+    MockConfluenceController confluence;
+
     /** The user's token, as the page sends it; the mock names its user after the last four characters. */
     private static final String TOKEN = "pat-0000-abcd";
 
@@ -80,6 +94,7 @@ class VeracodeApiTest {
     @BeforeEach
     void reset() {
         jira.reset();
+        confluence.reset();
         mvc = MockMvcBuilders.webAppContextSetup(context).defaultRequest(get("/").header(JiraToken.HEADER, TOKEN)).build();
         anonymous = MockMvcBuilders.webAppContextSetup(context).build();
     }
@@ -117,6 +132,17 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.reports[0].sca.mitigated").value(1))
                 .andExpect(jsonPath("$.reports[0].sca.maxCvss").value(10.0))
                 .andExpect(jsonPath("$.reports[0].sca.bySeverity[0].severity").value("Very High"))
+                // SAST statistics: not in the SCA counts (SAST's Jira half is sast.*)
+                .andExpect(jsonPath("$.reports[0].sast.rating").value("B"))
+                .andExpect(jsonPath("$.reports[0].sast.totalFlaws").value(3))
+                .andExpect(jsonPath("$.reports[0].sast.flaws").value(4))
+                .andExpect(jsonPath("$.reports[0].sast.open").value(2))
+                .andExpect(jsonPath("$.reports[0].sast.mitigated").value(1))
+                .andExpect(jsonPath("$.reports[0].sast.fixed").value(1))
+                .andExpect(jsonPath("$.reports[0].sast.affectsPolicy").value(2))
+                .andExpect(jsonPath("$.sastFlaws.length()").value(4))
+                .andExpect(jsonPath("$.sastFlaws[?(@.issueId == '2')].cwe").value(contains("CWE-78")))
+                .andExpect(jsonPath("$.sastFlaws[?(@.issueId == '2')].sourceFile").value(contains("com/creed/ops/ScriptRunner.java")))
                 .andExpect(jsonPath("$.projectKey").value("CREED"))
                 // the same CVE in two snakeyaml jars is two findings now: 10, not 9
                 .andExpect(jsonPath("$.counts.total").value(10))
@@ -384,6 +410,28 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.error").value("confluence_error"));
     }
 
+    /** {@code sample/veracode-detailedreport-2.xml}: a second project, overlapping the first on purpose (see its header). */
+    @Test
+    void twoProjectsShareTheirScaAndSastIssues() throws Exception {
+        MockMultipartFile gateway = new MockMultipartFile("file", "veracode-detailedreport-2.xml", "application/xml",
+                new ClassPathResource("sample/veracode-detailedreport-2.xml").getContentAsByteArray());
+        String gw = "creed-gateway-2026-10-08-Gateway";
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).file(gateway).param("jiraVersions", "2.3.0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reports[*].appName", contains("creed-platform-2026-10-06-Creed", gw)))
+                // 10 platform findings + 5 gateway ones (CVE-2020-8908 is mitigated)
+                .andExpect(jsonPath("$.counts.total").value(15))
+                // the platform's issue, found for the gateway too - without its label yet
+                .andExpect(jsonPath("$.findings[?(@.id=='" + gw + "|CVE-2021-44228@log4j-core-2.14.1.jar')].issues[0].key").value("CREED-101"))
+                .andExpect(jsonPath("$.findings[?(@.id=='" + gw + "|CVE-2021-44228@log4j-core-2.14.1.jar')].needsLabel").value(true))
+                .andExpect(jsonPath("$.findings[?(@.id=='" + gw + "|CVE-2016-1000027@spring-web-5.3.17.jar')].issues.length()").value(0))
+                // SAST: open flaws only; the SQL injection in both projects is one issue
+                .andExpect(jsonPath("$.sast.issues[*].cwe", contains("CWE-78", "CWE-89", "CWE-80")))
+                .andExpect(jsonPath("$.sast.issues[1].flaws.length()").value(2))
+                .andExpect(jsonPath("$.sast.issues[1].applications", contains("creed-platform-2026-10-06-Creed", gw)))
+                .andExpect(jsonPath("$.sastFlaws.length()").value(8));
+    }
+
     @Test
     void confluenceAttachmentsAreDownloadedAndAnalysed() throws Exception {
         // the xml directly, the zip through the media redirect (which refuses a token): three reports
@@ -552,12 +600,145 @@ class VeracodeApiTest {
             assertThat(levels).isEqualTo(10);
             // one report: no Total row
             assertThat(sca.getLastRowNum()).isEqualTo(1);
+            Sheet sast = wb.getSheet("SAST flaws");
+            assertThat(wb.getSheetIndex(sast)).isEqualTo(2);
+            assertThat(sast.getLastRowNum()).isEqualTo(4);
+            // the most severe first; the CWE links to MITRE
+            Row first = sast.getRow(1);
+            assertThat(first.getCell(0).getStringCellValue()).isEqualTo("Open");
+            assertThat(first.getCell(3).getStringCellValue()).isEqualTo("Very High");
+            assertThat(first.getCell(4).getHyperlink().getAddress())
+                    .isEqualTo("https://cwe.mitre.org/data/definitions/78.html");
+            assertThat(first.getCell(8).getStringCellValue()).isEqualTo("com/creed/ops/ScriptRunner.java");
+            assertThat(first.getCell(9).getNumericCellValue()).isEqualTo(42);
+            List<String> statuses = new ArrayList<>();
+            sast.forEach(row -> statuses.add(row.getCell(0).getStringCellValue()));
+            assertThat(statuses).containsExactlyInAnyOrder("Status", "Open", "Open", "Mitigated", "Fixed");
+            Row sastSummary = wb.getSheet("SAST summary").getRow(1);
+            assertThat(sastSummary.getCell(2).getStringCellValue()).isEqualTo("B");
+            assertThat(sastSummary.getCell(7).getNumericCellValue()).isEqualTo(2);
             Sheet source = wb.getSheet("Source");
             // a block per uploaded report, then the analysis
             assertThat(source.getRow(0).getCell(1).getStringCellValue()).isEqualTo("detailedreport.xml");
             assertThat(source.getRow(1).getCell(1).getStringCellValue()).isEqualTo("creed-platform-2026-10-06-Creed");
             assertThat(source.getRow(6).getCell(1).getStringCellValue()).isEqualTo("CREED");
         }
+    }
+
+    @Test
+    void sastIssuesAreFoundAndFiledByCweAndCategory() throws Exception {
+        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()))
+                .andExpect(status().isOk())
+                // two open flaws, two issues; the mitigated and the fixed one make none
+                .andExpect(jsonPath("$.sast.projectKey").value("CREED"))
+                .andExpect(jsonPath("$.sast.issueType").value("Vulnerability"))
+                .andExpect(jsonPath("$.sast.versionRequired").value(true))
+                // the configured SAST default the project has (9.9.9 is not in the mock)
+                .andExpect(jsonPath("$.sast.defaultVersions[0]").value("2.4.0"))
+                .andExpect(jsonPath("$.sast.defaultVersions.length()").value(1))
+                .andExpect(jsonPath("$.sast.error").doesNotExist())
+                .andExpect(jsonPath("$.sast.counts.total").value(2))
+                .andExpect(jsonPath("$.sast.counts.missing").value(2))
+                .andExpect(jsonPath("$.sast.issues[0].cwe").value("CWE-78"))
+                .andExpect(jsonPath("$.sast.issues[0].summary")
+                        .value("creed-sast - CWE-78 - Improper Neutralization of Special Elements used in an OS Command"))
+                .andExpect(jsonPath("$.sast.issues[0].flaws.length()").value(1))
+                // the SCA half is untouched
+                .andExpect(jsonPath("$.counts.total").value(10))
+                .andReturn().getResponse().getContentAsString();
+        String uploadId = JsonPath.read(body, "$.uploadId");
+        String cmd = JsonPath.read(body, "$.sast.issues[0].id");
+        String fields = "\"fields\":{\"components\":[\"security\"],\"customfield_10100\":\"Production\"}";
+        String request = "{\"uploadId\":\"" + uploadId + "\",\"issueIds\":[\"" + cmd + "\",\"SAST|CWE-117|x\"]," + fields;
+
+        // the issue type requires Affects Version/s: one version for SAST
+        mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON).content(request + "}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("jira_version_required"));
+        mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON)
+                        .content(request + ",\"jiraVersions\":[\"2.3.0\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.results[0].outcome").value("CREATED"))
+                // a mitigated flaw (CWE-117) is never filed
+                .andExpect(jsonPath("$.results[1].outcome").value("NOT_IN_REPORT"));
+        MockJiraStore.Issue created = jira.all().stream().filter(i -> i.summary().startsWith("creed-sast")).findFirst()
+                .orElseThrow();
+        assertThat(created.summary())
+                .isEqualTo("creed-sast - CWE-78 - Improper Neutralization of Special Elements used in an OS Command");
+        assertThat(created.issueType()).isEqualTo("Vulnerability");
+        assertThat(created.labels()).containsExactly("veracode-sast", "creed-sast");
+        assertThat(created.versions()).containsExactly("2.3.0");
+        assertThat(created.description()).contains("ScriptRunner.java", "CWE-78");
+
+        // found again by its summary alone - no version clause
+        mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON)
+                        .content(request + ",\"jiraVersions\":[\"2.3.0\"]}"))
+                .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"))
+                .andExpect(jsonPath("$.results[0].issues[0].key").value(created.key()));
+        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"jiraVersions\":[\"2.2.1\"]}"))
+                .andExpect(jsonPath("$.sast.counts.exists").value(1))
+                .andExpect(jsonPath("$.sast.issues[0].status").value("EXISTS"));
+        byte[] xlsx = mvc.perform(get("/api/veracode/analysis/export").param("uploadId", uploadId))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        try (XSSFWorkbook wb = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
+            Row first = wb.getSheet("SAST flaws").getRow(1);
+            assertThat(first.getCell(4).getStringCellValue()).isEqualTo("CWE-78");
+            assertThat(first.getCell(14).getStringCellValue()).isEqualTo(created.key());
+        }
+    }
+
+    @Test
+    void exportsTheAnalysisAsAConfluenceChildPage() throws Exception {
+        String uploadId = upload();
+        String request = "{\"uploadId\":\"" + uploadId + "\",\"parentPageId\":\"" + MockConfluenceController.PAGE
+                + "\",\"jiraVersions\":[\"2.3.0\"]}";
+
+        String body = mvc.perform(post("/api/veracode/confluence/export").header(ConfluenceToken.HEADER, "pat-wiki-9876")
+                        .contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.spaceKey").value("CREED"))
+                .andExpect(jsonPath("$.parentId").value(MockConfluenceController.PAGE))
+                .andReturn().getResponse().getContentAsString();
+        // {project} - {version} - Reports (SAST,SCA) - {yyyy-MM-dd HH-mm-ss}
+        assertThat(JsonPath.<String>read(body, "$.title")).matches(
+                "creed-platform-2026-10-06-Creed - 2\\.3\\.0 - Reports \\(SAST,SCA\\) - \\d{4}-\\d{2}-\\d{2} \\d{2}-\\d{2}-\\d{2}");
+        assertThat(JsonPath.<String>read(body, "$.url")).endsWith("pageId=" + JsonPath.read(body, "$.id"));
+
+        MockConfluenceController.CreatedPage page = confluence.createdPages().getFirst();
+        String storage = page.storage();
+        // storage format is XHTML: it must parse as XML
+        javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                .parse(new org.xml.sax.InputSource(new java.io.StringReader("<root>" + storage + "</root>")));
+        assertThat(storage).contains("<h2>SCA Issues Summary</h2>", "<h2>SCA Issues</h2>", "<h2>SAST Issues</h2>",
+                        "<th>Very High (", "<td>SCA (10)</td>", "<td>SAST (2)</td>", "<th>Total issue Count</th>")
+                // an existing issue links to Jira with its summary; a missing one is named by the summary it would get
+                .contains(">CREED-101</a>", "Not in Jira", "creed - CVE-2022-42889|CWE-94 - commons-text-1.9.jar")
+                .contains("creed-sast - CWE-78 - Improper Neutralization of Special Elements used in an OS Command")
+                // the template's sample text and Thymeleaf's own markup never reach the page
+                .doesNotContain("DT-15", "th:", "<!--")
+                // the report it was made from, attached and linked by name
+                .contains("Veracode report(s): <ac:link><ri:attachment ri:filename=\"detailedreport.xml\" />"
+                        + "<ac:link-body>detailedreport.xml</ac:link-body></ac:link>. Jira CREED");
+        assertThat(JsonPath.<List<String>>read(body, "$.attachments")).containsExactly("detailedreport.xml");
+        assertThat(page.attachments().get("detailedreport.xml"))
+                .isEqualTo(sample().getBytes());
+
+        // the page's own project and version win
+        mvc.perform(post("/api/veracode/confluence/export").header(ConfluenceToken.HEADER, "pat-wiki-9876")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request.replace("\"jiraVersions\"", "\"project\":\"Creed Platform\",\"version\":\"R26.1\",\"jiraVersions\"")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title", org.hamcrest.Matchers.startsWith("Creed Platform - R26.1 - Reports (SAST,SCA) - ")));
+        // a parent the user cannot see / that does not exist
+        mvc.perform(post("/api/veracode/confluence/export").header(ConfluenceToken.HEADER, "pat-wiki-9876")
+                        .contentType(MediaType.APPLICATION_JSON).content(request.replace(MockConfluenceController.PAGE, "424242")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("confluence_page_not_found"));
+        mvc.perform(post("/api/veracode/confluence/export").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("confluence_token_required"));
+        assertThat(confluence.createdPages()).hasSize(2);
     }
 
     @Test
@@ -768,15 +949,65 @@ class VeracodeApiTest {
                     RestClient.builder().baseUrl("http://localhost/mock/jira").requestFactory(factory).build());
         }
 
+        /**
+         * As the Jira one, except that a multipart body (attaching files) goes in as MockMvc's multipart request:
+         * MockMvcClientHttpRequestFactory hands it over as raw bytes, and a MockHttpServletRequest has no parts.
+         */
         @Bean
         @Primary
         ConfluenceClient mockMvcConfluenceClient(WebApplicationContext context) {
             AtomicReference<MockMvc> mvc = new AtomicReference<>();
-            ClientHttpRequestFactory factory = (uri, method) -> new MockMvcClientHttpRequestFactory(
-                    mvc.updateAndGet(m -> m != null ? m : MockMvcBuilders.webAppContextSetup(context).build()))
-                    .createRequest(uri, method);
+            Supplier<MockMvc> mockMvc = () -> mvc.updateAndGet(m -> m != null ? m : MockMvcBuilders.webAppContextSetup(context).build());
+            ClientHttpRequestFactory factory = (uri, method) -> new MockClientHttpRequest(method, uri) {
+                @Override
+                protected ClientHttpResponse executeInternal() throws IOException {
+                    MediaType type = getHeaders().getContentType();
+                    if (type == null || !MediaType.MULTIPART_FORM_DATA.includes(type)) {
+                        ClientHttpRequest plain = new MockMvcClientHttpRequestFactory(mockMvc.get()).createRequest(uri, method);
+                        getHeaders().forEach((name, values) -> plain.getHeaders().put(name, values));
+                        plain.getBody().write(getBodyAsBytes());
+                        return plain.execute();
+                    }
+                    var request = MockMvcRequestBuilders.multipart(method, uri);
+                    getHeaders().forEach((name, values) -> {
+                        if (!HttpHeaders.CONTENT_TYPE.equalsIgnoreCase(name)) {
+                            request.header(name, values.toArray());
+                        }
+                    });
+                    parts(getBodyAsBytes(), type.getParameter("boundary")).forEach(request::file);
+                    try {
+                        MockHttpServletResponse response = mockMvc.get().perform(request).andReturn().getResponse();
+                        MockClientHttpResponse answer = new MockClientHttpResponse(response.getContentAsByteArray(),
+                                HttpStatusCode.valueOf(response.getStatus()));
+                        response.getHeaderNames().forEach(n -> answer.getHeaders().addAll(n, response.getHeaders(n)));
+                        return answer;
+                    } catch (Exception e) {
+                        throw new IOException(e);
+                    }
+                }
+            };
             return RemoteClientsConfiguration.confluenceClient(
                     RestClient.builder().baseUrl("http://localhost/mock/confluence").requestFactory(factory).build());
+        }
+
+        /** The file parts of a multipart/form-data body. */
+        private static List<MockMultipartFile> parts(byte[] body, String boundary) {
+            String text = new String(body, StandardCharsets.ISO_8859_1);
+            List<MockMultipartFile> files = new java.util.ArrayList<>();
+            for (String part : text.split("--" + java.util.regex.Pattern.quote(boundary))) {
+                int split = part.indexOf("\r\n\r\n");
+                if (split < 0) {
+                    continue;
+                }
+                String headers = part.substring(0, split);
+                String content = part.substring(split + 4, part.length() - 2);
+                java.util.regex.Matcher name = java.util.regex.Pattern.compile("name=\"([^\"]*)\"").matcher(headers);
+                java.util.regex.Matcher filename = java.util.regex.Pattern.compile("filename=\"([^\"]*)\"").matcher(headers);
+                java.util.regex.Matcher contentType = java.util.regex.Pattern.compile("(?i)content-type:\\s*(\\S+)").matcher(headers);
+                files.add(new MockMultipartFile(name.find() ? name.group(1) : "file", filename.find() ? filename.group(1) : null,
+                        contentType.find() ? contentType.group(1) : null, content.getBytes(StandardCharsets.ISO_8859_1)));
+            }
+            return files;
         }
     }
 }

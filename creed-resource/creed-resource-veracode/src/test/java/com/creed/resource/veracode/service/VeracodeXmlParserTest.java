@@ -1,6 +1,7 @@
 package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.domain.ReportRow;
+import com.creed.resource.veracode.domain.SastFlaw;
 import com.creed.resource.veracode.service.VeracodeXmlParser.ParsedReport;
 import org.junit.jupiter.api.Test;
 
@@ -54,6 +55,68 @@ class VeracodeXmlParserTest {
                 .containsExactlyElementsOf(ScaSummary.LEVELS);
         assertThat(sca.bySeverity()).extracting(ScaSummary.SeverityCount::count).containsExactly(1, 1, 0, 0, 0, 1);
         assertThat(sca.unknownSeverity()).isEqualTo(1);
+    }
+
+    @Test
+    void readsTheStaticFlawsWithTheirCweName() {
+        ParsedReport report = parse("""
+                <detailedreport app_name="shop" total_flaws="2" flaws_not_mitigated="many">
+                  <static-analysis rating="C" score="71"/>
+                  <severity level="5"><category categoryname="X"><cwe cweid="78" cwename="OS Command Injection">
+                    <staticflaws>
+                      <flaw issueid="7" severity="5" cweid="78" categoryname="Cmd" module="a.war" sourcefilepath="com/x/"
+                            sourcefile="Run.java" line="42" remediation_status="New" mitigation_status="none"
+                            mitigation_status_desc="Not Mitigated" affects_policy_compliance="true"
+                            date_first_occurrence="2026-10-01 00:00:00 UTC" description="Runs input."/>
+                    </staticflaws>
+                  </cwe></category></severity>
+                  <severity level="3"><category categoryname="Y"><cwe cweid="117" cwename="Log Injection"><staticflaws>
+                    <flaw issueid="8" severity="3" cweid="117" sourcefile="Log.java" line="x"
+                          remediation_status="Open" mitigation_status="accepted" affects_policy_compliance="false">
+                      <mitigations><mitigation action="Approve Mitigation" date="2026-10-02"/></mitigations>
+                    </flaw>
+                    <flaw issueid="9" severity="3" cweid="117" sourcefile="Log.java" line="9" remediation_status="Fixed"/>
+                  </staticflaws></cwe></category></severity>
+                  <severity level="2"><category categoryname="Z"><cwe cweid="1" cwename="Leaked">
+                  </cwe></category></severity>
+                </detailedreport>
+                """);
+
+        assertThat(report.rows()).isEmpty();
+        assertThat(report.sastFlaws()).hasSize(3);
+        SastFlaw open = report.sastFlaws().getFirst();
+        assertThat(open.application()).isEqualTo("shop");
+        assertThat(open.issueId()).isEqualTo("7");
+        assertThat(open.severity()).isEqualTo("Very High");
+        assertThat(open.cwe()).isEqualTo("CWE-78");
+        assertThat(open.cweName()).isEqualTo("OS Command Injection");
+        assertThat(open.sourceFile()).isEqualTo("com/x/Run.java");
+        assertThat(open.line()).isEqualTo(42);
+        assertThat(open.mitigationStatus()).isEqualTo("Not Mitigated");
+        assertThat(open.affectsPolicy()).isTrue();
+        assertThat(open.open()).isTrue();
+        SastFlaw mitigated = report.sastFlaws().get(1);
+        // the cwe name of its own <cwe>, not the previous one's
+        assertThat(mitigated.cweName()).isEqualTo("Log Injection");
+        assertThat(mitigated.sourceFile()).isEqualTo("Log.java");
+        assertThat(mitigated.line()).isNull();
+        assertThat(mitigated.mitigated()).isTrue();
+        assertThat(report.sastFlaws().get(2).fixed()).isTrue();
+        assertThat(report.warnings()).anyMatch(w -> w.contains("line 'x'"))
+                .anyMatch(w -> w.contains("flaws_not_mitigated 'many'"));
+
+        SastSummary sast = report.sast();
+        assertThat(sast.rating()).isEqualTo("C");
+        assertThat(sast.score()).isEqualTo(71);
+        assertThat(sast.totalFlaws()).isEqualTo(2);
+        assertThat(sast.flawsNotMitigated()).isNull();
+        assertThat(sast.flaws()).isEqualTo(3);
+        assertThat(sast.open()).isEqualTo(1);
+        assertThat(sast.mitigated()).isEqualTo(1);
+        assertThat(sast.fixed()).isEqualTo(1);
+        assertThat(sast.affectsPolicy()).isEqualTo(1);
+        // open flaws only
+        assertThat(sast.bySeverity()).extracting(ScaSummary.SeverityCount::count).containsExactly(1, 0, 0, 0, 0, 0);
     }
 
     @Test

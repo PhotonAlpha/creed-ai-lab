@@ -1,0 +1,58 @@
+<!--/* Confluence storage format (XHTML) for the exported report page: keep every element closed, no entities but the
+       XML ones. Layout: sample/confluence-template.png - summary, SCA issues, SAST issues. */-->
+<th:block th:with="levels=${report.levels()}">
+<h2>SCA Issues Summary</h2>
+<table>
+  <tbody>
+    <tr>
+      <th>SCA/SAST</th>
+      <th th:each="level : ${levels}" th:text="|${level.severity()} (${level.total()})|">High (6)</th>
+    </tr>
+    <tr th:each="row : ${report.summary()}">
+      <td th:text="|${row.label()} (${row.total()})|">SCA (20)</td>
+      <td th:each="count : ${row.counts()}" style="text-align: right;" th:text="${count}">0</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>SCA Issues</h2>
+<table>
+  <tbody>
+    <tr>
+      <th>S.no</th><th>JIRA</th><th>Description</th><th>Severity</th><th>Repository</th><th>Status</th><th>Remarks</th>
+    </tr>
+    <tr th:each="row : ${report.sca()}">
+      <td style="text-align: right;" th:text="${row.no()}">1</td>
+      <td><th:block th:each="issue, it : ${row.issues()}"><a th:href="${issue.url()}" th:text="${issue.key()}">DT-15</a><th:block th:unless="${it.last}">, </th:block></th:block></td>
+      <td th:text="${row.description()}">IDB VERACODE SCA - CVE-2021-45046|CWE-917 - log4j-core-2.14.1.jar</td>
+      <td th:text="${row.severity()}">Very High</td>
+      <td th:text="${row.repository()}">creed</td>
+      <td th:text="${row.status()}">CLOSED</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>SAST Issues</h2>
+<table>
+  <tbody>
+    <tr>
+      <th>S.no</th><th>JIRA</th><th>Details</th><th>Severity</th><th>Total issue Count</th><th>Repository</th><th>Status</th><th>Remarks</th>
+    </tr>
+    <tr th:each="row : ${report.sast()}">
+      <td style="text-align: right;" th:text="${row.no()}">1</td>
+      <td><th:block th:each="issue, it : ${row.issues()}"><a th:href="${issue.url()}" th:text="${issue.key()}">DT-15</a><th:block th:unless="${it.last}">, </th:block></th:block></td>
+      <td th:text="${row.details()}">IDB VERACODE STSA - CWE-89 - SQL Injection</td>
+      <td th:text="${row.severity()}">MEDIUM</td>
+      <td style="text-align: right;" th:text="${row.count()}">4</td>
+      <td th:text="${row.repository()}">creed</td>
+      <td th:text="${row.status()}">CLOSED</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+
+<!--/* The report files are attached to the page after it is created; a link by file name resolves to the page's own
+       attachment, so it works once they are there. */-->
+<p><sub>Veracode report(s): <th:block th:each="file, it : ${report.files()}"><ac:link><ri:attachment th:ri:filename="${file}" ri:filename="report.xml" /><ac:link-body th:text="${file}">report.xml</ac:link-body></ac:link><th:block th:unless="${it.last}">, </th:block></th:block>. <th:block th:text="${report.source()}">Jira ...</th:block></sub></p>
+</th:block>

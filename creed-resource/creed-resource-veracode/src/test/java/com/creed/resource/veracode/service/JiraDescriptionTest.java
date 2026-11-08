@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class JiraDescriptionTest {
 
-    private static final ReportView REPORT = new ReportView("r.xml", "app", null, "2.3.0", "2.3.0", false, null, null, null, null);
+    private static final ReportView REPORT = new ReportView("r.xml", "app", null, "2.3.0", "2.3.0", false, null, null, null, null, null);
 
     @Test
     void noPipeInACellSplitsTheRow() {

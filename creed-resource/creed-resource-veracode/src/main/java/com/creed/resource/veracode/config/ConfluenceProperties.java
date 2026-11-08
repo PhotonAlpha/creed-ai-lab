@@ -22,6 +22,10 @@ import java.util.Locale;
  * @param maxDownloadSize an attachment larger than this (by the size Confluence lists) is not downloaded - it is read
  *                        into memory whole
  * @param readTimeout     downloads included: a 50 MB attachment over a slow link takes a while
+ * @param exportTitle     the exported page's title: {@code {project}} (the Veracode application(s), or the page's
+ *                        value), {@code {version}} (the reports' version, or the page's), {@code {timestamp}}
+ * @param exportTimestamp {@code {timestamp}}'s pattern ({@link java.time.format.DateTimeFormatter})
+ * @param exportTimeZone  {@code {timestamp}}'s zone; blank = this server's
  */
 @Validated
 @ConfigurationProperties("veracode.confluence")
@@ -31,10 +35,18 @@ public record ConfluenceProperties(
         @DefaultValue("50MB") DataSize maxDownloadSize,
         @DefaultValue("10") @Min(1) @Max(100) int maxConnections,
         @DefaultValue("5s") Duration connectTimeout,
-        @DefaultValue("60s") Duration readTimeout) {
+        @DefaultValue("60s") Duration readTimeout,
+        @DefaultValue("{project} - {version} - Reports (SAST,SCA) - {timestamp}") String exportTitle,
+        @DefaultValue("yyyy-MM-dd HH-mm-ss") String exportTimestamp,
+        String exportTimeZone) {
 
     public ConfluenceProperties {
         baseUrl = baseUrl == null || baseUrl.isBlank() ? null : baseUrl.trim().replaceAll("/+$", "");
+    }
+
+    public java.time.ZoneId exportZone() {
+        return exportTimeZone == null || exportTimeZone.isBlank() ? java.time.ZoneId.systemDefault()
+                : java.time.ZoneId.of(exportTimeZone.trim());
     }
 
     public boolean enabled() {

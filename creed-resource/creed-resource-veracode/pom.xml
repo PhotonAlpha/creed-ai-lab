@@ -30,6 +30,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
+        <!-- the Confluence export page (templates/confluence-report.html), rendered to a string - no MVC views -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-thymeleaf</artifactId>
+        </dependency>
         <!-- Spring Boot 4 moved RestClient/RestTemplate support (the RestClient.Builder bean) out of
              spring-boot-starter-web into its own starter. -->
         <dependency>

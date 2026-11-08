@@ -54,6 +54,8 @@ export interface Finding {
   issues: IssueRef[];
   /** The issue exists (another application filed it) but lacks this application's label: "create" adds it. */
   needsLabel: boolean;
+  /** The summary it is filed under (`summary-template`), whether the issue exists or not. */
+  summary?: string;
 }
 
 /** One uploaded Veracode detailed report (XML); an upload may hold several, one per file. */
@@ -71,6 +73,53 @@ export interface ReportView {
   generatedAt: string | null;
   /** `null` only in an analysis cached before the field existed. */
   sca: ScaSummary | null;
+  /** `null` only in an analysis cached before the field existed. */
+  sast: SastSummary | null;
+}
+
+/**
+ * A report's static-analysis statistics: the scan's rating / score and the root's stated `total_flaws` /
+ * `flaws_not_mitigated` (`null` when absent), then what was counted. `bySeverity` counts **open** flaws.
+ */
+export interface SastSummary {
+  rating: string | null;
+  score: number | null;
+  totalFlaws: number | null;
+  flawsNotMitigated: number | null;
+  /** Listed in the report, fixed and mitigated included. */
+  flaws: number;
+  open: number;
+  mitigated: number;
+  fixed: number;
+  /** Open flaws that affect policy compliance. */
+  affectsPolicy: number;
+  bySeverity: { severity: string; count: number }[];
+  unknownSeverity: number;
+}
+
+/** One static (SAST) flaw; open ones are filed in Jira grouped by CWE + category (`SastIssue`). */
+export interface SastFlaw {
+  application: string | null;
+  issueId: string | null;
+  severity: string | null;
+  /** `CWE-89` */
+  cwe: string | null;
+  cweName: string | null;
+  category: string | null;
+  module: string | null;
+  /** `com/creed/report/ReportQueryBuilder.java` */
+  sourceFile: string | null;
+  line: number | null;
+  scope: string | null;
+  remediationStatus: string | null;
+  mitigationStatus: string | null;
+  /** An approved mitigation. */
+  mitigated: boolean;
+  /** Fixed in this scan, listed for the record. */
+  fixed: boolean;
+  affectsPolicy: boolean | null;
+  firstFound: string | null;
+  description: string | null;
 }
 
 /**
@@ -108,7 +157,48 @@ export interface AnalysisCounts {
   needsLabel: number;
 }
 
+/**
+ * One SAST Jira issue: a CWE + flaw category across files and applications (open flaws only), found and created by its
+ * summary `{project} - CWE-89 - {category}`.
+ */
+export interface SastIssue {
+  /** `SAST|CWE-89|<category>` — what a create request names. */
+  id: string;
+  summary: string;
+  cwe: string | null;
+  cweName: string | null;
+  category: string | null;
+  severity: string | null;
+  flaws: SastFlaw[];
+  applications: string[];
+  /** `null` when Jira could not be read for SAST (`SastJira.error`). */
+  status: FindingStatus | null;
+  issues: IssueRef[];
+}
+
+/** The SAST half of an analysis: its own Jira project, issue type and create screen. */
+export interface SastJira {
+  projectKey: string;
+  issueType: string;
+  /** The versions the SAST issue type can be filed against; empty without Affects Version/s. */
+  jiraVersions: string[];
+  affectsVersion: boolean;
+  /** Creating needs exactly one version. */
+  versionRequired: boolean;
+  /** `sast.defaults.affects-versions` this issue type has: preselected. */
+  defaultVersions: string[];
+  createFields: CreateField[];
+  issues: SastIssue[];
+  counts: AnalysisCounts;
+  /** Why Jira could not be read for SAST (wrong project / issue type); SCA is unaffected. */
+  error: string | null;
+}
+
 export interface Analysis {
+  /** Every report's static flaws; absent in an analysis cached before SAST was read. */
+  sastFlaws?: SastFlaw[];
+  /** Absent in an analysis cached before SAST went to Jira. */
+  sast?: SastJira;
   /**
    * What every follow-up request names; the upload lives in the backend's memory for `veracode.upload.ttl` (2 h) and
    * not across a restart — then 404 `upload_expired`.
@@ -152,6 +242,8 @@ export interface VeracodeSettings {
   confluenceBaseUrl: string | null;
   /** The Confluence token dialog's preselected deployment. */
   confluenceCloud: boolean;
+  /** The exported page's title template: `{project} - {version} - Reports (SAST,SCA) - {timestamp}`. */
+  confluenceExportTitle: string;
 }
 
 /**
@@ -275,6 +367,19 @@ const confluenceHeader = (auth: ConfluenceAuth): Record<string, string> => ({
   [CONFLUENCE_TOKEN_HEADER]: auth.token,
   ...(auth.deployment === 'cloud' && auth.email ? { [CONFLUENCE_USER_HEADER]: auth.email } : {}),
 });
+
+/** The page `exportToConfluence` created; `url` opens it. */
+export interface ConfluenceCreatedPage {
+  id: string;
+  title: string;
+  spaceKey: string;
+  parentId: string;
+  url: string;
+  /** The report files (as uploaded, or as taken from Confluence) attached to the page. */
+  attachments: string[];
+  /** Why attaching failed - the page exists either way. */
+  attachmentError?: string | null;
+}
 
 /** `POST /confluence/connection`: a rejected token is `ok: false`, not an error. */
 export interface ConfluenceConnection {
@@ -422,6 +527,22 @@ export const veracodeApi = {
    */
   createIssues: (uploadId: string, findingIds: string[], fields: CreateFieldValues, jiraVersions: string[], auth: JiraAuth) =>
     requestAt<{ results: CreateResult[] }>(BASE, '/jira/issues', json({ uploadId, findingIds, fields, jiraVersions }, auth)),
+
+  /**
+   * The analysis (fresh) as a new Confluence page under `parentPageId`, as the user: the Jira token reads the issues,
+   * the Confluence token writes the page. `project` / `version` fill the title; blank = the reports' own.
+   */
+  exportToConfluence: (request: { uploadId: string; parentPageId: string; project: string; version: string; jiraVersions: string[] },
+    auth: JiraAuth, confluence: ConfluenceAuth) =>
+    requestAt<ConfluenceCreatedPage>(BASE, '/confluence/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...tokenHeader(auth), ...confluenceHeader(confluence) },
+      body: JSON.stringify(request),
+    }),
+
+  /** SAST issues by id, into the SAST project; `jiraVersions` = the version chosen for SAST (0 or 1). */
+  createSastIssues: (uploadId: string, issueIds: string[], fields: CreateFieldValues, jiraVersions: string[], auth: JiraAuth) =>
+    requestAt<{ results: CreateResult[] }>(BASE, '/jira/sast-issues', json({ uploadId, issueIds, fields, jiraVersions }, auth)),
 
   /** What the token may create in the project, and the create-screen fields the page has to ask for. */
   testConnection: (auth: JiraAuth) =>

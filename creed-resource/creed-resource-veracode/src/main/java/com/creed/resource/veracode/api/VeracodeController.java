@@ -3,11 +3,14 @@ package com.creed.resource.veracode.api;
 import com.creed.resource.veracode.api.dto.AnalysisRequest;
 import com.creed.resource.veracode.api.dto.AnalysisResponse;
 import com.creed.resource.veracode.api.dto.ConfluenceAnalysisRequest;
+import com.creed.resource.veracode.api.dto.ConfluenceExportRequest;
 import com.creed.resource.veracode.api.dto.CreateIssuesRequest;
+import com.creed.resource.veracode.api.dto.CreateSastIssuesRequest;
 import com.creed.resource.veracode.api.dto.CreateIssuesResponse;
 import com.creed.resource.veracode.api.dto.VeracodeSettings;
 import com.creed.resource.veracode.config.ConfluenceProperties;
 import com.creed.resource.veracode.config.JiraProperties;
+import com.creed.resource.veracode.service.ConfluenceExportService;
 import com.creed.resource.veracode.service.ConfluenceService;
 import com.creed.resource.veracode.service.ConfluenceToken;
 import com.creed.resource.veracode.service.ExcelExporter;
@@ -62,6 +65,7 @@ public class VeracodeController {
     private final JiraLookupService jiraLookup;
     private final JiraProperties jira;
     private final ConfluenceService confluence;
+    private final ConfluenceExportService confluenceExport;
     private final ConfluenceProperties confluenceProps;
     private final JsonMapper jsonMapper;
 
@@ -71,7 +75,8 @@ public class VeracodeController {
     @GetMapping("/settings")
     VeracodeSettings settings() {
         return new VeracodeSettings(jira.projectKey(), jira.issueType(), jira.baseUrl(), mock, jira.summaryTemplate(),
-                jira.looksLikeCloud(), confluenceProps.baseUrl(), confluenceProps.looksLikeCloud());
+                jira.looksLikeCloud(), confluenceProps.baseUrl(), confluenceProps.looksLikeCloud(),
+                confluenceProps.exportTitle());
     }
 
     /**
@@ -157,6 +162,13 @@ public class VeracodeController {
         return analysis.create(request.uploadId(), request.findingIds(), request.fields(), request.jiraVersions(), token);
     }
 
+    /** SAST issues (one per CWE + category) in the SAST project, re-checked against Jira first. */
+    @PostMapping("/jira/sast-issues")
+    CreateIssuesResponse createSastIssues(@Valid @RequestBody CreateSastIssuesRequest request, JiraToken token) {
+        return analysis.createSast(request.uploadId(), request.issueIds(), request.fields(), request.jiraVersions(),
+                token);
+    }
+
     /**
      * The page's "test connection" for the token it holds, on Jira's create metadata: whether the token is
      * accepted and may create the issue type in the project. A rejected token is an answer ({@code ok: false},
@@ -185,6 +197,18 @@ public class VeracodeController {
                 .contentType(XLSX)
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(filename).build().toString())
                 .body(excel.export(result));
+    }
+
+    /**
+     * The analysis (fresh, as for the Excel export) as a new Confluence page under {@code parentPageId}, titled
+     * {@code veracode.confluence.export-title}. Needs both tokens: Jira to read the issues, Confluence to write.
+     */
+    @PostMapping("/confluence/export")
+    ConfluenceService.CreatedPage exportToConfluence(@Valid @RequestBody ConfluenceExportRequest request,
+                                                     JiraToken token, ConfluenceToken confluenceToken) {
+        token.require();
+        return confluenceExport.export(request.uploadId(), request.parentPageId(), request.project(),
+                request.version(), request.jiraVersions(), token, confluenceToken);
     }
 
     /** The multipart upload carries the create-screen values as one JSON form value. */

@@ -10,6 +10,7 @@ import com.creed.resource.veracode.client.jira.JiraPage;
 import com.creed.resource.veracode.client.jira.JiraSearchResult;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
+import com.creed.resource.veracode.domain.SastIssue;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,10 @@ import java.util.regex.Pattern;
  * fields returned inline ({@link Jql}); the match is decided here on what Jira returned. Data Center searches
  * {@code /rest/api/2/search}, Jira Cloud {@code /rest/api/3/search/jql} (v2 search is retired there). The
  * project's versions are the {@code versions} field of the issue type's create metadata.
+ *
+ * <p>SAST issues ({@link SastIssue}) go to their own project and issue type ({@code veracode.jira.sast}) and are
+ * found by their summary alone: the CWE and the flaw category, no version (asked for, 2026-11-08). The create-screen
+ * reading, field checks, search and create are the same code, run against that target.
  *
  * <p>Every call carries the user's {@link JiraToken}.
  */
@@ -128,12 +133,27 @@ public class JiraLookupService {
     /**
      * The configured issue type as Jira knows it, and what its create screen asks for.
      *
-     * @param versions Affects Version/s values keyed by lower case
-     * @param fields   the fields the page fills (see {@link CreateField})
-     * @param cloud    read with a Jira Cloud token: user fields then take an {@code accountId}, not a name
+     * @param projectKey      the project it was read from (SCA's or SAST's)
+     * @param versions        Affects Version/s values keyed by lower case; empty without the field
+     * @param fields          the fields the page fills (see {@link CreateField})
+     * @param cloud           read with a Jira Cloud token: user fields then take an {@code accountId}, not a name
+     * @param affectsVersion  the create screen has Affects Version/s (always, for SCA: checked on reading)
+     * @param versionRequired ... and requires it: a SAST issue is then filed under the version chosen for it
      */
-    public record CreateMeta(String issueTypeId, String issueType, Map<String, String> versions,
-                             List<CreateField> fields, boolean cloud) {
+    public record CreateMeta(String projectKey, String issueTypeId, String issueType, Map<String, String> versions,
+                             List<CreateField> fields, boolean cloud, boolean affectsVersion, boolean versionRequired) {
+    }
+
+    /** Where issues go and what is preselected: SCA's from the token and the top-level config, SAST's from its own. */
+    private record Target(String projectKey, String issueType, JiraProperties.CreateDefaults defaults) {
+    }
+
+    private Target sca(JiraToken token) {
+        return new Target(props.projectKey(), token.issueTypeOr(props.issueType()), props.defaults());
+    }
+
+    private Target sast() {
+        return new Target(props.sastProjectKey(), props.sastIssueType(), props.sast().defaults());
     }
 
     /** The fields every create request carries by itself; anything else required comes from the page. */
@@ -142,15 +162,16 @@ public class JiraLookupService {
 
     public Connection connection(JiraToken token) {
         token.require();
-        String project = props.projectKey();
-        String wanted = token.issueTypeOr(props.issueType());
+        Target target = sca(token);
+        String project = target.projectKey();
+        String wanted = target.issueType();
         List<JiraIssueType> types;
         Map<String, List<JiraFieldMeta>> screens = new LinkedHashMap<>();
         try {
-            types = creatableTypes(token);
+            types = creatableTypes(token, project);
             // every type's screen, not just the wanted one: the page offers the types that would work
             for (JiraIssueType type : types) {
-                screens.put(type.id(), fieldsOf(token, type));
+                screens.put(type.id(), fieldsOf(token, project, type));
             }
         } catch (UpstreamException e) {
             Problem problem = e.status() == 0 ? Problem.UNREACHABLE
@@ -171,14 +192,14 @@ public class JiraLookupService {
         JiraIssueType type = byName(types, wanted);
         if (type == null) {
             return new Connection(false, props.baseUrl(), project, wanted, true, false, false, 0, List.of(), List.of(), List.of(), options,
-                    Problem.ISSUE_TYPE, 200, notCreatable(wanted, types));
+                    Problem.ISSUE_TYPE, 200, notCreatable(project, wanted, types));
         }
         List<JiraFieldMeta> fields = screens.get(type.id());
         if (versionsField(fields) == null) {
             return new Connection(false, props.baseUrl(), project, type.name(), true, true, false, 0, List.of(), List.of(), List.of(),
-                    options, Problem.AFFECTS_VERSION, 200, noAffectsVersion(type) + instead);
+                    options, Problem.AFFECTS_VERSION, 200, noAffectsVersion(project, type) + instead);
         }
-        CreateMeta meta = meta(type, fields, token);
+        CreateMeta meta = meta(project, type, fields, token, target.defaults());
         if (meta.versions().isEmpty()) {
             return new Connection(false, props.baseUrl(), project, type.name(), true, true, true, 0, List.of(), List.of(), meta.fields(),
                     options, Problem.NO_VERSIONS, 200, "project " + project + " has no version to file a "
@@ -193,9 +214,18 @@ public class JiraLookupService {
                 null, 200, message);
     }
 
-    /** The configured default versions Jira has, in Jira's spelling and the configured order. */
+    /** {@code sast.defaults.affects-versions} the SAST issue type has: the page's SAST version preselection. */
+    public List<String> sastDefaultVersions(CreateMeta meta) {
+        return defaultVersions(meta, props.sast().defaults());
+    }
+
     private List<String> defaultVersions(CreateMeta meta) {
-        return props.defaults().affectsVersions().stream()
+        return defaultVersions(meta, props.defaults());
+    }
+
+    /** The configured default versions Jira has, in Jira's spelling and the configured order. */
+    private static List<String> defaultVersions(CreateMeta meta, JiraProperties.CreateDefaults defaults) {
+        return defaults.affectsVersions().stream()
                 .map(v -> v == null ? null : meta.versions().get(v.trim().toLowerCase(Locale.ROOT)))
                 .filter(java.util.Objects::nonNull).distinct().toList();
     }
@@ -210,43 +240,64 @@ public class JiraLookupService {
      */
     public CreateMeta createMeta(JiraToken token) {
         token.require();
-        String wanted = token.issueTypeOr(props.issueType());
-        List<JiraIssueType> types = creatableTypes(token);
-        JiraIssueType type = byName(types, wanted);
+        Target target = sca(token);
+        List<JiraIssueType> types = creatableTypes(token, target.projectKey());
+        JiraIssueType type = byName(types, target.issueType());
         if (type == null) {
-            throw UpstreamException.setup(JIRA, notCreatable(wanted, types));
+            throw UpstreamException.setup(JIRA, notCreatable(target.projectKey(), target.issueType(), types));
         }
-        List<JiraFieldMeta> fields = fieldsOf(token, type);
+        List<JiraFieldMeta> fields = fieldsOf(token, target.projectKey(), type);
         if (versionsField(fields) == null) {
-            throw UpstreamException.setup(JIRA, noAffectsVersion(type) + "; test the connection on the page to see "
-                    + "which issue types have it");
+            throw UpstreamException.setup(JIRA, noAffectsVersion(target.projectKey(), type)
+                    + "; test the connection on the page to see which issue types have it");
         }
-        return meta(type, fields, token);
+        return meta(target.projectKey(), type, fields, token, target.defaults());
     }
 
-    private CreateMeta meta(JiraIssueType type, List<JiraFieldMeta> fields, JiraToken token) {
+    /**
+     * The SAST issue type's create screen ({@code veracode.jira.sast}). Unlike SCA, Affects Version/s is optional:
+     * a SAST issue is not looked up by version; when the screen requires one, creating files under the version
+     * chosen for SAST on the page.
+     */
+    public CreateMeta sastCreateMeta(JiraToken token) {
+        token.require();
+        Target target = sast();
+        List<JiraIssueType> types = creatableTypes(token, target.projectKey());
+        JiraIssueType type = byName(types, target.issueType());
+        if (type == null) {
+            throw UpstreamException.setup(JIRA, notCreatable(target.projectKey(), target.issueType(), types)
+                    + " (veracode.jira.sast.issue-type)");
+        }
+        return meta(target.projectKey(), type, fieldsOf(token, target.projectKey(), type), token, target.defaults());
+    }
+
+    private CreateMeta meta(String projectKey, JiraIssueType type, List<JiraFieldMeta> fields, JiraToken token,
+                            JiraProperties.CreateDefaults defaults) {
         List<CreateField> asked = fields.stream()
                 .filter(f -> JiraFieldMeta.COMPONENTS.equals(f.fieldId())
                         || f.required() && !f.hasDefaultValue() && !FILLED.contains(f.fieldId()))
                 .map(CreateField::of)
-                .map(f -> f.withConfigured(props.defaults().of(f.fieldId(), f.name())))
+                .map(f -> f.withConfigured(defaults.of(f.fieldId(), f.name())))
                 .toList();
+        JiraFieldMeta versions = versionsField(fields);
         Map<String, String> byLowerCase = new LinkedHashMap<>();
-        for (String name : versionsField(fields).allowedNames()) {
-            byLowerCase.putIfAbsent(name.trim().toLowerCase(Locale.ROOT), name);
+        if (versions != null) {
+            for (String name : versions.allowedNames()) {
+                byLowerCase.putIfAbsent(name.trim().toLowerCase(Locale.ROOT), name);
+            }
         }
-        return new CreateMeta(type.id(), type.name(), byLowerCase, asked, token.cloud());
+        return new CreateMeta(projectKey, type.id(), type.name(), byLowerCase, asked, token.cloud(), versions != null,
+                versions != null && versions.required());
     }
 
     /** Sub-task types are left out: they cannot be created without a parent. */
-    private List<JiraIssueType> creatableTypes(JiraToken token) {
-        return pages(from -> jira.createIssueTypes(token.authorization(), props.projectKey(), from, props.pageSize()))
+    private List<JiraIssueType> creatableTypes(JiraToken token, String projectKey) {
+        return pages(from -> jira.createIssueTypes(token.authorization(), projectKey, from, props.pageSize()))
                 .stream().filter(t -> !Boolean.TRUE.equals(t.subtask())).toList();
     }
 
-    private List<JiraFieldMeta> fieldsOf(JiraToken token, JiraIssueType type) {
-        return pages(from -> jira.createFields(token.authorization(), props.projectKey(), type.id(), from,
-                props.pageSize()));
+    private List<JiraFieldMeta> fieldsOf(JiraToken token, String projectKey, JiraIssueType type) {
+        return pages(from -> jira.createFields(token.authorization(), projectKey, type.id(), from, props.pageSize()));
     }
 
     private static JiraFieldMeta versionsField(List<JiraFieldMeta> fields) {
@@ -257,15 +308,15 @@ public class JiraLookupService {
         return types.stream().filter(t -> name.equalsIgnoreCase(t.name())).findFirst().orElse(null);
     }
 
-    private String notCreatable(String wanted, List<JiraIssueType> types) {
+    private static String notCreatable(String projectKey, String wanted, List<JiraIssueType> types) {
         return types.isEmpty()
-                ? "no issue type can be created in project " + props.projectKey() + " with this token"
-                : "issue type '" + wanted + "' cannot be created in project " + props.projectKey()
+                ? "no issue type can be created in project " + projectKey + " with this token"
+                : "issue type '" + wanted + "' cannot be created in project " + projectKey
                         + " (creatable: " + String.join(", ", types.stream().map(JiraIssueType::name).toList()) + ")";
     }
 
-    private String noAffectsVersion(JiraIssueType type) {
-        return "Affects Version/s is not on the create screen of " + type.name() + " in project " + props.projectKey()
+    private static String noAffectsVersion(String projectKey, JiraIssueType type) {
+        return "Affects Version/s is not on the create screen of " + type.name() + " in project " + projectKey
                 + ": add the field to that screen in Jira, or pick another issue type";
     }
 
@@ -321,7 +372,7 @@ public class JiraLookupService {
             jiraFields.put(f.fieldId(), f.multiple() ? json : json.getFirst());
         }
         if (!missing.isEmpty()) {
-            throw new FieldsRequiredException(props.projectKey(), meta.issueType(), missing);
+            throw new FieldsRequiredException(meta.projectKey(), meta.issueType(), missing);
         }
         return jiraFields;
     }
@@ -370,7 +421,7 @@ public class JiraLookupService {
             }
             String version = meta.versions().get(name.trim().toLowerCase(Locale.ROOT));
             if (version == null) {
-                throw new IllegalArgumentException("project " + props.projectKey() + " has no version '" + name.trim()
+                throw new IllegalArgumentException("project " + meta.projectKey() + " has no version '" + name.trim()
                         + "' to file a " + meta.issueType() + " against");
             }
             wanted.add(version);
@@ -590,6 +641,82 @@ public class JiraLookupService {
             return named(summary, finding.cveId());
         }
         return named(summary, Finding.UNKNOWN) && finding.cwe() != null && named(summary, finding.cwe());
+    }
+
+    /**
+     * SAST lookups: one JQL per {@code search-batch-size} issues in the SAST project, by summary only.
+     *
+     * @return SAST issue id -> covering Jira issues, every issue present
+     */
+    public Map<String, List<IssueRef>> findSast(List<SastIssue> issues, JiraToken token) {
+        Map<String, List<IssueRef>> result = new LinkedHashMap<>();
+        issues.forEach(i -> result.put(i.id(), new ArrayList<>()));
+        for (int from = 0; from < issues.size(); from += props.searchBatchSize()) {
+            List<SastIssue> batch = issues.subList(from, Math.min(issues.size(), from + props.searchBatchSize()));
+            String jql = Jql.sastLookup(props.sastProjectKey(), batch);
+            if (jql == null) {
+                continue;
+            }
+            for (JiraIssue issue : search(jql, token)) {
+                for (SastIssue i : batch) {
+                    if (coversSast(issue.summary(), i)) {
+                        result.get(i.id()).add(toRef(issue));
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * @param jiraVersion the version chosen for SAST on the page; {@code null} = none (the field is then left out)
+     * @param fields      from {@link #resolveFields} on {@link #sastCreateMeta}
+     */
+    public IssueRef createSast(SastIssue issue, String jiraVersion, Map<String, Object> fields, JiraToken token) {
+        List<String> labels = sastLabels();
+        String summary = sastSummary(issue);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("project", Map.of("key", props.sastProjectKey()));
+        body.put("issuetype", Map.of("name", props.sastIssueType()));
+        body.put("summary", summary);
+        body.put("description", JiraDescription.ofSast(issue));
+        if (jiraVersion != null) {
+            body.put("versions", List.of(Map.of("name", jiraVersion)));
+        }
+        body.put("labels", labels);
+        body.putAll(fields);
+        JiraCreatedIssue created = UpstreamException.call(JIRA,
+                () -> jira.createIssue(token.authorization(), new JiraCreateIssueRequest(body)));
+        log.info("created {} for {} ({} open flaws)", created.key(), issue.id(), issue.flaws().size());
+        return new IssueRef(created.key(), summary, null, null, null,
+                jiraVersion == null ? List.of() : List.of(jiraVersion), labels, props.browse(created.key()));
+    }
+
+    /** A SAST issue's labels: {@code sast.labels} and {@code sast.project-name}, Jira-safe (spaces become {@code _}). */
+    List<String> sastLabels() {
+        Set<String> labels = new LinkedHashSet<>();
+        props.sast().labels().forEach(l -> addLabel(labels, label(l)));
+        addLabel(labels, label(props.sastProject()));
+        return List.copyOf(labels);
+    }
+
+    /** {@code sast.summary-template} filled in ({@code {project} - {cwe} - {category}}), cut to Jira's 255. */
+    public String sastSummary(SastIssue issue) {
+        String summary = props.sast().summaryTemplate()
+                .replace("{project}", props.sastProject())
+                .replace("{jiraProject}", props.sastProjectKey())
+                .replace("{cwe}", issue.cweText())
+                .replace("{category}", issue.categoryText())
+                .replaceAll("\\s+", " ").trim();
+        return summary.length() <= 255 ? summary : summary.substring(0, 254) + "…";
+    }
+
+    /**
+     * A summary covers a SAST issue when it names the CWE and the category, each as a run of whole words, case and
+     * separators ignored: {@code CWE-89} is not in "... CWE-890 ...", and the category is not a prefix of a longer one.
+     */
+    static boolean coversSast(String summary, SastIssue issue) {
+        return named(summary, issue.cweText()) && named(summary, issue.categoryText());
     }
 
     /** Every page: until an empty one, {@code isLast}, or {@code total} reached - whichever Jira sends. */

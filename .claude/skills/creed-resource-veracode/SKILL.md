@@ -118,6 +118,22 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 - **`spring.config.additional-location` is a default property set in `main()` (`application()`)**, so
   `@SpringBootTest` never sees it — test it through `CreedResourceVeracodeApplication.application()`
   (`ExternalConfigDirTest`). It is not honoured from `application.yml`: Boot reads it before any config file is loaded.
+- **Confluence export = storage-format XHTML from Thymeleaf** (`ConfluenceExportService`, template
+  `templates/veracode/confluence-report.html`): every element closed, only XML entities — the test parses the output as
+  XML. Rendered with Boot's `SpringTemplateEngine` (SpEL); a plain `TemplateEngine` would need OGNL. Written with the
+  user's Confluence token, under the parent's space (the parent is read first); never a URL from the request.
+  Attribute names with a prefix (`ri:filename`) cannot go through `th:attr` ("Could not parse as assignation
+  sequence") - write `th:ri:filename`. The report files are attached after the page is created
+  (`ConfluenceService.attach`: multipart, `X-Atlassian-Token: nocheck`); build the parts as a `LinkedMultiValueMap` of
+  `HttpEntity` - `MultipartBodyBuilder` needs Reactive Streams, absent here (`NoClassDefFoundError: Publisher`).
+- **SAST issues = CWE + flaw `categoryname`** (`domain/SastIssue`, open flaws only — fixed = `remediation_status="Fixed"`,
+  mitigated = `mitigation_status="accepted"`, never filed). Summary `{project} - CWE-89 - {category}` (asked for) is the
+  identity: searched **without** a version clause and matched by `coversSast` (CWE and category as whole-word runs) —
+  keep both placeholders in `sast.summary-template` or nothing will ever match. Own target (`veracode.jira.sast`:
+  project-key, issue-type, project-name, labels, defaults; blank → SCA's) via `JiraLookupService.Target`; SAST never
+  uses the token's `X-Jira-Issue-Type` (that is SCA's choice). SAST Jira failures go to `sast.error`, never fail the
+  analysis. Not in `autoCreate`, no application labels. The `<cwe>`'s name is tracked on the element stack (reset at
+  `</cwe>`).
 - **SCA statistics = `ScaSummary` per report** (`ReportView.sca`, page table + xlsx *SCA summary*): stated
   attributes of `<software_composition_analysis>` are `Integer`/`Boolean`, `null` when absent — never default them
   to 0, which would claim SCA found nothing. Counted values are the report's own (mitigated excluded, before

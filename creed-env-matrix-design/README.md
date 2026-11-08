@@ -537,7 +537,29 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   vulnerabilities, the count per severity (Very High … Informational), max CVSS, mitigated (skipped). Counted as
   the report lists them — one CVE listed twice for a jar counts twice here and once in the findings table. A count
   the report does not state shows "—", not 0.
-- **Export Excel** downloads a fresh analysis (sheets *Findings*, *SCA summary* — the same statistics — and *Source*).
+- **SAST** (static-analysis flaws) — the **SAST tab** (`?tab=sast`) next to the SCA one, same upload and token:
+  - **Jira**: open flaws (not fixed, not mitigated) are grouped by **CWE + flaw category** (`categoryname`) across files,
+    lines and applications — one Jira issue each, summary `{project} - CWE-89 - {category}`, **found and created by that
+    summary** (no version in the search). Its own project, issue type and labels: `veracode.jira.sast` in
+    `application.yml` (`IDB VERACODE STSA`); the tab has its own affects-version choice (required when the issue type
+    requires it) and field bar. Rows expand to the flaws (application, file:line, module). A SAST project Jira refuses
+    is reported in the tab; SCA keeps working.
+  - *SAST statistics* under the SCA ones: rating, score, the report's stated total / not-mitigated counts, then
+    flaws listed / open / mitigated / fixed / open affecting policy, and open flaws per severity (*Total* row with
+    several reports).
+  - Below the Jira table, the *SAST flaws* card lists every flaw: open flaws by default (Open / All / Mitigated / Fixed), filters for severity
+    and application, search over CWE, file, category and issue ID; CWE links to MITRE, the file shows `name:line`
+    with the full path in its tooltip. *Mitigated* = an accepted mitigation, *Fixed* = `remediation_status="Fixed"`.
+- **Export to Confluence** (shown when Confluence is configured): a new child page under the page you name (id or
+  link), in its space, with your Confluence token — laid out as `sample/confluence-template.png`: *SCA Issues
+  Summary* (SCA findings and open SAST flaws per severity), *SCA Issues* (Jira, Jira summary, severity, Veracode
+  application, Jira status, empty Remarks) and *SAST Issues* (one row per CWE + category, with its flaw count).
+  Title `{project} - {version} - Reports (SAST,SCA) - {yyyy-MM-dd HH-mm-ss}`: project and version default to the
+  reports' application and version and can be changed in the dialog. Jira is read fresh, as for the Excel export.
+  The report file(s) analysed (as uploaded, or as taken from Confluence) are attached to the new page and linked from
+  its last line, *Veracode report(s)*.
+- **Export Excel** downloads a fresh analysis (sheets *Findings*, *SCA summary* — the same statistics —,
+  *SAST flaws* — with each flaw's Jira issue —, *SAST summary* and *Source*).
 
 ### Migration sync risk (`/migration-risk`)
 

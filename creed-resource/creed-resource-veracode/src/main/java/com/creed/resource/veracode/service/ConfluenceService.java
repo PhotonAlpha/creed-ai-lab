@@ -10,9 +10,14 @@ import com.creed.resource.veracode.service.VeracodeAnalysisService.UploadedFile;
 import com.creed.resource.veracode.service.VeracodeXmlParser.UnsupportedFileException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -159,17 +164,96 @@ public class ConfluenceService {
     private record Listing(ConfluencePage page, Map<String, Attachment> attachments) {
     }
 
-    private Listing list(String pageId, ConfluenceToken token) {
+    /**
+     * @param url             the page as a person opens it
+     * @param attachments     the files attached to it, as Confluence titled them
+     * @param attachmentError why attaching failed - the page exists either way; {@code null} when it did not
+     */
+    public record CreatedPage(String id, String title, String spaceKey, String parentId, String url,
+                              List<String> attachments, String attachmentError) {
+
+        CreatedPage withAttachments(List<String> titles, String error) {
+            return new CreatedPage(id, title, spaceKey, parentId, url, titles, error);
+        }
+    }
+
+    /**
+     * A new page under {@code parentPageId}, in the parent's space, as the user ({@code storage} = Confluence storage
+     * format, XHTML). The parent is read first, so a wrong id is a 404 naming it rather than Confluence's 400 about
+     * ancestors.
+     */
+    public CreatedPage createChildPage(String parentPageId, String title, String storage, ConfluenceToken token) {
         requireEnabled();
         token.require();
+        String parentId = pageId(parentPageId);
+        ConfluencePage parent = page(parentId, token);
+        if (parent.space() == null || parent.space().key() == null) {
+            throw new IllegalArgumentException("Confluence did not say which space page " + parentId + " is in");
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("type", "page");
+        body.put("title", title);
+        body.put("space", Map.of("key", parent.space().key()));
+        body.put("ancestors", List.of(Map.of("id", parentId)));
+        body.put("body", Map.of("storage", Map.of("value", storage, "representation", "storage")));
+        ConfluencePage created = UpstreamException.call(CONFLUENCE,
+                () -> confluence.createPage(token.authorization(), body));
+        log.info("created Confluence page {} '{}' under {} in {}", created.id(), title, parentId, parent.space().key());
+        return new CreatedPage(created.id(), created.title() != null ? created.title() : title, parent.space().key(),
+                parentId, props.pageUrl(created.id()), List.of(), null);
+    }
+
+    /**
+     * Attaches the files to a page (one request). The page must be one this token may edit - the export calls it on
+     * the page it just created.
+     *
+     * @return the attachments' titles as Confluence stored them
+     */
+    public List<String> attach(String pageId, List<UploadedFile> files, ConfluenceToken token) {
+        requireEnabled();
+        token.require();
+        if (files.isEmpty()) {
+            return List.of();
+        }
+        // a plain map, not MultipartBodyBuilder: that one needs Reactive Streams, which this servlet app lacks
+        MultiValueMap<String, HttpEntity<?>> parts = new LinkedMultiValueMap<>();
+        for (UploadedFile f : files) {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(mediaType(f.filename()));
+            parts.add("file", new HttpEntity<>(new ByteArrayResource(f.content()) {
+                @Override
+                public String getFilename() {
+                    return f.filename();
+                }
+            }, headers));
+        }
+        ConfluenceAttachmentPage result = UpstreamException.call(CONFLUENCE, () -> confluence.addAttachments(
+                token.authorization(), "nocheck", pageId(pageId), parts));
+        List<String> titles = result == null || result.results() == null ? List.of()
+                : result.results().stream().map(Attachment::title).toList();
+        log.info("Confluence page {}: attached {}", pageId, titles);
+        return titles;
+    }
+
+    private static MediaType mediaType(String filename) {
+        String name = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
+        return name.endsWith(".xml") ? MediaType.APPLICATION_XML
+                : name.endsWith(".zip") ? MediaType.parseMediaType("application/zip")
+                : MediaType.APPLICATION_OCTET_STREAM;
+    }
+
+    private static String pageId(String pageId) {
         String id = pageId == null ? "" : pageId.trim();
         if (!id.matches("\\d{1,19}")) {
             throw new IllegalArgumentException("a Confluence page id is a number (pageId=... in the page's URL), got '"
                     + pageId + "'");
         }
-        ConfluencePage page;
+        return id;
+    }
+
+    private ConfluencePage page(String id, ConfluenceToken token) {
         try {
-            page = UpstreamException.call(CONFLUENCE, () -> confluence.page(token.authorization(), id, "space"));
+            return UpstreamException.call(CONFLUENCE, () -> confluence.page(token.authorization(), id, "space"));
         } catch (UpstreamException e) {
             // Confluence says 404 for a page that is not there and for one this user may not see
             if (e.status() == 404 || e.status() == 403) {
@@ -177,6 +261,13 @@ public class ConfluenceService {
             }
             throw e;
         }
+    }
+
+    private Listing list(String pageId, ConfluenceToken token) {
+        requireEnabled();
+        token.require();
+        String id = pageId(pageId);
+        ConfluencePage page = page(id, token);
         Map<String, Attachment> attachments = new LinkedHashMap<>();
         for (int start = 0; ; ) {
             int from = start;

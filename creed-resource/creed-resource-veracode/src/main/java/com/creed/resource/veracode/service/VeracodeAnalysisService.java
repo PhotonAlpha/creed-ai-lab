@@ -6,9 +6,12 @@ import com.creed.resource.veracode.api.dto.CreateIssuesResponse.Outcome;
 import com.creed.resource.veracode.api.dto.CreateIssuesResponse.Result;
 import com.creed.resource.veracode.api.dto.FindingStatus;
 import com.creed.resource.veracode.api.dto.FindingView;
+import com.creed.resource.veracode.api.dto.SastIssueView;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.ReportRow;
+import com.creed.resource.veracode.domain.SastFlaw;
+import com.creed.resource.veracode.domain.SastIssue;
 import com.creed.resource.veracode.service.JiraLookupService.IssueRef;
 import com.creed.resource.veracode.service.VeracodeXmlParser.ParsedReport;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +44,10 @@ import java.util.stream.Collectors;
  *
  * <p>Every request needs the user's {@link JiraToken}: it goes to every Jira call, so a shared page reads and
  * files as whoever is using it. Without one nothing is parsed or called ({@code jira_token_required}).
+ *
+ * <p>SAST flaws are filed too, as {@link SastIssue}s (one per CWE + category, open flaws only) in their own project
+ * and issue type, found by summary alone. Reading them is part of every analysis but never fails it: a SAST project
+ * Jira refuses is reported in {@code sast.error} and the SCA half still answers.
  *
  * <p>The create screen's other fields (Component/s, required custom fields) come with the request - the page's
  * choices - and are checked against the screen before the first issue is created: an unknown value, or a
@@ -75,7 +82,7 @@ public class VeracodeAnalysisService {
      */
     private record Snapshot(String uploadId, List<ReportView> reports, Map<String, ReportView> byApplication,
                             List<Finding> findings, List<String> warnings, JiraLookupService.CreateMeta meta,
-                            List<String> versions, Map<String, List<IssueRef>> matches) {
+                            List<String> versions, Map<String, List<IssueRef>> matches, List<SastFlaw> sastFlaws) {
 
         ReportView reportOf(Finding f) {
             return byApplication.getOrDefault(f.application() == null ? "" : f.application(), reports.getFirst());
@@ -109,7 +116,8 @@ public class VeracodeAnalysisService {
                     file.content().length, parsed.info().appName(), version, overridden ? " (overridden)" : "",
                     parsed.rows().size());
         }
-        UploadedReportStore.Upload upload = uploads.put(reports, overridden);
+        UploadedReportStore.Upload upload = uploads.put(reports,
+                files.stream().map(f -> Map.entry(f.filename(), f.content())).toList(), overridden);
         return analyze(upload.id(), autoCreate, fields, jiraVersions, token);
     }
 
@@ -146,12 +154,13 @@ public class VeracodeAnalysisService {
                         warnings.add(f.id() + ": not created - " + e.getMessage());
                     }
                 }
-                views.add(FindingView.of(f, status, issues, needsLabel(f, issues)));
+                views.add(FindingView.of(f, jira.summary(f), status, issues, needsLabel(f, issues)));
             }
             return new AnalysisResponse(s.uploadId(), s.reports(), jiraProps.projectKey(),
                     List.copyOf(s.meta().versions().values()), s.versions(),
                     s.versions().size() == 1 ? s.versions().getFirst() : null, s.meta().fields(), views, warnings,
-                    AnalysisResponse.Counts.of(views), Instant.now(clock));
+                    AnalysisResponse.Counts.of(views), s.sastFlaws(), sast(s.sastFlaws(), token),
+                    Instant.now(clock));
         } finally {
             if (autoCreate) {
                 createLock.unlock();
@@ -224,7 +233,104 @@ public class VeracodeAnalysisService {
         return !issues.isEmpty() && label != null && issues.stream().noneMatch(i -> i.hasLabel(label));
     }
 
-    private Snapshot load(String uploadId, List<String> jiraVersions, JiraToken token) {
+    /**
+     * The SAST half of an analysis: the open flaws' issues looked up in the SAST project. A Jira failure (no such
+     * project or issue type, no permission) is the answer's {@code error}, not the analysis' - SCA is still shown.
+     * Nothing is asked of Jira when no flaw is open.
+     */
+    private AnalysisResponse.SastJira sast(List<SastFlaw> flaws, JiraToken token) {
+        List<SastIssue> issues = SastIssue.group(flaws);
+        String project = jiraProps.sastProjectKey();
+        String type = jiraProps.sastIssueType();
+        if (issues.isEmpty()) {
+            return new AnalysisResponse.SastJira(project, type, List.of(), false, false, List.of(), List.of(), List.of(),
+                    new AnalysisResponse.Counts(0, 0, 0, 0, 0), null);
+        }
+        JiraLookupService.CreateMeta meta;
+        Map<String, List<IssueRef>> matches;
+        try {
+            meta = jira.sastCreateMeta(token);
+            matches = jira.findSast(issues, token);
+        } catch (UpstreamException e) {
+            log.warn("SAST issues not read from Jira ({} / {}): {}", project, type, e.getMessage());
+            List<SastIssueView> views = issues.stream()
+                    .map(i -> SastIssueView.of(i, jira.sastSummary(i), null, List.of())).toList();
+            return new AnalysisResponse.SastJira(project, type, List.of(), false, false, List.of(), List.of(), views,
+                    new AnalysisResponse.Counts(views.size(), 0, 0, 0, 0), e.getMessage());
+        }
+        List<SastIssueView> views = issues.stream().map(i -> {
+            List<IssueRef> found = matches.getOrDefault(i.id(), List.of());
+            return SastIssueView.of(i, jira.sastSummary(i), found.isEmpty() ? FindingStatus.MISSING : FindingStatus.EXISTS,
+                    found);
+        }).toList();
+        int exists = (int) views.stream().filter(v -> v.status() == FindingStatus.EXISTS).count();
+        log.info("SAST: {} open flaws -> {} issues, {} in Jira {}", flaws.stream().filter(SastFlaw::open).count(),
+                issues.size(), exists, project);
+        return new AnalysisResponse.SastJira(meta.projectKey(), meta.issueType(), List.copyOf(meta.versions().values()),
+                meta.affectsVersion(), meta.versionRequired(), jira.sastDefaultVersions(meta), meta.fields(), views,
+                new AnalysisResponse.Counts(views.size(), exists, views.size() - exists, 0, 0), null);
+    }
+
+    /**
+     * Files SAST issues named by id, under the same lock as SCA: the upload and Jira are re-read first, so a second
+     * click (or someone else's issue) answers {@code ALREADY_EXISTS}. Fixed and mitigated flaws make no issue, so
+     * an id of theirs is {@code NOT_IN_REPORT}.
+     *
+     * @param jiraVersions the version chosen for SAST: exactly one when the issue type requires Affects Version/s,
+     *                     at most one otherwise (none = the field left out)
+     */
+    public CreateIssuesResponse createSast(String uploadId, List<String> issueIds, Map<String, Object> fields,
+                                           List<String> jiraVersions, JiraToken token) {
+        token.require();
+        createLock.lock();
+        try {
+            List<SastIssue> issues = SastIssue.group(read(uploadId).sastFlaws());
+            JiraLookupService.CreateMeta meta = jira.sastCreateMeta(token);
+            Map<String, Object> chosen = jira.resolveFields(meta, fields);
+            List<String> selected = meta.affectsVersion() ? jira.selectedVersions(meta, jiraVersions) : List.of();
+            String version = meta.versionRequired() || selected.size() > 1 ? jira.createVersion(selected)
+                    : selected.isEmpty() ? null : selected.getFirst();
+            Map<String, SastIssue> byId = issues.stream()
+                    .collect(Collectors.toMap(SastIssue::id, Function.identity(), (a, b) -> a, LinkedHashMap::new));
+            List<SastIssue> wanted = issueIds.stream().distinct().map(byId::get).filter(java.util.Objects::nonNull).toList();
+            Map<String, List<IssueRef>> matches = jira.findSast(wanted, token);
+            List<Result> results = new ArrayList<>();
+            for (String id : issueIds.stream().distinct().toList()) {
+                SastIssue issue = byId.get(id);
+                if (issue == null) {
+                    results.add(new Result(id, Outcome.NOT_IN_REPORT, List.of(),
+                            "no open SAST flaw of this CWE and category in this upload"));
+                    continue;
+                }
+                List<IssueRef> existing = matches.getOrDefault(id, List.of());
+                if (!existing.isEmpty()) {
+                    results.add(new Result(id, Outcome.ALREADY_EXISTS, existing, null));
+                    continue;
+                }
+                try {
+                    results.add(new Result(id, Outcome.CREATED, List.of(jira.createSast(issue, version, chosen, token)), null));
+                } catch (UpstreamException e) {
+                    log.warn("SAST create failed for {}: {}", id, e.getMessage());
+                    results.add(new Result(id, Outcome.FAILED, List.of(), e.getMessage()));
+                }
+            }
+            return new CreateIssuesResponse(results);
+        } finally {
+            createLock.unlock();
+        }
+    }
+
+    /** The upload's files as received - what the Confluence export attaches. */
+    public List<UploadedReportStore.SourceFile> sourceFiles(String uploadId) {
+        return read(uploadId).upload().files();
+    }
+
+    /** The upload's reports, rows and flaws - no Jira. */
+    private record Read(UploadedReportStore.Upload upload, List<ReportView> reports, Map<String, ReportView> byApplication,
+                        List<ReportRow> rows, List<SastFlaw> sastFlaws, List<String> warnings) {
+    }
+
+    private Read read(String uploadId) {
         if (uploadId == null || uploadId.isBlank()) {
             throw new IllegalArgumentException("uploadId is required: upload a Veracode XML report first");
         }
@@ -232,26 +338,39 @@ public class VeracodeAnalysisService {
         List<ReportView> reports = new ArrayList<>();
         Map<String, ReportView> byApplication = new LinkedHashMap<>();
         List<ReportRow> rows = new ArrayList<>();
+        List<SastFlaw> sastFlaws = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
         for (UploadedReportStore.ReportFile file : upload.reports()) {
             VeracodeXmlParser.ReportInfo info = file.report().info();
             ReportView view = new ReportView(file.filename(), info.appName(), info.appId(), info.version(),
                     file.affectedVersion(), upload.versionOverridden(), info.policyName(), info.policyCompliance(),
-                    info.generationDate(), file.report().sca());
+                    info.generationDate(), file.report().sca(), file.report().sast());
             reports.add(view);
             byApplication.putIfAbsent(info.appName() == null ? "" : info.appName(), view);
             rows.addAll(file.report().rows());
+            sastFlaws.addAll(file.report().sastFlaws());
             String prefix = upload.reports().size() > 1 ? file.filename() + ": " : "";
             file.report().warnings().forEach(w -> warnings.add(prefix + w));
         }
+        return new Read(upload, List.copyOf(reports), byApplication, List.copyOf(rows), List.copyOf(sastFlaws),
+                List.copyOf(warnings));
+    }
+
+    private Snapshot load(String uploadId, List<String> jiraVersions, JiraToken token) {
+        Read read = read(uploadId);
+        UploadedReportStore.Upload upload = read.upload();
+        List<ReportView> reports = read.reports();
+        List<ReportRow> rows = read.rows();
+        List<SastFlaw> sastFlaws = read.sastFlaws();
+        List<String> warnings = read.warnings();
         List<Finding> findings = Finding.group(rows);
         JiraLookupService.CreateMeta meta = jira.createMeta(token);
         List<String> versions = jira.selectedVersions(meta, jiraVersions);
         Map<String, List<IssueRef>> matches = jira.find(findings, versions, token);
-        log.info("upload {}: {} report(s), {} vulnerabilities -> {} findings, {} matched in Jira, {} warnings",
+        log.info("upload {}: {} report(s), {} vulnerabilities -> {} findings, {} matched in Jira, {} SAST flaws, {} warnings",
                 upload.id(), reports.size(), rows.size(), findings.size(),
-                matches.values().stream().filter(l -> !l.isEmpty()).count(), warnings.size());
-        return new Snapshot(upload.id(), List.copyOf(reports), byApplication, findings, List.copyOf(warnings), meta,
-                versions, matches);
+                matches.values().stream().filter(l -> !l.isEmpty()).count(), sastFlaws.size(), warnings.size());
+        return new Snapshot(upload.id(), reports, read.byApplication(), findings, warnings, meta, versions, matches,
+                sastFlaws);
     }
 }

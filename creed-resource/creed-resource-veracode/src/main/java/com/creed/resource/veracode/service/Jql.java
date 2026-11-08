@@ -1,6 +1,7 @@
 package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.domain.Finding;
+import com.creed.resource.veracode.domain.SastIssue;
 
 import java.util.Collection;
 import java.util.List;
@@ -57,6 +58,24 @@ final class Jql {
                         + String.join(", ", versions.stream().map(Jql::quote).toList()) + ")")
                 + " AND (" + String.join(" OR ", terms) + ")"
                 + " ORDER BY key";
+    }
+
+    /**
+     * SAST: the batch's CWEs as phrases ({@code summary ~ "\"CWE-89\""}), no version clause - a SAST issue is found by
+     * its summary alone (asked for). {@link JiraLookupService#coversSast} then asks for the category too. A flaw
+     * without a CWE is searched by its category's words.
+     */
+    static String sastLookup(String projectKey, Collection<SastIssue> issues) {
+        List<String> terms = issues.stream()
+                .map(i -> i.cwe() != null && ID.matcher(i.cwe().trim()).matches()
+                        ? "\"" + i.cwe().trim().toUpperCase(Locale.ROOT) + "\""
+                        : searchPhrase(i.categoryText()).toLowerCase(Locale.ROOT))
+                .filter(t -> !t.isEmpty()).distinct()
+                .map(t -> "summary ~ " + quote(t)).toList();
+        if (terms.isEmpty()) {
+            return null;
+        }
+        return "project = " + quote(projectKey) + " AND (" + String.join(" OR ", terms) + ") ORDER BY key";
     }
 
     /** A CVE or CWE id, sent as written: inside the phrase quotes its hyphens are text. */

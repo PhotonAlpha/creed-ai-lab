@@ -1,6 +1,8 @@
 package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.domain.Finding;
+import com.creed.resource.veracode.domain.SastFlaw;
+import com.creed.resource.veracode.domain.SastIssue;
 
 /** A created issue's description, in Jira wiki markup (the v2 API's format). */
 final class JiraDescription {
@@ -36,6 +38,40 @@ final class JiraDescription {
         }
         d.append("\n");
         return d.toString();
+    }
+
+    /**
+     * A SAST issue: the CWE and category, then one row per open flaw (application, severity, file:line, module, Veracode
+     * issue id, first found) and the first flaw's description - Veracode words it per CWE, so the flaws share it.
+     */
+    static String ofSast(SastIssue issue) {
+        StringBuilder d = new StringBuilder("h3. Veracode SAST finding\n");
+        d.append("||Field||Value||\n");
+        row(d, "CWE", issue.cwe() != null && issue.cwe().matches("CWE-\\d+")
+                ? "[" + issue.cwe() + "|https://cwe.mitre.org/data/definitions/" + issue.cwe().substring(4) + ".html]"
+                : escape(issue.cweText()));
+        row(d, "CWE name", escape(issue.cweName()));
+        row(d, "Category", escape(issue.categoryText()));
+        row(d, "Highest severity", escape(issue.severity()));
+        row(d, "Veracode application(s)", escape(String.join(", ", issue.applications())));
+        row(d, "Open flaws", String.valueOf(issue.flaws().size()));
+        d.append("\n||Application||Severity||File||Line||Module||Issue ID||First found||\n");
+        for (SastFlaw f : issue.flaws()) {
+            d.append('|').append(cell(f.application())).append('|').append(cell(f.severity()))
+                    .append('|').append(cell(f.sourceFile())).append('|').append(f.line() == null ? " " : f.line())
+                    .append('|').append(cell(f.module())).append('|').append(cell(f.issueId()))
+                    .append('|').append(cell(f.firstFound())).append("|\n");
+        }
+        String description = issue.flaws().stream().map(SastFlaw::description)
+                .filter(t -> t != null && !t.isBlank()).findFirst().orElse(null);
+        if (description != null) {
+            d.append("\nh4. Description\n").append(escape(description)).append('\n');
+        }
+        return d.toString();
+    }
+
+    private static String cell(String value) {
+        return value == null || value.isBlank() ? " " : escape(value.replaceAll("\\s*\\R\\s*", " "));
     }
 
     /** {@code CWE-502} links to MITRE's entry; "Unknown" stays text. */

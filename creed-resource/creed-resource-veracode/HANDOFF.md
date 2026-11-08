@@ -47,7 +47,8 @@ External config: `application.yml` / `application-<profile>.yml` in `CREED_VERAC
 | `POST /analysis` `{uploadId, autoCreate?, fields?}` | re-analyse an upload against Jira as it is now |
 | `POST /jira/issues` `{uploadId, findingIds[], fields}` | per-id `outcome`: CREATED / ALREADY_EXISTS / NOT_IN_REPORT / VERSION_NOT_IN_JIRA / FAILED; `fields` = the create screen's other fields (`{"components":["Security"],"customfield_10100":"Production"}`) |
 | `POST /jira/connection` | `{ok, projectKey, issueType, tokenAccepted, canCreate, versions, fields, status, message}` from the create metadata — a refused token is `ok:false` + Jira's status, not an error |
-| `GET /analysis/export?uploadId=` | xlsx (sheets *Findings*, *SCA summary*, *Source*) from a **fresh** analysis; *Severity* filled by level (`ExcelExporter.SEVERITY_FILL`, the page's tag hues: Very High red … Very Low blue, Informational grey) |
+| `POST /confluence/export` `{uploadId, parentPageId, project?, version?, jiraVersions}` + both tokens | a fresh analysis as a child page of `parentPageId` (its space), the report files attached and linked from its last line: `{id, title, spaceKey, parentId, url, attachments, attachmentError}`; 404 `confluence_page_not_found` for a parent the user cannot see |
+| `GET /analysis/export?uploadId=` | xlsx (sheets *Findings*, *SCA summary*, *SAST flaws*, *SAST summary*, *Source*) from a **fresh** analysis; *Severity* filled by level (`ExcelExporter.SEVERITY_FILL`, the page's tag hues: Very High red … Very Low blue, Informational grey) |
 
 Every endpoint but `/settings` needs the user's Jira token in `X-Jira-Token` — no fallback. Jira Cloud adds the
 Atlassian e-mail in `X-Jira-User` (→ Basic), Data Center sends the PAT alone (→ Bearer); the page asks which
@@ -105,7 +106,7 @@ parser (`last_update_time`, `recommendations/para`, `mitigations/mitigation/@dat
 
 2026-11-05 (later): **the report is a Veracode detailed report XML, uploaded** — Confluence removed (client,
 mock page, page id, `confluence.*` config), the table parser (html/csv/xlsx) removed with jsoup. `VeracodeXmlParser`
-(StAX, SCA section only, mitigated skipped); Affects Version = root `version` or the upload's `affectedVersion`;
+(StAX, SCA section only, mitigated skipped - SAST flaws are read since 2026-11-08, filed per CWE + category); Affects Version = root `version` or the upload's `affectedVersion`;
 `{project}` = `app_name`; `POST /analysis/sample` (mock only) analyses `sample/veracode-detailedreport.xml`
 (9 findings: 3 exist, 6 missing). **Jira TLS unverified** (`TrustAllTls`, `ssl-bundle` removed). **38 tests
 pass** after `clean` (incl. `TrustAllTlsTest`: self-signed cert for another host accepted, refused by the JDK
@@ -132,7 +133,8 @@ it was not checked in a browser (the browser extension could not attach to any p
 
 - **An upload lives in this process's memory** (`UploadedReportStore`, `veracode.upload.ttl` 2h,
   `max-entries` 50, oldest dropped). Restart or a second instance → `upload_expired`; the page tells the
-  user to upload again. The parsed rows are kept, not the bytes.
+  user to upload again. The parsed rows are kept, and the files as received **gzipped** (for the Confluence export's
+  attachments - a few MB per upload rather than the 50MB multipart limit).
 - **`MaxUploadSizeExceededException` needs the unscoped `UploadLimitExceptionHandler`** — multipart is
   resolved before a handler is chosen, so the controller-scoped advice never sees it (whitelabel 500).
 - **The Affects Version is the report's root `version`, never `component/@version`** — the latter is the
@@ -158,6 +160,53 @@ it was not checked in a browser (the browser extension could not attach to any p
   upload (`reports`, `uploadId`), a CVE + jar another application already filed is labelled (`LABELED`), not
   duplicated. The mock answers `PUT /rest/api/2/issue/{key}` labels; seeds use the new summary and carry the sample
   application's label. A report without `version` is no longer refused (the version is display only).
+- **Export to Confluence** (2026-11-08, asked for): `ConfluenceExportService` renders
+  `templates/veracode/confluence-report.html` (Thymeleaf, `spring-boot-starter-thymeleaf` - used as a string renderer,
+  no MVC views) to storage-format XHTML in the layout of `sample/confluence-template.png` and
+  `ConfluenceService.createChildPage` POSTs `/rest/api/content` (parent read first for its space). Title
+  `veracode.confluence.export-title` (`{project} - {version} - Reports (SAST,SCA) - {timestamp}`, `export-timestamp`
+  `yyyy-MM-dd HH-mm-ss`, `export-time-zone` blank = server's); `{project}` / `{version}` = the reports' application(s) /
+  version(s) unless the request names them. Interpretation of the template image (it is an Excel mock with a
+  misaligned SAST row): the summary row "SAST (n)" counts **open flaws**, the SAST table has one Repository column
+  (Veracode applications), Status = Jira status or "Not in Jira", Remarks empty. `FindingView.summary` (the summary a
+  finding is filed under) is new, so a missing SCA finding's Description is what it would be filed as. Mock: `POST
+  /mock/confluence/rest/api/content` keeps pages in memory (duplicate title in a space = 400, `?expand=body.storage`
+  returns the body). Test: `VeracodeApiTest.exportsTheAnalysisAsAConfluenceChildPage` (title pattern, storage parses as
+  XML, rows, overrides, 404, token). Checked in headless Chrome: dialog → created page, rendered body screenshot.
+- **Report files attached to the exported page** (2026-11-09, asked for): the files the analysis read - as uploaded, or
+  as downloaded from a Confluence page; a zip stays the zip - are kept with the upload (`UploadedReportStore.SourceFile`,
+  gzipped) and, once the page exists, POSTed in one multipart `child/attachment` (`X-Atlassian-Token: nocheck`, else
+  Confluence's XSRF 403). The last line "Veracode report(s): …" links each by name (`<ac:link><ri:attachment
+  ri:filename/>`). Same-named files get ` (2)` (Confluence would make the second a new version of the first). A failed
+  attach does not fail the export: the page exists, the answer carries `attachmentError` and the dialog shows it.
+  `VeracodeApiTest.ClientsOverMockMvc` turns a multipart request into MockMvc's `multipart()` (MockMvcClientHttpRequestFactory
+  passes raw bytes, which have no parts); checked against a live instance too (Tomcat multipart, Logbook logs `<multipart>`).
+- **SAST in Jira** (2026-11-08, asked for, same page): `domain/SastIssue` = the open flaws (not fixed, not mitigated)
+  grouped by CWE + the flaw's `categoryname`, across files and applications. Summary `sast.summary-template`
+  (`{project} - {cwe} - {category}`, `{project}` = `sast.project-name` "IDB VERACODE STSA", also the label - spaces → `_`);
+  found **by the summary alone** (`Jql.sastLookup`: CWE phrases, no version clause; `JiraLookupService.coversSast`: CWE and
+  category as whole-word runs) and created with it, in `veracode.jira.sast.project-key` / `issue-type` (blank → SCA's).
+  `JiraLookupService` reads a create screen per target (`Target`), so SAST has its own fields, versions and
+  `sast.defaults`; Affects Version/s is optional for SAST (`CreateMeta.affectsVersion` / `versionRequired`: when the
+  screen requires it, `createSast` needs exactly one). Every analysis carries `sast` (`SastJira`): issues with status,
+  versions, fields, `defaultVersions`; a Jira failure there is `sast.error` and SCA still answers
+  (`SastJiraMisconfiguredTest`). `POST /jira/sast-issues` {uploadId, issueIds, fields, jiraVersions}, same lock and
+  re-check as SCA (`ALREADY_EXISTS`, a fixed / mitigated flaw's id = `NOT_IN_REPORT`). No application labels for SAST
+  and not part of `autoCreate` (not asked for). xlsx *SAST flaws* gained Jira issue(s) / status. Page: tabs "SCA / SAST"
+  (`?tab=sast`), `SastJiraPanel.tsx` (own version select + field bar, issues table expandable to flaws),
+  `JiraFieldsBar.tsx` shared. Checked in headless Chrome (zh + en): defaults preselected, one created through the
+  UI, found again by a new upload. Tests 76.
+- **SAST flaws read** (2026-11-08, first step): the parser reads every
+  `severity/category/cwe/staticflaws/flaw` → `domain/SastFlaw` (CWE + its `<cwe cwename>`, `sourcefilepath` +
+  `sourcefile`, line, remediation / mitigation status; *mitigated* = `mitigation_status="accepted"`, *fixed* =
+  `remediation_status="Fixed"`) and `SastSummary` per report (`<static-analysis>` rating / score, the root's
+  `total_flaws` / `flaws_not_mitigated`, counted listed / open / mitigated / fixed / open-affecting-policy, open per
+  severity). JSON: `sastFlaws` on the analysis, `reports[i].sast`; xlsx: *SAST flaws* (most severe first, CWE → MITRE
+  link) and *SAST summary*. Not in `counts`, not in Jira. The sample gained three flaws (Very High open, Medium
+  mitigated, Medium fixed; `total_flaws="3"`). Page: "SAST statistics" table + "SAST flaws" card (`SastPanel.tsx`;
+  severity helpers moved to `severity.ts`). **If Jira is added later, the user chose CWE + file + line as a flaw's
+  identity** (summary like `{project} - CWE-89 - ReportQueryBuilder.java:88`). Checked in headless Chrome with two
+  reports (zh + en) and the export's sheet list.
 - **SCA statistics** (2026-11-08, asked for): `VeracodeXmlParser` also reads `<software_composition_analysis>`'s
   `third_party_components` / `violate_policy` / `components_violated_policy` / `blacklisted_components` and counts
   vulnerable components, vulnerabilities per level, max CVSS and mitigated → `ScaSummary` on `ParsedReport` and

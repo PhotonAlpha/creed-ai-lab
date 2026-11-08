@@ -10,8 +10,9 @@ package com.creed.resource.veracode.api.dto;
  *              Data Center a personal access token alone (Bearer)
  * @param confluenceBaseUrl {@code null} = no Confluence configured: the page offers uploads only
  * @param confluenceCloud   the Confluence token dialog's preselected deployment
+ * @param confluenceExportTitle the exported page's title template ({@code {project}}, {@code {version}}, {@code {timestamp}})
  */
 public record VeracodeSettings(String projectKey, String issueType, String jiraBaseUrl, boolean mock,
                                String summaryTemplate, boolean cloud, String confluenceBaseUrl,
-                               boolean confluenceCloud) {
+                               boolean confluenceCloud, String confluenceExportTitle) {
 }

@@ -163,7 +163,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   **Confluence 附件**：输入页面 ID（或粘贴页面链接）列出该页面全部附件，勾选 .xml / .zip（其他类型不可选），由后端下载并分析。
   Confluence 用用户自己的令牌（「Confluence 令牌」对话框，Cloud = 邮箱 + API 令牌，Data Center = 个人访问令牌，可「测试连接」，
   存储方式同 Jira 令牌，请求头 `X-Confluence-Token` / `X-Confluence-User`）；后端未配置 `veracode.confluence.base-url` 时只显示上传。
-  两种来源都只读取 SCA 部分；报告的影响版本（根节点 `version`，上传前可手工改）**只在表格中展示**，不参与 Jira 查询和创建。
+  两种来源都读取 SCA 部分（对接 Jira）和 SAST 静态分析漏洞（按 CWE + 类别对接 Jira，见下）；报告的影响版本（根节点 `version`，上传前可手工改）**只在表格中展示**，不参与 Jira 查询和创建。
 - **Jira 版本**是可搜索的多选下拉（版本多时不撑大页面，列表来自测试连接 / 分析结果）：查找时按所选版本过滤（`affectedVersion in`，不选 = 全部版本），
   新建时关联所选版本，所以创建必须正好选一个；切换版本会自动重新分析。
   默认值在后端配置 `veracode.jira.defaults`：`affects-versions`（测试连接后，若页面还没选 Jira 版本且该 Jira 有这些版本则选中，没有则页面不变）、
@@ -192,7 +192,17 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 表格可按关联 Jira 的属性过滤（状态 / 优先级 / 经办人 / 影响版本，多选），搜索框对 CVE、标题、组件、Jira 号与 Jira 标题做模糊匹配。
 - SCA 统计：报告表下方按报告列出 `<software_composition_analysis>` 的统计（第三方组件 / 违反策略及违规组件数 / 黑名单组件）与计数
   （有漏洞的组件 / 漏洞数 / 各严重级别 / 最高 CVSS / 已缓解），多个报告时带合计行。
-- 支持导出 Excel（Severity 按等级填充背景色；*SCA summary* 工作表与页面的 SCA 统计一致）。
+- SAST（静态分析漏洞，`severity/category/cwe/staticflaws/flaw`）与 SCA **在同一页面**，用标签页「SCA 组件漏洞 / SAST 代码漏洞」区分（`?tab=sast`）：
+  - Jira：**未关闭**的漏洞（已缓解、已修复的不建单）按 **CWE + 类别（flaw 的 `categoryname`）** 合并为一个 Jira，跨文件、行号和 application；
+    标题 `{project} - CWE-89 - {categoryname}`，**按这个标题查找和创建**（查找不带版本条件）。
+  - 项目、问题类型、label 与 SCA 分开，在 `application.yml` 的 `veracode.jira.sast` 配置（`{project}` / label 为 `IDB VERACODE STSA`，
+    label 中的空格变为 `_`）；SAST 标签页有自己的影响版本选择（该问题类型要求时必选）和 Jira 字段。SAST 读取 Jira 失败只在 SAST 标签页报错，不影响 SCA。
+  - 「SAST 统计」在报告表下方；SAST 标签页里是 Jira 表格（可展开看每处代码）和全部漏洞列表（含已缓解、已修复）。
+- 导出到 Confluence：输入父页面 ID（或链接），用用户自己的 Confluence 令牌在其下新建子页面；后端用 Thymeleaf 模板
+  （`templates/veracode/confluence-report.html`）生成 `sample/confluence-template.png` 的格式（汇总 / SCA Issues / SAST Issues），
+  标题 `{project} - {version} - Reports (SAST,SCA) - {yyyy-MM-dd HH-mm-ss}`（`veracode.confluence.export-title`；project / version 默认取报告的，可在对话框修改）。
+  页面底部「Veracode report(s):」附上分析的报告文件（上传的或从 Confluence 取的原文件，作为新页面的附件并链接）。
+- 支持导出 Excel（Severity 按等级填充背景色；*SCA summary* 工作表与页面的 SCA 统计一致；*SAST flaws* / *SAST summary* 两个工作表对应 SAST 部分）。
 - 统计卡片（漏洞总数 / 已在 Jira / 缺失 / 已创建）按状态用不同背景色（主题 token）；表格分页受控，默认每页 50 条（20 / 50 / 100 / 200）。
 - 刷新页面不丢数据：分析结果、所选 Jira 版本、字段取值、过滤条件、每页条数存 sessionStorage（随标签页关闭清除）；
   结果超出存储配额时只存上传 id，刷新后自动重新分析（后端上传保留 2 小时）。恢复时提示缓存时间，可重新分析或清除。

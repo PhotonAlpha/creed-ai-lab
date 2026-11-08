@@ -15,15 +15,17 @@ import java.util.List;
  *                        Jira is read and written by the Jira versions chosen on the page
  * @param needsLabel      the issue exists (another application filed it) but lacks this application's label:
  *                        creating adds the label instead of a second issue
+ * @param summary         the summary this page files the finding under ({@code summary-template}), existing or not
  */
 public record FindingView(String id, String application, String title, String cveId, String cve, String cwe,
                           String fileName, List<String> components, String severity, Double cvss,
                           String affectedVersion, String description, List<String> locations,
-                          FindingStatus status, List<IssueRef> issues, boolean needsLabel) {
+                          FindingStatus status, List<IssueRef> issues, boolean needsLabel, String summary) {
 
-    public static FindingView of(Finding f, FindingStatus status, List<IssueRef> issues, boolean needsLabel) {
+    public static FindingView of(Finding f, String summary, FindingStatus status, List<IssueRef> issues,
+                                 boolean needsLabel) {
         return new FindingView(f.id(), f.application(), f.title(), f.cveId(), f.cve(), f.cwe(), f.fileName(),
                 f.components(), f.severity(), f.cvss(), f.affectedVersion(), f.description(),
-                f.locations(), status, List.copyOf(issues), needsLabel);
+                f.locations(), status, List.copyOf(issues), needsLabel, summary);
     }
 }

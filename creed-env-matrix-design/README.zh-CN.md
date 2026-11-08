@@ -468,7 +468,23 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
 - **SCA 统计**：位于报告表下方，每个报告一行（多个报告时有「合计」行）：第三方组件、有漏洞的组件、是否违反策略（及违规组件数）、
   黑名单组件、漏洞数、各严重级别的数量（Very High … Informational）、最高 CVSS、已缓解（跳过）。按报告原样计数 —— 同一 jar 中重复列出的
   同一 CVE 在这里算两次，在漏洞表格中合并为一行。报告没有给出的数显示「—」，而不是 0。
-- **导出 Excel**：下载一次新的分析结果（*Findings*、*SCA summary*（同上的统计）与 *Source* 三个工作表）。
+- **SAST**（静态分析漏洞）—— 与 SCA 同一页面的「SAST 代码漏洞」标签页（`?tab=sast`），共用上传和令牌：
+  - **Jira**：未关闭的漏洞（未修复、未缓解）按 **CWE + 类别**（flaw 的 `categoryname`）合并，跨文件、行号和 application，每组一个 Jira，
+    标题 `{project} - CWE-89 - {category}`，**按这个标题查找和创建**（查找不带版本）。项目、问题类型、label 单独配置：
+    `application.yml` 的 `veracode.jira.sast`（`IDB VERACODE STSA`）；标签页有自己的影响版本（问题类型要求时必选）和 Jira 字段。
+    每行可展开查看具体代码位置。SAST 项目配置错误时只在该标签页报错，SCA 不受影响。
+  - SCA 统计下方的「SAST 统计」：评级、分数、报告给出的漏洞总数 / 未缓解数，然后是列出的、未关闭、已缓解、已修复、
+    未关闭且影响策略的数量，以及未关闭漏洞按严重级别的分布（多个报告时有「合计」行）。
+  - Jira 表格下方的「SAST 漏洞」卡片列出全部漏洞：默认只显示未关闭的（未关闭 / 全部 / 已缓解 / 已修复），可按严重级别、application 过滤，
+    搜索 CWE、文件、类别、问题编号；CWE 链接到 MITRE，文件显示为 `文件名:行号`，悬停可见完整路径。
+    「已缓解」= 缓解已被批准，「已修复」= `remediation_status="Fixed"`。
+- **导出到 Confluence**（配置了 Confluence 时显示）：在你指定的页面（ID 或链接）下、同一空间里，用你的 Confluence 令牌新建一个子页面，
+  格式同 `sample/confluence-template.png`：*SCA Issues Summary*（SCA 漏洞与未关闭的 SAST 漏洞按严重级别统计）、*SCA Issues*
+  （Jira、Jira 标题、严重级别、Veracode application、Jira 状态、空白的 Remarks）、*SAST Issues*（每个 CWE + 类别一行，含漏洞数）。
+  标题 `{project} - {version} - Reports (SAST,SCA) - {yyyy-MM-dd HH-mm-ss}`：project / version 默认取报告的 application 和版本，
+  可在对话框中修改。和导出 Excel 一样，Jira 状态是导出时重新读取的。
+  分析的报告文件（上传的，或从 Confluence 取的）会作为附件加到新页面上，并在页面最后一行 *Veracode report(s)* 中链接。
+- **导出 Excel**：下载一次新的分析结果（*Findings*、*SCA summary*（同上的统计）、*SAST flaws*（含每个漏洞对应的 Jira）、*SAST summary* 与 *Source* 五个工作表）。
 
 ### 迁移同步风险（`/migration-risk`）
 

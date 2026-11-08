@@ -7,9 +7,13 @@
     CVE-2022-1471                                    two snakeyaml versions, one finding
     SRCCLR-SID-29587                                 no CVE: matched and filed by the advisory id
     CVE-2019-17571                                   mitigated -> skipped
-  The static-analysis section is ignored here (only software_composition_analysis is read) but is kept valid
-  for DefectDojo's "Veracode Scan" parser, which also reads it: last_update_time, recommendations/para and
-  mitigations/mitigation/@date are attributes that parser requires.
+  SAST (static flaws; open ones are filed per CWE + category, "{project} - CWE-78 - <categoryname>"): four flaws,
+    issue 1  SQL Injection, High                     open, affects policy
+    issue 2  OS Command Injection, Very High         open, affects policy
+    issue 3  CRLF Injection into logs, Medium        mitigated (mitigation_status="accepted")
+    issue 4  URL Redirection, Medium                 fixed (remediation_status="Fixed")
+  The static-analysis section is also kept valid for DefectDojo's "Veracode Scan" parser, which reads it:
+  last_update_time, recommendations/para and mitigations/mitigation/@date are attributes that parser requires.
   VeracodeApiTest pins these outcomes - changing a vulnerability changes the test.
 -->
 <detailedreport xmlns="https://www.veracode.com/schema/reports/export/1.0" report_format_version="1.5"
@@ -17,15 +21,33 @@
                 static_analysis_unit_id="34567890" sandbox_id="" first_build_submitted_date="2026-09-30 08:12:44 UTC"
                 version="2.3.0" build_id="45678901" submitter="ci-veracode" platform="Not Specified"
                 assurance_level="5" business_criticality="5" generation_date="2026-10-14 10:20:30 UTC"
-                veracode_level="VL1" total_flaws="1" flaws_not_mitigated="1" teams="creed" life_cycle_stage="Deployed"
+                veracode_level="VL1" total_flaws="3" flaws_not_mitigated="2" teams="creed" life_cycle_stage="Deployed"
                 is_latest_build="true" last_update_time="2026-10-14 10:20:30 UTC" policy_name="Creed Default" policy_version="3"
                 policy_compliance_status="Did Not Pass" policy_rules_status="Did Not Pass" grace_period_expired="false"
                 scan_overdue="false">
   <static-analysis rating="B" score="88" submitted_date="2026-10-14 09:01:02 UTC" published_date="2026-10-14 10:15:00 UTC"
                    version="2.3.0" analysis_size_bytes="3456789" engine_version="20261001">
     <modules><module name="creed-platform.war" compiler="JAVAC_17" os="Java J2SE 17" architecture="JVM" loc="120345"
-                     score="88" numflawssev0="0" numflawssev1="0" numflawssev2="0" numflawssev3="0" numflawssev4="1" numflawssev5="0"/></modules>
+                     score="88" numflawssev0="0" numflawssev1="0" numflawssev2="0" numflawssev3="1" numflawssev4="1" numflawssev5="1"/></modules>
   </static-analysis>
+  <severity level="5">
+    <category categoryid="18" categoryname="OS Command Injection" pcirelated="true">
+      <recommendations>
+        <para text="Do not pass user input to a shell; use a fixed command with an argument array."/>
+      </recommendations>
+      <cwe cweid="78" cwename="Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')">
+        <staticflaws>
+          <flaw severity="5" categoryname="Improper Neutralization of Special Elements used in an OS Command" count="1"
+                issueid="2" module="creed-platform.war" type="java.lang.Runtime.exec" description="A request parameter reaches Runtime.exec() unchecked."
+                cweid="78" remediationeffort="2" exploitLevel="2" categoryid="18" pcirelated="true" date_first_occurrence="2026-10-14 09:30:00 UTC"
+                remediation_status="New" cia_impact="ccc" grace_period_expires="2026-10-21 09:30:00 UTC" affects_policy_compliance="true"
+                mitigation_status="none" mitigation_status_desc="Not Mitigated" sourcefile="ScriptRunner.java" line="42"
+                sourcefilepath="com/creed/ops/" scope="com.creed.ops.ScriptRunner" functionprototype="void run(java.lang.String)"
+                functionrelativelocation="12"/>
+        </staticflaws>
+      </cwe>
+    </category>
+  </severity>
   <severity level="4">
     <category categoryid="19" categoryname="SQL Injection" pcirelated="true">
       <recommendations>
@@ -42,6 +64,45 @@
                 mitigation_status="none" mitigation_status_desc="Not Mitigated" sourcefile="ReportQueryBuilder.java" line="88"
                 sourcefilepath="com/creed/report/" scope="com.creed.report.ReportQueryBuilder" functionprototype="java.util.List build(java.lang.String)"
                 functionrelativelocation="40"/>
+        </staticflaws>
+      </cwe>
+    </category>
+  </severity>
+  <severity level="3">
+    <category categoryid="17" categoryname="CRLF Injection" pcirelated="false">
+      <recommendations>
+        <para text="Encode or strip CR/LF from untrusted data before it is logged."/>
+      </recommendations>
+      <cwe cweid="117" cwename="Improper Output Neutralization for Logs">
+        <staticflaws>
+          <flaw severity="3" categoryname="Improper Output Neutralization for Logs" count="1"
+                issueid="3" module="creed-platform.war" type="org.slf4j.Logger.info" description="The user name is logged without neutralising line breaks."
+                cweid="117" remediationeffort="2" exploitLevel="0" categoryid="17" pcirelated="false" date_first_occurrence="2026-09-30 08:30:00 UTC"
+                remediation_status="Open" cia_impact="npn" grace_period_expires="2026-12-29 08:30:00 UTC" affects_policy_compliance="false"
+                mitigation_status="accepted" mitigation_status_desc="Mitigation Accepted" sourcefile="AuditLogger.java" line="57"
+                sourcefilepath="com/creed/audit/" scope="com.creed.audit.AuditLogger" functionprototype="void login(java.lang.String)"
+                functionrelativelocation="7">
+            <mitigations>
+              <mitigation action="Mitigate by Design" description="The log appender escapes CR/LF." user="security-team" date="2026-10-02 11:00:00 UTC"/>
+              <mitigation action="Approve Mitigation" description="Verified in the logback config." user="security-lead" date="2026-10-03 09:00:00 UTC"/>
+            </mitigations>
+          </flaw>
+        </staticflaws>
+      </cwe>
+    </category>
+    <category categoryid="21" categoryname="Open Redirect" pcirelated="false">
+      <recommendations>
+        <para text="Redirect only to an allow-list of known destinations."/>
+      </recommendations>
+      <cwe cweid="601" cwename="URL Redirection to Untrusted Site ('Open Redirect')">
+        <staticflaws>
+          <flaw severity="3" categoryname="URL Redirection to Untrusted Site ('Open Redirect')" count="1"
+                issueid="4" module="creed-platform.war" type="sendRedirect" description="The return URL is taken from the request."
+                cweid="601" remediationeffort="2" exploitLevel="0" categoryid="21" pcirelated="false" date_first_occurrence="2026-09-30 08:30:00 UTC"
+                remediation_status="Fixed" cia_impact="ppn" grace_period_expires="2026-12-29 08:30:00 UTC" affects_policy_compliance="false"
+                mitigation_status="none" mitigation_status_desc="Not Mitigated" sourcefile="LoginController.java" line="120"
+                sourcefilepath="com/creed/web/" scope="com.creed.web.LoginController" functionprototype="java.lang.String login(java.lang.String)"
+                functionrelativelocation="30"/>
         </staticflaws>
       </cwe>
     </category>
