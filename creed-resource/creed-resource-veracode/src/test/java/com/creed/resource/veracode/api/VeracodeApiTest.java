@@ -252,7 +252,7 @@ class VeracodeApiTest {
         assertThat(created.description()).contains(
                 "|CVE|[CVE-2022-22965|https://nvd.nist.gov/vuln/detail/CVE-2022-22965]|",
                 "|CWE|[CWE-94|https://cwe.mitre.org/data/definitions/94.html]|",
-                "|Veracode application|creed-platform-2026-10-06-Creed|", "|Component file|spring-beans-5.3.17.jar|",
+                "|Veracode application|creed-platform-2026-10-06-Creed|", "|Library file|spring-beans-5.3.17.jar|",
                 "|Component(s)|spring-beans 5.3.17|",
                 "|Description|Spring Framework RCE via data binding on JDK 9+. A Spring MVC or WebFlux application running on JDK 9+ may be vulnerable.|",
                 "Source: report detailedreport.xml, scan 2.3.0, policy Creed Default");
@@ -416,7 +416,18 @@ class VeracodeApiTest {
         MockMultipartFile gateway = new MockMultipartFile("file", "veracode-detailedreport-2.xml", "application/xml",
                 new ClassPathResource("sample/veracode-detailedreport-2.xml").getContentAsByteArray());
         String gw = "creed-gateway-2026-10-08-Gateway";
-        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).file(gateway).param("jiraVersions", "2.3.0"))
+        // the platform alone files the SQL injection SAST issue: with its own application label
+        String platform = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String sqlId = JsonPath.<List<String>>read(platform, "$.sast.issues[?(@.cwe=='CWE-89')].id").getFirst();
+        String sastCreate = "{\"uploadId\":\"%s\",\"issueIds\":[\"" + sqlId + "\"],\"jiraVersions\":[\"2.3.0\"],"
+                + "\"fields\":{\"components\":[\"security\"],\"customfield_10100\":\"Production\"}}";
+        mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON)
+                        .content(sastCreate.formatted(JsonPath.<String>read(platform, "$.uploadId"))))
+                .andExpect(jsonPath("$.results[0].outcome").value("CREATED"))
+                .andExpect(jsonPath("$.results[0].issues[0].labels", contains("veracode-sast", "creed-sast", "2026-10-06-Creed")));
+
+        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).file(gateway).param("jiraVersions", "2.3.0"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.reports[*].appName", contains("creed-platform-2026-10-06-Creed", gw)))
                 // 10 platform findings + 5 gateway ones (CVE-2020-8908 is mitigated)
@@ -429,7 +440,32 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.sast.issues[*].cwe", contains("CWE-78", "CWE-89", "CWE-80")))
                 .andExpect(jsonPath("$.sast.issues[1].flaws.length()").value(2))
                 .andExpect(jsonPath("$.sast.issues[1].applications", contains("creed-platform-2026-10-06-Creed", gw)))
-                .andExpect(jsonPath("$.sastFlaws.length()").value(8));
+                // filed by the platform: the gateway's label is missing, as for SCA
+                .andExpect(jsonPath("$.sast.issues[1].needsLabel").value(true))
+                .andExpect(jsonPath("$.sast.issues[1].missingLabels", contains("2026-10-08-Gateway")))
+                .andExpect(jsonPath("$.sast.counts.needsLabel").value(1))
+                .andExpect(jsonPath("$.sastFlaws.length()").value(8))
+                .andReturn().getResponse().getContentAsString();
+
+        String uploadId = JsonPath.read(body, "$.uploadId");
+        // "add label": the existing issue gets the gateway's label, no second issue
+        mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON).content(sastCreate.formatted(uploadId)))
+                .andExpect(jsonPath("$.results[0].outcome").value("LABELED"))
+                .andExpect(jsonPath("$.results[0].issues[0].labels", contains("veracode-sast", "creed-sast", "2026-10-06-Creed",
+                        "2026-10-08-Gateway")));
+        mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON).content(sastCreate.formatted(uploadId)))
+                .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"));
+
+        // on the Confluence page, one row per Jira issue: the repositories sharing it, one per line
+        mvc.perform(post("/api/veracode/confluence/export").header(ConfluenceToken.HEADER, "pat-wiki-9876")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"uploadId\":\"" + JsonPath.read(body, "$.uploadId")
+                                + "\",\"parentPageId\":\"" + MockConfluenceController.PAGE + "\",\"jiraVersions\":[\"2.3.0\"]}"))
+                .andExpect(status().isOk());
+        String storage = confluence.createdPages().getLast().storage();
+        assertThat(storage.split(">CREED-101</a>", -1)).hasSize(2);
+        assertThat(storage).contains("<td>" + gw + "<br />creed-platform-2026-10-06-Creed</td>")
+                // not in Jira: a row per finding, the summary row still counts findings
+                .contains("<td>SCA (15)</td>");
     }
 
     @Test
@@ -666,7 +702,7 @@ class VeracodeApiTest {
         assertThat(created.summary())
                 .isEqualTo("creed-sast - CWE-78 - Improper Neutralization of Special Elements used in an OS Command");
         assertThat(created.issueType()).isEqualTo("Vulnerability");
-        assertThat(created.labels()).containsExactly("veracode-sast", "creed-sast");
+        assertThat(created.labels()).containsExactly("veracode-sast", "creed-sast", "2026-10-06-Creed");
         assertThat(created.versions()).containsExactly("2.3.0");
         assertThat(created.description()).contains("ScriptRunner.java", "CWE-78");
 

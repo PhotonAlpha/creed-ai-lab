@@ -196,7 +196,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   - Jira：**未关闭**的漏洞（已缓解、已修复的不建单）按 **CWE + 类别（flaw 的 `categoryname`）** 合并为一个 Jira，跨文件、行号和 application；
     标题 `{project} - CWE-89 - {categoryname}`，**按这个标题查找和创建**（查找不带版本条件）。
   - 项目、问题类型、label 与 SCA 分开，在 `application.yml` 的 `veracode.jira.sast` 配置（`{project}` / label 为 `IDB VERACODE STSA`，
-    label 中的空格变为 `_`）；SAST 标签页有自己的影响版本选择（该问题类型要求时必选）和 Jira 字段。SAST 读取 Jira 失败只在 SAST 标签页报错，不影响 SCA。
+    label 中的空格变为 `_`；另加各 application 的 label，缺少时「添加 label」，与 SCA 一致）；SAST 标签页有自己的影响版本选择（该问题类型要求时必选）和 Jira 字段。SAST 读取 Jira 失败只在 SAST 标签页报错，不影响 SCA。
   - 「SAST 统计」在报告表下方；SAST 标签页里是 Jira 表格（可展开看每处代码）和全部漏洞列表（含已缓解、已修复）。
 - 导出到 Confluence：输入父页面 ID（或链接），用用户自己的 Confluence 令牌在其下新建子页面；后端用 Thymeleaf 模板
   （`templates/veracode/confluence-report.html`）生成 `sample/confluence-template.png` 的格式（汇总 / SCA Issues / SAST Issues），

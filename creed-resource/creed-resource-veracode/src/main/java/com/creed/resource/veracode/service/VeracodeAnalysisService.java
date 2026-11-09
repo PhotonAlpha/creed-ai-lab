@@ -254,21 +254,22 @@ public class VeracodeAnalysisService {
         } catch (UpstreamException e) {
             log.warn("SAST issues not read from Jira ({} / {}): {}", project, type, e.getMessage());
             List<SastIssueView> views = issues.stream()
-                    .map(i -> SastIssueView.of(i, jira.sastSummary(i), null, List.of())).toList();
+                    .map(i -> SastIssueView.of(i, jira.sastSummary(i), null, List.of(), List.of())).toList();
             return new AnalysisResponse.SastJira(project, type, List.of(), false, false, List.of(), List.of(), views,
                     new AnalysisResponse.Counts(views.size(), 0, 0, 0, 0), e.getMessage());
         }
         List<SastIssueView> views = issues.stream().map(i -> {
             List<IssueRef> found = matches.getOrDefault(i.id(), List.of());
             return SastIssueView.of(i, jira.sastSummary(i), found.isEmpty() ? FindingStatus.MISSING : FindingStatus.EXISTS,
-                    found);
+                    found, jira.missingSastLabels(i, found));
         }).toList();
         int exists = (int) views.stream().filter(v -> v.status() == FindingStatus.EXISTS).count();
+        int needsLabel = (int) views.stream().filter(SastIssueView::needsLabel).count();
         log.info("SAST: {} open flaws -> {} issues, {} in Jira {}", flaws.stream().filter(SastFlaw::open).count(),
                 issues.size(), exists, project);
         return new AnalysisResponse.SastJira(meta.projectKey(), meta.issueType(), List.copyOf(meta.versions().values()),
                 meta.affectsVersion(), meta.versionRequired(), jira.sastDefaultVersions(meta), meta.fields(), views,
-                new AnalysisResponse.Counts(views.size(), exists, views.size() - exists, 0, 0), null);
+                new AnalysisResponse.Counts(views.size(), exists, views.size() - exists, 0, needsLabel), null);
     }
 
     /**
@@ -303,14 +304,23 @@ public class VeracodeAnalysisService {
                     continue;
                 }
                 List<IssueRef> existing = matches.getOrDefault(id, List.of());
-                if (!existing.isEmpty()) {
-                    results.add(new Result(id, Outcome.ALREADY_EXISTS, existing, null));
-                    continue;
-                }
                 try {
+                    if (!existing.isEmpty()) {
+                        // as SCA: an application whose flaws the issue already covers gets its label, not a second issue
+                        List<String> missing = jira.missingSastLabels(issue, existing);
+                        if (missing.isEmpty()) {
+                            results.add(new Result(id, Outcome.ALREADY_EXISTS, existing, null));
+                            continue;
+                        }
+                        List<IssueRef> labelled = new ArrayList<>(existing);
+                        labelled.set(0, jira.addSastLabels(issue, existing, token));
+                        results.add(new Result(id, Outcome.LABELED, List.copyOf(labelled),
+                                "added label(s) " + String.join(", ", missing) + " to " + existing.getFirst().key()));
+                        continue;
+                    }
                     results.add(new Result(id, Outcome.CREATED, List.of(jira.createSast(issue, version, chosen, token)), null));
                 } catch (UpstreamException e) {
-                    log.warn("SAST create failed for {}: {}", id, e.getMessage());
+                    log.warn("SAST create / label failed for {}: {}", id, e.getMessage());
                     results.add(new Result(id, Outcome.FAILED, List.of(), e.getMessage()));
                 }
             }

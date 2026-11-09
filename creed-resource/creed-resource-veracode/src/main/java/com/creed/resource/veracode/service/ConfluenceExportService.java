@@ -19,6 +19,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -58,9 +59,13 @@ public class ConfluenceExportService {
     public record SummaryRow(String label, int total, List<Integer> counts) {
     }
 
-    /** @param description the Jira summary - the issue's, else the one it would be filed under */
-    public record ScaRow(int no, List<IssueRef> issues, String description, String severity, String repository,
-                         String status) {
+    /**
+     * @param description  the Jira summary - the issue's, else the one it would be filed under
+     * @param repositories the Veracode applications: one row per Jira issue, so a CVE + jar that several
+     *                     repositories share in one issue is one row naming them all (one per line)
+     */
+    public record ScaRow(int no, List<IssueRef> issues, String description, String severity,
+                         List<String> repositories, String status) {
     }
 
     /** @param count the issue's open flaws */
@@ -164,11 +169,19 @@ public class ConfluenceExportService {
             header.add(new Level(levels.get(i), sca.get(i) + sast.get(i)));
         }
 
-        List<ScaRow> scaRows = new ArrayList<>();
+        // findings in the same Jira issue(s) are one row - the issue is shared by the repositories; findings not in
+        // Jira stay a row each. In severity order, so a merged row sits where its first finding did.
+        Map<Object, List<FindingView>> byIssue = new LinkedHashMap<>();
         for (FindingView f : findings) {
-            String description = f.issues().isEmpty() ? f.summary() : f.issues().getFirst().summary();
-            scaRows.add(new ScaRow(scaRows.size() + 1, f.issues(), description, f.severity(), f.application(),
-                    status(f.issues())));
+            Object key = f.issues().isEmpty() ? f : f.issues().stream().map(IssueRef::key).sorted().toList();
+            byIssue.computeIfAbsent(key, k -> new ArrayList<>()).add(f);
+        }
+        List<ScaRow> scaRows = new ArrayList<>();
+        for (List<FindingView> group : byIssue.values()) {
+            FindingView first = group.getFirst();
+            String description = first.issues().isEmpty() ? first.summary() : first.issues().getFirst().summary();
+            scaRows.add(new ScaRow(scaRows.size() + 1, first.issues(), description, first.severity(),
+                    distinct(group.stream().map(FindingView::application).toList()), status(first.issues())));
         }
         boolean sastRead = result.sast() != null && result.sast().error() == null;
         List<SastRow> sastRows = new ArrayList<>();

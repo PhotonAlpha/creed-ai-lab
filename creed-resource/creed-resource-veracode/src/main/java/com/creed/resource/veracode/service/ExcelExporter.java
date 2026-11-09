@@ -46,7 +46,7 @@ import java.util.stream.Collectors;
 public class ExcelExporter {
 
     /** The page's columns: Title = {@code cve_id|cwe_id}, Description = the full {@code cve_summary}. */
-    private static final String[] HEADERS = {"Status", "Veracode application", "Title", "Component file",
+    private static final String[] HEADERS = {"Status", "Veracode application", "Title", "Library file",
             "Component(s)", "Severity", "CVSS", "Affected version", "Jira issue(s)", "Jira status",
             "Location", "Description"};
     static final int SEVERITY_COLUMN = 5;
@@ -134,7 +134,7 @@ public class ExcelExporter {
      */
     private static void scaSummary(Sheet sheet, List<ReportView> reports, CellStyle header, CellStyle[] severity) {
         List<String> headers = new ArrayList<>(List.of("Uploaded file", "Veracode application",
-                "Third-party components", "Vulnerable components", "Violates policy", "Components violating policy",
+                "Third-party components", "Vulnerable components", "Violates policy", "Libraries violating policy",
                 "Blacklisted components", "Vulnerabilities"));
         int firstLevel = headers.size();
         headers.addAll(ScaSummary.LEVELS);

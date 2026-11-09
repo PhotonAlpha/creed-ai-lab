@@ -126,6 +126,9 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   sequence") - write `th:ri:filename`. The report files are attached after the page is created
   (`ConfluenceService.attach`: multipart, `X-Atlassian-Token: nocheck`); build the parts as a `LinkedMultiValueMap` of
   `HttpEntity` - `MultipartBodyBuilder` needs Reactive Streams, absent here (`NoClassDefFoundError: Publisher`).
+- **SAST labels follow SCA's** (`JiraLookupService.sastLabels(issue)` / `missingSastLabels` / `addSastLabels`): every
+  application of the issue gets its `application-label`; an existing issue missing one is labelled (`LABELED`), never
+  filed twice. `addLabels` is the shared update (`update.labels.add` per label) - SCA's `addApplicationLabel` uses it.
 - **SAST issues = CWE + flaw `categoryname`** (`domain/SastIssue`, open flaws only — fixed = `remediation_status="Fixed"`,
   mitigated = `mitigation_status="accepted"`, never filed). Summary `{project} - CWE-89 - {category}` (asked for) is the
   identity: searched **without** a version clause and matched by `coversSast` (CWE and category as whole-word runs) —

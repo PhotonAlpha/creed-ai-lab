@@ -181,6 +181,14 @@ it was not checked in a browser (the browser extension could not attach to any p
   attach does not fail the export: the page exists, the answer carries `attachmentError` and the dialog shows it.
   `VeracodeApiTest.ClientsOverMockMvc` turns a multipart request into MockMvc's `multipart()` (MockMvcClientHttpRequestFactory
   passes raw bytes, which have no parts); checked against a live instance too (Tomcat multipart, Logbook logs `<multipart>`).
+- **SAST labels as SCA's** (2026-11-09, asked for): a created SAST issue carries `sast.labels`, `sast.project-name` and
+  the application label (`application-label`) of every application with open flaws in it. An existing issue lacking one
+  is `needsLabel` (`missingLabels` names them, `counts.needsLabel`); `POST /jira/sast-issues` then adds them
+  (`update.labels.add`, one update) and answers `LABELED` instead of `ALREADY_EXISTS`. The SAST tab mirrors SCA's tag,
+  orange buttons and statistics card. Creating and labelling both need the required create fields, as for SCA.
+- **SCA Issues on the page = one row per Jira issue** (2026-11-09, asked for): findings with the same issue key(s) - the
+  same CVE + jar in several repositories - are one row, Repository listing each application on its own line (`<br />`,
+  alphabetical, as the findings sort). Findings not in Jira stay a row each; the summary's "SCA (n)" still counts findings.
 - **SAST in Jira** (2026-11-08, asked for, same page): `domain/SastIssue` = the open flaws (not fixed, not mitigated)
   grouped by CWE + the flaw's `categoryname`, across files and applications. Summary `sast.summary-template`
   (`{project} - {cwe} - {category}`, `{project}` = `sast.project-name` "IDB VERACODE STSA", also the label - spaces → `_`);

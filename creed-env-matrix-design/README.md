@@ -542,7 +542,9 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
     lines and applications — one Jira issue each, summary `{project} - CWE-89 - {category}`, **found and created by that
     summary** (no version in the search). Its own project, issue type and labels: `veracode.jira.sast` in
     `application.yml` (`IDB VERACODE STSA`); the tab has its own affects-version choice (required when the issue type
-    requires it) and field bar. Rows expand to the flaws (application, file:line, module). A SAST project Jira refuses
+    requires it) and field bar. Labels as for SCA: a created issue carries the label of every application with
+    open flaws in it; an existing issue lacking an application's label shows *Label missing* and gets it with
+    **Add label** / **Add all labels** (orange) instead of a second issue. Rows expand to the flaws (application, file:line, module). A SAST project Jira refuses
     is reported in the tab; SCA keeps working.
   - *SAST statistics* under the SCA ones: rating, score, the report's stated total / not-mitigated counts, then
     flaws listed / open / mitigated / fixed / open affecting policy, and open flaws per severity (*Total* row with
@@ -553,7 +555,7 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
 - **Export to Confluence** (shown when Confluence is configured): a new child page under the page you name (id or
   link), in its space, with your Confluence token — laid out as `sample/confluence-template.png`: *SCA Issues
   Summary* (SCA findings and open SAST flaws per severity), *SCA Issues* (Jira, Jira summary, severity, Veracode
-  application, Jira status, empty Remarks) and *SAST Issues* (one row per CWE + category, with its flaw count).
+  application(s), Jira status, empty Remarks — one row per Jira issue: repositories sharing it are listed one per line) and *SAST Issues* (one row per CWE + category, with its flaw count).
   Title `{project} - {version} - Reports (SAST,SCA) - {yyyy-MM-dd HH-mm-ss}`: project and version default to the
   reports' application and version and can be changed in the dialog. Jira is read fresh, as for the Excel export.
   The report file(s) analysed (as uploaded, or as taken from Confluence) are attached to the new page and linked from

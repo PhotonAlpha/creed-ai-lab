@@ -77,9 +77,9 @@ public class JiraLookupService {
             return label == null || labels != null && labels.stream().anyMatch(label::equalsIgnoreCase);
         }
 
-        IssueRef withLabel(String label) {
+        IssueRef withLabels(List<String> added) {
             List<String> all = new ArrayList<>(labels == null ? List.of() : labels);
-            all.add(label);
+            all.addAll(added);
             return new IssueRef(key, summary, status, priority, assignee, versions, List.copyOf(all), url);
         }
     }
@@ -532,16 +532,22 @@ public class JiraLookupService {
      */
     public IssueRef addApplicationLabel(IssueRef issue, Finding finding, JiraToken token) {
         String label = applicationLabel(finding);
-        if (issue.hasLabel(label)) {
+        return label == null ? issue : addLabels(issue, List.of(label), finding.id(), token);
+    }
+
+    /** The labels the issue lacks, added in one update ({@code update.labels.add} each, the others untouched). */
+    IssueRef addLabels(IssueRef issue, List<String> labels, String forId, JiraToken token) {
+        List<String> missing = labels.stream().filter(l -> !issue.hasLabel(l)).toList();
+        if (missing.isEmpty()) {
             return issue;
         }
         UpstreamException.call(JIRA, () -> {
-            jira.updateIssue(token.authorization(), issue.key(),
-                    Map.of("update", Map.of("labels", List.of(Map.of("add", label)))));
+            jira.updateIssue(token.authorization(), issue.key(), Map.of("update", Map.of("labels",
+                    missing.stream().map(l -> Map.of("add", l)).toList())));
             return null;
         });
-        log.info("labelled {} with {} for {}", issue.key(), label, finding.id());
-        return issue.withLabel(label);
+        log.info("labelled {} with {} for {}", issue.key(), missing, forId);
+        return issue.withLabels(missing);
     }
 
     /** The label of the finding's Veracode application ({@code application-label}), Jira-safe; {@code null} without one. */
@@ -673,7 +679,7 @@ public class JiraLookupService {
      * @param fields      from {@link #resolveFields} on {@link #sastCreateMeta}
      */
     public IssueRef createSast(SastIssue issue, String jiraVersion, Map<String, Object> fields, JiraToken token) {
-        List<String> labels = sastLabels();
+        List<String> labels = sastLabels(issue);
         String summary = sastSummary(issue);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("project", Map.of("key", props.sastProjectKey()));
@@ -692,12 +698,40 @@ public class JiraLookupService {
                 jiraVersion == null ? List.of() : List.of(jiraVersion), labels, props.browse(created.key()));
     }
 
-    /** A SAST issue's labels: {@code sast.labels} and {@code sast.project-name}, Jira-safe (spaces become {@code _}). */
-    List<String> sastLabels() {
+    /**
+     * A SAST issue's labels, as SCA's: {@code sast.labels}, {@code sast.project-name} and the label of every application
+     * with an open flaw in it ({@code application-label}), Jira-safe (spaces become {@code _}).
+     */
+    List<String> sastLabels(SastIssue issue) {
         Set<String> labels = new LinkedHashSet<>();
         props.sast().labels().forEach(l -> addLabel(labels, label(l)));
         addLabel(labels, label(props.sastProject()));
+        sastApplicationLabels(issue).forEach(l -> addLabel(labels, l));
         return List.copyOf(labels);
+    }
+
+    /** The labels of the issue's applications, Jira-safe; an application the regex does not name has none. */
+    public List<String> sastApplicationLabels(SastIssue issue) {
+        Set<String> labels = new LinkedHashSet<>();
+        issue.applications().forEach(a -> addLabel(labels, label(props.applicationLabel(a))));
+        return List.copyOf(labels);
+    }
+
+    /**
+     * The application labels that none of the issue's Jira issues carries yet - as for SCA, an application whose
+     * flaws another application's issue already covers gets its label there, not a second issue. Empty when the issue
+     * is not in Jira.
+     */
+    public List<String> missingSastLabels(SastIssue issue, List<IssueRef> issues) {
+        if (issues.isEmpty()) {
+            return List.of();
+        }
+        return sastApplicationLabels(issue).stream().filter(l -> issues.stream().noneMatch(i -> i.hasLabel(l))).toList();
+    }
+
+    /** {@link #missingSastLabels} added to the first of the issues. */
+    public IssueRef addSastLabels(SastIssue issue, List<IssueRef> issues, JiraToken token) {
+        return addLabels(issues.getFirst(), missingSastLabels(issue, issues), issue.id(), token);
     }
 
     /** {@code sast.summary-template} filled in ({@code {project} - {cwe} - {category}}), cut to Jira's 255. */

@@ -174,6 +174,9 @@ export interface SastIssue {
   /** `null` when Jira could not be read for SAST (`SastJira.error`). */
   status: FindingStatus | null;
   issues: IssueRef[];
+  /** As SCA: the issue exists but lacks the label of some application with open flaws in it (`missingLabels`). */
+  needsLabel: boolean;
+  missingLabels: string[];
 }
 
 /** The SAST half of an analysis: its own Jira project, issue type and create screen. */

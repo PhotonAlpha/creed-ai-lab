@@ -93,7 +93,7 @@ per candidate. The project's versions are the
   `-` (`AAA-BBB-CCC-DDD` → `CCC-DDD`, `AAA-BBB-CC-DD-EE` → `CC-DD-EE`; no match = the whole name). Spaces become `_`
   (Jira refuses them);
 - description: one wiki-markup table in the page's order — Title (`cve_id|cwe_id`, NVD / MITRE links), Veracode
-  application, Component file, Component(s), Severity, CVSS, Affected version, Location, Description
+  application, Library file, Component(s), Severity, CVSS, Affected version, Location, Description
   (the **full** `cve_summary`) — then the source report, scan and policy.
 
 **Preselected values** — `veracode.jira.defaults`, applied when the connection test has read Jira, and only as

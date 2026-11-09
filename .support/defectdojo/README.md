@@ -38,3 +38,11 @@ Test → **Import History**。
 - `DD_SECRET_KEY` / `DD_CREDENTIAL_AES_256_KEY` 是官方 compose 的公开默认值，仅限本地。
 - DefectDojo 的 Veracode 解析器对 XML 要求比 creed-resource-veracode 严：根节点要有 `app_id`、`last_update_time`，
   静态扫描的 `category` 要有 `recommendations/para`，缓解要有 `mitigations/mitigation/@date`。
+
+DefectDojo (.support/defectdojo/)
+- UI: http://localhost:8380/, login admin / defectdojo_pw. Version is 3.4.202; all containers are running.
+- It's based on the official compose file, with these changes:
+    - Images come from Docker Hub instead of the official default registry.defectdojo.com, which logs the IP of every pull.
+    - The version is pinned.
+    - It reuses the postgres:15 and redis:7 images you already had.
+    - Database data lives in /Users/ethan/Desktop/workspace/database/defectdojo-postgresql, on host port 5434.

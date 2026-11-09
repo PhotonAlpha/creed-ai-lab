@@ -22,7 +22,7 @@ final class JiraDescription {
                 ? "[" + f.cve() + "|https://nvd.nist.gov/vuln/detail/" + f.cve() + "]" : escape(f.cveText()));
         row(d, "CWE", cwe(f));
         row(d, "Veracode application", escape(f.application()));
-        row(d, "Component file", escape(f.fileName()));
+        row(d, "Library file", escape(f.fileName()));
         row(d, "Component(s)", escape(String.join(", ", f.components())));
         row(d, "Severity", escape(f.severity()));
         row(d, "CVSS", f.cvss() == null ? "" : f.cvss().toString());

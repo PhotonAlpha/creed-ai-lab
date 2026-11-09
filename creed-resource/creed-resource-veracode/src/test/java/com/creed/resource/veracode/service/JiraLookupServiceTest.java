@@ -279,6 +279,25 @@ class JiraLookupServiceTest {
         return service(jira, 50);
     }
 
+    @Test
+    void aSastIssueLacksTheLabelsOfApplicationsItsJiraIssueDoesNotCarry() {
+        JiraLookupService service = service(new FakeJira(), 50);
+        SastIssue sql = SastIssue.group(List.of(
+                sastFlaw("creed-platform-2026-10-06-Creed", "CWE-89", "SQL Injection"),
+                sastFlaw("creed-gateway-2026-10-08-Gateway", "CWE-89", "SQL Injection"))).getFirst();
+        JiraLookupService.IssueRef filed = new JiraLookupService.IssueRef("CREED-9", "x", "To Do", null, null, List.of(), List.of("veracode", "2026-10-06-creed"), "u");
+
+        // as SCA: every application's label on create; an existing issue lacks those it does not carry (any case)
+        assertThat(service.sastLabels(sql)).endsWith("2026-10-06-Creed", "2026-10-08-Gateway");
+        assertThat(service.missingSastLabels(sql, List.of(filed))).containsExactly("2026-10-08-Gateway");
+        assertThat(service.missingSastLabels(sql, List.of())).isEmpty();
+    }
+
+    private static SastFlaw sastFlaw(String application, String cwe, String category) {
+        return new SastFlaw(application, "1", "High", cwe, null, category, "a.war", "com/x/A.java", 1, null, "New",
+                "Not Mitigated", false, false, true, null, null);
+    }
+
     private static SastIssue sastIssue(String cwe, String category) {
         SastFlaw flaw = new SastFlaw("app", "1", "High", cwe, null, category, "a.war", "com/x/A.java", 1, null, "New",
                 "Not Mitigated", false, false, true, null, null);
@@ -292,8 +311,8 @@ class JiraLookupServiceTest {
 
         // the summary is the template; the SAST project falls back to the SCA one (no sast.project-key)
         assertThat(service.sastSummary(sql)).isEqualTo("IDB VERACODE STSA - CWE-89 - SQL Injection");
-        // spaces cannot be in a Jira label; the project name is the configured label already
-        assertThat(service.sastLabels()).containsExactly("IDB_VERACODE_STSA", "veracode");
+        // spaces cannot be in a Jira label; the project name is the configured label already; then the application's
+        assertThat(service.sastLabels(sql)).containsExactly("IDB_VERACODE_STSA", "veracode", "app");
         assertThat(JiraLookupService.coversSast("IDB VERACODE STSA - cwe 89 - sql injection", sql)).isTrue();
         // another CWE number, another category: not this issue
         assertThat(JiraLookupService.coversSast("IDB VERACODE STSA - CWE-890 - SQL Injection", sql)).isFalse();

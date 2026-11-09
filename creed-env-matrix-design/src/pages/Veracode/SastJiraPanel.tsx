@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { ProCard } from '@ant-design/pro-components';
 import {
   Alert, App, Button, Col, Input, Popconfirm, Row, Segmented, Select, Space, Statistic, Table, Tag, Tooltip, Typography,
   theme,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { KeyOutlined, PlusCircleOutlined } from '@ant-design/icons';
+import { KeyOutlined, PlusCircleOutlined, TagOutlined, TagsOutlined } from '@ant-design/icons';
 import { veracodeApi } from '../../api/veracode';
 import type {
   Analysis, CreateFieldValues, CreateResult, FindingStatus, JiraAuth, SastFlaw, SastIssue, SastJira,
@@ -21,6 +22,10 @@ type StatusFilter = 'ALL' | FindingStatus;
 const STATUS_COLOR: Record<FindingStatus, string> = { EXISTS: 'success', MISSING: 'error', CREATED: 'processing' };
 const fileName = (path: string | null) => (path ? path.slice(path.lastIndexOf('/') + 1) : '—');
 const cweUrl = (cwe: string) => `https://cwe.mitre.org/data/definitions/${cwe.replace(/^CWE-/i, '')}.html`;
+/** As on the SCA tab: missing → created; filed for another application → labelled. */
+const actionable = (i: SastIssue) => i.status === 'MISSING' || i.needsLabel;
+const CREATE_BUTTON = { color: 'primary', icon: <PlusCircleOutlined /> } as const;
+const LABEL_BUTTON = { color: 'orange', icon: <TagOutlined /> } as const;
 
 /**
  * SAST issues in Jira: one per CWE + flaw category (open flaws only), found and created by the summary
@@ -76,6 +81,7 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
         ...i.flaws.map((f) => f.sourceFile)].some((v) => v?.toLowerCase().includes(needle))));
   }, [sast.issues, statusFilter, keyword]);
   const allMissing = sast.issues.filter((i) => i.status === 'MISSING').map((i) => i.id);
+  const allUnlabelled = sast.issues.filter((i) => i.needsLabel).map((i) => i.id);
 
   const applyResults = (results: CreateResult[]) => {
     const byId = new Map(results.map((r) => [r.findingId, r]));
@@ -83,8 +89,10 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
       if (!prev.sast) return prev;
       const issues = prev.sast.issues.map((i): SastIssue => {
         const r = byId.get(i.id);
-        if (r?.outcome === 'CREATED') return { ...i, status: 'CREATED', issues: r.issues };
-        if (r?.outcome === 'ALREADY_EXISTS') return { ...i, status: 'EXISTS', issues: r.issues };
+        if (r?.outcome === 'CREATED') return { ...i, status: 'CREATED', issues: r.issues, needsLabel: false, missingLabels: [] };
+        if (r?.outcome === 'ALREADY_EXISTS' || r?.outcome === 'LABELED') {
+          return { ...i, status: 'EXISTS', issues: r.issues, needsLabel: false, missingLabels: [] };
+        }
         return i;
       });
       const count = (s: FindingStatus) => issues.filter((i) => i.status === s).length;
@@ -93,14 +101,19 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
         sast: {
           ...prev.sast,
           issues,
-          counts: { ...prev.sast.counts, exists: count('EXISTS'), missing: count('MISSING'), created: count('CREATED') },
+          counts: {
+            ...prev.sast.counts, exists: count('EXISTS'), missing: count('MISSING'), created: count('CREATED'),
+            needsLabel: issues.filter((i) => i.needsLabel).length,
+          },
         },
       };
     });
-    setSelected((prev) => prev.filter((id) => !['CREATED', 'ALREADY_EXISTS'].includes(byId.get(id)?.outcome ?? '')));
+    setSelected((prev) => prev.filter((id) => !['CREATED', 'ALREADY_EXISTS', 'LABELED'].includes(byId.get(id)?.outcome ?? '')));
     const created = results.filter((r) => r.outcome === 'CREATED').length;
-    const others = results.filter((r) => r.outcome !== 'CREATED');
+    const labelled = results.filter((r) => r.outcome === 'LABELED').length;
+    const others = results.filter((r) => r.outcome !== 'CREATED' && r.outcome !== 'LABELED');
     if (created > 0) message.success(t('veracode.createdCount', { count: created }));
+    if (labelled > 0) message.success(t('veracode.labelledCount', { count: labelled }));
     if (others.length > 0) {
       modal.warning({
         title: t('veracode.notCreatedTitle', { count: others.length }),
@@ -134,17 +147,19 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
     }
   };
 
-  const createButton = (ids: string[], label: string, confirm: string, size?: 'small') => (canCreate ? (
+  /** Create (blue) or add label (orange) - one request either way: the server decides per issue, re-reading Jira. */
+  const createButton = (ids: string[], label: string, confirm: string,
+                        { size, kind = CREATE_BUTTON, icon }: { size?: 'small'; kind?: typeof CREATE_BUTTON | typeof LABEL_BUTTON; icon?: ReactNode } = {}) => (canCreate ? (
     <Popconfirm title={confirm} onConfirm={() => create(ids)} disabled={ids.length === 0}>
-      <Button size={size} type="primary" variant={size ? 'filled' : undefined} icon={<PlusCircleOutlined />}
+      <Button size={size} variant={size ? 'filled' : 'solid'} {...kind} {...(icon ? { icon } : {})}
               loading={creating} disabled={ids.length === 0}>
         {label}
       </Button>
     </Popconfirm>
   ) : (
     <Tooltip title={createBlocked}>
-      <Button size={size} icon={hasToken ? <PlusCircleOutlined /> : <KeyOutlined />} disabled={hasToken}
-              onClick={onTokenNeeded}>
+      <Button size={size} variant={size ? 'filled' : 'solid'} {...kind} {...(hasToken ? {} : { icon: <KeyOutlined /> })}
+              disabled={hasToken} onClick={onTokenNeeded}>
         {label}
       </Button>
     </Tooltip>
@@ -155,7 +170,16 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
       title: t('veracode.col.status'),
       dataIndex: 'status',
       width: 100,
-      render: (s: FindingStatus | null) => (s ? <Tag color={STATUS_COLOR[s]}>{t(`veracode.status.${s}` as MessageKey)}</Tag> : '—'),
+      render: (s: FindingStatus | null, i) => (s ? (
+        <Space direction="vertical" size={4}>
+          <Tag color={STATUS_COLOR[s]}>{t(`veracode.status.${s}` as MessageKey)}</Tag>
+          {i.needsLabel && (
+            <Tooltip title={t('veracode.sastJira.needsLabelHint', { labels: i.missingLabels.join(', ') })}>
+              <Tag color="warning">{t('veracode.needsLabel')}</Tag>
+            </Tooltip>
+          )}
+        </Space>
+      ) : '—'),
     },
     {
       title: t('veracode.sastJira.summary'),
@@ -213,11 +237,15 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
     {
       title: t('veracode.col.actions'),
       key: 'actions',
-      width: 110,
+      width: 130,
       fixed: 'right',
-      render: (_, i) => i.status === 'MISSING'
-        && createButton([i.id], t('veracode.createOne'),
-          t('veracode.sastJira.createOneConfirm', { project: sast.projectKey, type: sast.issueType }), 'small'),
+      // an existing issue of another application is labelled, not created again
+      render: (_, i) => (i.needsLabel
+        ? createButton([i.id], t('veracode.labelOne'),
+          t('veracode.sastJira.labelOneConfirm', { key: i.issues[0]?.key ?? '', labels: i.missingLabels.join(', ') }),
+          { size: 'small', kind: LABEL_BUTTON })
+        : i.status === 'MISSING' && createButton([i.id], t('veracode.createOne'),
+          t('veracode.sastJira.createOneConfirm', { project: sast.projectKey, type: sast.issueType }), { size: 'small' })),
     },
   ];
 
@@ -283,11 +311,13 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
           ['EXISTS', counts.exists, design.colorSuccessBg, design.colorSuccessBorder, design.colorSuccessText],
           ['MISSING', counts.missing, design.colorErrorBg, design.colorErrorBorder, design.colorErrorText],
           ['CREATED', counts.created, design.colorPrimaryBg, design.colorPrimaryBorder, design.colorPrimaryText],
+          ['needsLabel', counts.needsLabel, design.colorWarningBg, design.colorWarningBorder, design.colorWarningText],
         ] as const).map(([key, value, background, border, color]) => (
           <Col key={key} xs={12} md={6} flex="auto">
             <ProCard bordered style={{ background, borderColor: border }}>
               <Statistic
-                title={key === 'total' ? t('veracode.sastJira.total') : t(`veracode.status.${key}` as MessageKey)}
+                title={key === 'total' ? t('veracode.sastJira.total')
+                  : key === 'needsLabel' ? t('veracode.needsLabel') : t(`veracode.status.${key}` as MessageKey)}
                 value={value}
                 valueStyle={{ color }}
               />
@@ -310,6 +340,13 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
             t('veracode.sastJira.createConfirm', { count: selected.length, project: sast.projectKey, type: sast.issueType }))}
           {createButton(allMissing, t('veracode.createAllMissing', { count: allMissing.length }),
             t('veracode.sastJira.createConfirm', { count: allMissing.length, project: sast.projectKey, type: sast.issueType }))}
+          <Tooltip title={canCreate ? t('veracode.labelAllHint') : undefined}>
+            <span>
+              {createButton(allUnlabelled, t('veracode.labelAll', { count: allUnlabelled.length }),
+                t('veracode.sastJira.labelAllConfirm', { count: allUnlabelled.length }),
+                { kind: LABEL_BUTTON, icon: <TagsOutlined /> })}
+            </span>
+          </Tooltip>
           <Input.Search
             allowClear
             style={{ width: 280 }}
@@ -330,7 +367,7 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
           rowSelection={{
             selectedRowKeys: selected,
             onChange: (keys) => setSelected(keys as string[]),
-            getCheckboxProps: (i) => ({ disabled: i.status !== 'MISSING' }),
+            getCheckboxProps: (i) => ({ disabled: !actionable(i) }),
           }}
         />
       </ProCard>

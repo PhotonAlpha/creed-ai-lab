@@ -472,6 +472,8 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
   - **Jira**：未关闭的漏洞（未修复、未缓解）按 **CWE + 类别**（flaw 的 `categoryname`）合并，跨文件、行号和 application，每组一个 Jira，
     标题 `{project} - CWE-89 - {category}`，**按这个标题查找和创建**（查找不带版本）。项目、问题类型、label 单独配置：
     `application.yml` 的 `veracode.jira.sast`（`IDB VERACODE STSA`）；标签页有自己的影响版本（问题类型要求时必选）和 Jira 字段。
+    label 与 SCA 一致：新建的 Jira 带上其中每个有未关闭漏洞的 application 的 label；已存在但缺少某个 application label 的 Jira
+    显示「缺少 label」，用橙色的「添加 label」/「添加全部 label」补上，而不是再建一个。
     每行可展开查看具体代码位置。SAST 项目配置错误时只在该标签页报错，SCA 不受影响。
   - SCA 统计下方的「SAST 统计」：评级、分数、报告给出的漏洞总数 / 未缓解数，然后是列出的、未关闭、已缓解、已修复、
     未关闭且影响策略的数量，以及未关闭漏洞按严重级别的分布（多个报告时有「合计」行）。
@@ -480,7 +482,7 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
     「已缓解」= 缓解已被批准，「已修复」= `remediation_status="Fixed"`。
 - **导出到 Confluence**（配置了 Confluence 时显示）：在你指定的页面（ID 或链接）下、同一空间里，用你的 Confluence 令牌新建一个子页面，
   格式同 `sample/confluence-template.png`：*SCA Issues Summary*（SCA 漏洞与未关闭的 SAST 漏洞按严重级别统计）、*SCA Issues*
-  （Jira、Jira 标题、严重级别、Veracode application、Jira 状态、空白的 Remarks）、*SAST Issues*（每个 CWE + 类别一行，含漏洞数）。
+  （Jira、Jira 标题、严重级别、Veracode application、Jira 状态、空白的 Remarks；同一个 Jira 只占一行，共用它的多个 repository 换行列在一起）、*SAST Issues*（每个 CWE + 类别一行，含漏洞数）。
   标题 `{project} - {version} - Reports (SAST,SCA) - {yyyy-MM-dd HH-mm-ss}`：project / version 默认取报告的 application 和版本，
   可在对话框中修改。和导出 Excel 一样，Jira 状态是导出时重新读取的。
   分析的报告文件（上传的，或从 Confluence 取的）会作为附件加到新页面上，并在页面最后一行 *Veracode report(s)* 中链接。

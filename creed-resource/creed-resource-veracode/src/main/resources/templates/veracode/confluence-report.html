@@ -26,7 +26,7 @@
       <td><th:block th:each="issue, it : ${row.issues()}"><a th:href="${issue.url()}" th:text="${issue.key()}">DT-15</a><th:block th:unless="${it.last}">, </th:block></th:block></td>
       <td th:text="${row.description()}">IDB VERACODE SCA - CVE-2021-45046|CWE-917 - log4j-core-2.14.1.jar</td>
       <td th:text="${row.severity()}">Very High</td>
-      <td th:text="${row.repository()}">creed</td>
+      <td><th:block th:each="repository, it : ${row.repositories()}"><th:block th:text="${repository}">creed</th:block><br th:unless="${it.last}" /></th:block></td>
       <td th:text="${row.status()}">CLOSED</td>
       <td></td>
     </tr>
