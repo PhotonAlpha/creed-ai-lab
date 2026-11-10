@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  生产环境 Logback 配置（Spring Boot，文件名必须为 logback-spring.xml 才能使用 springProfile/springProperty）
+  适用版本：Logback 1.2.13+ / 1.4.x / 1.5.x
+  要点：
+    1. Pattern 不含 %L %M %C %F %caller，避免每条日志抓取调用栈
+    2. 文件写入全部经 AsyncAppender，neverBlock=true，业务线程不会被日志阻塞
+    3. 滚动文件按天 + 按大小，单文件 200MB，总量封顶，避免频繁 rollover 和目录文件爆炸
+    4. 生产不开 scan，不打印控制台
+    5. 消息、MDC、异常经 %replace 去除 CR/LF，防日志注入（CWE-117）
+-->
+<configuration scan="false">
+
+    <!-- ========== 变量 ========== -->
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="app"/>
+    <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="logs"/>
+
+    <!-- 不含行号/方法名等调用者信息；traceId 来自 MDC，没有时输出空
+         防 CRLF 日志注入（CWE-117）：
+           - %msg 中的 CR/LF 替换为 _，外部输入伪造不出新的一行
+           - MDC traceId 可能来自请求头，CR/LF 直接去掉
+           - 异常堆栈本身多行：去掉 CR；LF 只保留堆栈自己的换行（后面是制表符的 at / ... / Suppressed，或 Caused by:，
+             或末尾），异常 message 里的 LF 替换为 _。残余：以制表符开头的伪造内容看起来像一行堆栈，但伪造不出带日期的日志行
+           - 显式写出 %ex，logback 就不会再自动追加一个未处理的 %ex
+         另写 pattern 时同样要包 %replace，否则那里没有保护 -->
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%replace(%X{traceId:-}){'[\r\n]', ''}] %logger{36} - %replace(%msg){'[\r\n]', '_'}%n%replace(%ex){'\r|\n(?!\t|Caused by: |$)', '_'}"/>
+
+    <!-- ========== 控制台（仅开发环境使用） ========== -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ========== 全量日志文件 ========== -->
+    <appender name="FILE_ALL" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/${APP_NAME}.log</file>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <!-- true：每条立即刷盘，宕机不丢日志；对吞吐要求极高时可改为 false（kill -9 可能丢最后几 KB） -->
+        <immediateFlush>true</immediateFlush>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!-- 按天归档 + 按大小切分，归档自动 gzip 压缩 -->
+            <fileNamePattern>${LOG_PATH}/archive/${APP_NAME}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <!-- 不要设太小，否则高流量下频繁 rollover -->
+            <maxFileSize>200MB</maxFileSize>
+            <!-- 保留 15 天 -->
+            <maxHistory>15</maxHistory>
+            <!-- 归档总量上限，防止磁盘写满 -->
+            <totalSizeCap>20GB</totalSizeCap>
+            <!-- 启动时不扫描清理，避免归档多时拖慢启动 -->
+            <cleanHistoryOnStart>false</cleanHistoryOnStart>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ========== 错误日志文件（只记 ERROR） ========== -->
+    <appender name="FILE_ERROR" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/${APP_NAME}-error.log</file>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/archive/${APP_NAME}-error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>5GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ========== 异步包装 ========== -->
+    <appender name="ASYNC_ALL" class="ch.qos.logback.classic.AsyncAppender">
+        <!-- 队列容量，默认 256 太小 -->
+        <queueSize>8192</queueSize>
+        <!-- 队列剩余容量低于该值时丢弃 TRACE/DEBUG/INFO，保留 WARN/ERROR -->
+        <discardingThreshold>1024</discardingThreshold>
+        <!-- 队列满时直接丢弃而不是阻塞业务线程 -->
+        <neverBlock>true</neverBlock>
+        <!-- 不采集调用者信息（开启会每条抓调用栈，非常耗 CPU） -->
+        <includeCallerData>false</includeCallerData>
+        <!-- 关闭时最多等待 2 秒把队列刷完 -->
+        <maxFlushTime>2000</maxFlushTime>
+        <appender-ref ref="FILE_ALL"/>
+    </appender>
+
+    <appender name="ASYNC_ERROR" class="ch.qos.logback.classic.AsyncAppender">
+        <!-- 过滤器必须放在 AsyncAppender 上：入队前过滤，队列里只有 ERROR，
+             否则 INFO 洪峰会占满队列，导致 ERROR 被 neverBlock 丢弃 -->
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+        <queueSize>2048</queueSize>
+        <!-- 错误日志一条都不丢弃 -->
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <includeCallerData>false</includeCallerData>
+        <maxFlushTime>2000</maxFlushTime>
+        <appender-ref ref="FILE_ERROR"/>
+    </appender>
+
+    <!-- ========== 第三方框架降噪（各环境通用） ========== -->
+    <logger name="org.springframework" level="INFO"/>
+    <logger name="org.hibernate" level="WARN"/>
+    <logger name="org.hibernate.SQL" level="WARN"/>
+    <logger name="org.apache" level="WARN"/>
+    <logger name="io.netty" level="WARN"/>
+    <logger name="org.mybatis" level="WARN"/>
+    <logger name="com.zaxxer.hikari" level="INFO"/>
+    <logger name="com.alibaba.nacos" level="WARN"/>
+
+    <!-- ========== 开发 / 测试环境 ========== -->
+    <springProfile name="dev,local,test">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="ASYNC_ALL"/>
+        </root>
+    </springProfile>
+
+    <!-- ========== 生产环境 ========== -->
+    <springProfile name="prod">
+        <root level="INFO">
+            <appender-ref ref="ASYNC_ALL"/>
+            <appender-ref ref="ASYNC_ERROR"/>
+        </root>
+    </springProfile>
+
+    <!-- 未指定 profile 时的兜底 -->
+    <springProfile name="!dev &amp; !local &amp; !test &amp; !prod">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="ASYNC_ALL"/>
+        </root>
+    </springProfile>
+
+</configuration>
