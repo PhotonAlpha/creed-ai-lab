@@ -68,6 +68,30 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-11 (latest, asked for): **closed issues may be filed again** - `veracode.jira.closed-statuses` (`Closed, Done`);
+`FindingView` / `SastIssueView.recreatable` = every issue found is in one; `CreateIssuesRequest` /
+`CreateSastIssuesRequest.recreateClosed` files that **one** id anyway (more ids = 400, re-checked against Jira under the
+create lock). Page: red *Re-create* on such a row, `modal.confirm` listing the closed issues
+(`pages/Veracode/recreateClosed.tsx`). **81 tests pass**
+(`aFindingWhoseIssuesAreAllClosedMayBeFiledAgainOneAtATime`; SAST shares the code path, no test of its own - the mock
+has no closed SAST issue).
+
+2026-11-10 ( `sample/changes.jpg`, asked for): **application mapping** `veracode.applications` (`app-name` →
+`name`, `url`; `config/ApplicationProperties`) replaces `veracode.jira.application-label` (removed): the mapped name
+(else the `app_name`) is the Jira label, the Jira description's linked *Veracode application*, the Confluence export's
+linked *Repository*, and `AnalysisResponse.applications` for the page. **Issue source**: `ReportView.sourceName` /
+`sourceUrl` (the file a report came in; the Confluence attachment URL when downloaded) + `sourcePageTitle` / `sourcePageUrl` (the page holding it); the
+description's *Source* links a downloaded file and its page (`on page [title|url]`), an uploaded one is attached to every issue created from it (`JiraClient.addAttachments`, mock
+`POST /mock/jira/rest/api/2/issue/{key}/attachments`, `MockJiraStore.attachments`); attach failure = the result's
+message, never a failed create. **Confluence export** rows sorted by repository (first mapped name), SAST *Details* =
+`SastIssueView.byApplication` (`<name>: <sast project-name> - <category>` / `CWE 117 <cwe name>` /
+`CWE 117 (Flaw IDs: …)`, display only). Mock Confluence page 98765: the zip and PDF are now dated
+(`*_09_Nov_2026.*`). Page: Confluence attachment filter (dated `dd_MMM_yyyy` + `.zip` by default, newest first, max
+50; a report-date dropdown narrows to one date, the newest preselected), full-screen `Spin` while an upload / Confluence download is processed, SAST *Jira summary* column = the
+per-application blocks (*Open flaws* column merged in). **80 tests pass**; over real HTTP on :18197 (mock, Apache
+transport): mapped label + linked description + the uploaded XML attached; Confluence zip → `sourceUrl`; export rows
+sorted, SAST blocks. Page typechecks; **not seen in a browser**.
+
 2026-11-06 (latest): **every Jira call is the page user's** — `RemoteAuth`, `veracode.jira.auth` and
 `require-user-token` removed, `JiraClient`'s `Authorization` header required, no default header; no token → 400
 `jira_token_required` on every endpoint but `/settings` (the page opens its token dialog). **Required create fields

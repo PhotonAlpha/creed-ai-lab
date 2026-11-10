@@ -15,6 +15,8 @@ import { useI18n } from '../../locales';
 import type { MessageKey } from '../../locales';
 import { JiraFieldsBar } from './JiraFieldsBar';
 import { severityColor, severityRank } from './severity';
+import { ApplicationName } from './applicationName';
+import { RECREATE_BUTTON, confirmRecreate } from './recreateClosed';
 
 const { Text } = Typography;
 
@@ -89,9 +91,11 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
       if (!prev.sast) return prev;
       const issues = prev.sast.issues.map((i): SastIssue => {
         const r = byId.get(i.id);
-        if (r?.outcome === 'CREATED') return { ...i, status: 'CREATED', issues: r.issues, needsLabel: false, missingLabels: [] };
+        if (r?.outcome === 'CREATED') {
+          return { ...i, status: 'CREATED', issues: r.issues, needsLabel: false, missingLabels: [], recreatable: false };
+        }
         if (r?.outcome === 'ALREADY_EXISTS' || r?.outcome === 'LABELED') {
-          return { ...i, status: 'EXISTS', issues: r.issues, needsLabel: false, missingLabels: [] };
+          return { ...i, status: 'EXISTS', issues: r.issues, needsLabel: false, missingLabels: [], recreatable: false };
         }
         return i;
       });
@@ -133,12 +137,12 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
     }
   };
 
-  const create = async (ids: string[]) => {
+  const create = async (ids: string[], recreateClosed = false) => {
     if (ids.length === 0) return;
     setCreating(true);
     try {
       const { results } = await veracodeApi.createSastIssues(analysis.uploadId, ids, fieldValues,
-        version ? [version] : [], auth);
+        version ? [version] : [], auth, recreateClosed);
       applyResults(results);
     } catch (e) {
       message.error((e as Error).message);
@@ -182,17 +186,32 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
       ) : '—'),
     },
     {
-      title: t('veracode.sastJira.summary'),
+      // CWE + category and the open flaws in one column, per application (asked for, 2026-11-10):
+      //   Creed-CCS: IDB VERACODE STSA - CRLF Injection / CWE 117 <name> / CWE 117 (Flaw IDs: 257, 258)
+      // Display only: the issue is still found and filed by `summary`, shown in the tooltip
+      title: <Tooltip title={t('veracode.sastJira.summaryHint')}>{t('veracode.sastJira.summary')}</Tooltip>,
       dataIndex: 'summary',
-      width: 420,
+      width: 460,
+      sorter: (a, b) => a.flaws.length - b.flaws.length,
       render: (summary: string, i) => (
-        <Space direction="vertical" size={0}>
-          <Text>{summary}</Text>
-          <Space size={4}>
-            {i.cwe ? <a href={cweUrl(i.cwe)} target="_blank" rel="noreferrer">{i.cwe}</a> : <Text type="secondary">Unknown</Text>}
-            {i.cweName && <Text type="secondary" ellipsis={{ tooltip: i.cweName }} style={{ maxWidth: 320, fontSize: 12 }}>{i.cweName}</Text>}
+        <Tooltip title={t('veracode.sastJira.jiraSummary', { summary })} placement="topLeft">
+          <Space direction="vertical" size={8}>
+            {(i.byApplication ?? []).map((b) => (
+              <Space key={b.appName ?? b.name} direction="vertical" size={0}>
+                <Text>
+                  {b.url ? <a href={b.url} target="_blank" rel="noreferrer" title={b.appName ?? undefined}>{b.name}</a> : b.name}
+                  {`: ${b.heading}`}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {i.cwe ? <a href={cweUrl(i.cwe)} target="_blank" rel="noreferrer">{b.cwe}</a> : b.cwe}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{b.flawIds}</Text>
+              </Space>
+            ))}
+            {/* an analysis cached before the blocks existed */}
+            {!i.byApplication && <Text>{summary}</Text>}
           </Space>
-        </Space>
+        </Tooltip>
       ),
     },
     {
@@ -204,19 +223,13 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
       render: (s: string | null) => (s ? <Tag color={severityColor(s)}>{s}</Tag> : '—'),
     },
     {
-      title: t('veracode.sastJira.flaws'),
-      key: 'flaws',
-      width: 90,
-      align: 'right',
-      sorter: (a, b) => a.flaws.length - b.flaws.length,
-      render: (_, i) => i.flaws.length,
-    },
-    {
       title: t('veracode.col.application'),
       dataIndex: 'applications',
       width: 220,
       render: (apps: string[]) => (
-        <Space direction="vertical" size={0}>{apps.map((a) => <Text key={a} style={{ fontSize: 12 }}>{a}</Text>)}</Space>
+        <Space direction="vertical" size={0}>
+          {apps.map((a) => <ApplicationName key={a} app={a} apps={analysis.applications} style={{ fontSize: 12 }} />)}
+        </Space>
       ),
     },
     {
@@ -244,8 +257,16 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
         ? createButton([i.id], t('veracode.labelOne'),
           t('veracode.sastJira.labelOneConfirm', { key: i.issues[0]?.key ?? '', labels: i.missingLabels.join(', ') }),
           { size: 'small', kind: LABEL_BUTTON })
-        : i.status === 'MISSING' && createButton([i.id], t('veracode.createOne'),
-          t('veracode.sastJira.createOneConfirm', { project: sast.projectKey, type: sast.issueType }), { size: 'small' })),
+        : i.status === 'MISSING' ? createButton([i.id], t('veracode.createOne'),
+          t('veracode.sastJira.createOneConfirm', { project: sast.projectKey, type: sast.issueType }), { size: 'small' })
+          : i.recreatable && (
+            <Tooltip title={canCreate ? t('veracode.recreate.hint') : createBlocked}>
+              <Button size="small" variant="filled" {...RECREATE_BUTTON} loading={creating} disabled={!canCreate}
+                      onClick={() => confirmRecreate(modal, t, i.issues, sast.projectKey, () => create([i.id], true))}>
+                {t('veracode.recreate.button')}
+              </Button>
+            </Tooltip>
+          )),
     },
   ];
 
@@ -257,7 +278,7 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
       rowKey={(f) => `${f.application ?? ''}|${f.issueId ?? ''}|${f.sourceFile ?? ''}|${f.line ?? ''}`}
       dataSource={i.flaws}
       columns={[
-        { title: t('veracode.col.application'), dataIndex: 'application', render: (v: string | null) => v ?? '—' },
+        { title: t('veracode.col.application'), dataIndex: 'application', render: (v: string | null) => <ApplicationName app={v} apps={analysis.applications} /> },
         { title: t('veracode.col.severity'), dataIndex: 'severity', render: (s: string | null) => (s ? <Tag color={severityColor(s)}>{s}</Tag> : '—') },
         {
           title: t('veracode.sast.location'),

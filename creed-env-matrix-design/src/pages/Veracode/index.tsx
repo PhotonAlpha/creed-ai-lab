@@ -16,6 +16,7 @@ import {
   Segmented,
   Select,
   Space,
+  Spin,
   Statistic,
   Switch,
   Table,
@@ -33,10 +34,11 @@ import {
 } from '@ant-design/icons';
 import { jiraAuthComplete, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
 import type {
-  Analysis, ConfluenceAuth, CreateField, CreateFieldValues, CreateResult, Finding, FindingStatus, IssueRef, JiraAuth,
+  Analysis, ApplicationView, ConfluenceAuth, CreateField, CreateFieldValues, CreateResult, Finding, FindingStatus, IssueRef, JiraAuth,
   JiraConnection, ReportView, ScaSummary, VeracodeSettings,
 } from '../../api/veracode';
 import { ConfluenceSource } from './ConfluenceSource';
+import { ApplicationName, applicationLabel } from './applicationName';
 import { JiraTokenModal } from './JiraTokenModal';
 import { emptyAuth, jiraTokenStore } from './jiraToken';
 import { pageCache } from './pageCache';
@@ -45,6 +47,7 @@ import { JiraFieldsBar } from './JiraFieldsBar';
 import { SastJiraPanel } from './SastJiraPanel';
 import { ConfluenceExportModal } from './ConfluenceExportModal';
 import { SEVERITY_COLOR, severityRank } from './severity';
+import { RECREATE_BUTTON, confirmRecreate } from './recreateClosed';
 import { ApiError } from '../../api/client';
 import { useI18n } from '../../locales';
 import type { MessageKey } from '../../locales';
@@ -148,6 +151,8 @@ export function VeracodePage() {
   const [loading, setLoading] = useState(false);
   /** The upload under way (one or more files): bytes sent, then (all sent) the server parsing and asking Jira. */
   const [upload, setUpload] = useState<{ name: string; loaded: number; total: number } | null>(null);
+  /** New report files being processed (an upload, or Confluence attachments): the page is covered until it answers. */
+  const [processing, setProcessing] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -246,6 +251,7 @@ export function VeracodePage() {
       if (current === requestId.current) {
         setLoading(false);
         setUpload(null);
+        setProcessing(null);
       }
     }
   }, [message, t]);
@@ -341,6 +347,7 @@ export function VeracodePage() {
     const total = fileList.reduce((n, f) => n + f.size, 0);
     withToken(() => confirmed(() => {
       setUpload({ name, loaded: 0, total });
+      setProcessing(name);
       void run(() => veracodeApi.analyzeUpload(fileList, options(), auth,
         (p) => setUpload({ name, ...p })), options().autoCreate);
     }));
@@ -351,9 +358,9 @@ export function VeracodePage() {
   const analyzeConfluence = (pageId: string, attachmentIds: string[], name: string, confluence: ConfluenceAuth) =>
     withToken(() => confirmed(() => {
       setUpload(null);
+      setProcessing(t('veracode.confluence.analysing', { name }));
       void run(() => veracodeApi.analyzeConfluence(pageId, attachmentIds, options(), auth, confluence),
         options().autoCreate);
-      message.info(t('veracode.confluence.analysing', { name }));
     }));
 
   const analyzeSample = () =>
@@ -380,9 +387,9 @@ export function VeracodePage() {
       });
       const findings = prev.findings.map((f): Finding => {
         const r = byId.get(f.id);
-        if (r?.outcome === 'CREATED') return { ...f, status: 'CREATED', issues: r.issues, needsLabel: false };
+        if (r?.outcome === 'CREATED') return { ...f, status: 'CREATED', issues: r.issues, needsLabel: false, recreatable: false };
         if (r?.outcome === 'ALREADY_EXISTS' || r?.outcome === 'LABELED') {
-          return { ...f, status: 'EXISTS', issues: r.issues, needsLabel: false };
+          return { ...f, status: 'EXISTS', issues: r.issues, needsLabel: false, recreatable: false };
         }
         const sibling = f.status === 'MISSING' ? filed.get(issueKey(f)) : undefined;
         return sibling ? { ...f, status: 'EXISTS', issues: sibling.issues, needsLabel: true } : f;
@@ -426,11 +433,11 @@ export function VeracodePage() {
     }
   };
 
-  const create = async (ids: string[]) => {
+  const create = async (ids: string[], recreateClosed = false) => {
     if (!analysis || ids.length === 0) return;
     setCreating(true);
     try {
-      const { results } = await veracodeApi.createIssues(analysis.uploadId, ids, fieldValues, jiraVersions, auth);
+      const { results } = await veracodeApi.createIssues(analysis.uploadId, ids, fieldValues, jiraVersions, auth, recreateClosed);
       applyResults(results);
     } catch (e) {
       if (tokenMissing(e)) setTokenOpen(true);
@@ -513,7 +520,7 @@ export function VeracodePage() {
       title: t('veracode.col.application'),
       dataIndex: 'application',
       width: 180,
-      render: (a: string | null) => a ?? '—',
+      render: (a: string | null) => <ApplicationName app={a} apps={analysis?.applications} />,
     }] : []),
     {
       // cve_id|cwe_id: the CVE links to NVD, the CWE to MITRE; "Unknown" for a missing part
@@ -601,7 +608,14 @@ export function VeracodePage() {
       width: 130,
       fixed: 'right',
       // an existing issue of another application is labelled, not created again
-      render: (_, f) => creatable(f) && (canCreate ? (
+      render: (_, f) => (!creatable(f) && f.recreatable ? (
+        <Tooltip title={canCreate ? t('veracode.recreate.hint') : createBlocked}>
+          <Button size="small" variant="filled" {...RECREATE_BUTTON} loading={creating} disabled={!canCreate}
+                  onClick={() => confirmRecreate(modal, t, f.issues, analysis?.projectKey ?? '', () => create([f.id], true))}>
+            {t('veracode.recreate.button')}
+          </Button>
+        </Tooltip>
+      ) : creatable(f) && (canCreate ? (
         <Popconfirm
           title={f.needsLabel
             ? t('veracode.labelOneConfirm', { key: f.issues[0]?.key ?? '' })
@@ -620,7 +634,7 @@ export function VeracodePage() {
             {t(f.needsLabel ? 'veracode.labelOne' : 'veracode.createOne')}
           </Button>
         </Tooltip>
-      )),
+      ))),
     },
   ];
 
@@ -774,6 +788,14 @@ export function VeracodePage() {
             );
           })()}
           {upload && <UploadProgressBar {...upload} autoCreate={options().autoCreate} />}
+          {/* the whole page waits while new files are uploaded and processed (asked for): nothing else to click */}
+          <Spin
+            fullscreen
+            spinning={processing != null}
+            percent={upload && upload.total > 0 && upload.loaded < upload.total
+              ? Math.min(99, Math.floor((upload.loaded / upload.total) * 100)) : undefined}
+            tip={upload ? uploadStage(upload, options().autoCreate, t) : processing}
+          />
           {analysis && (
             <>
               <Descriptions size="small" column={{ xs: 1, md: 2, xl: 4 }} style={{ marginTop: 16 }}>
@@ -798,7 +820,7 @@ export function VeracodePage() {
                 dataSource={analysis.reports}
                 columns={[
                   { title: t('veracode.file'), dataIndex: 'fileName' },
-                  { title: t('veracode.app'), dataIndex: 'appName', render: (v: string | null) => v ?? '—' },
+                  { title: t('veracode.app'), dataIndex: 'appName', render: (v: string | null) => <ApplicationName app={v} apps={analysis.applications} /> },
                   {
                     title: t('veracode.affectedVersion'),
                     dataIndex: 'affectedVersion',
@@ -829,8 +851,8 @@ export function VeracodePage() {
                 ]}
                 style={{ marginTop: 8 }}
               />
-              <ScaSummaryTable reports={analysis.reports} />
-              <SastSummaryTable reports={analysis.reports} />
+              <ScaSummaryTable reports={analysis.reports} apps={analysis.applications} />
+              <SastSummaryTable reports={analysis.reports} apps={analysis.applications} />
             </>
           )}
         </ProCard>
@@ -924,7 +946,7 @@ export function VeracodePage() {
                           placeholder={t('veracode.application.filter')}
                           value={applications}
                           onChange={setApplications}
-                          options={applicationList.map((a) => ({ value: a, label: a || '—' }))}
+                          options={applicationList.map((a) => ({ value: a, label: applicationLabel(a, analysis?.applications) || '—' }))}
                           style={{ width: 240 }}
                         />
                         <Space size={4}>
@@ -1030,7 +1052,7 @@ export function VeracodePage() {
                           key: a,
                           label: (
                             <Space>
-                              <Text strong>{a || '—'}</Text>
+                              <ApplicationName app={a} apps={analysis?.applications} style={{ fontWeight: 600 }} />
                               <Tag>{t('veracode.application.count', { count: own.length })}</Tag>
                               {own.some((f) => f.status === 'MISSING') && (
                                 <Tag color="error">{own.filter((f) => f.status === 'MISSING').length} {t('veracode.status.MISSING')}</Tag>
@@ -1070,7 +1092,8 @@ export function VeracodePage() {
                     <Empty description={t(analysis ? 'veracode.sastJira.reanalyze' : 'veracode.empty')} />
                   )}
                   {analysis?.sastFlaws && analysis.sastFlaws.length > 0 && (
-                    <SastPanel flaws={analysis.sastFlaws} multipleApplications={analysis.reports.length > 1} />
+                    <SastPanel flaws={analysis.sastFlaws} multipleApplications={analysis.reports.length > 1}
+                               apps={analysis.applications} />
                   )}
                 </Space>
               ),
@@ -1111,17 +1134,19 @@ const formatBytes = (n: number) =>
  * Two phases: the upload, measured in bytes; then the server's part (parse the XML, look every finding up in
  * Jira, create when asked), which reports nothing while it runs — shown as a running bar, not a fake percentage.
  */
+/** Sending (bytes so far), then parsing and looking up in Jira - the server reports no progress for that part. */
+const uploadStage = ({ name, loaded, total }: { name: string; loaded: number; total: number }, autoCreate: boolean,
+                     t: ReturnType<typeof useI18n>['t']) => (total > 0 && loaded >= total
+  ? t(autoCreate ? 'veracode.upload.creating' : 'veracode.upload.analysing', { name })
+  : t('veracode.upload.sending', { name, loaded: formatBytes(loaded), total: formatBytes(total) }));
+
 function UploadProgressBar({ name, loaded, total, autoCreate }: { name: string; loaded: number; total: number; autoCreate: boolean }) {
   const { t } = useI18n();
   const sent = total > 0 && loaded >= total;
   const percent = total > 0 ? Math.min(100, Math.floor((loaded / total) * 100)) : 0;
   return (
     <div style={{ marginTop: 12 }}>
-      <Typography.Text type="secondary">
-        {sent
-          ? t(autoCreate ? 'veracode.upload.creating' : 'veracode.upload.analysing', { name })
-          : t('veracode.upload.sending', { name, loaded: formatBytes(loaded), total: formatBytes(total) })}
-      </Typography.Text>
+      <Typography.Text type="secondary">{uploadStage({ name, loaded, total }, autoCreate, t)}</Typography.Text>
       <Progress percent={sent ? 100 : percent} status="active" showInfo={!sent} />
     </div>
   );
@@ -1131,7 +1156,7 @@ function UploadProgressBar({ name, loaded, total, autoCreate }: { name: string; 
  * The reports' SCA statistics, one row per report and a total when there are several — the same table as the
  * workbook's "SCA summary" sheet. A count the report does not state is "—", not 0.
  */
-function ScaSummaryTable({ reports }: { reports: ReportView[] }) {
+function ScaSummaryTable({ reports, apps }: { reports: ReportView[]; apps?: ApplicationView[] }) {
   const { t } = useI18n();
   const rows = reports.filter((r): r is ReportView & { sca: ScaSummary } => r.sca != null);
   if (rows.length === 0) return null;
@@ -1148,9 +1173,9 @@ function ScaSummaryTable({ reports }: { reports: ReportView[] }) {
       key: 'report',
       fixed: 'left',
       width: 220,
-      render: (_, r) => (
-        <Text ellipsis={{ tooltip: r.fileName }} style={{ maxWidth: 200 }}>{r.appName ?? r.fileName}</Text>
-      ),
+      render: (_, r) => (r.appName ? <ApplicationName app={r.appName} apps={apps} /> : (
+        <Text ellipsis={{ tooltip: r.fileName }} style={{ maxWidth: 200 }}>{r.fileName}</Text>
+      )),
     },
     { title: t('veracode.sca.thirdParty'), key: 'thirdParty', align: 'right', render: (_, r) => stated(r.sca.thirdPartyComponents) },
     { title: t('veracode.sca.vulnerableComponents'), key: 'vulnerable', align: 'right', render: (_, r) => r.sca.vulnerableComponents },

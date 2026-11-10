@@ -43,15 +43,17 @@ veracode:
     # {component}, {jiraProject}, {version} also work. An issue matches when its summary names the CVE (Unknown + CWE
     # without one) and - as far as the template has them - the {file} and the {component}.
     summary-template: ${CREED_JIRA_SUMMARY_TEMPLATE:{project} - {cve}|{cwe} - {file}}
+    # A finding (SCA or SAST) whose issues are ALL in one of these statuses (any case) may be filed again - one at a
+    # time, after the page's confirmation (recreateClosed). Bulk creates still treat a closed issue as filed.
+    closed-statuses: Closed, Done
     # No Jira account here: every call (lookup, createmeta, create) uses the token the user typed on the page,
     # sent as X-Jira-Token. The page asks Cloud or Data Center: Cloud adds the Atlassian e-mail (X-Jira-User) and
     # goes to Jira as Basic base64(email:token), Data Center's personal access token as Bearer. Both REST API v2.
     # Without a token a request is 400 jira_token_required.
-    # Every created issue: these, project-name and the application label (application-label's group 1 of the
-    # Veracode app_name: AAA-BBB-CCC-DDD -> CCC-DDD). The same issue reported by another application gets that
-    # application's label added instead of a second issue.
+    # Every created issue: these, project-name and the application's label - its name under veracode.applications
+    # below, else its app_name. The same issue reported by another application gets that application's label added
+    # instead of a second issue.
     labels: ["IDB VERACODE SCA"]
-    application-label: ${CREED_JIRA_APPLICATION_LABEL:^[^-]*-[^-]*-(.+)$}
     browse-url: https://ethancaoq.atlassian.net/browse/{key}
     # maxResults of the paged createmeta calls (issue types / fields of the issue type)
     page-size: 50
@@ -87,6 +89,20 @@ veracode:
       defaults:
         affects-versions: []
         fields: {}
+
+  # Veracode applications (app_name, any case) under a name of their own and a link: the name is what the page, the
+  # Jira description (Veracode application) and the Confluence export (Repository) show, linked to url, and it is the
+  # application's Jira label (no link there). An app_name without an entry is shown, and labelled, as itself.
+  applications:
+    - app-name: GBT-T1-Creed-CCS
+      name: Creed-CCS
+      url: https://github.com/PhotonAlpha/creed-ai-lab
+    - app-name: creed-platform-2026-10-06-Creed
+      name: Creed-Oct
+      url: https://github.com/PhotonAlpha/creed-ai-lab
+    - app-name: creed-gateway-2026-10-08-Gateway
+      name: Creed-Oct-2
+      url: https://github.com/PhotonAlpha/creed-ai-lab
 
   # A Confluence page's attachments as a report source (the page lists them, the user picks .xml / .zip, this service
   # downloads and analyses them). Like Jira: no account here, every call uses the user's own token (X-Confluence-Token,

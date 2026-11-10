@@ -27,10 +27,9 @@ import java.util.Map;
  *                       Veracode {@code app_name}), {@code {component}}, {@code {jiraProject}}, {@code {version}}.
  *                       Matching reads which of {@code {file}} / {@code {component}} it holds: an issue must name
  *                       those, plus the CVE (or Unknown + CWE)
- * @param labels         added to every created issue, with {@code projectName} and the application label (not the CVE)
- * @param applicationLabel a regex on the Veracode application whose group 1 is the application's label: the default
- *                       drops everything up to the second {@code -} ({@code AAA-BBB-CCC-DDD} -> {@code CCC-DDD});
- *                       no match = the whole name. Another application reporting the same issue adds its label
+ * @param labels         added to every created issue, with {@code projectName} and the application's label - its
+ *                       mapped name ({@link ApplicationProperties}), else its {@code app_name}; not the CVE. Another
+ *                       application reporting the same issue adds its label
  * @param browseUrl      template for issue links, {@code {key}} is replaced
  * @param pageSize       {@code maxResults} per page of the paged calls (create metadata, searches)
  * @param searchBatchSize findings per lookup search: their CVEs are OR'ed into one JQL. Bounded by the URL length
@@ -39,6 +38,8 @@ import java.util.Map;
  *                       concurrent requests)
  * @param defaults       what the page preselects once the connection test has read Jira - only values Jira offers
  * @param sast           where SAST (static-analysis) issues go - their own project, issue type, labels and summary
+ * @param closedStatuses statuses (any case) of a finished issue: a finding whose issues are all in one may be filed
+ *                       again, one at a time and after the page's confirmation (asked for, 2026-11-10)
  */
 @Validated
 @ConfigurationProperties("veracode.jira")
@@ -49,7 +50,6 @@ public record JiraProperties(
         String projectName,
         @DefaultValue("{project} - {cve}|{cwe} - {file}") String summaryTemplate,
         @DefaultValue("veracode") List<String> labels,
-        @DefaultValue("^[^-]*-[^-]*-(.+)$") String applicationLabel,
         @NotBlank String browseUrl,
         @DefaultValue("50") @Min(1) @Max(1000) int pageSize,
         @DefaultValue("50") @Min(1) @Max(100) int searchBatchSize,
@@ -57,7 +57,14 @@ public record JiraProperties(
         @DefaultValue("5s") Duration connectTimeout,
         @DefaultValue("20s") Duration readTimeout,
         @DefaultValue CreateDefaults defaults,
-        @DefaultValue Sast sast) {
+        @DefaultValue Sast sast,
+        @DefaultValue({"Closed", "Done"}) List<String> closedStatuses) {
+
+    /** Every issue is finished ({@code closed-statuses}); {@code false} for none - a missing one is just created. */
+    public boolean allClosed(List<String> statuses) {
+        return !statuses.isEmpty() && statuses.stream().allMatch(s -> s != null
+                && closedStatuses.stream().anyMatch(c -> c.trim().equalsIgnoreCase(s.trim())));
+    }
 
     /**
      * SAST issues: one per CWE + flaw category ({@code categoryname}), looked up and created by their summary alone -
@@ -145,16 +152,6 @@ public record JiraProperties(
     /** {@code {project}}: the configured name, else the Jira project key. */
     public String project() {
         return projectName == null || projectName.isBlank() ? projectKey : projectName.trim();
-    }
-
-    /** The label an application's findings carry ({@link #applicationLabel}); {@code null} without an application. */
-    public String applicationLabel(String application) {
-        if (application == null || application.isBlank()) {
-            return null;
-        }
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile(applicationLabel).matcher(application.trim());
-        return m.matches() && m.groupCount() >= 1 && m.group(1) != null && !m.group(1).isBlank()
-                ? m.group(1) : application.trim();
     }
 
     public String browse(String key) {

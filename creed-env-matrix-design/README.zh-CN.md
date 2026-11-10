@@ -474,6 +474,9 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
     `application.yml` 的 `veracode.jira.sast`（`IDB VERACODE STSA`）；标签页有自己的影响版本（问题类型要求时必选）和 Jira 字段。
     label 与 SCA 一致：新建的 Jira 带上其中每个有未关闭漏洞的 application 的 label；已存在但缺少某个 application label 的 Jira
     显示「缺少 label」，用橙色的「添加 label」/「添加全部 label」补上，而不是再建一个。
+  - **已关闭的 Jira 可以重新创建**（SCA 与 SAST 相同）：一个漏洞找到的 Jira 全部为 Closed / Done（后端 `veracode.jira.closed-statuses`）时，
+    该行显示红色「重新创建」。点击后弹框列出这些已关闭的 Jira，提醒确认确实需要重新跟踪而不是重复报告，选「仍然创建」才新建。
+    只能逐行进行，「创建全部缺失」不会这样做；后端会重新读取 Jira，期间有 Jira 被重新打开则不再新建。
     每行可展开查看具体代码位置。SAST 项目配置错误时只在该标签页报错，SCA 不受影响。
   - SCA 统计下方的「SAST 统计」：评级、分数、报告给出的漏洞总数 / 未缓解数，然后是列出的、未关闭、已缓解、已修复、
     未关闭且影响策略的数量，以及未关闭漏洞按严重级别的分布（多个报告时有「合计」行）。
@@ -487,6 +490,18 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
   可在对话框中修改。和导出 Excel 一样，Jira 状态是导出时重新读取的。
   分析的报告文件（上传的，或从 Confluence 取的）会作为附件加到新页面上，并在页面最后一行 *Veracode report(s)* 中链接。
 - **导出 Excel**：下载一次新的分析结果（*Findings*、*SCA summary*（同上的统计）、*SAST flaws*（含每个漏洞对应的 Jira）、*SAST summary* 与 *Source* 五个工作表）。
+- **application 名称**（2026-11-10）：后端配置 `veracode.applications` 把 `app_name` 映射为名称和链接（`GBT-T1-Creed-CCS` → `Creed-CCS`，`https://…/browse`）。
+  页面表格、Jira 描述（*Veracode application*）和导出的 Confluence 页面（*Repository*）显示该名称，点击直接跳转；它也是该 application 的 Jira label
+  （取代 `application-label` 正则，label 不带链接）。没有映射时使用 `app_name` 本身。
+- **Confluence 附件**按上传时间倒序列出，默认最多显示 50 个（50 / 100 / 200 / 全部），默认只显示文件名中带报告日期 `dd_MMM_yyyy`（`09_Nov_2026`）
+  且后缀为 `.zip` 的附件 —— 页面上通常还有同一次扫描的 PDF。两个过滤条件都可以取消。
+  页面保留每次扫描（`03_Nov_2026`、`09_Nov_2026` …）时，「报告日期」下拉框列出文件名中出现的日期（最新在前，带附件数），
+  列出附件后默认选中最新的日期；选「所有日期」恢复为只要求带日期。
+- **上传（或从 Confluence 下载）处理过程中**整个页面显示全屏 loading：先显示上传百分比，再显示「正在解析并在 Jira 中查找」。
+- **新建 Jira 的来源**：上传的文件作为附件加到 Jira 上，描述中的 *Source* 注明这一点；从 Confluence 下载的报告则在 *Source* 中给出该附件的 Confluence 地址，以及附件所在的原始页面（页面标题，可点击跳转）。
+- **SAST 的 Jira 标题列**按 application 显示（只影响显示 —— Jira 仍按标题查找和创建，标题见单元格提示）：
+  `Creed-CCS: IDB VERACODE STSA - CRLF Injection` / `CWE 117 <CWE 名称>` / `CWE 117 (Flaw IDs: 257, 258)`；「未关闭漏洞」列合并到该列。
+  导出的 Confluence 页面中 SAST 的 *Details* 相同，两个表格都按 repository 排序。
 
 ### 迁移同步风险（`/migration-risk`）
 

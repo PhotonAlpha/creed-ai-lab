@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.web.util.HtmlUtils;
 
@@ -254,6 +255,28 @@ public class MockJiraController {
             store.addLabel(key, label);
         }
         return ResponseEntity.noContent().build();
+    }
+
+    /** Jira's attach: multipart {@code file} parts; the XSRF check refuses it (403) without {@code no-check}. */
+    @PostMapping("/rest/api/2/issue/{key}/attachments")
+    ResponseEntity<?> attach(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+                             @RequestHeader(name = "X-Atlassian-Token", required = false) String xsrf,
+                             @PathVariable String key, @RequestParam("file") List<MultipartFile> files) {
+        if (user(authorization) == null) {
+            return unauthorized();
+        }
+        if (!"no-check".equals(xsrf)) {
+            return error(HttpStatus.FORBIDDEN, "XSRF check failed", null);
+        }
+        if (store.find(key) == null) {
+            return error(HttpStatus.NOT_FOUND, "Issue Does Not Exist", null);
+        }
+        List<Map<String, Object>> created = new ArrayList<>();
+        for (MultipartFile f : files) {
+            store.attach(key, f.getOriginalFilename());
+            created.add(Map.of("filename", String.valueOf(f.getOriginalFilename()), "size", f.getSize()));
+        }
+        return ResponseEntity.ok(created);
     }
 
     @PostMapping("/rest/api/2/issue")

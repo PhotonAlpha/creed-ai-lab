@@ -16,16 +16,19 @@ import java.util.List;
  * @param needsLabel      the issue exists (another application filed it) but lacks this application's label:
  *                        creating adds the label instead of a second issue
  * @param summary         the summary this page files the finding under ({@code summary-template}), existing or not
+ * @param recreatable     its issues are all finished ({@code closed-statuses}): the page offers filing it again,
+ *                        after a confirmation
  */
 public record FindingView(String id, String application, String title, String cveId, String cve, String cwe,
                           String fileName, List<String> components, String severity, Double cvss,
                           String affectedVersion, String description, List<String> locations,
-                          FindingStatus status, List<IssueRef> issues, boolean needsLabel, String summary) {
+                          FindingStatus status, List<IssueRef> issues, boolean needsLabel, String summary,
+                          boolean recreatable) {
 
     public static FindingView of(Finding f, String summary, FindingStatus status, List<IssueRef> issues,
-                                 boolean needsLabel) {
+                                 boolean needsLabel, boolean recreatable) {
         return new FindingView(f.id(), f.application(), f.title(), f.cveId(), f.cve(), f.cwe(), f.fileName(),
                 f.components(), f.severity(), f.cvss(), f.affectedVersion(), f.description(),
-                f.locations(), status, List.copyOf(issues), needsLabel, summary);
+                f.locations(), status, List.copyOf(issues), needsLabel, summary, recreatable);
     }
 }

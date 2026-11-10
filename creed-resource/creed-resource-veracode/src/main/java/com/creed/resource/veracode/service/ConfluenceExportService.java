@@ -3,6 +3,7 @@ package com.creed.resource.veracode.service;
 import com.creed.resource.veracode.api.dto.AnalysisResponse;
 import com.creed.resource.veracode.api.dto.FindingView;
 import com.creed.resource.veracode.api.dto.SastIssueView;
+import com.creed.resource.veracode.config.ApplicationProperties;
 import com.creed.resource.veracode.config.ConfluenceProperties;
 import com.creed.resource.veracode.domain.SastFlaw;
 import com.creed.resource.veracode.domain.Severity;
@@ -50,6 +51,7 @@ public class ConfluenceExportService {
     private final VeracodeAnalysisService analysis;
     private final ConfluenceService confluence;
     private final ConfluenceProperties props;
+    private final ApplicationProperties apps;
     private final ITemplateEngine templates;
     private final Clock clock;
 
@@ -60,17 +62,28 @@ public class ConfluenceExportService {
     }
 
     /**
+     * A Veracode application by its mapped name ({@code veracode.applications}), else its {@code app_name}.
+     *
+     * @param url its link; {@code null} without a mapping - the name is then text
+     */
+    public record Repository(String name, String url) {
+    }
+
+    /**
      * @param description  the Jira summary - the issue's, else the one it would be filed under
      * @param repositories the Veracode applications: one row per Jira issue, so a CVE + jar that several
      *                     repositories share in one issue is one row naming them all (one per line)
      */
     public record ScaRow(int no, List<IssueRef> issues, String description, String severity,
-                         List<String> repositories, String status) {
+                         List<Repository> repositories, String status) {
     }
 
-    /** @param count the issue's open flaws */
-    public record SastRow(int no, List<IssueRef> issues, String details, String severity, int count,
-                          String repository, String status) {
+    /**
+     * @param details the issue per application, as the page shows it ({@link SastIssueView.ApplicationBlock})
+     * @param count   the issue's open flaws
+     */
+    public record SastRow(int no, List<IssueRef> issues, List<SastIssueView.ApplicationBlock> details, String severity,
+                          int count, List<Repository> repositories, String status) {
     }
 
     /**
@@ -180,16 +193,22 @@ public class ConfluenceExportService {
         for (List<FindingView> group : byIssue.values()) {
             FindingView first = group.getFirst();
             String description = first.issues().isEmpty() ? first.summary() : first.issues().getFirst().summary();
-            scaRows.add(new ScaRow(scaRows.size() + 1, first.issues(), description, first.severity(),
-                    distinct(group.stream().map(FindingView::application).toList()), status(first.issues())));
+            scaRows.add(new ScaRow(0, first.issues(), description, first.severity(),
+                    repositories(group.stream().map(FindingView::application).toList()), status(first.issues())));
         }
         boolean sastRead = result.sast() != null && result.sast().error() == null;
         List<SastRow> sastRows = new ArrayList<>();
         for (SastIssueView i : sastIssues) {
-            String details = i.issues().isEmpty() ? i.summary() : i.issues().getFirst().summary();
-            sastRows.add(new SastRow(sastRows.size() + 1, i.issues(), details, i.severity(), i.flaws().size(),
-                    String.join(", ", i.applications()), sastRead ? status(i.issues()) : "—"));
+            sastRows.add(new SastRow(0, i.issues(), i.byApplication(), i.severity(), i.flaws().size(),
+                    repositories(i.applications()), sastRead ? status(i.issues()) : "—"));
         }
+        // sorted by repository (asked for, 2026-11-10) - the first one a row names - then as before: by severity
+        scaRows = numbered(scaRows.stream().sorted(Comparator.comparing((ScaRow r) -> sortKey(r.repositories())))
+                .toList(), (r, no) -> new ScaRow(no, r.issues(), r.description(), r.severity(), r.repositories(),
+                r.status()));
+        sastRows = numbered(sastRows.stream().sorted(Comparator.comparing((SastRow r) -> sortKey(r.repositories())))
+                .toList(), (r, no) -> new SastRow(no, r.issues(), r.details(), r.severity(), r.count(),
+                r.repositories(), r.status()));
 
         String source = "Jira " + result.projectKey() + " (SCA" + (result.selectedVersions().isEmpty() ? ", any version"
                 : ", versions " + String.join(", ", result.selectedVersions())) + ")"
@@ -198,6 +217,29 @@ public class ConfluenceExportService {
                         .format(result.analyzedAt()) + ".";
         return new Report(header, List.of(new SummaryRow("SCA", findings.size(), sca),
                 new SummaryRow("SAST", openFlaws.size(), sast)), scaRows, sastRows, files, source);
+    }
+
+    /** The applications under their mapped names, alphabetical (case ignored), each once. */
+    private List<Repository> repositories(List<String> appNames) {
+        Map<String, Repository> byName = new LinkedHashMap<>();
+        for (String app : distinct(appNames)) {
+            String name = apps.name(app);
+            byName.putIfAbsent(name.toLowerCase(Locale.ROOT), new Repository(name, apps.url(app)));
+        }
+        return byName.values().stream().sorted(Comparator.comparing(r -> r.name().toLowerCase(Locale.ROOT))).toList();
+    }
+
+    /** A row without a repository sorts last. */
+    private static String sortKey(List<Repository> repositories) {
+        return repositories.isEmpty() ? "\uffff" : repositories.getFirst().name().toLowerCase(Locale.ROOT);
+    }
+
+    private static <R> List<R> numbered(List<R> rows, java.util.function.BiFunction<R, Integer, R> withNo) {
+        List<R> numbered = new ArrayList<>();
+        for (R row : rows) {
+            numbered.add(withNo.apply(row, numbered.size() + 1));
+        }
+        return numbered;
     }
 
     /** Jira's statuses of the issues, or {@value #NOT_IN_JIRA}. */

@@ -10,13 +10,10 @@ import com.creed.resource.veracode.service.VeracodeAnalysisService.UploadedFile;
 import com.creed.resource.veracode.service.VeracodeXmlParser.UnsupportedFileException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
 import java.net.URI;
@@ -120,13 +117,16 @@ public class ConfluenceService {
                 throw new UnsupportedFileException(a.title() + " is " + a.fileSize() + " bytes, more than "
                         + props.maxDownloadSize().toMegabytes() + "MB (veracode.confluence.max-download-size)");
             }
-            byte[] content = fetch(downloadUrl(a), token, a.title());
+            URI url = downloadUrl(a);
+            byte[] content = fetch(url, token, a.title());
             if (content.length > max) {
                 throw new UnsupportedFileException(a.title() + " is larger than "
                         + props.maxDownloadSize().toMegabytes() + "MB (veracode.confluence.max-download-size)");
             }
             log.info("Confluence page {}: downloaded '{}' ({} bytes)", pageId, a.title(), content.length);
-            files.add(new UploadedFile(a.title(), content));
+            // the URL goes into the Jira issues filed from it, instead of the file itself
+            files.add(new UploadedFile(a.title(), content, url.toString(), listing.page().title(),
+                    props.pageUrl(listing.page().id())));
         }
         return files;
     }
@@ -215,31 +215,13 @@ public class ConfluenceService {
         if (files.isEmpty()) {
             return List.of();
         }
-        // a plain map, not MultipartBodyBuilder: that one needs Reactive Streams, which this servlet app lacks
-        MultiValueMap<String, HttpEntity<?>> parts = new LinkedMultiValueMap<>();
-        for (UploadedFile f : files) {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(mediaType(f.filename()));
-            parts.add("file", new HttpEntity<>(new ByteArrayResource(f.content()) {
-                @Override
-                public String getFilename() {
-                    return f.filename();
-                }
-            }, headers));
-        }
+        MultiValueMap<String, HttpEntity<?>> parts = MultipartFiles.of(files);
         ConfluenceAttachmentPage result = UpstreamException.call(CONFLUENCE, () -> confluence.addAttachments(
                 token.authorization(), "nocheck", pageId(pageId), parts));
         List<String> titles = result == null || result.results() == null ? List.of()
                 : result.results().stream().map(Attachment::title).toList();
         log.info("Confluence page {}: attached {}", pageId, titles);
         return titles;
-    }
-
-    private static MediaType mediaType(String filename) {
-        String name = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
-        return name.endsWith(".xml") ? MediaType.APPLICATION_XML
-                : name.endsWith(".zip") ? MediaType.parseMediaType("application/zip")
-                : MediaType.APPLICATION_OCTET_STREAM;
     }
 
     private static String pageId(String pageId) {

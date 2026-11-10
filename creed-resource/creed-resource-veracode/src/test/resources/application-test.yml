@@ -40,6 +40,11 @@ veracode:
       labels: [veracode-sast]
       defaults:
         affects-versions: [9.9.9, 2.4.0]
+  # The second sample report's application under another name, with a link; the first sample's stays its app_name
+  applications:
+    - app-name: creed-gateway-2026-10-08-Gateway
+      name: Creed-Gateway
+      url: https://git.example.com/projects/GATEWAY/browse
   confluence:
     # Never called over the network either: the test swaps the client onto MockMvc.
     base-url: http://localhost/mock/confluence

@@ -1,6 +1,9 @@
 package com.creed.resource.veracode.client.jira;
 
+import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -34,6 +37,16 @@ public interface JiraClient {
     void updateIssue(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
                      @PathVariable String key,
                      @RequestBody java.util.Map<String, Object> update);
+
+    /**
+     * Attaches files to an issue: multipart, one {@code file} part each. Jira refuses it (403, XSRF check) without
+     * {@code X-Atlassian-Token: no-check}. Answers the attachments created; nothing here reads them.
+     */
+    @PostExchange(url = "/rest/api/2/issue/{key}/attachments", contentType = MediaType.MULTIPART_FORM_DATA_VALUE)
+    void addAttachments(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+                        @RequestHeader("X-Atlassian-Token") String xsrf,
+                        @PathVariable String key,
+                        @RequestBody MultiValueMap<String, HttpEntity<?>> files);
 
     /** Data Center: paged by {@code startAt}. @param fields comma-separated */
     @GetExchange("/rest/api/2/search")

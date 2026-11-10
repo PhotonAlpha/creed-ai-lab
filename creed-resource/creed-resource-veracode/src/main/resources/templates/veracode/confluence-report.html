@@ -26,7 +26,7 @@
       <td><th:block th:each="issue, it : ${row.issues()}"><a th:href="${issue.url()}" th:text="${issue.key()}">DT-15</a><th:block th:unless="${it.last}">, </th:block></th:block></td>
       <td th:text="${row.description()}">IDB VERACODE SCA - CVE-2021-45046|CWE-917 - log4j-core-2.14.1.jar</td>
       <td th:text="${row.severity()}">Very High</td>
-      <td><th:block th:each="repository, it : ${row.repositories()}"><th:block th:text="${repository}">creed</th:block><br th:unless="${it.last}" /></th:block></td>
+      <td><th:block th:each="repository, it : ${row.repositories()}"><a th:if="${repository.url() != null}" th:href="${repository.url()}" th:text="${repository.name()}">Creed-CCS</a><th:block th:if="${repository.url() == null}" th:text="${repository.name()}">creed</th:block><br th:unless="${it.last}" /></th:block></td>
       <td th:text="${row.status()}">CLOSED</td>
       <td></td>
     </tr>
@@ -42,10 +42,10 @@
     <tr th:each="row : ${report.sast()}">
       <td style="text-align: right;" th:text="${row.no()}">1</td>
       <td><th:block th:each="issue, it : ${row.issues()}"><a th:href="${issue.url()}" th:text="${issue.key()}">DT-15</a><th:block th:unless="${it.last}">, </th:block></th:block></td>
-      <td th:text="${row.details()}">IDB VERACODE STSA - CWE-89 - SQL Injection</td>
+      <td><th:block th:each="block, it : ${row.details()}"><a th:if="${block.url() != null}" th:href="${block.url()}" th:text="${block.name()}">Creed-CCS</a><th:block th:if="${block.url() == null}" th:text="${block.name()}">Creed-CCS</th:block><th:block th:text="|: ${block.heading()}|">: IDB VERACODE STSA - CRLF Injection</th:block><br /><th:block th:text="${block.cwe()}">CWE 117 Improper Output Neutralization for Logs</th:block><br /><th:block th:text="${block.flawIds()}">CWE 117 (Flaw IDs: 257, 258)</th:block><th:block th:unless="${it.last}"><br /><br /></th:block></th:block></td>
       <td th:text="${row.severity()}">MEDIUM</td>
       <td style="text-align: right;" th:text="${row.count()}">4</td>
-      <td th:text="${row.repository()}">creed</td>
+      <td><th:block th:each="repository, it : ${row.repositories()}"><a th:if="${repository.url() != null}" th:href="${repository.url()}" th:text="${repository.name()}">Creed-CCS</a><th:block th:if="${repository.url() == null}" th:text="${repository.name()}">creed</th:block><br th:unless="${it.last}" /></th:block></td>
       <td th:text="${row.status()}">CLOSED</td>
       <td></td>
     </tr>

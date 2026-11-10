@@ -9,6 +9,7 @@ import com.creed.resource.veracode.client.jira.JiraIssueType;
 import com.creed.resource.veracode.client.jira.JiraPage;
 import com.creed.resource.veracode.client.jira.JiraSearchResult;
 import com.creed.resource.veracode.client.jira.JiraVersion;
+import com.creed.resource.veracode.config.ApplicationProperties;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.SastFlaw;
@@ -103,7 +104,7 @@ class JiraLookupServiceTest {
         FakeJira jira = new FakeJira();
         jira.found = List.of(issue("CREED-2", "CREED", "[Veracode] CVE-2021-44228 log4j"));
         Finding log4shell = finding("CVE-2021-44228", "log4j-core-2.14.1.jar");
-        JiraLookupService service = new JiraLookupService(jira, properties("[Veracode] {cve}", 50));
+        JiraLookupService service = new JiraLookupService(jira, properties("[Veracode] {cve}", 50), APPS);
 
         assertThat(service.find(List.of(log4shell), List.of("2.3.0"), TOKEN).get(log4shell.id()))
                 .extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-2");
@@ -121,10 +122,10 @@ class JiraLookupServiceTest {
         // {project} is project-name, not the Veracode application
         assertThat(service.summary(log4shell)).isEqualTo("creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar");
         assertThat(service.summary(unknown)).isEqualTo("creed - Unknown|Unknown - x.jar");
-        // configured labels, project-name, and the application without its first two parts - not the cve_id
-        assertThat(service.labels(log4shell)).containsExactly("veracode", "creed", "GATEWAY-API");
-        assertThat(service.applicationLabel(log4shell)).isEqualTo("GATEWAY-API");
-        // fewer than two hyphens: the whole name; Jira takes no spaces in a label
+        // configured labels, project-name, and the application's mapped name - not the cve_id
+        assertThat(service.labels(log4shell)).containsExactly("veracode", "creed", "Pay-Gateway");
+        assertThat(service.applicationLabel(log4shell)).isEqualTo("Pay-Gateway");
+        // no mapping: the app_name itself; Jira takes no spaces in a label
         assertThat(service.labels(unknown)).containsExactly("veracode", "creed", "two_words");
     }
 
@@ -202,7 +203,7 @@ class JiraLookupServiceTest {
         // by id or by name, any case; values Jira does not offer are dropped
         JiraLookupService service = new JiraLookupService(jira, properties("{cve}", 3, new JiraProperties.CreateDefaults(
                 List.of("2.4.0", "9.9.9", "2.3.0"), Map.of("COMPONENTS", List.of("security", "Nope"),
-                "region", List.of("APAC"), "customfield_5", List.of("Blue")))));
+                "region", List.of("APAC"), "customfield_5", List.of("Blue")))), APPS);
 
         JiraLookupService.Connection connection = service.connection(TOKEN);
         assertThat(connection.defaultVersions()).containsExactly("2.4.0", "2.3.0");
@@ -284,12 +285,14 @@ class JiraLookupServiceTest {
         JiraLookupService service = service(new FakeJira(), 50);
         SastIssue sql = SastIssue.group(List.of(
                 sastFlaw("creed-platform-2026-10-06-Creed", "CWE-89", "SQL Injection"),
-                sastFlaw("creed-gateway-2026-10-08-Gateway", "CWE-89", "SQL Injection"))).getFirst();
-        JiraLookupService.IssueRef filed = new JiraLookupService.IssueRef("CREED-9", "x", "To Do", null, null, List.of(), List.of("veracode", "2026-10-06-creed"), "u");
+                sastFlaw("creed-pay-gateway-api", "CWE-89", "SQL Injection"))).getFirst();
+        JiraLookupService.IssueRef filed = new JiraLookupService.IssueRef("CREED-9", "x", "To Do", null, null, List.of(),
+                List.of("veracode", "CREED-PLATFORM-2026-10-06-creed"), "u");
 
-        // as SCA: every application's label on create; an existing issue lacks those it does not carry (any case)
-        assertThat(service.sastLabels(sql)).endsWith("2026-10-06-Creed", "2026-10-08-Gateway");
-        assertThat(service.missingSastLabels(sql, List.of(filed))).containsExactly("2026-10-08-Gateway");
+        // as SCA: every application's label (mapped name, else app_name) on create; an existing issue lacks those it
+        // does not carry (any case)
+        assertThat(service.sastLabels(sql)).endsWith("creed-platform-2026-10-06-Creed", "Pay-Gateway");
+        assertThat(service.missingSastLabels(sql, List.of(filed))).containsExactly("Pay-Gateway");
         assertThat(service.missingSastLabels(sql, List.of())).isEmpty();
     }
 
@@ -340,8 +343,12 @@ class JiraLookupServiceTest {
         assertThat(meta.versions()).isEmpty();
     }
 
+    /** CREED-PAY-GATEWAY-API is mapped (case ignored); every other application keeps its app_name. */
+    private static final ApplicationProperties APPS = new ApplicationProperties(List.of(
+            new ApplicationProperties.Application("creed-pay-gateway-api", "Pay-Gateway", "https://git/pay")));
+
     private static JiraLookupService service(JiraClient jira, int searchBatchSize) {
-        return new JiraLookupService(jira, properties("{project} - {cve}|{cwe} - {file}", searchBatchSize));
+        return new JiraLookupService(jira, properties("{project} - {cve}|{cwe} - {file}", searchBatchSize), APPS);
     }
 
     private static JiraProperties properties(String template, int searchBatchSize) {
@@ -350,10 +357,11 @@ class JiraLookupServiceTest {
 
     private static JiraProperties properties(String template, int searchBatchSize, JiraProperties.CreateDefaults defaults) {
         return new JiraProperties("http://jira", "CREED", "Bug", "creed", template, List.of("veracode"),
-                "^[^-]*-[^-]*-(.+)$", "http://jira/browse/{key}", 1, searchBatchSize, 5,
+                "http://jira/browse/{key}", 1, searchBatchSize, 5,
                 Duration.ofSeconds(1), Duration.ofSeconds(1), defaults,
                 new JiraProperties.Sast(null, null, "IDB VERACODE STSA", "{project} - {cwe} - {category}",
-                        List.of("IDB VERACODE STSA", "veracode"), new JiraProperties.CreateDefaults(null, null)));
+                        List.of("IDB VERACODE STSA", "veracode"), new JiraProperties.CreateDefaults(null, null)),
+                List.of("Closed", "Done"));
     }
 
     /** Pages of one item each (pageSize 1), so paging is walked as well. */
@@ -372,6 +380,12 @@ class JiraLookupServiceTest {
 
         @Override
         public JiraCreatedIssue createIssue(String authorization, JiraCreateIssueRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void addAttachments(String authorization, String xsrf, String key,
+                                   org.springframework.util.MultiValueMap<String, org.springframework.http.HttpEntity<?>> files) {
             throw new UnsupportedOperationException();
         }
 

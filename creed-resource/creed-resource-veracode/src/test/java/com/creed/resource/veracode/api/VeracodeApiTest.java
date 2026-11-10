@@ -245,8 +245,8 @@ class VeracodeApiTest {
         // the page's choices, sent as Jira's option ids
         assertThat(created.components()).containsExactly("Security");
         assertThat(created.environment()).isEqualTo("Production");
-        // configured, project-name, the application's label (creed-platform-2026-10-06-Creed -> 2026-10-06-Creed); no CVE
-        assertThat(created.labels()).containsExactly("veracode", "creed", "2026-10-06-Creed");
+        // configured, project-name, the application's label (no veracode.applications entry: its app_name); no CVE
+        assertThat(created.labels()).containsExactly("veracode", "creed", "creed-platform-2026-10-06-Creed");
         // no "\\|" escape anywhere: Jira Cloud renders it as a backslash and an extra cell
         assertThat(created.description()).doesNotContain("\\|");
         assertThat(created.description()).contains(
@@ -255,13 +255,53 @@ class VeracodeApiTest {
                 "|Veracode application|creed-platform-2026-10-06-Creed|", "|Library file|spring-beans-5.3.17.jar|",
                 "|Component(s)|spring-beans 5.3.17|",
                 "|Description|Spring Framework RCE via data binding on JDK 9+. A Spring MVC or WebFlux application running on JDK 9+ may be vulnerable.|",
-                "Source: report detailedreport.xml, scan 2.3.0, policy Creed Default");
+                "Source: uploaded report detailedreport.xml (attached to this issue), scan 2.3.0, policy Creed Default");
+        // the uploaded file itself is attached to the issue
+        assertThat(jira.attachments("CREED-105")).containsExactly("detailedreport.xml");
 
         // The second click: re-checked, not duplicated.
         mvc.perform(post("/api/veracode/jira/issues").header(JiraToken.HEADER, TOKEN).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"uploadId\":\"" + uploadId + "\",\"findingIds\":[\"creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar\"]," + FIELDS + "}"))
                 .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"))
                 .andExpect(jsonPath("$.results[0].issues[0].key").value("CREED-105"));
+        assertThat(jira.all()).hasSize(5);
+    }
+
+    @Test
+    void aFindingWhoseIssuesAreAllClosedMayBeFiledAgainOneAtATime() throws Exception {
+        String spring = "creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar";
+        String log4j = "creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar";
+        // under 2.2.1 spring-beans has only CREED-102, Done; log4j-core's CREED-101 (2.3.0) is In Progress
+        String uploadId = JsonPath.read(mvc.perform(multipart("/api/veracode/analysis/upload").file(sample())
+                        .param("jiraVersions", "2.2.1", "2.3.0"))
+                .andExpect(jsonPath("$.findings[?(@.id=='" + spring + "')].recreatable").value(true))
+                .andExpect(jsonPath("$.findings[?(@.id=='" + log4j + "')].recreatable").value(false))
+                .andReturn().getResponse().getContentAsString(), "$.uploadId");
+        String fields = "\"fields\":{\"components\":[\"Security\"],\"customfield_10100\":\"Production\"},\"jiraVersions\":[\"2.2.1\"]";
+        // without the flag a closed issue still counts as filed
+        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"%s\",\"findingIds\":[\"%s\"],%s}".formatted(uploadId, spring, fields)))
+                .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"));
+        // never in bulk
+        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"%s\",\"findingIds\":[\"%s\",\"%s\"],%s,\"recreateClosed\":true}"
+                                .formatted(uploadId, spring, log4j, fields)))
+                .andExpect(status().isBadRequest());
+        assertThat(jira.all()).hasSize(4);
+        // one, confirmed: filed again beside the Done one
+        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"%s\",\"findingIds\":[\"%s\"],%s,\"recreateClosed\":true}"
+                                .formatted(uploadId, spring, fields)))
+                .andExpect(jsonPath("$.results[0].outcome").value("CREATED"))
+                .andExpect(jsonPath("$.results[0].issues[0].key").value("CREED-105"));
+        // now an open issue exists: the flag files nothing more, and the page no longer offers it
+        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"%s\",\"findingIds\":[\"%s\"],%s,\"recreateClosed\":true}"
+                                .formatted(uploadId, spring, fields)))
+                .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"));
+        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"%s\",\"jiraVersions\":[\"2.2.1\"]}".formatted(uploadId)))
+                .andExpect(jsonPath("$.findings[?(@.id=='" + spring + "')].recreatable").value(false));
         assertThat(jira.all()).hasSize(5);
     }
 
@@ -394,7 +434,7 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.spaceKey").value("CREED"))
                 .andExpect(jsonPath("$.url").value("http://localhost/mock/confluence/pages/viewpage.action?pageId=98765"))
                 .andExpect(jsonPath("$.attachments[*].title",
-                        contains("veracode-detailedreport.xml", "veracode-reports.zip", "scan-summary.pdf")))
+                        contains("veracode-detailedreport.xml", "veracode-reports_09_Nov_2026.zip", "scan-summary_09_Nov_2026.pdf")))
                 .andExpect(jsonPath("$.attachments[*].supported", contains(true, true, false)))
                 .andExpect(jsonPath("$.attachments[0].mediaType").value("application/xml"))
                 .andExpect(jsonPath("$.attachments[0].author").value("ci-veracode"));
@@ -425,7 +465,7 @@ class VeracodeApiTest {
         mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON)
                         .content(sastCreate.formatted(JsonPath.<String>read(platform, "$.uploadId"))))
                 .andExpect(jsonPath("$.results[0].outcome").value("CREATED"))
-                .andExpect(jsonPath("$.results[0].issues[0].labels", contains("veracode-sast", "creed-sast", "2026-10-06-Creed")));
+                .andExpect(jsonPath("$.results[0].issues[0].labels", contains("veracode-sast", "creed-sast", "creed-platform-2026-10-06-Creed")));
 
         String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).file(gateway).param("jiraVersions", "2.3.0"))
                 .andExpect(status().isOk())
@@ -442,7 +482,17 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.sast.issues[1].applications", contains("creed-platform-2026-10-06-Creed", gw)))
                 // filed by the platform: the gateway's label is missing, as for SCA
                 .andExpect(jsonPath("$.sast.issues[1].needsLabel").value(true))
-                .andExpect(jsonPath("$.sast.issues[1].missingLabels", contains("2026-10-08-Gateway")))
+                // the gateway is mapped (application-test.yml): its label is its name there, linked on the page
+                .andExpect(jsonPath("$.sast.issues[1].missingLabels", contains("Creed-Gateway")))
+                .andExpect(jsonPath("$.applications[1].name").value("Creed-Gateway"))
+                .andExpect(jsonPath("$.applications[1].url").value("https://git.example.com/projects/GATEWAY/browse"))
+                .andExpect(jsonPath("$.applications[0].name").value("creed-platform-2026-10-06-Creed"))
+                .andExpect(jsonPath("$.applications[0].url").doesNotExist())
+                // per application, as the page shows the issue: "<name>: <sast project-name> - <category>" ...
+                .andExpect(jsonPath("$.sast.issues[1].byApplication[*].name", contains("Creed-Gateway", "creed-platform-2026-10-06-Creed")))
+                .andExpect(jsonPath("$.sast.issues[1].byApplication[0].heading").value("creed-sast - Improper Neutralization of Special Elements used in an SQL Command"))
+                .andExpect(jsonPath("$.sast.issues[1].byApplication[0].cwe").value(org.hamcrest.Matchers.startsWith("CWE 89 Improper Neutralization")))
+                .andExpect(jsonPath("$.sast.issues[1].byApplication[0].flawIds").value(org.hamcrest.Matchers.matchesPattern("CWE 89 \\(Flaw IDs: \\d+\\)")))
                 .andExpect(jsonPath("$.sast.counts.needsLabel").value(1))
                 .andExpect(jsonPath("$.sastFlaws.length()").value(8))
                 .andReturn().getResponse().getContentAsString();
@@ -451,8 +501,8 @@ class VeracodeApiTest {
         // "add label": the existing issue gets the gateway's label, no second issue
         mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON).content(sastCreate.formatted(uploadId)))
                 .andExpect(jsonPath("$.results[0].outcome").value("LABELED"))
-                .andExpect(jsonPath("$.results[0].issues[0].labels", contains("veracode-sast", "creed-sast", "2026-10-06-Creed",
-                        "2026-10-08-Gateway")));
+                .andExpect(jsonPath("$.results[0].issues[0].labels", contains("veracode-sast", "creed-sast",
+                        "creed-platform-2026-10-06-Creed", "Creed-Gateway")));
         mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON).content(sastCreate.formatted(uploadId)))
                 .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"));
 
@@ -463,7 +513,9 @@ class VeracodeApiTest {
                 .andExpect(status().isOk());
         String storage = confluence.createdPages().getLast().storage();
         assertThat(storage.split(">CREED-101</a>", -1)).hasSize(2);
-        assertThat(storage).contains("<td>" + gw + "<br />creed-platform-2026-10-06-Creed</td>")
+        // repositories by their mapped names, linked when mapped, alphabetical
+        assertThat(storage).contains("<td><a href=\"https://git.example.com/projects/GATEWAY/browse\">Creed-Gateway</a>"
+                        + "<br />creed-platform-2026-10-06-Creed</td>")
                 // not in Jira: a row per finding, the summary row still counts findings
                 .contains("<td>SCA (15)</td>");
     }
@@ -471,15 +523,26 @@ class VeracodeApiTest {
     @Test
     void confluenceAttachmentsAreDownloadedAndAnalysed() throws Exception {
         // the xml directly, the zip through the media redirect (which refuses a token): three reports
-        mvc.perform(post("/api/veracode/analysis/confluence").header(ConfluenceToken.HEADER, TOKEN)
+        String downloaded = mvc.perform(post("/api/veracode/analysis/confluence").header(ConfluenceToken.HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"pageId\":\"98765\",\"attachmentIds\":[\"att1001\",\"att1002\"],\"jiraVersions\":[\"2.3.0\"]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.reports[*].fileName", contains("veracode-detailedreport.xml",
-                        "veracode-reports.zip/reports/veracode-detailedreport-2.xml",
-                        "veracode-reports.zip/reports/veracode-detailedreport.xml")))
+                        "veracode-reports_09_Nov_2026.zip/reports/veracode-detailedreport-2.xml",
+                        "veracode-reports_09_Nov_2026.zip/reports/veracode-detailedreport.xml")))
                 .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].issues[0].key")
-                        .value("CREED-101"));
+                        .value("CREED-101"))
+                .andReturn().getResponse().getContentAsString();
+        // filed from a downloaded report: the description links the Confluence attachment, Jira gets no file
+        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content("""
+                        {"uploadId":"%s","findingIds":["creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar"],%s}
+                        """.formatted(JsonPath.<String>read(downloaded, "$.uploadId"), FIELDS)))
+                .andExpect(jsonPath("$.results[0].outcome").value("CREATED"));
+        MockJiraStore.Issue filed = jira.find("CREED-105");
+        assertThat(filed.description()).contains("Source: report Confluence attachment [veracode-detailedreport.xml|"
+                + "http://localhost/mock/confluence/download/attachments/98765/veracode-detailedreport.xml")
+                .contains(" on page [Veracode reports - creed|http://localhost/mock/confluence/pages/viewpage.action?pageId=98765]");
+        assertThat(jira.attachments(filed.key())).isEmpty();
         // the PDF is listed, not analysable; an id from another page is refused, not fetched
         mvc.perform(post("/api/veracode/analysis/confluence").header(ConfluenceToken.HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"pageId\":\"98765\",\"attachmentIds\":[\"att1003\"]}"))
@@ -528,9 +591,10 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.results[1].issues[0].key").value("CREED-105"))
                 .andExpect(jsonPath("$.results[2].issues[0].key").value("CREED-101"));
         assertThat(jira.all()).hasSize(5);
-        // AAA-BBB-CCC-DDD -> CCC-DDD: creed-pay-gateway-api is labelled gateway-api
-        assertThat(jira.find("CREED-105").labels()).containsExactly("veracode", "creed", "2026-10-06-Creed", "gateway-api");
-        assertThat(jira.find("CREED-101").labels()).contains("2026-10-06-Creed", "gateway-api");
+        // no veracode.applications entry: each application is labelled by its app_name
+        assertThat(jira.find("CREED-105").labels()).containsExactly("veracode", "creed", "creed-platform-2026-10-06-Creed",
+                "creed-pay-gateway-api");
+        assertThat(jira.find("CREED-101").labels()).contains("creed-platform-2026-10-06-Creed", "creed-pay-gateway-api");
 
         mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"uploadId\":\"" + uploadId + "\",\"jiraVersions\":[\"2.3.0\"]}"))
@@ -702,9 +766,11 @@ class VeracodeApiTest {
         assertThat(created.summary())
                 .isEqualTo("creed-sast - CWE-78 - Improper Neutralization of Special Elements used in an OS Command");
         assertThat(created.issueType()).isEqualTo("Vulnerability");
-        assertThat(created.labels()).containsExactly("veracode-sast", "creed-sast", "2026-10-06-Creed");
+        assertThat(created.labels()).containsExactly("veracode-sast", "creed-sast", "creed-platform-2026-10-06-Creed");
         assertThat(created.versions()).containsExactly("2.3.0");
-        assertThat(created.description()).contains("ScriptRunner.java", "CWE-78");
+        assertThat(created.description()).contains("ScriptRunner.java", "CWE-78",
+                "Source: uploaded report detailedreport.xml (attached to this issue)");
+        assertThat(jira.attachments(created.key())).containsExactly("detailedreport.xml");
 
         // found again by its summary alone - no version clause
         mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON)
@@ -750,7 +816,10 @@ class VeracodeApiTest {
                         "<th>Very High (", "<td>SCA (10)</td>", "<td>SAST (2)</td>", "<th>Total issue Count</th>")
                 // an existing issue links to Jira with its summary; a missing one is named by the summary it would get
                 .contains(">CREED-101</a>", "Not in Jira", "creed - CVE-2022-42889|CWE-94 - commons-text-1.9.jar")
-                .contains("creed-sast - CWE-78 - Improper Neutralization of Special Elements used in an OS Command")
+                // SAST Details: per application, three lines (the Jira summary is not repeated there)
+                .contains("<td>creed-platform-2026-10-06-Creed: creed-sast - Improper Neutralization of Special Elements"
+                        + " used in an OS Command<br />CWE 78 Improper Neutralization of Special Elements used in an OS Command"
+                        + " (&#39;OS Command Injection&#39;)<br />CWE 78 (Flaw IDs: 2)</td>")
                 // the template's sample text and Thymeleaf's own markup never reach the page
                 .doesNotContain("DT-15", "th:", "<!--")
                 // the report it was made from, attached and linked by name
@@ -977,21 +1046,22 @@ class VeracodeApiTest {
         @Bean
         @Primary
         JiraClient mockMvcJiraClient(WebApplicationContext context) {
-            AtomicReference<MockMvc> mvc = new AtomicReference<>();
-            ClientHttpRequestFactory factory = (uri, method) -> new MockMvcClientHttpRequestFactory(
-                    mvc.updateAndGet(m -> m != null ? m : MockMvcBuilders.webAppContextSetup(context).build()))
-                    .createRequest(uri, method);
             return RemoteClientsConfiguration.jiraClient(
-                    RestClient.builder().baseUrl("http://localhost/mock/jira").requestFactory(factory).build());
+                    RestClient.builder().baseUrl("http://localhost/mock/jira").requestFactory(overMockMvc(context)).build());
         }
 
-        /**
-         * As the Jira one, except that a multipart body (attaching files) goes in as MockMvc's multipart request:
-         * MockMvcClientHttpRequestFactory hands it over as raw bytes, and a MockHttpServletRequest has no parts.
-         */
         @Bean
         @Primary
         ConfluenceClient mockMvcConfluenceClient(WebApplicationContext context) {
+            return RemoteClientsConfiguration.confluenceClient(
+                    RestClient.builder().baseUrl("http://localhost/mock/confluence").requestFactory(overMockMvc(context)).build());
+        }
+
+        /**
+         * A multipart body (attaching files, to Jira or Confluence) goes in as MockMvc's multipart request:
+         * MockMvcClientHttpRequestFactory hands it over as raw bytes, and a MockHttpServletRequest has no parts.
+         */
+        private static ClientHttpRequestFactory overMockMvc(WebApplicationContext context) {
             AtomicReference<MockMvc> mvc = new AtomicReference<>();
             Supplier<MockMvc> mockMvc = () -> mvc.updateAndGet(m -> m != null ? m : MockMvcBuilders.webAppContextSetup(context).build());
             ClientHttpRequestFactory factory = (uri, method) -> new MockClientHttpRequest(method, uri) {
@@ -1022,8 +1092,7 @@ class VeracodeApiTest {
                     }
                 }
             };
-            return RemoteClientsConfiguration.confluenceClient(
-                    RestClient.builder().baseUrl("http://localhost/mock/confluence").requestFactory(factory).build());
+            return factory;
         }
 
         /** The file parts of a multipart/form-data body. */

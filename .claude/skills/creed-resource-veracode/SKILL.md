@@ -31,6 +31,11 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 
 ## Rules that are easy to break
 
+- **Filing a closed issue again is single and confirmed** (2026-11-11, asked for): `recreateClosed` is honoured only
+  with exactly one id and only while every matched issue is in `veracode.jira.closed-statuses`; it is re-checked
+  server-side under `createLock`. Never thread it into bulk create or `autoCreate` - those must keep treating a closed
+  issue as filed, or every re-analysis duplicates the project's history.
+
 - **Confluence downloads: ids in, URLs never.** `POST /analysis/confluence` takes attachment ids; the server re-lists
   the page and downloads its own `_links.download` under `veracode.confluence.base-url`. Redirects are followed in
   `ConfluenceService.fetch` (the client has redirects off, like Jira's) and the token goes only to URLs **under the
@@ -126,8 +131,19 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   sequence") - write `th:ri:filename`. The report files are attached after the page is created
   (`ConfluenceService.attach`: multipart, `X-Atlassian-Token: nocheck`); build the parts as a `LinkedMultiValueMap` of
   `HttpEntity` - `MultipartBodyBuilder` needs Reactive Streams, absent here (`NoClassDefFoundError: Publisher`).
+- **Application label = the mapped name** (`veracode.applications`, `config/ApplicationProperties`: `app-name` → `name`,
+  `url`, matched case-insensitively; no entry = the `app_name`) since 2026-11-10 - the `application-label` regex is
+  gone. A list, not a map keyed by `app_name`: relaxed binding drops characters from map keys. The same name (linked)
+  is shown on the page, in the Jira description and as the Confluence *Repository*. Changing a mapping changes the label,
+  so existing issues show "label missing" until labelled again.
+- **Uploaded report files are attached to every created issue** (SCA and SAST, `JiraLookupService.attach`, multipart
+  `file` parts + `X-Atlassian-Token: no-check`, `MultipartFiles` shared with the Confluence attach); a file downloaded
+  from Confluence (`SourceFile.url`) is linked from the description's *Source* instead, followed by its page
+  (`SourceFile.pageTitle` / `pageUrl` → `ReportView.sourcePage*`, `on page [title|url]`). `ReportFile.source` is the
+  index of the received file a report came in (a zip holds several). Attach failure = the result's message, the issue
+  stays. `VeracodeApiTest.ClientsOverMockMvc.overMockMvc` turns multipart into MockMvc `multipart()` for both clients.
 - **SAST labels follow SCA's** (`JiraLookupService.sastLabels(issue)` / `missingSastLabels` / `addSastLabels`): every
-  application of the issue gets its `application-label`; an existing issue missing one is labelled (`LABELED`), never
+  application of the issue gets its label (mapped name); an existing issue missing one is labelled (`LABELED`), never
   filed twice. `addLabels` is the shared update (`update.labels.add` per label) - SCA's `addApplicationLabel` uses it.
 - **SAST issues = CWE + flaw `categoryname`** (`domain/SastIssue`, open flaws only — fixed = `remediation_status="Fixed"`,
   mitigated = `mitigation_status="accepted"`, never filed). Summary `{project} - CWE-89 - {category}` (asked for) is the

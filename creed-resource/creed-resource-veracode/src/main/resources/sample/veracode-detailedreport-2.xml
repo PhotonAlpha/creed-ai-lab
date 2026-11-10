@@ -15,7 +15,7 @@
     issue 2  Basic XSS (CWE-80), Medium             open, this project only
     issue 3  Hard-coded password (CWE-259), High     fixed (remediation_status="Fixed")
     issue 4  CRLF Injection into logs (CWE-117)      mitigated (mitigation_status="accepted"), as in the platform
-  Mock Confluence page 98765 serves it inside veracode-reports.zip. Kept valid for DefectDojo's "Veracode Scan" parser
+  Mock Confluence page 98765 serves it inside veracode-reports_09_Nov_2026.zip. Kept valid for DefectDojo's "Veracode Scan" parser
   like the first sample (last_update_time, recommendations/para, mitigations/mitigation/@date).
 -->
 <detailedreport xmlns="https://www.veracode.com/schema/reports/export/1.0" report_format_version="1.5"

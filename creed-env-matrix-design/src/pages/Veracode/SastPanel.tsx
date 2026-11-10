@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react';
 import { ProCard } from '@ant-design/pro-components';
 import { Input, Segmented, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { TableColumnsType } from 'antd';
-import type { ReportView, SastFlaw, SastSummary } from '../../api/veracode';
+import type { ApplicationView, ReportView, SastFlaw, SastSummary } from '../../api/veracode';
 import { useI18n } from '../../locales';
 import { severityColor, severityRank } from './severity';
+import { ApplicationName, applicationLabel } from './applicationName';
 
 const { Text, Paragraph } = Typography;
 
@@ -19,7 +20,7 @@ const cweUrl = (cwe: string) => `https://cwe.mitre.org/data/definitions/${cwe.re
  * The reports' static-analysis statistics, one row per report and a total when there are several — the workbook's
  * "SAST summary" sheet. The severity columns count open flaws; a count the report does not state is "—".
  */
-export function SastSummaryTable({ reports }: { reports: ReportView[] }) {
+export function SastSummaryTable({ reports, apps }: { reports: ReportView[]; apps?: ApplicationView[] }) {
   const { t } = useI18n();
   const rows = reports.filter((r): r is ReportView & { sast: SastSummary } => r.sast != null && r.sast.flaws > 0);
   if (rows.length === 0) return null;
@@ -32,7 +33,8 @@ export function SastSummaryTable({ reports }: { reports: ReportView[] }) {
       title: t('veracode.sca.report'),
       key: 'report',
       fixed: 'left',
-      render: (_, r) => <Text ellipsis={{ tooltip: r.fileName }} style={{ maxWidth: 200 }}>{r.appName ?? r.fileName}</Text>,
+      render: (_, r) => (r.appName ? <ApplicationName app={r.appName} apps={apps} />
+        : <Text ellipsis={{ tooltip: r.fileName }} style={{ maxWidth: 200 }}>{r.fileName}</Text>),
     },
     {
       title: t('veracode.sast.rating'),
@@ -109,7 +111,7 @@ export function SastSummaryTable({ reports }: { reports: ReportView[] }) {
  * Every report's static flaws: open ones by default, filterable by status, severity and application, searchable.
  * Every flaw, fixed and mitigated ones included; the Jira issues (open flaws by CWE + category) are the table above.
  */
-export function SastPanel({ flaws, multipleApplications }: { flaws: SastFlaw[]; multipleApplications: boolean }) {
+export function SastPanel({ flaws, multipleApplications, apps }: { flaws: SastFlaw[]; multipleApplications: boolean; apps?: ApplicationView[] }) {
   const { t } = useI18n();
   const [status, setStatus] = useState<SastStatus>('OPEN');
   const [severities, setSeverities] = useState<string[]>([]);
@@ -126,8 +128,10 @@ export function SastPanel({ flaws, multipleApplications }: { flaws: SastFlaw[]; 
     [flaws],
   );
   const applicationOptions = useMemo(
-    () => [...new Set(flaws.map((f) => f.application ?? ''))].filter(Boolean).sort().map((a) => ({ value: a, label: a })),
-    [flaws],
+    () => [...new Set(flaws.map((f) => f.application ?? ''))].filter(Boolean)
+      .map((a) => ({ value: a, label: applicationLabel(a, apps) }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [flaws, apps],
   );
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -144,7 +148,7 @@ export function SastPanel({ flaws, multipleApplications }: { flaws: SastFlaw[]; 
       title: t('veracode.col.application'),
       dataIndex: 'application',
       key: 'application',
-      render: (v: string | null) => v ?? '—',
+      render: (v: string | null) => <ApplicationName app={v} apps={apps} />,
     }] : []),
     {
       title: t('veracode.col.severity'),

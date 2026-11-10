@@ -32,21 +32,38 @@ import java.util.zip.GZIPOutputStream;
 @RequiredArgsConstructor
 public class UploadedReportStore {
 
-    /** One file of an upload; its rows already carry the version shown for them. */
-    public record ReportFile(String filename, ParsedReport report, String affectedVersion) {
+    /**
+     * One file of an upload; its rows already carry the version shown for them.
+     *
+     * @param source the index of the {@link SourceFile} it was read from (a zip holds several)
+     */
+    public record ReportFile(String filename, ParsedReport report, String affectedVersion, int source) {
     }
 
-    /** A file as it was uploaded (or downloaded from Confluence) - a zip stays the zip. */
-    public record SourceFile(String filename, byte[] gzipped, int size) {
+    /**
+     * A file as it was uploaded (or downloaded from Confluence) - a zip stays the zip.
+     *
+     * @param url       the Confluence attachment it was downloaded from; {@code null} for an upload
+     * @param pageTitle the Confluence page holding it
+     * @param pageUrl   that page's URL
+     */
+    public record SourceFile(String filename, byte[] gzipped, int size, String url, String pageTitle, String pageUrl) {
 
-        static SourceFile of(String filename, byte[] content) {
+        /** Downloaded from Confluence: Jira issues link {@link #url} instead of carrying the file. */
+        public boolean downloaded() {
+            return url != null;
+        }
+
+        static SourceFile of(VeracodeAnalysisService.UploadedFile file) {
+            byte[] content = file.content();
             ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(64, content.length / 8));
             try (GZIPOutputStream gzip = new GZIPOutputStream(out)) {
                 gzip.write(content);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
-            return new SourceFile(filename, out.toByteArray(), content.length);
+            return new SourceFile(file.filename(), out.toByteArray(), content.length, file.url(), file.pageTitle(),
+                    file.pageUrl());
         }
 
         public byte[] content() {
@@ -71,10 +88,10 @@ public class UploadedReportStore {
     private final Clock clock;
     private final Map<String, Upload> uploads = new LinkedHashMap<>();
 
-    /** @param files the files as received, filename to bytes, in upload order */
-    public Upload put(List<ReportFile> reports, List<Map.Entry<String, byte[]>> files, boolean overridden) {
+    /** @param files the files as received, in upload order */
+    public Upload put(List<ReportFile> reports, List<VeracodeAnalysisService.UploadedFile> files, boolean overridden) {
         // compressed outside the lock: tens of MB of XML take a moment
-        List<SourceFile> kept = files.stream().map(f -> SourceFile.of(f.getKey(), f.getValue())).toList();
+        List<SourceFile> kept = files.stream().map(SourceFile::of).toList();
         return store(reports, kept, overridden);
     }
 

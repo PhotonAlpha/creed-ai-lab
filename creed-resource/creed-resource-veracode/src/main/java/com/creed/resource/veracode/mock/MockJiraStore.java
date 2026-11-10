@@ -24,8 +24,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class MockJiraStore {
 
     public static final String PROJECT = "CREED";
-    /** The sample report's application ({@code creed-platform-2026-10-06-Creed}) as a label: after the second hyphen. */
-    public static final String SAMPLE_APPLICATION_LABEL = "2026-10-06-Creed";
+    /**
+     * The sample report's application ({@code creed-platform-2026-10-06-Creed}) as a label: its {@code app_name}, the
+     * label of an application {@code veracode.applications} does not map.
+     */
+    public static final String SAMPLE_APPLICATION_LABEL = "creed-platform-2026-10-06-Creed";
 
     /** @param assignee {@code null} = unassigned; @param reporter who created it ({@code null} for seeds) */
     public record Issue(int id, String key, String summary, String description, String status, String priority,
@@ -35,6 +38,8 @@ public class MockJiraStore {
 
     private final List<String> versions = List.of("2.2.1", "2.3.0", "2.4.0");
     private final List<Issue> issues = new ArrayList<>();
+    /** Issue key -> the names of the files attached to it, in order. */
+    private final java.util.Map<String, List<String>> attachments = new java.util.HashMap<>();
     private final AtomicInteger sequence = new AtomicInteger();
 
     public MockJiraStore() {
@@ -43,6 +48,7 @@ public class MockJiraStore {
 
     public synchronized void reset() {
         issues.clear();
+        attachments.clear();
         sequence.set(100);
         seed("creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar",
                 "In Progress", "Highest", "Alice Wang", "2.3.0");
@@ -92,6 +98,14 @@ public class MockJiraStore {
             }
         }
         return null;
+    }
+
+    public synchronized void attach(String key, String filename) {
+        attachments.computeIfAbsent(key.toUpperCase(java.util.Locale.ROOT), k -> new ArrayList<>()).add(filename);
+    }
+
+    public synchronized List<String> attachments(String key) {
+        return List.copyOf(attachments.getOrDefault(key.toUpperCase(java.util.Locale.ROOT), List.of()));
     }
 
     public synchronized Issue find(String key) {

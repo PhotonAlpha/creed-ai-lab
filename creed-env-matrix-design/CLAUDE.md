@@ -175,12 +175,14 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 按 Jira 标题匹配：CVE 出现在标题任意位置即可（忽略大小写和 `-` `_` 空格，但不会匹配更长的编号）；无 `cve_id` 时按 `Unknown` + `cwe_id`；
   且组件 `file_name` 要作为完整的词出现在标题中（`log4j-api-2.14.1.jar` 或 `log4j-core-2.14.10.jar` 不算），标题模板含 `{file}` 时生效。
 - 新建 Jira 标题 `{project} - {cve_id}|{cwe_id} - {file_name}`，`{project}` 为 `veracode.jira.project-name`（不是 Veracode application）；
-  label：`veracode`、`{project}`、application label（不含 `cve_id`）（`app_name` 去掉第二个 `-` 之前的部分，`AAA-BBB-CCC-DDD` → `CCC-DDD`，正则 `veracode.jira.application-label`）；
+  label：`veracode`、`{project}`、application label（不含 `cve_id`）（`veracode.applications` 中映射的名称，如 `GBT-T1-Creed-CCS` → `Creed-CCS`；没有映射时为 `app_name`）；
   描述表格按页面列顺序，含完整 `cve_summary`。
 - 可一次上传多个 XML：不同 application 时表格可按 application 过滤、分组（可折叠）；相同 CVE + 相同 jar 的 Jira 已存在时不再重复创建，
   而是给它加上该 application 的 label（行上显示「缺少 label」，按钮为「添加 label」）。
   按钮按颜色区分：创建 = 蓝色（primary）+ ➕ 图标，添加 label = 橙色 + 标签图标（与「缺少 label」标签、统计卡片同色）；
   工具栏「创建全部缺失」只建缺失的，「添加全部 label」一键给所有缺少 label 的 Jira 加上，避免遗漏。
+- 已关闭的 Jira：一个漏洞（SCA 或 SAST）找到的 Jira **全部**为 Closed / Done（`veracode.jira.closed-statuses`）时，该行显示红色「重新创建」，
+  点击后弹框列出已关闭的 Jira 并提醒慎重，确认后只为这一行新建（`recreateClosed`，后端只接受单个 id，并重新检查状态）；批量创建仍视为已存在。
   application 显示在分组（折叠面板）标题上，单个报告时显示在上方的报告表中；只有关闭分组、多个 application 混在一个表里时才显示 application 列。
   查找用批量 JQL 搜索：每 50 条漏洞一次（Data Center `/rest/api/2/search`，Cloud `/rest/api/3/search/jql`）。
 - 创建 Jira 使用**用户自己的访问令牌**：页面「Jira 令牌」中配置并「测试连接」（显示令牌对应的用户、是否能访问项目），
@@ -202,6 +204,15 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   （`templates/veracode/confluence-report.html`）生成 `sample/confluence-template.png` 的格式（汇总 / SCA Issues / SAST Issues），
   标题 `{project} - {version} - Reports (SAST,SCA) - {yyyy-MM-dd HH-mm-ss}`（`veracode.confluence.export-title`；project / version 默认取报告的，可在对话框修改）。
   页面底部「Veracode report(s):」附上分析的报告文件（上传的或从 Confluence 取的原文件，作为新页面的附件并链接）。
+  SCA / SAST 两个表格按 repository 排序；SAST 的 Details 与页面的「Jira 标题」列相同（按 application 三行）。
+- application 映射（`veracode.applications`：`app_name` → 名称 + 链接）：页面表格、Jira 描述、Confluence 的 Repository 显示映射名称并可点击跳转，
+  映射名称也是 Jira label；没有映射时用 `app_name`。
+- Confluence 附件列表：按上传时间倒序，默认最多 50 个，默认只列文件名含 `dd_MMM_yyyy` 日期且为 `.zip` 的附件（可取消）；
+  「报告日期」下拉框按文件名中的日期再筛选（最新在前），列出后默认选最新日期，可选「所有日期」。
+- 上传 / 从 Confluence 分析时全屏 loading（`Spin fullscreen`，上传阶段显示百分比）。
+- 新建 Jira 描述的 Source：上传的文件加为 Jira 附件；从 Confluence 下载的给出附件地址和所在页面的链接（`on page [标题|页面地址]`）。
+- SAST 标签页「Jira 标题」列按 application 显示三行（`<名称>: <SAST project-name> - <类别>` / `CWE 117 <名称>` / `CWE 117 (Flaw IDs: …)`），
+  合并了原「未关闭漏洞」列；只影响显示，Jira 标题本身不变。
 - 支持导出 Excel（Severity 按等级填充背景色；*SCA summary* 工作表与页面的 SCA 统计一致；*SAST flaws* / *SAST summary* 两个工作表对应 SAST 部分）。
 - 统计卡片（漏洞总数 / 已在 Jira / 缺失 / 已创建）按状态用不同背景色（主题 token）；表格分页受控，默认每页 50 条（20 / 50 / 100 / 200）。
 - 刷新页面不丢数据：分析结果、所选 Jira 版本、字段取值、过滤条件、每页条数存 sessionStorage（随标签页关闭清除）；

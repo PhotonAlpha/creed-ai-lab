@@ -20,22 +20,34 @@ import java.util.List;
  *                     {@code autoCreate} run
  * @param sastFlaws    every report's static-analysis flaws, as listed (fixed and mitigated included)
  * @param sast         the open flaws as SAST Jira issues (one per CWE + category) in the SAST project
+ * @param applications the reports' Veracode applications under their mapped names and links
  */
 public record AnalysisResponse(String uploadId, List<ReportView> reports, String projectKey, List<String> jiraVersions,
                                List<String> selectedVersions, String createVersion,
                                List<CreateField> createFields,
                                List<FindingView> findings, List<String> warnings, Counts counts,
-                               List<SastFlaw> sastFlaws, SastJira sast, Instant analyzedAt) {
+                               List<SastFlaw> sastFlaws, SastJira sast, List<Application> applications,
+                               Instant analyzedAt) {
+
+    /**
+     * A Veracode application as the page shows it ({@code veracode.applications}).
+     *
+     * @param name its mapped name, else {@code appName}
+     * @param url  where the name links to; {@code null} without a mapping
+     */
+    public record Application(String appName, String name, String url) {
+    }
 
     /**
      * @param projectKey      the SAST project ({@code veracode.jira.sast.project-key})
+     * @param projectName     {@code {project}} of the SAST summaries ({@code sast.project-name})
      * @param jiraVersions    the versions its issue type can be filed against (empty without Affects Version/s)
      * @param versionRequired creating needs exactly one of them
      * @param defaultVersions {@code sast.defaults.affects-versions} among {@code jiraVersions}: the page preselects one
      * @param createFields    the SAST create screen's fields the page asks for
      * @param error           why Jira could not be read for SAST; the issues are then listed without a status
      */
-    public record SastJira(String projectKey, String issueType, List<String> jiraVersions, boolean affectsVersion,
+    public record SastJira(String projectKey, String projectName, String issueType, List<String> jiraVersions, boolean affectsVersion,
                            boolean versionRequired, List<String> defaultVersions, List<CreateField> createFields, List<SastIssueView> issues,
                            Counts counts, String error) {
     }

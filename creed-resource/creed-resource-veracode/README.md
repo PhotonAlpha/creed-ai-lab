@@ -62,6 +62,12 @@ same issue. Such a finding shows *label missing* until the issue carries its app
 the label (`PUT /rest/api/2/issue/{key}` `update.labels.add`, outcome `LABELED`) instead of filing a second issue —
 also within one request, when both applications' findings were missing.
 
+**A closed issue may be filed again, one at a time.** A finding (SCA or SAST) whose issues are **all** in
+`veracode.jira.closed-statuses` (default `Closed, Done`, any case) is `recreatable` in the analysis; the page asks
+for a confirmation and sends `"recreateClosed": true` with that one id (`POST /jira/issues` or `/jira/sast-issues`).
+More than one id with the flag is 400; the server re-reads Jira, so an issue reopened meanwhile answers
+`ALREADY_EXISTS`. Without the flag - bulk create, auto-create - a closed issue still counts as filed.
+
 **Several reports in one upload**: `file` may repeat on `POST /analysis/upload`; the response has `uploadId` and
 `reports` (one per file), every finding its `application`. The page filters and groups by it.
 
@@ -88,13 +94,29 @@ per candidate. The project's versions are the
   `veracode.jira.project-name` (a name of this service's own, **not** the Veracode application, which is
   `{application}`; blank = the project key), `{cve}` / `{cwe}` "Unknown" when absent. E.g.
   `creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar`;
-- labels: `labels` (`veracode`), `project-name`, and the **application label** (not the `cve_id` — it is in the summary) — group 1 of
-  `veracode.jira.application-label` on the `app_name`, default `^[^-]*-[^-]*-(.+)$`: everything after the second
-  `-` (`AAA-BBB-CCC-DDD` → `CCC-DDD`, `AAA-BBB-CC-DD-EE` → `CC-DD-EE`; no match = the whole name). Spaces become `_`
-  (Jira refuses them);
+- labels: `labels` (`veracode`), `project-name`, and the **application label** (not the `cve_id` — it is in the
+  summary): the application's name under `veracode.applications` (`GBT-T1-Creed-CCS` → `Creed-CCS`), else its
+  `app_name`. Spaces become `_` (Jira refuses them);
 - description: one wiki-markup table in the page's order — Title (`cve_id|cwe_id`, NVD / MITRE links), Veracode
-  application, Library file, Component(s), Severity, CVSS, Affected version, Location, Description
-  (the **full** `cve_summary`) — then the source report, scan and policy.
+  application (the mapped name, linked to its `url`), Library file, Component(s), Severity, CVSS, Affected version,
+  Location, Description (the **full** `cve_summary`) — then the *Source*: a report downloaded from Confluence is
+  linked by its attachment URL and by the page holding it (`on page [title|viewpage URL]`); an uploaded file is **attached to the issue** right after it is created (`POST
+  /rest/api/2/issue/{key}/attachments`, `X-Atlassian-Token: no-check`; a failed attach leaves the issue and is
+  reported as the result's message / a warning). Then the report in it, the scan and the policy. SAST issues get the
+  same *Source* line per report and the same attachments.
+
+**Application names** — `veracode.applications`, a list of `app-name` (any case) → `name`, `url`:
+
+```yaml
+veracode:
+  applications:
+    - app-name: GBT-T1-Creed-CCS
+      name: Creed-CCS
+      url: https://example.com/projects/xxxx/browse
+```
+
+The name is shown (linked) on the page, in the Jira description and in the Confluence export's *Repository*, and is
+the application's Jira label. An application without an entry keeps its `app_name`, without a link.
 
 **Preselected values** — `veracode.jira.defaults`, applied when the connection test has read Jira, and only as
 far as that Jira offers them (one it lacks is dropped; the page then keeps what it had):

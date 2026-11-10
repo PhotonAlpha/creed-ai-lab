@@ -80,12 +80,12 @@ public class MockConfluenceController {
     public MockConfluenceController() {
         byte[] xml = resource("sample/veracode-detailedreport.xml");
         files.put(XML_ID, new File(XML_ID, "veracode-detailedreport.xml", "application/xml", xml));
-        files.put(ZIP_ID, new File(ZIP_ID, "veracode-reports.zip", "application/zip", zip(Map.of(
+        files.put(ZIP_ID, new File(ZIP_ID, "veracode-reports_09_Nov_2026.zip", "application/zip", zip(Map.of(
                 "reports/veracode-detailedreport.xml", xml,
                 "reports/veracode-detailedreport-2.xml", resource("sample/veracode-detailedreport-2.xml"),
                 "reports/detailedreport.xsd", "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"/>"
                         .getBytes(StandardCharsets.UTF_8)))));
-        files.put(PDF_ID, new File(PDF_ID, "scan-summary.pdf", "application/pdf", "%PDF-1.7 mock".getBytes(StandardCharsets.UTF_8)));
+        files.put(PDF_ID, new File(PDF_ID, "scan-summary_09_Nov_2026.pdf", "application/pdf", "%PDF-1.7 mock".getBytes(StandardCharsets.UTF_8)));
     }
 
     @GetMapping(BASE + "/rest/api/user/current")

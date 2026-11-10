@@ -544,7 +544,10 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
     `application.yml` (`IDB VERACODE STSA`); the tab has its own affects-version choice (required when the issue type
     requires it) and field bar. Labels as for SCA: a created issue carries the label of every application with
     open flaws in it; an existing issue lacking an application's label shows *Label missing* and gets it with
-    **Add label** / **Add all labels** (orange) instead of a second issue. Rows expand to the flaws (application, file:line, module). A SAST project Jira refuses
+    **Add label** / **Add all labels** (orange) instead of a second issue. On both tabs a finding whose issues are
+    **all** Closed / Done (`veracode.jira.closed-statuses`) gets a red **Re-create**: a dialog lists the closed issues
+    and asks the user to make sure it is a regression, not a duplicate; one row at a time, never in bulk, and the
+    server re-reads Jira first (an issue reopened meanwhile means nothing is created). Rows expand to the flaws (application, file:line, module). A SAST project Jira refuses
     is reported in the tab; SCA keeps working.
   - *SAST statistics* under the SCA ones: rating, score, the report's stated total / not-mitigated counts, then
     flaws listed / open / mitigated / fixed / open affecting policy, and open flaws per severity (*Total* row with
@@ -562,6 +565,24 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   its last line, *Veracode report(s)*.
 - **Export Excel** downloads a fresh analysis (sheets *Findings*, *SCA summary* — the same statistics —,
   *SAST flaws* — with each flaw's Jira issue —, *SAST summary* and *Source*).
+- **Application names** (2026-11-10): `veracode.applications` in the backend config maps an `app_name` to a name and a
+  link (`GBT-T1-Creed-CCS` → `Creed-CCS`, `https://…/browse`). Tables on the page, the Jira description (*Veracode
+  application*) and the Confluence export (*Repository*) show the name, linked; it is also the application's Jira label
+  (replacing the `application-label` regex). Without an entry the `app_name` itself is used.
+- **Confluence attachments** are listed newest first, at most 50 by default (50 / 100 / 200 / all), filtered by default
+  to names with a report date `dd_MMM_yyyy` (`09_Nov_2026`) and to `.zip` — the page usually holds PDFs of the same
+  scans. Both filters can be turned off. When the page keeps every run (`03_Nov_2026`, `09_Nov_2026`, …) a *report
+  date* dropdown lists the dates found in the names (newest first, with counts) and preselects the newest after
+  listing; *Any date* goes back to "has a date".
+- **While an upload (or a Confluence download) is processed** the page is covered by a full-screen spinner: upload
+  percentage first, then "parsing and looking up in Jira".
+- **Source of a created issue**: an uploaded file is attached to the Jira issue itself, and the description's
+  *Source* line says so; a report downloaded from Confluence is linked there by its attachment URL instead,
+  followed by the page holding it (`on page [title|url]`).
+- **SAST Jira summary column** shows the issue per application (display only — the issue is still found and filed by
+  its summary, in the cell tooltip): `Creed-CCS: IDB VERACODE STSA - CRLF Injection` / `CWE 117 <CWE name>` /
+  `CWE 117 (Flaw IDs: 257, 258)`; the *Open flaws* column is merged into it. The Confluence export's SAST *Details*
+  is the same, and both of its tables are sorted by repository.
 
 ### Migration sync risk (`/migration-risk`)
 

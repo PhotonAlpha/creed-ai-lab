@@ -56,6 +56,8 @@ export interface Finding {
   needsLabel: boolean;
   /** The summary it is filed under (`summary-template`), whether the issue exists or not. */
   summary?: string;
+  /** Its issues are all finished (Closed / Done): it may be filed again, one at a time, after a confirmation. */
+  recreatable?: boolean;
 }
 
 /** One uploaded Veracode detailed report (XML); an upload may hold several, one per file. */
@@ -75,6 +77,13 @@ export interface ReportView {
   sca: ScaSummary | null;
   /** `null` only in an analysis cached before the field existed. */
   sast: SastSummary | null;
+  /** The file it came in (a `.zip`, or the report itself). */
+  sourceName?: string | null;
+  /** The Confluence attachment that file was downloaded from; `null` for an upload. */
+  sourceUrl?: string | null;
+  /** The Confluence page holding that attachment, and its URL - both linked from the Jira description's Source. */
+  sourcePageTitle?: string | null;
+  sourcePageUrl?: string | null;
 }
 
 /**
@@ -177,11 +186,44 @@ export interface SastIssue {
   /** As SCA: the issue exists but lacks the label of some application with open flaws in it (`missingLabels`). */
   needsLabel: boolean;
   missingLabels: string[];
+  /** As SCA: its issues are all finished, it may be filed again after a confirmation. */
+  recreatable?: boolean;
+  /**
+   * The issue per application, as the page and the Confluence export show it (display only; the Jira summary stays
+   * `summary`). Absent in an analysis cached before it existed.
+   */
+  byApplication?: SastApplicationBlock[];
+}
+
+/**
+ * Three lines per application: `Creed-CCS: IDB VERACODE STSA - CRLF Injection` / `CWE 117 Improper Output
+ * Neutralization for Logs` / `CWE 117 (Flaw IDs: 257, 258)`.
+ */
+export interface SastApplicationBlock {
+  appName: string | null;
+  /** The application's mapped name (`veracode.applications`), else its `app_name`. */
+  name: string;
+  /** Where `name` links to; `null` without a mapping. */
+  url: string | null;
+  /** What follows `name: ` — `{sast project-name} - {category}`. */
+  heading: string;
+  cwe: string;
+  flawIds: string;
+}
+
+/** A Veracode application under its mapped name and link (`veracode.applications` in the backend config). */
+export interface ApplicationView {
+  appName: string;
+  /** The mapped name, else `appName`. */
+  name: string;
+  url: string | null;
 }
 
 /** The SAST half of an analysis: its own Jira project, issue type and create screen. */
 export interface SastJira {
   projectKey: string;
+  /** `{project}` of the SAST summaries (`sast.project-name`). */
+  projectName?: string;
   issueType: string;
   /** The versions the SAST issue type can be filed against; empty without Affects Version/s. */
   jiraVersions: string[];
@@ -220,6 +262,8 @@ export interface Analysis {
   findings: Finding[];
   warnings: string[];
   counts: AnalysisCounts;
+  /** The reports' applications under their mapped names and links; absent in an analysis cached before it existed. */
+  applications?: ApplicationView[];
   analyzedAt: string;
 }
 
@@ -526,10 +570,13 @@ export const veracodeApi = {
 
   /**
    * Findings go by id: the server re-reads the page and re-checks Jira before creating, so a stale
-   * screen or a double click comes back ALREADY_EXISTS instead of a duplicate.
+   * screen or a double click comes back ALREADY_EXISTS instead of a duplicate. `recreateClosed` files the one finding
+   * named although its issues exist, when they are all finished (Closed / Done).
    */
-  createIssues: (uploadId: string, findingIds: string[], fields: CreateFieldValues, jiraVersions: string[], auth: JiraAuth) =>
-    requestAt<{ results: CreateResult[] }>(BASE, '/jira/issues', json({ uploadId, findingIds, fields, jiraVersions }, auth)),
+  createIssues: (uploadId: string, findingIds: string[], fields: CreateFieldValues, jiraVersions: string[], auth: JiraAuth,
+    recreateClosed = false) =>
+    requestAt<{ results: CreateResult[] }>(BASE, '/jira/issues',
+      json({ uploadId, findingIds, fields, jiraVersions, recreateClosed }, auth)),
 
   /**
    * The analysis (fresh) as a new Confluence page under `parentPageId`, as the user: the Jira token reads the issues,
@@ -544,8 +591,10 @@ export const veracodeApi = {
     }),
 
   /** SAST issues by id, into the SAST project; `jiraVersions` = the version chosen for SAST (0 or 1). */
-  createSastIssues: (uploadId: string, issueIds: string[], fields: CreateFieldValues, jiraVersions: string[], auth: JiraAuth) =>
-    requestAt<{ results: CreateResult[] }>(BASE, '/jira/sast-issues', json({ uploadId, issueIds, fields, jiraVersions }, auth)),
+  createSastIssues: (uploadId: string, issueIds: string[], fields: CreateFieldValues, jiraVersions: string[], auth: JiraAuth,
+    recreateClosed = false) =>
+    requestAt<{ results: CreateResult[] }>(BASE, '/jira/sast-issues',
+      json({ uploadId, issueIds, fields, jiraVersions, recreateClosed }, auth)),
 
   /** What the token may create in the project, and the create-screen fields the page has to ask for. */
   testConnection: (auth: JiraAuth) =>

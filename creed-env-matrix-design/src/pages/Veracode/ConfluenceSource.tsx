@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Input, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Checkbox, Input, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { FileSearchOutlined, KeyOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { confluenceAuthComplete, veracodeApi } from '../../api/veracode';
@@ -31,6 +31,23 @@ export const pageIdOf = (input: string) => {
   return /[?&]pageId=(\d+)/.exec(text)?.[1] ?? /\/pages\/(\d+)(?:[/?#]|$)/.exec(text)?.[1] ?? text;
 };
 
+/** A report date in the file name, `dd_MMM_yyyy` (`09_Nov_2026`), any case - how the scans are named on the page. */
+const DATED = /(?<!\d)(\d{2})_(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)_(\d{4})(?!\d)/i;
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+/** The report date in a name as `{ key: 'yyyy-MM-dd', label: '09_Nov_2026' }`; the key sorts and compares, case aside. */
+const reportDate = (title: string) => {
+  const m = DATED.exec(title);
+  if (!m) return null;
+  const month = MONTHS.indexOf(m[2].toLowerCase());
+  return {
+    key: `${m[3]}-${String(month + 1).padStart(2, '0')}-${m[1]}`,
+    label: `${m[1]}_${m[2][0].toUpperCase()}${m[2].slice(1).toLowerCase()}_${m[3]}`,
+  };
+};
+/** How many attachments are listed at most; 0 = all. The newest first, so the limit keeps the latest. */
+const LIMITS = [50, 100, 200, 0];
+const newestFirst = (a: ConfluenceAttachment, b: ConfluenceAttachment) => (b.created ?? '').localeCompare(a.created ?? '');
+
 const size = (bytes: number | null) => (bytes == null ? '—'
   : bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
     : bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`);
@@ -50,6 +67,39 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
   const [listingLoading, setListingLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  // the default filter (asked for): a dated report name and a .zip - the page also holds PDFs of the same scans
+  const [datedOnly, setDatedOnly] = useState(true);
+  const [zipOnly, setZipOnly] = useState(true);
+  const [limit, setLimit] = useState(50);
+  /** One report date (`yyyy-MM-dd`) or '' for any: a page keeps every run (`03_Nov_2026`, `09_Nov_2026`, ...). */
+  const [date, setDate] = useState('');
+
+  /** The dates the page's names hold, newest first, with how many attachments carry each. */
+  const dates = useMemo(() => {
+    const counts = new Map<string, { label: string; count: number }>();
+    for (const a of listing?.attachments ?? []) {
+      const d = reportDate(a.title);
+      if (!d || (zipOnly && !a.title.toLowerCase().endsWith('.zip'))) continue;
+      const seen = counts.get(d.key);
+      counts.set(d.key, { label: seen?.label ?? d.label, count: (seen?.count ?? 0) + 1 });
+    }
+    return [...counts].sort(([a], [b]) => b.localeCompare(a)).map(([key, v]) => ({ key, ...v }));
+  }, [listing, zipOnly]);
+
+  const matching = useMemo(() => (listing?.attachments ?? [])
+    .filter((a) => {
+      if (zipOnly && !a.title.toLowerCase().endsWith('.zip')) return false;
+      if (!datedOnly) return true;
+      const d = reportDate(a.title);
+      return !!d && (!date || d.key === date);
+    })
+    .sort(newestFirst), [listing, datedOnly, zipOnly, date]);
+  const visible = useMemo(() => (limit > 0 ? matching.slice(0, limit) : matching), [matching, limit]);
+  /** Only what is listed can be analysed: a filter change drops what it hides from the selection. */
+  const chosenIds = useMemo(() => {
+    const shown = new Set(visible.map((a) => a.id));
+    return selected.filter((id) => shown.has(id));
+  }, [visible, selected]);
 
   /** A saved token is tested once, so the button can say whose it is. */
   useEffect(() => {
@@ -85,6 +135,11 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
     try {
       const result = await veracodeApi.confluenceAttachments(id, auth);
       setListing(result);
+      // the latest run is what is usually analysed: older dated reports stay one pick away
+      setDate(result.attachments
+        .filter((a) => !zipOnly || a.title.toLowerCase().endsWith('.zip'))
+        .map((a) => reportDate(a.title)?.key ?? '')
+        .reduce((a, b) => (b > a ? b : a), ''));
       // everything analysable is ticked: usually what a report page holds
       setSelected(result.attachments.filter((a) => a.supported).map((a) => a.id));
     } catch (e) {
@@ -98,8 +153,8 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
   };
 
   const analyze = () => {
-    if (!listing || selected.length === 0) return;
-    const chosen = listing.attachments.filter((a) => selected.includes(a.id));
+    if (!listing || chosenIds.length === 0) return;
+    const chosen = listing.attachments.filter((a) => chosenIds.includes(a.id));
     const label = chosen.length === 1 ? chosen[0].title : t('veracode.upload.files', { count: chosen.length });
     onAnalyze(listing.pageId, chosen.map((a) => a.id), label, auth);
   };
@@ -164,17 +219,52 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
             <a href={listing.url} target="_blank" rel="noreferrer">{listing.title}</a>
             {listing.spaceKey && <Tag>{listing.spaceKey}</Tag>}
           </Space>
+          <Space style={{ marginTop: 8 }} wrap>
+            <Tooltip title={t('veracode.confluence.filter.datedHint')}>
+              <Checkbox checked={datedOnly} onChange={(e) => setDatedOnly(e.target.checked)}>
+                {t('veracode.confluence.filter.dated')}
+              </Checkbox>
+            </Tooltip>
+            {datedOnly && (
+              <Select
+                size="small"
+                value={date}
+                onChange={setDate}
+                showSearch
+                optionFilterProp="label"
+                style={{ width: 200 }}
+                options={[
+                  { value: '', label: t('veracode.confluence.filter.anyDate') },
+                  ...dates.map((d) => ({ value: d.key, label: `${d.label} (${d.count})` })),
+                ]}
+              />
+            )}
+            <Checkbox checked={zipOnly} onChange={(e) => setZipOnly(e.target.checked)}>
+              {t('veracode.confluence.filter.zip')}
+            </Checkbox>
+            <Text type="secondary">{t('veracode.confluence.filter.limit')}</Text>
+            <Select
+              size="small"
+              value={limit}
+              onChange={setLimit}
+              style={{ width: 100 }}
+              options={LIMITS.map((n) => ({ value: n, label: n === 0 ? t('veracode.confluence.filter.all') : n }))}
+            />
+            <Text type="secondary">
+              {t('veracode.confluence.filter.shown', { shown: visible.length, matching: matching.length, total: listing.attachments.length })}
+            </Text>
+          </Space>
           <Table<ConfluenceAttachment>
             rowKey="id"
             size="small"
             style={{ marginTop: 8 }}
             columns={columns}
-            dataSource={listing.attachments}
+            dataSource={visible}
             pagination={false}
             scroll={{ x: 900, y: 320 }}
-            locale={{ emptyText: t('veracode.confluence.empty') }}
+            locale={{ emptyText: t(listing.attachments.length === 0 ? 'veracode.confluence.empty' : 'veracode.confluence.filter.none') }}
             rowSelection={{
-              selectedRowKeys: selected,
+              selectedRowKeys: chosenIds,
               onChange: (keys) => setSelected(keys as string[]),
               getCheckboxProps: (a) => ({ disabled: !a.supported }),
             }}
@@ -184,10 +274,10 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
             icon={<PlayCircleOutlined />}
             style={{ marginTop: 12 }}
             loading={busy}
-            disabled={selected.length === 0}
+            disabled={chosenIds.length === 0}
             onClick={analyze}
           >
-            {t('veracode.confluence.analyze', { count: selected.length })}
+            {t('veracode.confluence.analyze', { count: chosenIds.length })}
           </Button>
         </>
       )}

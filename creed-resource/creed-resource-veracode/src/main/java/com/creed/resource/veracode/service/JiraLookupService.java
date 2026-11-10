@@ -8,6 +8,7 @@ import com.creed.resource.veracode.client.jira.JiraIssue;
 import com.creed.resource.veracode.client.jira.JiraIssueType;
 import com.creed.resource.veracode.client.jira.JiraPage;
 import com.creed.resource.veracode.client.jira.JiraSearchResult;
+import com.creed.resource.veracode.config.ApplicationProperties;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.SastIssue;
@@ -67,6 +68,7 @@ public class JiraLookupService {
 
     private final JiraClient jira;
     private final JiraProperties props;
+    private final ApplicationProperties apps;
 
     /** @param assignee display name; {@code null} = unassigned */
     /** @param labels the issue's labels - an application's label missing from them is added, not a second issue */
@@ -515,7 +517,7 @@ public class JiraLookupService {
         body.put("project", Map.of("key", props.projectKey()));
         body.put("issuetype", Map.of("name", token.issueTypeOr(props.issueType())));
         body.put("summary", summary);
-        body.put("description", JiraDescription.of(finding, report));
+        body.put("description", JiraDescription.of(finding, report, apps));
         body.put("versions", List.of(Map.of("name", jiraVersion)));
         body.put("labels", labels);
         body.putAll(fields);
@@ -550,9 +552,27 @@ public class JiraLookupService {
         return issue.withLabels(missing);
     }
 
-    /** The label of the finding's Veracode application ({@code application-label}), Jira-safe; {@code null} without one. */
+    /**
+     * The label of the finding's Veracode application: its mapped name ({@code veracode.applications}), else its
+     * {@code app_name} - Jira-safe; {@code null} without one.
+     */
     public String applicationLabel(Finding finding) {
-        return label(props.applicationLabel(finding.application()));
+        return label(apps.name(finding.application()));
+    }
+
+    /**
+     * Attaches the report files an issue was filed from (uploaded ones: a downloaded file is linked from the
+     * description instead). One request; Jira's XSRF check wants {@code X-Atlassian-Token: no-check}.
+     */
+    public void attach(String key, List<VeracodeAnalysisService.UploadedFile> files, JiraToken token) {
+        if (files.isEmpty()) {
+            return;
+        }
+        UpstreamException.call(JIRA, () -> {
+            jira.addAttachments(token.authorization(), "no-check", key, MultipartFiles.of(files));
+            return null;
+        });
+        log.info("attached {} to {}", files.stream().map(VeracodeAnalysisService.UploadedFile::filename).toList(), key);
     }
 
     /**
@@ -677,15 +697,17 @@ public class JiraLookupService {
     /**
      * @param jiraVersion the version chosen for SAST on the page; {@code null} = none (the field is then left out)
      * @param fields      from {@link #resolveFields} on {@link #sastCreateMeta}
+     * @param reports     the reports of the issue's applications - the description's source
      */
-    public IssueRef createSast(SastIssue issue, String jiraVersion, Map<String, Object> fields, JiraToken token) {
+    public IssueRef createSast(SastIssue issue, String jiraVersion, Map<String, Object> fields, List<ReportView> reports,
+                               JiraToken token) {
         List<String> labels = sastLabels(issue);
         String summary = sastSummary(issue);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("project", Map.of("key", props.sastProjectKey()));
         body.put("issuetype", Map.of("name", props.sastIssueType()));
         body.put("summary", summary);
-        body.put("description", JiraDescription.ofSast(issue));
+        body.put("description", JiraDescription.ofSast(issue, reports, apps));
         if (jiraVersion != null) {
             body.put("versions", List.of(Map.of("name", jiraVersion)));
         }
@@ -700,7 +722,7 @@ public class JiraLookupService {
 
     /**
      * A SAST issue's labels, as SCA's: {@code sast.labels}, {@code sast.project-name} and the label of every application
-     * with an open flaw in it ({@code application-label}), Jira-safe (spaces become {@code _}).
+     * with an open flaw in it (its mapped name, else its {@code app_name}), Jira-safe (spaces become {@code _}).
      */
     List<String> sastLabels(SastIssue issue) {
         Set<String> labels = new LinkedHashSet<>();
@@ -710,10 +732,10 @@ public class JiraLookupService {
         return List.copyOf(labels);
     }
 
-    /** The labels of the issue's applications, Jira-safe; an application the regex does not name has none. */
+    /** The labels of the issue's applications (mapped name, else {@code app_name}), Jira-safe. */
     public List<String> sastApplicationLabels(SastIssue issue) {
         Set<String> labels = new LinkedHashSet<>();
-        issue.applications().forEach(a -> addLabel(labels, label(props.applicationLabel(a))));
+        issue.applications().forEach(a -> addLabel(labels, label(apps.name(a))));
         return List.copyOf(labels);
     }
 

@@ -159,14 +159,15 @@ public class VeracodeController {
     @PostMapping("/jira/issues")
     CreateIssuesResponse createIssues(@Valid @RequestBody CreateIssuesRequest request,
                                       JiraToken token) {
-        return analysis.create(request.uploadId(), request.findingIds(), request.fields(), request.jiraVersions(), token);
+        return analysis.create(request.uploadId(), request.findingIds(), request.fields(), request.jiraVersions(),
+                request.recreateClosed(), token);
     }
 
     /** SAST issues (one per CWE + category) in the SAST project, re-checked against Jira first. */
     @PostMapping("/jira/sast-issues")
     CreateIssuesResponse createSastIssues(@Valid @RequestBody CreateSastIssuesRequest request, JiraToken token) {
         return analysis.createSast(request.uploadId(), request.issueIds(), request.fields(), request.jiraVersions(),
-                token);
+                request.recreateClosed(), token);
     }
 
     /**
