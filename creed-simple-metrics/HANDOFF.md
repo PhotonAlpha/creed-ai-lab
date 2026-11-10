@@ -20,6 +20,17 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Current state
 
+- 2026-11-11: **per-endpoint camel-http pools** — `creed.camel.http-components.<name>` registers a named component
+  (`NamedHttpComponentRegistrar`: `<name>`, `<name>ConnectionManager`, `<name>PoolEvictor`, `<name>PoolMetrics`), all
+  components built by one factory `CamelHttpComponents` (the default `http`/`https` too); routes opt in with
+  `<name>:https://<service-id>/...` (`<name>://` is refused — camel-http would send it as plain HTTP). Unset keys inherit
+  `creed.camel.http.*`. No route switched yet, none declared. `CamelHttpComponentsTest` (5) +
+  `NamedHttpComponentRegistrarTest` (3). Comparison with per-service-id pools / endpoint options:
+  `docs/camel-http-per-endpoint-pools.md`. **Run end to end** (catalog + order primary, `catalog-bulk` max-total 4 /
+  per-route 2 via run arguments, `fetch-catalog` temporarily on `catalog-bulk:https://`, reverted): `GET /catalog` 200
+  ×3, audit line `pool[route 1/2 …; total 1/4 …]`, gauges `camelHttpPool-catalog-bulk` total.max 4 / 1 connection vs
+  `camelHttpPool` 0, `http_client_request_seconds` still on `catalog-resource`; `/fulfillment` bulk fetches logged by
+  `LoadBalancerAuditInterceptor` (RestClient), camel-http pools untouched; SIGTERM closes both pools, no exception.
 - 2026-11-08: **the original request is read-only** — `OriginalRequestRoutePolicyFactory` stores it as a safe-copy
   property (private key, immutable record); route code reads `originalRequest(exchange)` (the six fulfillment
   processors switched), `carryOver(from, to)` for a `ProducerTemplate` exchange. `setProperty` / `removeProperties("*")`

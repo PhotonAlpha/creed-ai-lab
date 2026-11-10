@@ -11,17 +11,12 @@ import io.micrometer.observation.ObservationRegistry;
 import org.apache.camel.CamelContext;
 import org.apache.camel.ProducerTemplate;
 import org.apache.camel.component.http.HttpComponent;
-import org.apache.hc.client5.http.observation.ObservingOptions;
-import org.apache.hc.client5.http.observation.impl.ObservationClassicExecInterceptor;
-import org.apache.hc.client5.http.impl.ChainElement;
-import org.apache.hc.client5.http.impl.DefaultConnectionKeepAliveStrategy;
 import org.apache.hc.client5.http.impl.IdleConnectionEvictor;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.ssl.NoSuchSslBundleException;
 import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
@@ -31,7 +26,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.zalando.logbook.Logbook;
-import org.zalando.logbook.httpclient5.LogbookHttpExecHandler;
 
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
@@ -133,7 +127,7 @@ public class CamelConfig {
      * One instance, two registry names: Camel resolves components by scheme against the bean
      * name/alias, and {@code HttpComponent} itself is scheme-agnostic (each endpoint derives its
      * security from the endpoint URI), so the same component serves {@code http://} and
-     * {@code https://} endpoints.
+     * {@code https://} endpoints. Built by {@link CamelHttpComponents}, like every named component.
      */
     @Bean(name = {"http", "https"})
     public HttpComponent httpComponent(
@@ -141,53 +135,27 @@ public class CamelConfig {
             LoadBalancerRoutePlanner routePlanner,
             ObservationRegistry observationRegistry,
             Logbook logbook,
-            @Value("${creed.camel.http.connection-request-timeout:3s}") Duration connectionRequestTimeout,
-            @Value("${creed.camel.http.response-timeout:10s}") Duration responseTimeout,
+            Environment environment,
             @Value("${creed.audit.pool-stats.every:100}") int poolStatsEvery,
             @Value("${creed.audit.pool-stats.slow-threshold:1s}") Duration poolStatsSlowThreshold) {
-        HttpComponent component = new HttpComponent();
-        component.setClientConnectionManager(connectionManager);
-        // HttpEndpoint applies the configurer after its own builder setup, so the planner is not overridden
-        component.setHttpClientConfigurer(builder -> builder
-                .setRoutePlanner(routePlanner)
-                // HttpClient's stock strategy: header-less Tomcat responses get RequestConfig's 3-minute
-                // keep-alive, so idle connections are bounded by camelHttpPoolEvictor's max-idle-time
-                // (closeIdle), not by keep-alive
-                .setKeepAliveStrategy(DefaultConnectionKeepAliveStrategy.INSTANCE)
-                // Zalando Logbook: the FULL request/response audit (headers/cookies/bodies with
-                // obfuscation, `logbook.*` config). First per the Logbook docs, so it sees the
-                // message before other interceptors touch it.
-                .addExecInterceptorFirst("logbook", new LogbookHttpExecHandler(logbook))
-                // Apache's hc5 observation support: an `http.client.request` Observation (timer +
-                // trace propagation) per attempt — the camel-http twin of the RestClient's
-                // `http.client.requests`. Still placed right inside RETRY, so it times each
-                // ATTEMPT, not the whole retried operation, and so it brackets the same work the
-                // lbAudit handler below logs.
-                //
-                // Deliberately constructed directly rather than via
-                // HttpClientObservationSupport.enable(builder, ...): that helper installs every
-                // interceptor with addExecInterceptorFirst, which would (a) move this outside RETRY
-                // and silently change it from per-attempt to per-operation timing, and (b) also bind
-                // its own ConnPoolMeters, duplicating the pool gauges ConnectionPoolMetrics already
-                // publishes under the names the dashboards use.
-                //
-                // Name change from the retired Micrometer handler: the Observation (and therefore
-                // the derived timer and span) is `http.client.request`, was
-                // `httpcomponents.httpclient.request`. Nothing in monitoring/ queried the old name.
-                .addExecInterceptorAfter(ChainElement.RETRY.name(), "micrometer",
-                        new ObservationClassicExecInterceptor(observationRegistry, ObservingOptions.DEFAULT))
-                // innermost (inside retry): logs the instance the route planner picked, per attempt,
-                // plus route/total occupancy of this pool (sampled: creed.audit.pool-stats.*)
-                .addExecInterceptorLast("lbAudit", new PoolingHttpClientConnectionManagerAuditExecHandler(
-                        connectionManager, poolStatsEvery, poolStatsSlowThreshold)));
-        component.setConnectionRequestTimeout(connectionRequestTimeout.toMillis());
-        component.setResponseTimeout(responseTimeout.toMillis());
-        return component;
+        return CamelHttpComponents.create(connectionManager, camelHttpProps(environment),
+                new CamelHttpComponents.Shared(routePlanner, observationRegistry, logbook, poolStatsEvery,
+                        poolStatsSlowThreshold));
+    }
+
+    /**
+     * Per-endpoint pools: one more camel-http component (own pool, evictor, metrics) per
+     * {@code creed.camel.http-components.<name>}, used as {@code <name>:https://<service-id>/...}.
+     * {@code static}: a registry post-processor must not drag this configuration in early.
+     */
+    @Bean
+    static NamedHttpComponentRegistrar namedHttpComponentRegistrar() {
+        return new NamedHttpComponentRegistrar();
     }
 
     /** {@code creed.camel.http.*}, with {@link HttpPoolProperties}' defaults for anything unset. */
     private static HttpPoolProperties camelHttpProps(Environment environment) {
-        return Binder.get(environment).bindOrCreate("creed.camel.http", HttpPoolProperties.class);
+        return CamelHttpComponents.defaults(environment);
     }
 
     /**

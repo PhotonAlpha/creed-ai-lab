@@ -25,6 +25,9 @@ include 误杀出站、jackson 漏洞误报）、hc5 entity 一次性流的 `wri
 **[docs/camel-observation-baggage-loss.md](docs/camel-observation-baggage-loss.md)**。`ProducerTemplate.send` 返回后读大响应 body 报
 `NoSuchFileException`（UoW 在返回前已结束并删除 stream cache 临时文件）的根因与修复，见
 **[docs/producertemplate-stream-cache-cleanup.md](docs/producertemplate-stream-cache-cleanup.md)**。
+同一集群的批量接口与实时接口要用不同连接池时，在 `creed.camel.http-components.<name>` 声明一个具名 camel-http 组件
+（独立连接池、清理线程、指标），路由写成 `<name>:https://<service-id>/...`；三种做法的对比与取舍见
+**[docs/camel-http-per-endpoint-pools.md](docs/camel-http-per-endpoint-pools.md)**。
 
 REST 走 camel-servlet，Tomcat context path 为 `/simple`，API 在 `https://localhost:8096/simple/camel/api/*`（经 httpd：`https://localhost:9443/simple/camel/api/*`）（hello / time / echo / catalog /
 order / payment / aggregate / aggregate-notify / **fulfillment**）。`/aggregate` 与 `/aggregate-notify`

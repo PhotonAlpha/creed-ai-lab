@@ -172,6 +172,16 @@ creed:
       validate-after-inactivity: 2s
       max-idle-time: 30s
       eviction-interval: 5s
+    # Per-endpoint pools: one more camel-http component per name (own pool, evictor, metrics
+    # camelHttpPool-<name>), used as <to uri="<name>:https://<service-id>/..."/> - the protocol is
+    # required (<name>://... is refused: camel-http would send it as plain HTTP). Unset keys inherit
+    # creed.camel.http above. None declared: every route is on the default pool.
+    # Design + comparison: docs/camel-http-per-endpoint-pools.md
+    # http-components:
+    #  catalog-bulk:
+    #    max-total: 10
+    #    max-per-route: 5
+    #    response-timeout: 60s
   audit:
     legacy-filter:
       enabled: true

@@ -50,6 +50,17 @@ holds a permanent `aliveInstancesReplay.subscribe()` that keeps the `replay(1).r
 running regardless of traffic; `choose()` sees a flip only after the LB cache TTL (35s default). Design
 notes: `docs/camel-http-loadbalancer.md` 运行时开关 section.
 
+## Per-endpoint camel-http pools (`creed.camel.http-components.<name>`)
+
+Isolation is **one `HttpComponent` bean per pool** (2026-11-11, asked for: a cluster's bulk vs real-time calls), not a
+pool swapped per endpoint: camel-http treats only the *component's* pool as shared — an endpoint holding any other pool
+closes it in `doStop()` (`HttpEndpoint`, reference compare), so a removed route or an evicted `toD` endpoint would kill
+its siblings' pool. `NamedHttpComponentRegistrar` registers `<name>` + pool/evictor/metrics; every component (the
+default too) comes from `CamelHttpComponents` so none misses the route planner / Logbook / observation / lbAudit.
+Endpoint URI is `<name>:https://<service-id>/...`: TLS is `uri.startsWith("https")`, so `<name>://` would go out as
+plain HTTP — `ExplicitProtocolHttpComponent` refuses it. The `name:https://` form is source behaviour, not documented:
+`CamelHttpComponentsTest` locks it. Comparison: `docs/camel-http-per-endpoint-pools.md`.
+
 ## HttpClient pool lifecycle (`HttpPoolProperties`, all three pools)
 
 `loadBalancedPool`, `healthCheckPool` (`creed.partner[.health-check].http.*`) and `camelHttpPool`
