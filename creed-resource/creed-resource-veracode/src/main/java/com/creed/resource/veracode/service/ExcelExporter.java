@@ -369,6 +369,8 @@ public class ExcelExporter {
                 new Object[] {"Jira project", a.projectKey()},
                 new Object[] {"Jira versions searched", a.selectedVersions().isEmpty() ? "(any)"
                         : String.join(", ", a.selectedVersions())},
+                new Object[] {"Jira countries searched", a.selectedCountries().isEmpty() ? "(any)"
+                        : String.join(", ", a.selectedCountries())},
                 new Object[] {"Analysed at", TIME.format(a.analyzedAt())},
                 new Object[] {"Findings", n.total() + " (exists " + n.exists() + ", missing " + n.missing()
                         + ", label missing " + n.needsLabel() + ")"}));

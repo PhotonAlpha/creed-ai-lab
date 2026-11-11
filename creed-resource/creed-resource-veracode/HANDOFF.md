@@ -68,7 +68,24 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
-2026-11-11 (latest, asked for): **closed issues may be filed again** - `veracode.jira.closed-statuses` (`Closed, Done`);
+2026-11-12 (latest, asked for): **a created SAST issue's description starts with the page's "Jira summary" block** -
+`SastIssueView.blocks` per application (`<name>: <project> - <category>` / `CWE 78 <name>` / `CWE 78 (Flaw IDs: 2)`),
+the name linked when mapped; the summary is unchanged (it is the lookup key).
+
+2026-11-12 (asked for): **a lookup-condition change = 1 Jira call, not 6** - `AnalysisRequest.skipSast` (SAST
+not re-read, page keeps its own), `meta-cache-ttl` (60s Caffeine create-screen cache per token fingerprint, cleared by the
+connection test), page searches once when a select's dropdown closes. **85 tests pass**
+(`aCreateScreenIsReusedPerTokenUntilTheConnectionIsTested`, `skipSastLeavesTheSastHalfOut`).
+
+2026-11-11 (asked for): **Country filter on the SCA lookup** - `veracode.jira.country-field` (`Country`);
+`JiraLookupService.countryFilter` -> `Jql.lookup(..., cf[N] in (...))`; `countries` on every SCA analysis / create /
+export request, `countries` + `selectedCountries` in the response and `JiraConnection`. Mock: `customfield_10300`
+Country (Singapore / Malaysia / China / Hong Kong), CREED-103 filed for Malaysia (`theChosenCountriesNarrowTheLookup`).
+SAST is filtered too since 2026-11-12 (its own Country field; a Country it lacks is the SAST tab's error,
+`countries` on `CreateSastIssuesRequest`). Page: Country multi-select, auto-create confirmation, token dialogs with a link to the token
+page, Reports card foldable. **83 tests pass.**
+
+2026-11-11 (asked for): **closed issues may be filed again** - `veracode.jira.closed-statuses` (`Closed, Done`);
 `FindingView` / `SastIssueView.recreatable` = every issue found is in one; `CreateIssuesRequest` /
 `CreateSastIssuesRequest.recreateClosed` files that **one** id anyway (more ids = 400, re-checked against Jira under the
 create lock). Page: red *Re-create* on such a row, `modal.confirm` listing the closed issues

@@ -33,7 +33,7 @@ public class MockJiraStore {
     /** @param assignee {@code null} = unassigned; @param reporter who created it ({@code null} for seeds) */
     public record Issue(int id, String key, String summary, String description, String status, String priority,
                         String assignee, String reporter, List<String> versions, List<String> components,
-                        String environment, List<String> labels, String issueType) {
+                        String environment, List<String> labels, String issueType, String country) {
     }
 
     private final List<String> versions = List.of("2.2.1", "2.3.0", "2.4.0");
@@ -51,17 +51,21 @@ public class MockJiraStore {
         attachments.clear();
         sequence.set(100);
         seed("creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar",
-                "In Progress", "Highest", "Alice Wang", "2.3.0");
-        seed("creed - CVE-2022-22965|CWE-94 - spring-beans-5.3.17.jar", "Done", "High", "Bob Li", "2.2.1");
-        // separators instead of the id's own hyphens: still found (the title match is loose)
-        seed("Upgrade jackson-databind-2.12.6.jar: cve 2020 36518 deep wrapper array nesting", "To Do", "Medium", null, "2.3.0");
-        seed("[Veracode] CVE-2021-4104 JMSAppender deserialization in log4j-1.2.17.jar", "Done", "High", "Alice Wang", "2.3.0");
+                "In Progress", "Highest", "Alice Wang", "2.3.0", "Singapore");
+        seed("creed - CVE-2022-22965|CWE-94 - spring-beans-5.3.17.jar", "Done", "High", "Bob Li", "2.2.1", "Singapore");
+        // separators instead of the id's own hyphens: still found (the title match is loose). Filed for Malaysia: a
+        // Country filter of Singapore leaves it out
+        seed("Upgrade jackson-databind-2.12.6.jar: cve 2020 36518 deep wrapper array nesting", "To Do", "Medium", null,
+                "2.3.0", "Malaysia");
+        seed("[Veracode] CVE-2021-4104 JMSAppender deserialization in log4j-1.2.17.jar", "Done", "High", "Alice Wang",
+                "2.3.0", "Singapore");
     }
 
-    private void seed(String summary, String status, String priority, String assignee, String version) {
+    private void seed(String summary, String status, String priority, String assignee, String version, String country) {
         int n = sequence.incrementAndGet();
         issues.add(new Issue(10_000 + n, PROJECT + "-" + n, summary, null, status, priority, assignee, null,
-                List.of(version), List.of("Security"), "Production", List.of("veracode", SAMPLE_APPLICATION_LABEL), "Bug"));
+                List.of(version), List.of("Security"), "Production", List.of("veracode", SAMPLE_APPLICATION_LABEL), "Bug",
+                country));
     }
 
     public List<String> versions() {
@@ -73,10 +77,12 @@ public class MockJiraStore {
     }
 
     public synchronized Issue create(String summary, String description, List<String> versions, List<String> components,
-                                     String environment, List<String> labels, String reporter, String issueType) {
+                                     String environment, List<String> labels, String reporter, String issueType,
+                                     String country) {
         int n = sequence.incrementAndGet();
         Issue issue = new Issue(10_000 + n, PROJECT + "-" + n, summary, description, "To Do", "Medium", null,
-                reporter, List.copyOf(versions), List.copyOf(components), environment, List.copyOf(labels), issueType);
+                reporter, List.copyOf(versions), List.copyOf(components), environment, List.copyOf(labels), issueType,
+                country);
         issues.add(issue);
         return issue;
     }
@@ -92,7 +98,7 @@ public class MockJiraStore {
                 }
                 Issue updated = new Issue(it.id(), it.key(), it.summary(), it.description(), it.status(), it.priority(),
                         it.assignee(), it.reporter(), it.versions(), it.components(), it.environment(),
-                        List.copyOf(labels), it.issueType());
+                        List.copyOf(labels), it.issueType(), it.country());
                 issues.set(i, updated);
                 return updated;
             }

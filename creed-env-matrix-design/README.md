@@ -549,6 +549,15 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
     and asks the user to make sure it is a regression, not a duplicate; one row at a time, never in bulk, and the
     server re-reads Jira first (an issue reopened meanwhile means nothing is created). Rows expand to the flaws (application, file:line, module). A SAST project Jira refuses
     is reported in the tab; SCA keeps working.
+- **Country** (a multi-select under *Jira settings*): only issues (SCA and SAST) whose Country is one of those chosen are looked up
+  (JQL `cf[<id>] in (...)`); none = any. The options are the create screen's Country field (backend
+  `veracode.jira.country-field`); without that field the select is disabled and says so. A created issue takes its Country from the
+  field bar, not from here.
+- **Auto-create** asks first when ticked: the next analysis files an issue for every missing finding in one go. While on,
+  an orange tag says so.
+- **Token dialogs** (Jira / Confluence): a *No token yet?* box says where to create one and links to that page in a new
+  tab; create it there, come back and paste.
+- **Cards**: the three cards on top cast a shadow on hover; *Reports* folds and unfolds.
   - *SAST statistics* under the SCA ones: rating, score, the report's stated total / not-mitigated counts, then
     flaws listed / open / mitigated / fixed / open affecting policy, and open flaws per severity (*Total* row with
     several reports).
@@ -573,7 +582,8 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   to names with a report date `dd_MMM_yyyy` (`09_Nov_2026`) and to `.zip` — the page usually holds PDFs of the same
   scans. Both filters can be turned off. When the page keeps every run (`03_Nov_2026`, `09_Nov_2026`, …) a *report
   date* dropdown lists the dates found in the names (newest first, with counts) and preselects the newest after
-  listing; *Any date* goes back to "has a date".
+  listing; *Any date* goes back to "has a date". A *keyword* box filters the listed attachments in the browser (no
+  new query): every space-separated word must occur, any case, in the name, media type or uploader.
 - **While an upload (or a Confluence download) is processed** the page is covered by a full-screen spinner: upload
   percentage first, then "parsing and looking up in Jira".
 - **Source of a created issue**: an uploaded file is attached to the Jira issue itself, and the description's
@@ -582,7 +592,8 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
 - **SAST Jira summary column** shows the issue per application (display only — the issue is still found and filed by
   its summary, in the cell tooltip): `Creed-CCS: IDB VERACODE STSA - CRLF Injection` / `CWE 117 <CWE name>` /
   `CWE 117 (Flaw IDs: 257, 258)`; the *Open flaws* column is merged into it. The Confluence export's SAST *Details*
-  is the same, and both of its tables are sorted by repository.
+  is the same, and both of its tables are sorted by repository. A created SAST issue's description starts with the
+  same three lines per application (its summary stays one line: it is what the issue is found by).
 
 ### Migration sync risk (`/migration-risk`)
 

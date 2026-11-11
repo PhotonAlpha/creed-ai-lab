@@ -9,7 +9,8 @@ import java.util.List;
  * @param project      {@code {project}} in the title; blank = the reports' Veracode application(s)
  * @param version      {@code {version}} in the title; blank = the reports' version(s)
  * @param jiraVersions the SCA Jira versions to look up in, as on the page
+ * @param countries    the Country options to look up in, as on the page
  */
 public record ConfluenceExportRequest(@NotBlank String uploadId, @NotBlank String parentPageId, String project,
-                                      String version, List<String> jiraVersions) {
+                                      String version, List<String> jiraVersions, List<String> countries) {
 }

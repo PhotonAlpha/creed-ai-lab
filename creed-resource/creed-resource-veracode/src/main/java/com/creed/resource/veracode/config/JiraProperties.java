@@ -40,6 +40,12 @@ import java.util.Map;
  * @param sast           where SAST (static-analysis) issues go - their own project, issue type, labels and summary
  * @param closedStatuses statuses (any case) of a finished issue: a finding whose issues are all in one may be filed
  *                       again, one at a time and after the page's confirmation (asked for, 2026-11-10)
+ * @param countryField   the SCA issue type's Country field, by id ({@code customfield_10300}) or name, any case: its
+ *                       options are the page's Country select, and the ones chosen narrow the lookup
+ *                       ({@code cf[10300] in (...)}; asked for, 2026-11-11). Not on the create screen = no select
+ * @param metaCacheTtl   how long an analysis reuses a create screen it read (issue types + fields, per token, project
+ *                       and issue type): a lookup-condition change then costs one Jira search, not three calls. Issues
+ *                       themselves are never cached; the connection test always reads afresh. {@code 0} = off
  */
 @Validated
 @ConfigurationProperties("veracode.jira")
@@ -58,7 +64,9 @@ public record JiraProperties(
         @DefaultValue("20s") Duration readTimeout,
         @DefaultValue CreateDefaults defaults,
         @DefaultValue Sast sast,
-        @DefaultValue({"Closed", "Done"}) List<String> closedStatuses) {
+        @DefaultValue({"Closed", "Done"}) List<String> closedStatuses,
+        @DefaultValue("Country") String countryField,
+        @DefaultValue("60s") Duration metaCacheTtl) {
 
     /** Every issue is finished ({@code closed-statuses}); {@code false} for none - a missing one is just created. */
     public boolean allClosed(List<String> statuses) {

@@ -15,15 +15,19 @@ import java.util.List;
  *                         empty = any version
  * @param createVersion    what a created issue is filed under: the one selected version, {@code null} with none
  *                         or several selected (creating then answers {@code jira_version_required})
+ * @param countries         the Country field's options (empty without one) - the page's Country select
+ * @param selectedCountries the ones chosen on the page, Jira's spelling: searched; empty = any country
  * @param createFields the create-screen fields the page asks for before creating (read with the user's token)
  * @param warnings     report rows that were skipped or read partially, and creations that failed during an
  *                     {@code autoCreate} run
  * @param sastFlaws    every report's static-analysis flaws, as listed (fixed and mitigated included)
- * @param sast         the open flaws as SAST Jira issues (one per CWE + category) in the SAST project
+ * @param sast         the open flaws as SAST Jira issues (one per CWE + category) in the SAST project; {@code null}
+ *                     when the request said {@code skipSast}
  * @param applications the reports' Veracode applications under their mapped names and links
  */
 public record AnalysisResponse(String uploadId, List<ReportView> reports, String projectKey, List<String> jiraVersions,
                                List<String> selectedVersions, String createVersion,
+                               List<String> countries, List<String> selectedCountries,
                                List<CreateField> createFields,
                                List<FindingView> findings, List<String> warnings, Counts counts,
                                List<SastFlaw> sastFlaws, SastJira sast, List<Application> applications,

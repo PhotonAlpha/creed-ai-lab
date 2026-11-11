@@ -1,20 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Button, Checkbox, Input, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { FileSearchOutlined, KeyOutlined, PlayCircleOutlined } from '@ant-design/icons';
-import { confluenceAuthComplete, veracodeApi } from '../../api/veracode';
+import { FileSearchOutlined, KeyOutlined, PlayCircleOutlined, SearchOutlined } from '@ant-design/icons';
+import { veracodeApi } from '../../api/veracode';
 import type { ConfluenceAttachment, ConfluenceAuth, ConfluenceConnection, ConfluencePageAttachments } from '../../api/veracode';
 import { ApiError } from '../../api/client';
-import { ConfluenceTokenModal } from './ConfluenceTokenModal';
-import { confluenceTokenStore, emptyConfluenceAuth } from './confluenceToken';
 import { useI18n } from '../../locales';
 
 const { Text } = Typography;
 
 interface Props {
-  baseUrl: string;
-  /** The deployment the token dialog preselects when nothing is saved. */
-  cloud: boolean;
+  /** The page's Confluence sign-in (`useConfluenceToken`): its button is on the source tab bar, not in here. */
+  auth: ConfluenceAuth;
+  hasToken: boolean;
+  /** The saved token's test, `null` before one answered. */
+  connection: ConfluenceConnection | null;
+  /** Opens the token dialog. */
+  onNeedToken: () => void;
   mock?: boolean;
   /** An analysis is running: nothing new can start. */
   busy: boolean;
@@ -48,6 +50,15 @@ const reportDate = (title: string) => {
 const LIMITS = [50, 100, 200, 0];
 const newestFirst = (a: ConfluenceAttachment, b: ConfluenceAttachment) => (b.created ?? '').localeCompare(a.created ?? '');
 
+/**
+ * The keyword filter over a listing already fetched (no backend call): every space-separated word must occur, any
+ * case, in the name, the media type or the author - `ccs 09_nov` narrows to one application's run.
+ */
+const matchesKeyword = (a: ConfluenceAttachment, words: string[]) => {
+  const text = `${a.title} ${a.mediaType ?? ''} ${a.author ?? ''}`.toLowerCase();
+  return words.every((w) => text.includes(w));
+};
+
 const size = (bytes: number | null) => (bytes == null ? '—'
   : bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
     : bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`);
@@ -56,13 +67,8 @@ const size = (bytes: number | null) => (bytes == null ? '—'
  * Reports from a Confluence page instead of an upload: the page's attachments are listed with the user's own
  * Confluence token, the user ticks `.xml` / `.zip` ones, and the backend downloads and analyses them.
  */
-export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdChange, onAnalyze }: Props) {
+export function ConfluenceSource({ auth, hasToken, connection, onNeedToken, mock, busy, pageId, onPageIdChange, onAnalyze }: Props) {
   const { t } = useI18n();
-  const [token, setToken] = useState(() => confluenceTokenStore.load());
-  const auth = useMemo(() => token.auth ?? emptyConfluenceAuth(cloud ? 'cloud' : 'dataCenter'), [token.auth, cloud]);
-  const hasToken = confluenceAuthComplete(auth);
-  const [connection, setConnection] = useState<ConfluenceConnection | null>(null);
-  const [tokenOpen, setTokenOpen] = useState(false);
   const [listing, setListing] = useState<ConfluencePageAttachments | null>(null);
   const [listingLoading, setListingLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +79,8 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
   const [limit, setLimit] = useState(50);
   /** One report date (`yyyy-MM-dd`) or '' for any: a page keeps every run (`03_Nov_2026`, `09_Nov_2026`, ...). */
   const [date, setDate] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const words = useMemo(() => keyword.toLowerCase().split(/\s+/).filter(Boolean), [keyword]);
 
   /** The dates the page's names hold, newest first, with how many attachments carry each. */
   const dates = useMemo(() => {
@@ -89,11 +97,12 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
   const matching = useMemo(() => (listing?.attachments ?? [])
     .filter((a) => {
       if (zipOnly && !a.title.toLowerCase().endsWith('.zip')) return false;
+      if (!matchesKeyword(a, words)) return false;
       if (!datedOnly) return true;
       const d = reportDate(a.title);
       return !!d && (!date || d.key === date);
     })
-    .sort(newestFirst), [listing, datedOnly, zipOnly, date]);
+    .sort(newestFirst), [listing, datedOnly, zipOnly, date, words]);
   const visible = useMemo(() => (limit > 0 ? matching.slice(0, limit) : matching), [matching, limit]);
   /** Only what is listed can be analysed: a filter change drops what it hides from the selection. */
   const chosenIds = useMemo(() => {
@@ -101,31 +110,9 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
     return selected.filter((id) => shown.has(id));
   }, [visible, selected]);
 
-  /** A saved token is tested once, so the button can say whose it is. */
-  useEffect(() => {
-    if (!token.auth || !confluenceAuthComplete(token.auth)) return;
-    veracodeApi.testConfluence(token.auth).then(setConnection).catch(() => setConnection(null));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const save = (value: ConfluenceAuth, remember: boolean, tested: ConfluenceConnection | null) => {
-    confluenceTokenStore.save(value, remember);
-    setToken({ auth: value, remember });
-    setConnection(tested);
-    setTokenOpen(false);
-    if (!tested) veracodeApi.testConfluence(value).then(setConnection).catch(() => setConnection(null));
-  };
-
-  const clear = () => {
-    confluenceTokenStore.clear();
-    setToken({ auth: null, remember: false });
-    setConnection(null);
-    setTokenOpen(false);
-  };
-
   const list = async () => {
     if (!hasToken) {
-      setTokenOpen(true);
+      onNeedToken();
       return;
     }
     const id = pageIdOf(pageId);
@@ -145,7 +132,7 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
     } catch (e) {
       setListing(null);
       setSelected([]);
-      if (e instanceof ApiError && e.body?.error === 'confluence_token_required') setTokenOpen(true);
+      if (e instanceof ApiError && e.body?.error === 'confluence_token_required') onNeedToken();
       setError((e as Error).message);
     } finally {
       setListingLoading(false);
@@ -183,6 +170,21 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
 
   return (
     <>
+      {/* listing runs as the user: say first when the token is missing or refused, with the way to fix it */}
+      {(!hasToken || (connection && !connection.ok)) && (
+        <Alert
+          type={!hasToken ? 'warning' : 'error'}
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={t(!hasToken ? 'veracode.confluence.token.needed' : 'veracode.confluence.token.rejected')}
+          description={hasToken ? connection?.message : undefined}
+          action={(
+            <Button size="small" type={!hasToken ? 'primary' : 'default'} icon={<KeyOutlined />} onClick={onNeedToken}>
+              {t(!hasToken ? 'veracode.token.setUp' : 'veracode.token.check')}
+            </Button>
+          )}
+        />
+      )}
       <Space wrap>
         <Tooltip title={t('veracode.confluence.pageHint')}>
           <Input
@@ -197,18 +199,6 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
         <Button icon={<FileSearchOutlined />} loading={listingLoading} disabled={!pageId.trim()} onClick={() => void list()}>
           {t('veracode.confluence.list')}
         </Button>
-        <Tooltip title={connection?.message ?? t('veracode.confluence.token.buttonHint')}>
-          <Button icon={<KeyOutlined />} onClick={() => setTokenOpen(true)}>
-            {t('veracode.confluence.token.button')}
-            {!hasToken
-              ? <Tag style={{ marginInlineEnd: 0 }}>{t('veracode.token.unset')}</Tag>
-              : connection?.ok
-                ? <Tag color="success" style={{ marginInlineEnd: 0 }}>{connection.user ?? t('veracode.token.valid')}</Tag>
-                : connection
-                  ? <Tag color="error" style={{ marginInlineEnd: 0 }}>{t('veracode.token.bad')}</Tag>
-                  : <Tag color="processing" style={{ marginInlineEnd: 0 }}>{t('veracode.token.set')}</Tag>}
-          </Button>
-        </Tooltip>
         {mock && <Text type="secondary">{t('veracode.confluence.mockHint')}</Text>}
       </Space>
       {error && <Alert style={{ marginTop: 12 }} type="error" showIcon message={error} />}
@@ -220,6 +210,17 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
             {listing.spaceKey && <Tag>{listing.spaceKey}</Tag>}
           </Space>
           <Space style={{ marginTop: 8 }} wrap>
+            <Tooltip title={t('veracode.confluence.filter.keywordHint')}>
+              <Input
+                size="small"
+                allowClear
+                prefix={<SearchOutlined />}
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                placeholder={t('veracode.confluence.filter.keyword')}
+                style={{ width: 240 }}
+              />
+            </Tooltip>
             <Tooltip title={t('veracode.confluence.filter.datedHint')}>
               <Checkbox checked={datedOnly} onChange={(e) => setDatedOnly(e.target.checked)}>
                 {t('veracode.confluence.filter.dated')}
@@ -281,18 +282,6 @@ export function ConfluenceSource({ baseUrl, cloud, mock, busy, pageId, onPageIdC
           </Button>
         </>
       )}
-      <ConfluenceTokenModal
-        open={tokenOpen}
-        auth={auth}
-        saved={!!token.auth}
-        remember={token.remember}
-        baseUrl={baseUrl}
-        mock={mock}
-        connection={connection}
-        onSave={save}
-        onClear={clear}
-        onCancel={() => setTokenOpen(false)}
-      />
     </>
   );
 }

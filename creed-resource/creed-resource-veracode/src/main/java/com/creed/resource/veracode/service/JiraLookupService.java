@@ -12,6 +12,7 @@ import com.creed.resource.veracode.config.ApplicationProperties;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.SastIssue;
+import com.github.benmanes.caffeine.cache.Cache;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -69,6 +70,12 @@ public class JiraLookupService {
     private final JiraClient jira;
     private final JiraProperties props;
     private final ApplicationProperties apps;
+    /**
+     * Create screens read for analyses, by token fingerprint + project + issue type ({@code meta-cache-ttl}; built in
+     * {@code JiraMetaCacheConfiguration}): metadata, which changes when someone edits the Jira scheme - not issues,
+     * which every analysis and create reads afresh.
+     */
+    private final Cache<String, CreateMeta> metaCache;
 
     /** @param assignee display name; {@code null} = unassigned */
     /** @param labels the issue's labels - an application's label missing from them is added, not a second issue */
@@ -98,6 +105,8 @@ public class JiraLookupService {
      * @param affectsVersion {@code issueType}'s create screen has Affects Version/s - without it nothing is looked up
      *                       or created (the version is half of what identifies a finding)
      * @param fields         what the page asks for before creating (Component/s, required fields without a default)
+     * @param countries      the Country field's options ({@code veracode.jira.country-field}) - the page's Country
+     *                       select; empty when the create screen has no such field
      * @param issueTypes     every type the token may create, each with whether it can be filed against a version -
      *                       the page's issue type choice
      * @param versionNames   the versions {@code issueType} can be filed against - the page's Jira version list
@@ -108,7 +117,7 @@ public class JiraLookupService {
      */
     public record Connection(boolean ok, String baseUrl, String projectKey, String issueType, boolean tokenAccepted,
                              boolean canCreate, boolean affectsVersion, int versions, List<String> versionNames,
-                             List<String> defaultVersions, List<CreateField> fields,
+                             List<String> defaultVersions, List<CreateField> fields, List<String> countries,
                              List<IssueTypeOption> issueTypes, Problem problem, int status, String message) {
     }
 
@@ -141,9 +150,22 @@ public class JiraLookupService {
      * @param cloud           read with a Jira Cloud token: user fields then take an {@code accountId}, not a name
      * @param affectsVersion  the create screen has Affects Version/s (always, for SCA: checked on reading)
      * @param versionRequired ... and requires it: a SAST issue is then filed under the version chosen for it
+     * @param country         the screen's Country field ({@code veracode.jira.country-field}), {@code null} without one
      */
     public record CreateMeta(String projectKey, String issueTypeId, String issueType, Map<String, String> versions,
-                             List<CreateField> fields, boolean cloud, boolean affectsVersion, boolean versionRequired) {
+                             List<CreateField> fields, boolean cloud, boolean affectsVersion, boolean versionRequired,
+                             CreateField country) {
+    }
+
+    /**
+     * The page's Country choice for the lookup: {@code field in (values)}, no clause when {@code values} is empty.
+     *
+     * @param field  the field as JQL names it ({@code cf[10300]}), {@code null} without the field
+     * @param values option labels in Jira's spelling and order
+     */
+    public record CountryFilter(String field, List<String> values) {
+
+        public static final CountryFilter ANY = new CountryFilter(null, List.of());
     }
 
     /** Where issues go and what is preselected: SCA's from the token and the top-level config, SAST's from its own. */
@@ -164,6 +186,9 @@ public class JiraLookupService {
 
     public Connection connection(JiraToken token) {
         token.require();
+        // "test connection" is how a user says "I changed something in Jira": what this token had cached goes
+        String fingerprint = fingerprint(token);
+        metaCache.invalidateAll(metaCache.asMap().keySet().stream().filter(k -> k.startsWith(fingerprint + "|")).toList());
         Target target = sca(token);
         String project = target.projectKey();
         String wanted = target.issueType();
@@ -179,7 +204,7 @@ public class JiraLookupService {
             Problem problem = e.status() == 0 ? Problem.UNREACHABLE
                     : e.status() == 401 ? Problem.TOKEN_REJECTED : Problem.PROJECT;
             return new Connection(false, props.baseUrl(), project, wanted, problem != Problem.UNREACHABLE
-                    && problem != Problem.TOKEN_REJECTED, false, false, 0, List.of(), List.of(), List.of(), List.of(), problem, e.status(),
+                    && problem != Problem.TOKEN_REJECTED, false, false, 0, List.of(), List.of(), List.of(), List.of(), List.of(), problem, e.status(),
                     e.getMessage());
         }
         List<IssueTypeOption> options = types.stream().map(t -> {
@@ -193,17 +218,17 @@ public class JiraLookupService {
 
         JiraIssueType type = byName(types, wanted);
         if (type == null) {
-            return new Connection(false, props.baseUrl(), project, wanted, true, false, false, 0, List.of(), List.of(), List.of(), options,
+            return new Connection(false, props.baseUrl(), project, wanted, true, false, false, 0, List.of(), List.of(), List.of(), List.of(), options,
                     Problem.ISSUE_TYPE, 200, notCreatable(project, wanted, types));
         }
         List<JiraFieldMeta> fields = screens.get(type.id());
         if (versionsField(fields) == null) {
-            return new Connection(false, props.baseUrl(), project, type.name(), true, true, false, 0, List.of(), List.of(), List.of(),
+            return new Connection(false, props.baseUrl(), project, type.name(), true, true, false, 0, List.of(), List.of(), List.of(), List.of(),
                     options, Problem.AFFECTS_VERSION, 200, noAffectsVersion(project, type) + instead);
         }
         CreateMeta meta = meta(project, type, fields, token, target.defaults());
         if (meta.versions().isEmpty()) {
-            return new Connection(false, props.baseUrl(), project, type.name(), true, true, true, 0, List.of(), List.of(), meta.fields(),
+            return new Connection(false, props.baseUrl(), project, type.name(), true, true, true, 0, List.of(), List.of(), meta.fields(), countries(meta),
                     options, Problem.NO_VERSIONS, 200, "project " + project + " has no version to file a "
                     + type.name() + " against: create the versions (releases) in Jira");
         }
@@ -212,8 +237,8 @@ public class JiraLookupService {
                 + meta.versions().size() + " version(s) to file against"
                 + (required.isEmpty() ? "" : "; to choose on the page: " + String.join(", ", required));
         return new Connection(true, props.baseUrl(), project, meta.issueType(), true, true, true,
-                meta.versions().size(), List.copyOf(meta.versions().values()), defaultVersions(meta), meta.fields(), options,
-                null, 200, message);
+                meta.versions().size(), List.copyOf(meta.versions().values()), defaultVersions(meta), meta.fields(), countries(meta),
+                options, null, 200, message);
     }
 
     /** {@code sast.defaults.affects-versions} the SAST issue type has: the page's SAST version preselection. */
@@ -243,6 +268,10 @@ public class JiraLookupService {
     public CreateMeta createMeta(JiraToken token) {
         token.require();
         Target target = sca(token);
+        return cached(token, "sca", target, () -> readCreateMeta(token, target));
+    }
+
+    private CreateMeta readCreateMeta(JiraToken token, Target target) {
         List<JiraIssueType> types = creatableTypes(token, target.projectKey());
         JiraIssueType type = byName(types, target.issueType());
         if (type == null) {
@@ -264,6 +293,10 @@ public class JiraLookupService {
     public CreateMeta sastCreateMeta(JiraToken token) {
         token.require();
         Target target = sast();
+        return cached(token, "sast", target, () -> readSastCreateMeta(token, target));
+    }
+
+    private CreateMeta readSastCreateMeta(JiraToken token, Target target) {
         List<JiraIssueType> types = creatableTypes(token, target.projectKey());
         JiraIssueType type = byName(types, target.issueType());
         if (type == null) {
@@ -271,6 +304,26 @@ public class JiraLookupService {
                     + " (veracode.jira.sast.issue-type)");
         }
         return meta(target.projectKey(), type, fieldsOf(token, target.projectKey(), type), token, target.defaults());
+    }
+
+    /**
+     * The create screen from {@link #metaCache} while fresh, else read and kept. A failed read (an exception from
+     * {@code read}) is not kept: the next analysis asks Jira again. Keyed by a hash of the authorization header - the
+     * token itself is never held.
+     */
+    private CreateMeta cached(JiraToken token, String kind, Target target, java.util.function.Supplier<CreateMeta> read) {
+        String key = fingerprint(token) + "|" + kind + "|" + target.projectKey() + "|"
+                + target.issueType().toLowerCase(Locale.ROOT);
+        return metaCache.get(key, k -> read.get());
+    }
+
+    private static String fingerprint(JiraToken token) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(token.authorization().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private CreateMeta meta(String projectKey, JiraIssueType type, List<JiraFieldMeta> fields, JiraToken token,
@@ -288,8 +341,11 @@ public class JiraLookupService {
                 byLowerCase.putIfAbsent(name.trim().toLowerCase(Locale.ROOT), name);
             }
         }
+        CreateField country = fields.stream()
+                .filter(f -> props.countryField().equalsIgnoreCase(f.fieldId()) || props.countryField().equalsIgnoreCase(f.name()))
+                .findFirst().map(CreateField::of).orElse(null);
         return new CreateMeta(projectKey, type.id(), type.name(), byLowerCase, asked, token.cloud(), versions != null,
-                versions != null && versions.required());
+                versions != null && versions.required(), country);
     }
 
     /** Sub-task types are left out: they cannot be created without a parent. */
@@ -431,6 +487,42 @@ public class JiraLookupService {
         return meta.versions().values().stream().filter(wanted::contains).toList();
     }
 
+    /** The Country options of the screen, Jira's order; empty without the field. */
+    static List<String> countries(CreateMeta meta) {
+        return meta.country() == null ? List.of()
+                : meta.country().options().stream().map(CreateField.Option::label).toList();
+    }
+
+    /**
+     * The page's Country choice in Jira's spelling and order (asked for, 2026-11-11): searched with
+     * {@code field in (...)}, like the versions.
+     *
+     * @param chosen option labels (or ids), any case; {@code null} / empty = any country
+     * @throws IllegalArgumentException a country the field does not offer, or no Country field on the screen
+     */
+    public CountryFilter countryFilter(CreateMeta meta, List<String> chosen) {
+        List<String> wanted = chosen == null ? List.of()
+                : chosen.stream().filter(c -> c != null && !c.isBlank()).map(String::trim).toList();
+        if (wanted.isEmpty()) {
+            return CountryFilter.ANY;
+        }
+        CreateField field = meta.country();
+        if (field == null) {
+            throw new IllegalArgumentException("the " + meta.issueType() + " create screen of " + meta.projectKey()
+                    + " has no field '" + props.countryField() + "' (veracode.jira.country-field) to search by");
+        }
+        Set<String> ids = new LinkedHashSet<>();
+        for (String name : wanted) {
+            CreateField.Option option = field.option(name);
+            if (option == null) {
+                throw new IllegalArgumentException(field.name() + " has no option '" + name + "'");
+            }
+            ids.add(option.id());
+        }
+        return new CountryFilter(Jql.fieldRef(field.fieldId(), field.name()), field.options().stream()
+                .filter(o -> ids.contains(o.id())).map(CreateField.Option::label).toList());
+    }
+
     /**
      * The version a created issue is filed against: the one selected version. None or several is
      * {@link VersionRequiredException} - answered before anything is created.
@@ -456,15 +548,17 @@ public class JiraLookupService {
      * One JQL search per {@code search-batch-size} findings, {@code affectedVersion in (...)} the selected versions
      * (none selected = any version, or none).
      *
-     * @param versions from {@link #selectedVersions}
+     * @param versions  from {@link #selectedVersions}
+     * @param countries from {@link #countryFilter}: Jira alone decides it - the issues are read without the field
      * @return finding id -> covering issues, every finding present
      */
-    public Map<String, List<IssueRef>> find(List<Finding> findings, List<String> versions, JiraToken token) {
+    public Map<String, List<IssueRef>> find(List<Finding> findings, List<String> versions, CountryFilter countries,
+                                            JiraToken token) {
         Map<String, List<IssueRef>> result = new LinkedHashMap<>();
         findings.forEach(f -> result.put(f.id(), new ArrayList<>()));
         for (int from = 0; from < findings.size(); from += props.searchBatchSize()) {
             List<Finding> batch = findings.subList(from, Math.min(findings.size(), from + props.searchBatchSize()));
-            String jql = Jql.lookup(props.projectKey(), versions, batch);
+            String jql = Jql.lookup(props.projectKey(), versions, countries.field(), countries.values(), batch);
             if (jql == null) {
                 continue;
             }
@@ -674,12 +768,12 @@ public class JiraLookupService {
      *
      * @return SAST issue id -> covering Jira issues, every issue present
      */
-    public Map<String, List<IssueRef>> findSast(List<SastIssue> issues, JiraToken token) {
+    public Map<String, List<IssueRef>> findSast(List<SastIssue> issues, CountryFilter countries, JiraToken token) {
         Map<String, List<IssueRef>> result = new LinkedHashMap<>();
         issues.forEach(i -> result.put(i.id(), new ArrayList<>()));
         for (int from = 0; from < issues.size(); from += props.searchBatchSize()) {
             List<SastIssue> batch = issues.subList(from, Math.min(issues.size(), from + props.searchBatchSize()));
-            String jql = Jql.sastLookup(props.sastProjectKey(), batch);
+            String jql = Jql.sastLookup(props.sastProjectKey(), countries.field(), countries.values(), batch);
             if (jql == null) {
                 continue;
             }
@@ -707,7 +801,7 @@ public class JiraLookupService {
         body.put("project", Map.of("key", props.sastProjectKey()));
         body.put("issuetype", Map.of("name", props.sastIssueType()));
         body.put("summary", summary);
-        body.put("description", JiraDescription.ofSast(issue, reports, apps));
+        body.put("description", JiraDescription.ofSast(issue, reports, apps, props.sastProject()));
         if (jiraVersion != null) {
             body.put("versions", List.of(Map.of("name", jiraVersion)));
         }

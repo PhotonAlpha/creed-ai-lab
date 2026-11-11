@@ -242,8 +242,8 @@ export interface SastJira {
 export interface Analysis {
   /** Every report's static flaws; absent in an analysis cached before SAST was read. */
   sastFlaws?: SastFlaw[];
-  /** Absent in an analysis cached before SAST went to Jira. */
-  sast?: SastJira;
+  /** Absent in an analysis cached before SAST went to Jira; null in a `skipSast` answer (the page keeps its own). */
+  sast?: SastJira | null;
   /**
    * What every follow-up request names; the upload lives in the backend's memory for `veracode.upload.ttl` (2 h) and
    * not across a restart — then 404 `upload_expired`.
@@ -257,6 +257,10 @@ export interface Analysis {
   selectedVersions: string[];
   /** What a created issue is filed under: the one chosen version; null with none or several chosen. */
   createVersion: string | null;
+  /** The Country field's options; absent in an analysis cached before Country was searched. */
+  countries?: string[];
+  /** The chosen ones, Jira's spelling: searched (`cf[…] in`); empty = any country. */
+  selectedCountries?: string[];
   /** What creating needs from the page, read through the user's token. */
   createFields: CreateField[];
   findings: Finding[];
@@ -349,6 +353,8 @@ export interface JiraConnection {
   defaultVersions: string[];
   /** The create-screen fields the page asks for. */
   fields: CreateField[];
+  /** The Country field's options (`veracode.jira.country-field`) — the page's Country select; empty without one. */
+  countries?: string[];
   /** Every type the token may create — the page's issue type choice. */
   issueTypes: JiraIssueTypeOption[];
   /** The first failed check, `null` when `ok`. */
@@ -468,6 +474,8 @@ export interface UploadOptions {
   affectedVersion?: string;
   /** Jira versions to look up in (none = any); creating files under the one chosen. */
   jiraVersions?: string[];
+  /** Country options to look up in (none = any). */
+  countries?: string[];
   autoCreate?: boolean;
   /** Create-screen values for `autoCreate`. */
   fields?: CreateFieldValues;
@@ -479,17 +487,18 @@ export interface UploadProgress {
   total: number;
 }
 
-/** Repeated `jiraVersions=` parameters — what Spring binds to a `List<String>`. */
-const withVersions = (params: URLSearchParams, jiraVersions: string[] = []) => {
+/** Repeated `jiraVersions=` / `countries=` parameters — what Spring binds to a `List<String>`. */
+const withVersions = (params: URLSearchParams, jiraVersions: string[] = [], countries: string[] = []) => {
   jiraVersions.forEach((v) => params.append('jiraVersions', v));
+  countries.forEach((c) => params.append('countries', c));
   return params;
 };
 
-const uploadQuery = ({ affectedVersion, autoCreate, fields, jiraVersions }: UploadOptions) => withVersions(new URLSearchParams({
+const uploadQuery = ({ affectedVersion, autoCreate, fields, jiraVersions, countries }: UploadOptions) => withVersions(new URLSearchParams({
   autoCreate: String(!!autoCreate),
   ...(affectedVersion?.trim() ? { affectedVersion: affectedVersion.trim() } : {}),
   ...(autoCreate && fields ? { fields: JSON.stringify(fields) } : {}),
-}), jiraVersions);
+}), jiraVersions, countries);
 
 const json = (body: unknown, auth: JiraAuth): RequestInit => ({
   method: 'POST',
@@ -501,8 +510,9 @@ export const veracodeApi = {
   settings: () => requestAt<VeracodeSettings>(BASE, '/settings'),
 
   /** Re-analyse an upload against Jira as it is now. */
-  analyze: (uploadId: string, auth: JiraAuth, jiraVersions: string[], autoCreate = false, fields?: CreateFieldValues) =>
-    requestAt<Analysis>(BASE, '/analysis', json({ uploadId, autoCreate, fields, jiraVersions }, auth)),
+  analyze: (uploadId: string, auth: JiraAuth, jiraVersions: string[], autoCreate = false, fields?: CreateFieldValues,
+    countries: string[] = [], skipSast = false) =>
+    requestAt<Analysis>(BASE, '/analysis', json({ uploadId, autoCreate, fields, jiraVersions, countries, skipSast }, auth)),
 
   /**
    * Multipart, so not through `requestAt`: that sets a JSON Content-Type whenever there is a body, and
@@ -560,6 +570,7 @@ export const veracodeApi = {
         autoCreate: !!options.autoCreate,
         fields: options.autoCreate ? options.fields : undefined,
         jiraVersions: options.jiraVersions ?? [],
+        countries: options.countries ?? [],
       }),
       headers: { 'Content-Type': 'application/json', ...tokenHeader(auth), ...confluenceHeader(confluence) },
     }),
@@ -574,15 +585,16 @@ export const veracodeApi = {
    * named although its issues exist, when they are all finished (Closed / Done).
    */
   createIssues: (uploadId: string, findingIds: string[], fields: CreateFieldValues, jiraVersions: string[], auth: JiraAuth,
-    recreateClosed = false) =>
+    recreateClosed = false, countries: string[] = []) =>
     requestAt<{ results: CreateResult[] }>(BASE, '/jira/issues',
-      json({ uploadId, findingIds, fields, jiraVersions, recreateClosed }, auth)),
+      json({ uploadId, findingIds, fields, jiraVersions, countries, recreateClosed }, auth)),
 
   /**
    * The analysis (fresh) as a new Confluence page under `parentPageId`, as the user: the Jira token reads the issues,
    * the Confluence token writes the page. `project` / `version` fill the title; blank = the reports' own.
    */
-  exportToConfluence: (request: { uploadId: string; parentPageId: string; project: string; version: string; jiraVersions: string[] },
+  exportToConfluence: (request: { uploadId: string; parentPageId: string; project: string; version: string; jiraVersions: string[];
+    countries: string[] },
     auth: JiraAuth, confluence: ConfluenceAuth) =>
     requestAt<ConfluenceCreatedPage>(BASE, '/confluence/export', {
       method: 'POST',
@@ -592,9 +604,9 @@ export const veracodeApi = {
 
   /** SAST issues by id, into the SAST project; `jiraVersions` = the version chosen for SAST (0 or 1). */
   createSastIssues: (uploadId: string, issueIds: string[], fields: CreateFieldValues, jiraVersions: string[], auth: JiraAuth,
-    recreateClosed = false) =>
+    recreateClosed = false, countries: string[] = []) =>
     requestAt<{ results: CreateResult[] }>(BASE, '/jira/sast-issues',
-      json({ uploadId, issueIds, fields, jiraVersions, recreateClosed }, auth)),
+      json({ uploadId, issueIds, fields, jiraVersions, countries, recreateClosed }, auth)),
 
   /** What the token may create in the project, and the create-screen fields the page has to ask for. */
   testConnection: (auth: JiraAuth) =>
@@ -604,8 +616,8 @@ export const veracodeApi = {
    * A fresh analysis as .xlsx. Fetched rather than opened as a link so a failure shows the server's
    * message instead of a browser download of an error page.
    */
-  exportXlsx: async (uploadId: string, auth: JiraAuth, jiraVersions: string[]) => {
-    const query = withVersions(new URLSearchParams({ uploadId }), jiraVersions);
+  exportXlsx: async (uploadId: string, auth: JiraAuth, jiraVersions: string[], countries: string[] = []) => {
+    const query = withVersions(new URLSearchParams({ uploadId }), jiraVersions, countries);
     const response = await fetch(`${BASE}/analysis/export?${query}`, { headers: tokenHeader(auth) });
     if (!response.ok) {
       throw await parseError(response);

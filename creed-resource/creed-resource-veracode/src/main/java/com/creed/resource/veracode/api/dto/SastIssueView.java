@@ -58,7 +58,8 @@ public record SastIssueView(String id, String summary, String cwe, String cweNam
                 blocks(i, project, apps), recreatable);
     }
 
-    static List<ApplicationBlock> blocks(SastIssue i, String project, ApplicationProperties apps) {
+    /** Also the head of a created SAST issue's description ({@code JiraDescription.ofSast}): the page's column, as filed. */
+    public static List<ApplicationBlock> blocks(SastIssue i, String project, ApplicationProperties apps) {
         // "CWE-117" reads "CWE 117" here, as asked
         String cwe = i.cwe() == null ? Finding.UNKNOWN : i.cwe().replaceFirst("(?i)^CWE-", "CWE ");
         String cweLine = i.cweName() == null || i.cweName().isBlank() ? cwe : cwe + " " + i.cweName().trim();

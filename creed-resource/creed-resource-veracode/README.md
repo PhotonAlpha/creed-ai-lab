@@ -68,6 +68,23 @@ for a confirmation and sends `"recreateClosed": true` with that one id (`POST /j
 More than one id with the flag is 400; the server re-reads Jira, so an issue reopened meanwhile answers
 `ALREADY_EXISTS`. Without the flag - bulk create, auto-create - a closed issue still counts as filed.
 
+**Country narrows the SCA and SAST lookups.** `veracode.jira.country-field` (default `Country`; field id or name, any case) names
+a field of the SCA issue type's create screen; its options are `countries` in `POST /jira/connection` and in every
+analysis. `countries` (repeated query parameter, or a JSON array on `/analysis`, `/jira/issues`, `/analysis/confluence`,
+`/confluence/export`; also `/analysis/export`) adds `cf[<id>] in ("Singapore", ...)` to the lookup JQL - a custom field
+by its number, a system one by its quoted name; empty = no clause. An option the field lacks, or a choice without the
+field, is 400. Searched only: creating sets Country from the create-screen values (`fields`), never from the filter.
+The response echoes `selectedCountries`; the Excel and Confluence exports state them.
+The SAST lookup (and `/jira/sast-issues`, which takes `countries` too) applies the same choice through the SAST issue
+type's own field of that name; a Country it lacks, or no such field there, is reported as `sast.error` - SCA still
+answers.
+
+**A lookup-condition change costs one Jira call.** An analysis makes six: issue types, create fields and a search, for
+SCA and for SAST. `POST /analysis` with `"skipSast": true` (the page sends it when only the Jira versions changed - Countries filter SAST too)
+leaves SAST out (`sast: null`; ignored with `autoCreate`), and `veracode.jira.meta-cache-ttl` (60s, `0` = off; a Caffeine cache, at most 500 entries) reuses
+a create screen read for the same token, project and issue type - keyed by a SHA-256 of the authorization header,
+cleared for that token by `POST /jira/connection`. Issues are never cached: lookups and creates always read Jira.
+
 **Several reports in one upload**: `file` may repeat on `POST /analysis/upload`; the response has `uploadId` and
 `reports` (one per file), every finding its `application`. The page filters and groups by it.
 

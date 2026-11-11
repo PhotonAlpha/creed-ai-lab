@@ -12,9 +12,10 @@ import java.util.Map;
  *
  * @param fields       the SAST create screen's other fields
  * @param jiraVersions the version chosen for SAST: one when its issue type requires Affects Version/s, else optional
+ * @param countries    the page's Countries: the issues are re-checked with them before creating
  * @param recreateClosed as {@link CreateIssuesRequest#recreateClosed()}: the one issue named, its issues all finished
  */
 public record CreateSastIssuesRequest(@NotBlank String uploadId, @NotEmpty @Size(max = 500) List<String> issueIds,
                                       Map<String, Object> fields, List<String> jiraVersions,
-                                      boolean recreateClosed) {
+                                      List<String> countries, boolean recreateClosed) {
 }

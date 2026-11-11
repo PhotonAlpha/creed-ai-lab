@@ -100,12 +100,13 @@ public class ConfluenceExportService {
      * @param project      {@code {project}} in the title; blank = the reports' Veracode application(s)
      * @param version      {@code {version}}; blank = the reports' version(s)
      * @param jiraVersions the SCA Jira versions to look up in, as for the analysis
+     * @param countries    the SCA Country options to look up in, as for the analysis
      */
     public ConfluenceService.CreatedPage export(String uploadId, String parentPageId, String project, String version,
-                                                List<String> jiraVersions, JiraToken jiraToken,
+                                                List<String> jiraVersions, List<String> countries, JiraToken jiraToken,
                                                 ConfluenceToken confluenceToken) {
         confluenceToken.require();
-        AnalysisResponse result = analysis.analyze(uploadId, false, Map.of(), jiraVersions, jiraToken);
+        AnalysisResponse result = analysis.analyze(uploadId, false, Map.of(), jiraVersions, countries, jiraToken);
         List<UploadedFile> files = attachments(analysis.sourceFiles(uploadId));
         String title = title(result, project, version);
         String storage = render(result, files.stream().map(UploadedFile::filename).toList());
@@ -211,7 +212,9 @@ public class ConfluenceExportService {
                 r.repositories(), r.status()));
 
         String source = "Jira " + result.projectKey() + " (SCA" + (result.selectedVersions().isEmpty() ? ", any version"
-                : ", versions " + String.join(", ", result.selectedVersions())) + ")"
+                : ", versions " + String.join(", ", result.selectedVersions()))
+                + (result.selectedCountries().isEmpty() ? "" : ", countries " + String.join(", ", result.selectedCountries()))
+                + ")"
                 + (result.sast() == null ? "" : ", " + result.sast().projectKey() + " (SAST)")
                 + ". Generated " + DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z").withZone(props.exportZone())
                         .format(result.analyzedAt()) + ".";

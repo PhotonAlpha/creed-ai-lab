@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Checkbox, Form, Input, Modal, Segmented, Space, Typography } from 'antd';
+import { Alert, Button, Checkbox, Flex, Form, Input, Modal, Segmented, Space, Typography } from 'antd';
 import { ApiOutlined } from '@ant-design/icons';
 import { confluenceAuthComplete, veracodeApi } from '../../api/veracode';
 import type { ConfluenceAuth, ConfluenceConnection, JiraDeployment } from '../../api/veracode';
 import { useI18n } from '../../locales';
+import { TokenHelp, tokenPageUrl } from './tokenHelp';
 
 const { Paragraph } = Typography;
 
@@ -75,31 +76,39 @@ export function ConfluenceTokenModal({ open, auth, saved, remember, baseUrl, moc
       title={t('veracode.confluence.token.title')}
       onCancel={onCancel}
       destroyOnHidden
+      // test on the left of the actions: it checks what is typed, before saving it
       footer={(
-        <Space>
-          {saved && <Button danger onClick={onClear}>{t('veracode.token.clear')}</Button>}
-          <Button onClick={onCancel}>{t('veracode.token.cancel')}</Button>
-          <Button type="primary" disabled={!complete} onClick={() => onSave(trimmed(draft), keep, result)}>
-            {t('veracode.token.save')}
-          </Button>
-        </Space>
+        <Flex justify="space-between" wrap gap={8}>
+          <span>{saved && <Button danger onClick={onClear}>{t('veracode.token.clear')}</Button>}</span>
+          <Space>
+            <Button icon={<ApiOutlined />} loading={testing} disabled={!complete} onClick={() => void test()}>
+              {t('veracode.token.test')}
+            </Button>
+            <Button onClick={onCancel}>{t('veracode.token.cancel')}</Button>
+            <Button type="primary" disabled={!complete} onClick={() => onSave(trimmed(draft), keep, result)}>
+              {t('veracode.token.save')}
+            </Button>
+          </Space>
+        </Flex>
       )}
     >
-      <Segmented<JiraDeployment>
-        block
-        value={draft.deployment}
-        onChange={(deployment) => change({ deployment })}
-        options={[
-          { value: 'cloud', label: t('veracode.confluence.token.cloud') },
-          { value: 'dataCenter', label: t('veracode.confluence.token.dataCenter') },
-        ]}
-        style={{ marginBottom: 12 }}
-      />
-      <Paragraph type="secondary">
-        {t(cloud ? 'veracode.confluence.token.cloudHint' : 'veracode.confluence.token.hint', { url: baseUrl ?? '' })}
-      </Paragraph>
-      {mock && <Paragraph type="secondary">{t('veracode.confluence.token.mockHint')}</Paragraph>}
       <Form layout="vertical" component="div">
+        <Form.Item label={t('veracode.token.deployment')} style={{ marginBottom: 16 }}>
+          <Segmented<JiraDeployment>
+            block
+            value={draft.deployment}
+            onChange={(deployment) => change({ deployment })}
+            options={[
+              { value: 'cloud', label: t('veracode.confluence.token.cloud') },
+              { value: 'dataCenter', label: t('veracode.confluence.token.dataCenter') },
+            ]}
+          />
+        </Form.Item>
+        <TokenHelp
+          url={tokenPageUrl('confluence', draft.deployment, baseUrl)}
+          steps={t(cloud ? 'veracode.tokenHelp.cloud' : 'veracode.tokenHelp.confluenceDataCenter', { url: baseUrl ?? '' })}
+        />
+        {mock && <Paragraph type="secondary">{t('veracode.confluence.token.mockHint')}</Paragraph>}
         {cloud && (
           <Form.Item label={t('veracode.token.email')} style={{ marginBottom: 12 }}>
             <Input
@@ -111,24 +120,23 @@ export function ConfluenceTokenModal({ open, auth, saved, remember, baseUrl, moc
             />
           </Form.Item>
         )}
-        <Form.Item label={t(cloud ? 'veracode.token.apiToken' : 'veracode.token.pat')} style={{ marginBottom: 0 }}>
-          <Space.Compact style={{ width: '100%' }}>
-            <Input.Password
-              value={draft.token}
-              onChange={(e) => change({ token: e.target.value })}
-              onPressEnter={() => complete && void test()}
-              placeholder={t(cloud ? 'veracode.token.cloudPlaceholder' : 'veracode.confluence.token.placeholder')}
-              autoComplete="off"
-            />
-            <Button icon={<ApiOutlined />} loading={testing} disabled={!complete} onClick={() => void test()}>
-              {t('veracode.token.test')}
-            </Button>
-          </Space.Compact>
+        <Form.Item
+          label={t(cloud ? 'veracode.token.apiToken' : 'veracode.token.pat')}
+          extra={t('veracode.confluence.token.privacy')}
+          style={{ marginBottom: 8 }}
+        >
+          <Input.Password
+            value={draft.token}
+            onChange={(e) => change({ token: e.target.value })}
+            onPressEnter={() => complete && void test()}
+            placeholder={t(cloud ? 'veracode.token.cloudPlaceholder' : 'veracode.confluence.token.placeholder')}
+            autoComplete="off"
+          />
         </Form.Item>
+        <Checkbox checked={keep} onChange={(e) => setKeep(e.target.checked)}>
+          {t('veracode.token.remember')}
+        </Checkbox>
       </Form>
-      <Checkbox checked={keep} onChange={(e) => setKeep(e.target.checked)} style={{ marginTop: 12 }}>
-        {t('veracode.token.remember')}
-      </Checkbox>
       {result && (
         <Alert
           style={{ marginTop: 16 }}

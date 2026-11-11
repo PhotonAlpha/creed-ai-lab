@@ -166,8 +166,20 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   两种来源都读取 SCA 部分（对接 Jira）和 SAST 静态分析漏洞（按 CWE + 类别对接 Jira，见下）；报告的影响版本（根节点 `version`，上传前可手工改）**只在表格中展示**，不参与 Jira 查询和创建。
 - **Jira 版本**是可搜索的多选下拉（版本多时不撑大页面，列表来自测试连接 / 分析结果）：查找时按所选版本过滤（`affectedVersion in`，不选 = 全部版本），
   新建时关联所选版本，所以创建必须正好选一个；切换版本会自动重新分析。
+  查询条件（Jira 版本 / Country）改动时只查一次：下拉框打开期间的点选只改状态，关闭下拉框才提交（关闭状态下删标签或清空则立即提交），
+  集合没变不发请求；请求带 `skipSast`，只重查 SCA，页面保留原来的 SAST 结果；后端在 `meta-cache-ttl`（60s）内复用创建界面信息 —— 一次改动 = 1 次 Jira 搜索。
   默认值在后端配置 `veracode.jira.defaults`：`affects-versions`（测试连接后，若页面还没选 Jira 版本且该 Jira 有这些版本则选中，没有则页面不变）、
   `fields`（Component/s 等创建字段，按字段 id 或名称；Jira 没有的取值忽略）。
+- 「Jira 设置」卡片顶部是带底色和边框的「查询条件」面板，Jira 版本、Country 两个下拉框带可见标签（问号图标显示说明）；其余选项和按钮在面板下方。
+  「Jira 令牌」按钮（带状态标签）在该卡片标题「Jira 设置」紧右侧（mock 标签在标题栏最右）；未配置令牌、令牌被拒或项目 / 问题类型有问题时，
+  卡片顶部显示警告 / 错误提示，带「配置令牌」/「查看检查结果」按钮。
+  mock 模式的「示例报告」按钮在「报告来源」卡片标题栏右侧（它也是一种报告来源）。
+  「Confluence 令牌」按钮在「报告来源」标题紧右侧（只在 Confluence 标签页显示，令牌状态由 `useConfluenceToken` 在页面层持有）；
+  未配置或被拒时 Confluence 标签页顶部显示提示，带「配置令牌」/「查看检查结果」按钮。
+- **Country** 多选下拉（「查询条件」面板中，Jira 版本右侧）：选项取自问题类型创建界面上的 Country 字段（`veracode.jira.country-field`，
+  默认 `Country`，按 id 或名称；没有该字段时下拉框置灰并提示原因，测试连接前提示先测试）；查找时加 `cf[<id>] in (...)`，不选 = 不限；切换后自动重新分析；SAST 也按它过滤（用 SAST 问题类型自己的 Country 字段，SAST 那边没有该字段或没有所选值时只在 SAST 标签页报错）。只改 Jira 版本时才带 `skipSast`。
+  只用于查找：新建 Jira 的 Country 取自 Jira 字段栏（`defaults.fields`），不取这里的值。
+- 勾选「自动创建缺失的 Jira」时先弹框（危险按钮）提醒会一次性批量创建、需慎重，确认后才勾上，并显示橙色提示标签；分析前仍会再确认一次。
 - 按 CVE（无 CVE 时按公告编号）+ Component(s) + 所选 Jira 版本在 Jira 中查找是否存在：
   存在则列出 Jira 编号、状态、优先级、经办人；不存在则可按需创建（单行 / 所选 / 全部缺失，或分析时自动创建）。
 - 一行 = 一个 Veracode application + 一个 `cve_id` + 一个组件 `file_name`（同一 CVE 在两个 jar 中是两行、两个 Jira）。
@@ -190,6 +202,9 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   对话框先选 **Jira Cloud**（邮箱 + API 令牌，另带 `X-Jira-User`，后端以 Basic 认证）或 **Jira Data Center**（个人访问令牌，后端以 Bearer），两者都调用 REST API v2；`base-url` 为 `*.atlassian.net` 时默认选中 Cloud。
   「测试连接」逐项显示检查结果（令牌 → 能否创建该问题类型 → 是否有影响版本字段 → 项目是否有版本），失败项给出在 Jira 中的修复方法；
   问题类型可在对话框中选择（标出哪些类型有影响版本字段），随令牌保存，以 `X-Jira-Issue-Type` 发给后端，默认取 `veracode.jira.issue-type`。
+  Jira / Confluence 两个令牌对话框布局相同（`tokenHelp.tsx`）：部署方式 → 「还没有令牌？」说明 + 新标签页打开令牌页面的链接
+  （Cloud：id.atlassian.com 的 API 令牌页；Data Center：实例上的个人访问令牌页）→ 邮箱 / 令牌（下方是隐私说明）→ 记住；
+  「测试连接」在底部按钮栏，与取消 / 保存并列，「清除令牌」在左侧。
 - 页面布局默认与 Ant Design Pro 一致：ProLayout `layout="mix"`，顶部标题栏 + 左侧可折叠菜单（ProLayout 只给第一级菜单画图标，子菜单图标由 `App.tsx` 的 `withMenuIcon` 补上）；可在「整体风格设置」抽屉中修改（见 README 第 8a 节）。
 - 表格可按关联 Jira 的属性过滤（状态 / 优先级 / 经办人 / 影响版本，多选），搜索框对 CVE、标题、组件、Jira 号与 Jira 标题做模糊匹配。
 - SCA 统计：报告表下方按报告列出 `<software_composition_analysis>` 的统计（第三方组件 / 违反策略及违规组件数 / 黑名单组件）与计数
@@ -208,11 +223,15 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - application 映射（`veracode.applications`：`app_name` → 名称 + 链接）：页面表格、Jira 描述、Confluence 的 Repository 显示映射名称并可点击跳转，
   映射名称也是 Jira label；没有映射时用 `app_name`。
 - Confluence 附件列表：按上传时间倒序，默认最多 50 个，默认只列文件名含 `dd_MMM_yyyy` 日期且为 `.zip` 的附件（可取消）；
-  「报告日期」下拉框按文件名中的日期再筛选（最新在前），列出后默认选最新日期，可选「所有日期」。
+  「报告日期」下拉框按文件名中的日期再筛选（最新在前），列出后默认选最新日期，可选「所有日期」；
+  关键字输入框在前端过滤已列出的结果（不调用后端，文件名 / 类型 / 上传者包含全部关键字）。
+- 页面顶部是三张独立的 antd `Card`（标题带图标，标题栏用 Card 的语义化 `styles` 填充 `colorFillAlter` 背景；antd 5 只支持对象写法）：「报告来源」（上传 / Confluence 附件标签页）、
+  「Jira 设置」（Jira 版本、版本覆盖、自动创建、令牌等工具栏和 Jira 字段）、「报告概要」（有分析结果时：报告表与 SCA / SAST 统计，可点右上角收起 / 展开，状态存 sessionStorage）。
+  三张卡片鼠标悬停时有阴影（`hoverable`，光标保持默认，因为卡片本身不可点击）。
 - 上传 / 从 Confluence 分析时全屏 loading（`Spin fullscreen`，上传阶段显示百分比）。
 - 新建 Jira 描述的 Source：上传的文件加为 Jira 附件；从 Confluence 下载的给出附件地址和所在页面的链接（`on page [标题|页面地址]`）。
 - SAST 标签页「Jira 标题」列按 application 显示三行（`<名称>: <SAST project-name> - <类别>` / `CWE 117 <名称>` / `CWE 117 (Flaw IDs: …)`），
-  合并了原「未关闭漏洞」列；只影响显示，Jira 标题本身不变。
+  合并了原「未关闭漏洞」列；Jira 标题本身不变（仍按标题查找），新建的 SAST Jira 在描述开头写同样的三行（按 application）。
 - 支持导出 Excel（Severity 按等级填充背景色；*SCA summary* 工作表与页面的 SCA 统计一致；*SAST flaws* / *SAST summary* 两个工作表对应 SAST 部分）。
 - 统计卡片（漏洞总数 / 已在 Jira / 缺失 / 已创建）按状态用不同背景色（主题 token）；表格分页受控，默认每页 50 条（20 / 50 / 100 / 200）。
 - 刷新页面不丢数据：分析结果、所选 Jira 版本、字段取值、过滤条件、每页条数存 sessionStorage（随标签页关闭清除）；

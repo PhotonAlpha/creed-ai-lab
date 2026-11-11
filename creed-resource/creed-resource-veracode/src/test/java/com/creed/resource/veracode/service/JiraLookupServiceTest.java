@@ -10,6 +10,7 @@ import com.creed.resource.veracode.client.jira.JiraPage;
 import com.creed.resource.veracode.client.jira.JiraSearchResult;
 import com.creed.resource.veracode.client.jira.JiraVersion;
 import com.creed.resource.veracode.config.ApplicationProperties;
+import com.creed.resource.veracode.config.JiraMetaCacheConfiguration;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.SastFlaw;
@@ -69,7 +70,7 @@ class JiraLookupServiceTest {
         Finding text4shell = finding("CVE-2022-42889", "commons-text-1.9.jar");
 
         Map<String, List<JiraLookupService.IssueRef>> found = service(jira, 2)
-                .find(List.of(log4shell, spring4shell, text4shell), List.of("2.3.0"), TOKEN);
+                .find(List.of(log4shell, spring4shell, text4shell), List.of("2.3.0"), JiraLookupService.CountryFilter.ANY, TOKEN);
 
         assertThat(found.get(log4shell.id())).extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-1");
         assertThat(found.get(spring4shell.id())).extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-3");
@@ -92,7 +93,7 @@ class JiraLookupServiceTest {
         Finding log4shell = finding("CVE-2021-44228", "log4j-core-2.14.1.jar");
 
         Map<String, List<JiraLookupService.IssueRef>> found = service(jira, 50)
-                .find(List.of(log4shell), List.of("2.3.0"), new JiraToken("api-token", "me@example.com"));
+                .find(List.of(log4shell), List.of("2.3.0"), JiraLookupService.CountryFilter.ANY, new JiraToken("api-token", "me@example.com"));
 
         assertThat(found.get(log4shell.id())).extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-1");
         assertThat(jira.cloudPages).isEqualTo(2);
@@ -104,9 +105,9 @@ class JiraLookupServiceTest {
         FakeJira jira = new FakeJira();
         jira.found = List.of(issue("CREED-2", "CREED", "[Veracode] CVE-2021-44228 log4j"));
         Finding log4shell = finding("CVE-2021-44228", "log4j-core-2.14.1.jar");
-        JiraLookupService service = new JiraLookupService(jira, properties("[Veracode] {cve}", 50), APPS);
+        JiraLookupService service = service(jira, properties("[Veracode] {cve}", 50));
 
-        assertThat(service.find(List.of(log4shell), List.of("2.3.0"), TOKEN).get(log4shell.id()))
+        assertThat(service.find(List.of(log4shell), List.of("2.3.0"), JiraLookupService.CountryFilter.ANY, TOKEN).get(log4shell.id()))
                 .extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-2");
     }
 
@@ -127,6 +128,29 @@ class JiraLookupServiceTest {
         assertThat(service.applicationLabel(log4shell)).isEqualTo("Pay-Gateway");
         // no mapping: the app_name itself; Jira takes no spaces in a label
         assertThat(service.labels(unknown)).containsExactly("veracode", "creed", "two_words");
+    }
+
+    /** A lookup-condition change re-analyses: the create screen is reused per token, until a connection test. */
+    @Test
+    void aCreateScreenIsReusedPerTokenUntilTheConnectionIsTested() {
+        FakeJira jira = new FakeJira();
+        JiraProperties base = properties("{project} - {cve}|{cwe} - {file}", 50);
+        JiraLookupService service = service(jira, new JiraProperties(base.baseUrl(), base.projectKey(),
+                base.issueType(), base.projectName(), base.summaryTemplate(), base.labels(), base.browseUrl(),
+                base.pageSize(), base.searchBatchSize(), base.maxConnections(), base.connectTimeout(), base.readTimeout(),
+                base.defaults(), base.sast(), base.closedStatuses(), base.countryField(), Duration.ofMinutes(1)));
+
+        service.createMeta(TOKEN);
+        service.createMeta(TOKEN);
+        assertThat(jira.typeReads).isEqualTo(1);
+        // another user's token reads its own
+        service.createMeta(new JiraToken("other-token", null));
+        assertThat(jira.typeReads).isEqualTo(2);
+        // "test connection" reads afresh, and so does the next analysis with that token
+        service.connection(TOKEN);
+        int afterTest = jira.typeReads;
+        service.createMeta(TOKEN);
+        assertThat(jira.typeReads).isEqualTo(afterTest + 1);
     }
 
     @Test
@@ -201,9 +225,9 @@ class JiraLookupServiceTest {
                 new JiraFieldMeta("customfield_5", "Team", true, false, new JiraFieldMeta.Schema("option", null, null, "select"),
                         options("Red"), null));
         // by id or by name, any case; values Jira does not offer are dropped
-        JiraLookupService service = new JiraLookupService(jira, properties("{cve}", 3, new JiraProperties.CreateDefaults(
+        JiraLookupService service = service(jira, properties("{cve}", 3, new JiraProperties.CreateDefaults(
                 List.of("2.4.0", "9.9.9", "2.3.0"), Map.of("COMPONENTS", List.of("security", "Nope"),
-                "region", List.of("APAC"), "customfield_5", List.of("Blue")))), APPS);
+                "region", List.of("APAC"), "customfield_5", List.of("Blue")))));
 
         JiraLookupService.Connection connection = service.connection(TOKEN);
         assertThat(connection.defaultVersions()).containsExactly("2.4.0", "2.3.0");
@@ -329,6 +353,9 @@ class JiraLookupServiceTest {
 
         assertThat(jql).isEqualTo("project = \"SEC\" AND (summary ~ \"\\\"CWE-89\\\"\" OR summary ~ \"odd thing\")"
                 + " ORDER BY key");
+        // the page's Countries narrow it as they do SCA's (asked for, 2026-11-12)
+        assertThat(Jql.sastLookup("SEC", "cf[10300]", List.of("Singapore"), List.of(sastIssue("CWE-89", "SQL Injection"))))
+                .isEqualTo("project = \"SEC\" AND cf[10300] in (\"Singapore\") AND (summary ~ \"\\\"CWE-89\\\"\") ORDER BY key");
     }
 
     @Test
@@ -348,7 +375,11 @@ class JiraLookupServiceTest {
             new ApplicationProperties.Application("creed-pay-gateway-api", "Pay-Gateway", "https://git/pay")));
 
     private static JiraLookupService service(JiraClient jira, int searchBatchSize) {
-        return new JiraLookupService(jira, properties("{project} - {cve}|{cwe} - {file}", searchBatchSize), APPS);
+        return service(jira, properties("{project} - {cve}|{cwe} - {file}", searchBatchSize));
+    }
+
+    private static JiraLookupService service(JiraClient jira, JiraProperties props) {
+        return new JiraLookupService(jira, props, APPS, JiraMetaCacheConfiguration.metaCache(props.metaCacheTtl()));
     }
 
     private static JiraProperties properties(String template, int searchBatchSize) {
@@ -361,7 +392,7 @@ class JiraLookupServiceTest {
                 Duration.ofSeconds(1), Duration.ofSeconds(1), defaults,
                 new JiraProperties.Sast(null, null, "IDB VERACODE STSA", "{project} - {cwe} - {category}",
                         List.of("IDB VERACODE STSA", "veracode"), new JiraProperties.CreateDefaults(null, null)),
-                List.of("Closed", "Done"));
+                List.of("Closed", "Done"), "Country", Duration.ZERO);
     }
 
     /** Pages of one item each (pageSize 1), so paging is walked as well. */
@@ -377,6 +408,7 @@ class JiraLookupServiceTest {
         int pages;
         int cloudPages;
         String lastAuthorization;
+        int typeReads;
 
         @Override
         public JiraCreatedIssue createIssue(String authorization, JiraCreateIssueRequest request) {
@@ -416,6 +448,7 @@ class JiraLookupServiceTest {
 
         @Override
         public JiraPage<JiraIssueType> createIssueTypes(String authorization, String project, int startAt, int maxResults) {
+            typeReads++;
             lastAuthorization = authorization;
             return page(types, startAt);
         }

@@ -58,12 +58,18 @@ public class MockJiraController {
     private static final Pattern PROJECT = Pattern.compile("project\\s*=\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
     private static final Pattern VERSIONS = Pattern.compile("affectedVersion\\s+in\\s*\\(([^)]*)\\)", Pattern.CASE_INSENSITIVE);
     private static final Pattern A_LITERAL = Pattern.compile(LITERAL);
+    /** {@code Jql.fieldRef} of {@link #COUNTRY_FIELD}. */
+    private static final Pattern COUNTRIES = Pattern.compile("cf\\[10300]\\s+in\\s*\\(([^)]*)\\)", Pattern.CASE_INSENSITIVE);
     private static final Pattern SUMMARY = Pattern.compile("summary\\s*~\\s*" + LITERAL, Pattern.CASE_INSENSITIVE);
     static final String REJECTED_TOKEN = "invalid";
     static final List<String> COMPONENTS = List.of("Security", "Platform", "Payments");
     static final String ENVIRONMENT_FIELD = "customfield_10100";
     /** option id -> value */
     static final Map<String, String> ENVIRONMENTS = new LinkedHashMap<>();
+    /** Country (asked for, 2026-11-11): optional on the screen, searchable as {@code cf[10300] in (...)}. */
+    static final String COUNTRY_FIELD = "customfield_10300";
+    /** option id -> value */
+    static final Map<String, String> COUNTRY_OPTIONS = new LinkedHashMap<>();
     /**
      * Task's create screen has no Affects Version/s, as in a Jira Cloud Scrum project: the connection test must say
      * so (and offer the other types) instead of failing as "cannot create".
@@ -76,6 +82,10 @@ public class MockJiraController {
     static {
         ENVIRONMENTS.put("10200", "Production");
         ENVIRONMENTS.put("10201", "Staging");
+        COUNTRY_OPTIONS.put("10400", "Singapore");
+        COUNTRY_OPTIONS.put("10401", "Malaysia");
+        COUNTRY_OPTIONS.put("10402", "China");
+        COUNTRY_OPTIONS.put("10403", "Hong Kong");
         ISSUE_TYPES.put("1", "Bug");
         ISSUE_TYPES.put("3", "Task");
         ISSUE_TYPES.put("10001", "Story");
@@ -132,6 +142,9 @@ public class MockJiraController {
                 field(ENVIRONMENT_FIELD, "Environment Found", true,
                         schema("option", null, null, "com.atlassian.jira.plugin.system.customfieldtypes:select"),
                         environmentValues()),
+                field(COUNTRY_FIELD, "Country", false,
+                        schema("option", null, null, "com.atlassian.jira.plugin.system.customfieldtypes:select"),
+                        options(COUNTRY_OPTIONS)),
                 field("labels", "Labels", false, schema("array", "string", "labels", null), null),
                 field("priority", "Priority", false, schema("priority", null, "priority", null), null)));
         if (NO_VERSIONS_TYPE.equals(issueTypeId)) {
@@ -215,6 +228,20 @@ public class MockJiraController {
                 versions.add(version);
             }
         }
+        // no clause = any country; an option the field lacks is Jira's 400
+        List<String> countries = new ArrayList<>();
+        Matcher c = COUNTRIES.matcher(jql);
+        if (c.find()) {
+            Matcher literal = A_LITERAL.matcher(c.group(1));
+            while (literal.find()) {
+                String country = unescape(literal.group(1));
+                if (!COUNTRY_OPTIONS.containsValue(country)) {
+                    return error(HttpStatus.BAD_REQUEST,
+                            "The option '" + country + "' for field 'Country' does not exist.", null);
+                }
+                countries.add(country);
+            }
+        }
         // phrase -> contained as is; plain words -> all present, any order
         List<String> phrases = new ArrayList<>();
         List<List<String>> words = new ArrayList<>();
@@ -229,6 +256,7 @@ public class MockJiraController {
         }
         return store.all().stream()
                 .filter(i -> versions.isEmpty() || i.versions().stream().anyMatch(iv -> versions.stream().anyMatch(iv::equalsIgnoreCase)))
+                .filter(i -> countries.isEmpty() || countries.contains(i.country()))
                 .filter(i -> phrases.isEmpty() && words.isEmpty()
                         || phrases.stream().anyMatch(p -> (" " + Finding.normalise(i.summary()) + " ").contains(" " + p + " "))
                         || words.stream().anyMatch(w -> List.of(Finding.normalise(i.summary()).split(" ")).containsAll(w)))
@@ -336,8 +364,9 @@ public class MockJiraController {
         }
         List<String> labels = new ArrayList<>();
         fields.path("labels").forEach(l -> labels.add(l.asString()));
+        String country = COUNTRY_OPTIONS.get(fields.path(COUNTRY_FIELD).path("id").asString(""));
         MockJiraStore.Issue issue = store.create(summary, fields.path("description").asString(null), versions,
-                components, environment, labels, reporter, issueType);
+                components, environment, labels, reporter, issueType, country);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "id", String.valueOf(issue.id()), "key", issue.key(), "self", self(issue)));
     }
@@ -355,6 +384,7 @@ public class MockJiraController {
                 + " &middot; Affects: " + HtmlUtils.htmlEscape(String.join(", ", issue.versions()))
                 + " &middot; Components: " + HtmlUtils.htmlEscape(String.join(", ", issue.components()))
                 + " &middot; Environment Found: " + HtmlUtils.htmlEscape(String.valueOf(issue.environment()))
+                + " &middot; Country: " + HtmlUtils.htmlEscape(String.valueOf(issue.country()))
                 + " &middot; Labels: " + HtmlUtils.htmlEscape(String.join(", ", issue.labels()))
                 + (issue.reporter() == null ? "" : " &middot; Reporter: " + HtmlUtils.htmlEscape(issue.reporter()))
                 + "</p><pre>"
@@ -371,6 +401,7 @@ public class MockJiraController {
         fields.put("labels", issue.labels());
         fields.put("components", issue.components().stream().map(c -> Map.of("name", c)).toList());
         fields.put(ENVIRONMENT_FIELD, issue.environment() == null ? null : Map.of("value", issue.environment()));
+        fields.put(COUNTRY_FIELD, issue.country() == null ? null : Map.of("value", issue.country()));
         fields.put("priority", issue.priority() == null ? null : Map.of("name", issue.priority()));
         fields.put("assignee", issue.assignee() == null ? null
                 : Map.of("name", issue.assignee().toLowerCase().replace(' ', '.'), "displayName", issue.assignee()));
@@ -383,6 +414,12 @@ public class MockJiraController {
         for (String name : COMPONENTS) {
             values.add(Map.of("id", String.valueOf(++id), "name", name));
         }
+        return values;
+    }
+
+    private static List<Map<String, Object>> options(Map<String, String> byId) {
+        List<Map<String, Object>> values = new ArrayList<>();
+        byId.forEach((id, value) -> values.add(Map.of("id", id, "value", value)));
         return values;
     }
 

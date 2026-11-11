@@ -111,6 +111,40 @@ class VeracodeApiTest {
         return JsonPath.read(body, "$.uploadId");
     }
 
+    /** A lookup-condition change asks for the SCA half only: SAST is not read again. */
+    @Test
+    void skipSastLeavesTheSastHalfOut() throws Exception {
+        String uploadId = upload();
+        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"jiraVersions\":[\"2.3.0\"],\"skipSast\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sast").doesNotExist())
+                .andExpect(jsonPath("$.counts.total").value(10));
+        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"jiraVersions\":[\"2.3.0\"]}"))
+                .andExpect(jsonPath("$.sast.projectKey").exists());
+    }
+
+    /** CREED-103 (jackson-databind) is filed for Malaysia, the other seeds for Singapore. */
+    @Test
+    void theChosenCountriesNarrowTheLookup() throws Exception {
+        String jackson = "$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2020-36518@jackson-databind-2.12.6.jar')]";
+        String log4shell = "$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')]";
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("jiraVersions", "2.3.0")
+                        .param("countries", "singapore"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.countries", contains("Singapore", "Malaysia", "China", "Hong Kong")))
+                .andExpect(jsonPath("$.selectedCountries", contains("Singapore")))
+                .andExpect(jsonPath(jackson + ".status").value(contains("MISSING")))
+                .andExpect(jsonPath(log4shell + ".status").value(contains("EXISTS")));
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("jiraVersions", "2.3.0")
+                        .param("countries", "Singapore", "Malaysia"))
+                .andExpect(jsonPath(jackson + ".status").value(contains("EXISTS")));
+        // an option the field does not offer
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("countries", "Atlantis"))
+                .andExpect(status().isBadRequest());
+    }
+
     @Test
     void anUploadedReportIsMatchedAgainstJira() throws Exception {
         mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("jiraVersions", "2.3.0"))
@@ -770,6 +804,10 @@ class VeracodeApiTest {
         assertThat(created.versions()).containsExactly("2.3.0");
         assertThat(created.description()).contains("ScriptRunner.java", "CWE-78",
                 "Source: uploaded report detailedreport.xml (attached to this issue)");
+        // headed by the page's "Jira summary" column: name: project - category / CWE line / flaw ids
+        assertThat(created.description()).startsWith("creed-platform-2026-10-06-Creed: creed-sast - "
+                + "Improper Neutralization of Special Elements used in an OS Command\nCWE 78");
+        assertThat(created.description()).contains("\nCWE 78 (Flaw IDs: 2)\n\nh3. Veracode SAST finding");
         assertThat(jira.attachments(created.key())).containsExactly("detailedreport.xml");
 
         // found again by its summary alone - no version clause

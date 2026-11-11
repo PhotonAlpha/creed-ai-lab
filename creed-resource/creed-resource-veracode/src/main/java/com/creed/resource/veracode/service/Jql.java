@@ -43,11 +43,18 @@ final class Jql {
     private Jql() {
     }
 
+    static String lookup(String projectKey, List<String> versions, Collection<Finding> findings) {
+        return lookup(projectKey, versions, null, List.of(), findings);
+    }
+
     /**
-     * @param versions the page's Jira versions ({@code affectedVersion in (...)}); empty = no version clause
+     * @param versions     the page's Jira versions ({@code affectedVersion in (...)}); empty = no version clause
+     * @param countryField the Country field as JQL names it ({@link #fieldRef}); {@code countries} empty = no clause
+     * @param countries    the page's Country options, Jira's spelling ({@code cf[10300] in ("Singapore", ...)})
      * @return {@code null} when none of the findings has anything to search by
      */
-    static String lookup(String projectKey, List<String> versions, Collection<Finding> findings) {
+    static String lookup(String projectKey, List<String> versions, String countryField, List<String> countries,
+                         Collection<Finding> findings) {
         List<String> terms = findings.stream().map(Jql::summaryTerm).filter(t -> !t.isEmpty()).distinct()
                 .map(t -> "summary ~ " + quote(t)).toList();
         if (terms.isEmpty()) {
@@ -56,6 +63,8 @@ final class Jql {
         return "project = " + quote(projectKey)
                 + (versions.isEmpty() ? "" : " AND affectedVersion in ("
                         + String.join(", ", versions.stream().map(Jql::quote).toList()) + ")")
+                + (countries.isEmpty() || countryField == null ? "" : " AND " + countryField + " in ("
+                        + String.join(", ", countries.stream().map(Jql::quote).toList()) + ")")
                 + " AND (" + String.join(" OR ", terms) + ")"
                 + " ORDER BY key";
     }
@@ -66,6 +75,12 @@ final class Jql {
      * without a CWE is searched by its category's words.
      */
     static String sastLookup(String projectKey, Collection<SastIssue> issues) {
+        return sastLookup(projectKey, null, List.of(), issues);
+    }
+
+    /** As {@link #sastLookup(String, Collection)}, narrowed to the page's Countries like the SCA lookup. */
+    static String sastLookup(String projectKey, String countryField, List<String> countries,
+                             Collection<SastIssue> issues) {
         List<String> terms = issues.stream()
                 .map(i -> i.cwe() != null && ID.matcher(i.cwe().trim()).matches()
                         ? "\"" + i.cwe().trim().toUpperCase(Locale.ROOT) + "\""
@@ -75,7 +90,10 @@ final class Jql {
         if (terms.isEmpty()) {
             return null;
         }
-        return "project = " + quote(projectKey) + " AND (" + String.join(" OR ", terms) + ") ORDER BY key";
+        return "project = " + quote(projectKey)
+                + (countries.isEmpty() || countryField == null ? "" : " AND " + countryField + " in ("
+                        + String.join(", ", countries.stream().map(Jql::quote).toList()) + ")")
+                + " AND (" + String.join(" OR ", terms) + ") ORDER BY key";
     }
 
     /** A CVE or CWE id, sent as written: inside the phrase quotes its hyphens are text. */
@@ -101,6 +119,15 @@ final class Jql {
     /** The text as Lucene will tokenise it, with nothing in it that means something to the query parser. */
     static String searchPhrase(String text) {
         return text == null ? "" : text.replaceAll(LUCENE_RESERVED, " ").replaceAll("\\s+", " ").trim();
+    }
+
+    /**
+     * A field as JQL names it: a custom field by its number ({@code customfield_10300} -> {@code cf[10300]}) - its
+     * name may be shared by another field or be translated - else the quoted name.
+     */
+    static String fieldRef(String fieldId, String name) {
+        java.util.regex.Matcher custom = java.util.regex.Pattern.compile("customfield_(\\d+)").matcher(fieldId);
+        return custom.matches() ? "cf[" + custom.group(1) + "]" : quote(name != null ? name : fieldId);
     }
 
     /** A JQL string literal. */

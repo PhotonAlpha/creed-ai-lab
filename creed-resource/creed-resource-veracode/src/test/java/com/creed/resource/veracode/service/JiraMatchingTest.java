@@ -107,6 +107,20 @@ class JiraMatchingTest {
         assertThat(Jql.quote("a\\b\"c")).isEqualTo("\"a\\\\b\\\"c\"");
     }
 
+    @Test
+    void jqlNarrowsToTheChosenCountriesByTheCustomFieldsNumber() {
+        Finding log4shell = finding("CVE-2021-44228", "CWE-502", "a.jar");
+
+        assertThat(Jql.lookup("CREED", List.of("2.3.0"), Jql.fieldRef("customfield_10300", "Country"),
+                List.of("Singapore", "Hong Kong"), List.of(log4shell))).isEqualTo(
+                "project = \"CREED\" AND affectedVersion in (\"2.3.0\") AND cf[10300] in (\"Singapore\", \"Hong Kong\")"
+                        + " AND (summary ~ \"\\\"CVE-2021-44228\\\"\") ORDER BY key");
+        // none chosen: no clause; a system field by its quoted name
+        assertThat(Jql.lookup("CREED", List.of(), "cf[10300]", List.of(), List.of(log4shell)))
+                .isEqualTo("project = \"CREED\" AND (summary ~ \"\\\"CVE-2021-44228\\\"\") ORDER BY key");
+        assertThat(Jql.fieldRef("country", "Country")).isEqualTo("\"Country\"");
+    }
+
     private static JiraIssue issue(String summary, String version) {
         return new JiraIssue("1", "CREED-1", new JiraIssue.Fields(summary, null, List.of(JiraVersion.named(version)),
                 List.of(), null, null, null));

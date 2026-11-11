@@ -88,6 +88,7 @@ public class VeracodeController {
      * @param fields          create-screen values for {@code autoCreate}, as JSON ({@code {"components":["Security"]}})
      * @param jiraVersions    the Jira versions to look up in, repeated ({@code ?jiraVersions=2.3.0&jiraVersions=2.4.0});
      *                        none = any. {@code autoCreate} files under the one chosen
+     * @param countries       the Country options to look up in, repeated; none = any
      */
     @PostMapping(value = "/analysis/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     AnalysisResponse analyzeUpload(@RequestPart("file") List<MultipartFile> files,
@@ -95,6 +96,7 @@ public class VeracodeController {
                                    @RequestParam(defaultValue = "false") boolean autoCreate,
                                    @RequestParam(required = false) String fields,
                                    @RequestParam(required = false) List<String> jiraVersions,
+                                   @RequestParam(required = false) List<String> countries,
                                    JiraToken token)
             throws IOException {
         List<VeracodeAnalysisService.UploadedFile> uploaded = new ArrayList<>();
@@ -103,7 +105,8 @@ public class VeracodeController {
                     ? "upload-" + (uploaded.size() + 1) + ".xml" : file.getOriginalFilename();
             uploaded.add(new VeracodeAnalysisService.UploadedFile(name, file.getBytes()));
         }
-        return analysis.analyzeUpload(uploaded, affectedVersion, autoCreate, fields(fields), jiraVersions, token);
+        return analysis.analyzeUpload(uploaded, affectedVersion, autoCreate, fields(fields), jiraVersions, countries,
+                token);
     }
 
     /** The bundled sample report, as if uploaded - only with the mocks, where it has a Jira to match. */
@@ -112,6 +115,7 @@ public class VeracodeController {
                                    @RequestParam(defaultValue = "false") boolean autoCreate,
                                    @RequestParam(required = false) String fields,
                                    @RequestParam(required = false) List<String> jiraVersions,
+                                   @RequestParam(required = false) List<String> countries,
                                    JiraToken token)
             throws IOException {
         if (!mock) {
@@ -119,7 +123,8 @@ public class VeracodeController {
         }
         byte[] xml = new ClassPathResource(SAMPLE).getContentAsByteArray();
         return analysis.analyzeUpload(List.of(new VeracodeAnalysisService.UploadedFile(
-                "veracode-detailedreport-sample.xml", xml)), affectedVersion, autoCreate, fields(fields), jiraVersions, token);
+                "veracode-detailedreport-sample.xml", xml)), affectedVersion, autoCreate, fields(fields), jiraVersions,
+                countries, token);
     }
 
     /**
@@ -134,7 +139,7 @@ public class VeracodeController {
         List<VeracodeAnalysisService.UploadedFile> files =
                 confluence.download(request.pageId(), request.attachmentIds(), confluenceToken);
         return analysis.analyzeUpload(files, request.affectedVersion(), request.autoCreate(), request.fields(),
-                request.jiraVersions(), token);
+                request.jiraVersions(), request.countries(), token);
     }
 
     /** "Test connection" for the Confluence token: whom it signs in as. A rejected token is an answer, not an error. */
@@ -153,21 +158,22 @@ public class VeracodeController {
     @PostMapping("/analysis")
     AnalysisResponse analyze(@RequestBody AnalysisRequest request,
                              JiraToken token) {
-        return analysis.analyze(request.uploadId(), request.autoCreate(), request.fields(), request.jiraVersions(), token);
+        return analysis.analyze(request.uploadId(), request.autoCreate(), request.fields(), request.jiraVersions(),
+                request.countries(), request.skipSast(), token);
     }
 
     @PostMapping("/jira/issues")
     CreateIssuesResponse createIssues(@Valid @RequestBody CreateIssuesRequest request,
                                       JiraToken token) {
         return analysis.create(request.uploadId(), request.findingIds(), request.fields(), request.jiraVersions(),
-                request.recreateClosed(), token);
+                request.countries(), request.recreateClosed(), token);
     }
 
     /** SAST issues (one per CWE + category) in the SAST project, re-checked against Jira first. */
     @PostMapping("/jira/sast-issues")
     CreateIssuesResponse createSastIssues(@Valid @RequestBody CreateSastIssuesRequest request, JiraToken token) {
         return analysis.createSast(request.uploadId(), request.issueIds(), request.fields(), request.jiraVersions(),
-                request.recreateClosed(), token);
+                request.countries(), request.recreateClosed(), token);
     }
 
     /**
@@ -187,8 +193,9 @@ public class VeracodeController {
     @GetMapping("/analysis/export")
     ResponseEntity<byte[]> export(@RequestParam String uploadId,
                                   @RequestParam(required = false) List<String> jiraVersions,
+                                  @RequestParam(required = false) List<String> countries,
                                   JiraToken token) {
-        AnalysisResponse result = analysis.analyze(uploadId, false, Map.of(), jiraVersions, token);
+        AnalysisResponse result = analysis.analyze(uploadId, false, Map.of(), jiraVersions, countries, token);
         List<String> apps = result.reports().stream().map(r -> r.appName()).filter(java.util.Objects::nonNull)
                 .distinct().toList();
         String base = apps.size() != 1 ? (apps.isEmpty() ? "report" : apps.size() + "-applications")
@@ -209,7 +216,7 @@ public class VeracodeController {
                                                      JiraToken token, ConfluenceToken confluenceToken) {
         token.require();
         return confluenceExport.export(request.uploadId(), request.parentPageId(), request.project(),
-                request.version(), request.jiraVersions(), token, confluenceToken);
+                request.version(), request.jiraVersions(), request.countries(), token, confluenceToken);
     }
 
     /** The multipart upload carries the create-screen values as one JSON form value. */

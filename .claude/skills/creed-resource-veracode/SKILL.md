@@ -36,6 +36,18 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   server-side under `createLock`. Never thread it into bulk create or `autoCreate` - those must keep treating a closed
   issue as filed, or every re-analysis duplicates the project's history.
 
+- **Only create screens are cached, never issues** (2026-11-12): `meta-cache-ttl` keeps `CreateMeta` in a Caffeine cache
+  (bean in `config/JiraMetaCacheConfiguration`, injected; `expireAfterWrite`, max 500; concurrent misses load once; TTL 0 = every
+  entry expires on write) per SHA-256 of the
+  authorization header + project + issue type; `connection()` drops that token's entries. Lookups and creates must
+  keep reading Jira every time - the duplicate-free create path depends on it. `skipSast` must stay ignored with
+  `autoCreate` (auto-create files SAST too).
+
+- **Country is a lookup filter, not a create value** (2026-11-11): `countries` only adds `cf[N] in (...)` to the SCA JQL
+  (`Jql.fieldRef`: a custom field by number - names can repeat or be translated). Creating takes Country from `fields`
+  like any create-screen field. `covers()` does not re-check it (the search reads no Country), so the mock's `matching`
+  must honour the clause - it parses `cf[10300] in (...)` literally; another field id needs the mock pattern changed.
+
 - **Confluence downloads: ids in, URLs never.** `POST /analysis/confluence` takes attachment ids; the server re-lists
   the page and downloads its own `_links.download` under `veracode.confluence.base-url`. Redirects are followed in
   `ConfluenceService.fetch` (the client has redirects off, like Jira's) and the token goes only to URLs **under the

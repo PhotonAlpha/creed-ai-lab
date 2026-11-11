@@ -46,6 +46,14 @@ veracode:
     # A finding (SCA or SAST) whose issues are ALL in one of these statuses (any case) may be filed again - one at a
     # time, after the page's confirmation (recreateClosed). Bulk creates still treat a closed issue as filed.
     closed-statuses: Closed, Done
+    # The SCA issue type's Country field, by id (customfield_10300) or name, any case: its options are the page's Country
+    # select (several = any of them), searched as cf[<id>] in (...). Not on the create screen = no select. Creating
+    # does not take the value from the select - the create screen's own field (defaults.fields) does.
+    country-field: ${CREED_JIRA_COUNTRY_FIELD:Country}
+    # An analysis reuses a create screen (issue types + fields) it read within this long, per token / project / issue type:
+    # changing the Jira versions or Country then costs one Jira search instead of three calls. Issues are never cached,
+    # and "test connection" always reads afresh. 0 = off.
+    meta-cache-ttl: 60s
     # No Jira account here: every call (lookup, createmeta, create) uses the token the user typed on the page,
     # sent as X-Jira-Token. The page asks Cloud or Data Center: Cloud adds the Atlassian e-mail (X-Jira-User) and
     # goes to Jira as Basic base64(email:token), Data Center's personal access token as Bearer. Both REST API v2.
@@ -66,7 +74,8 @@ veracode:
     #   option names (or ids), or the value itself for a text / number / user field. Overrides Jira's own default.
     defaults:
       affects-versions: ${CREED_JIRA_DEFAULT_VERSIONS:}
-      fields: {}
+      fields:
+        country: Singapore
       #  components: [Security]
       #  Environment Found: [Production]
     max-connections: 20
@@ -88,7 +97,8 @@ veracode:
       # like jira.defaults, for the SAST issue type's create screen (affects-versions = the SAST version select)
       defaults:
         affects-versions: []
-        fields: {}
+        fields:
+          country: Singapore
 
   # Veracode applications (app_name, any case) under a name of their own and a link: the name is what the page, the
   # Jira description (Veracode application) and the Confluence export (Repository) show, linked to url, and it is the

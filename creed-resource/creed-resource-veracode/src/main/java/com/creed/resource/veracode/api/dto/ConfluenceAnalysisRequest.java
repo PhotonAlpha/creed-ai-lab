@@ -12,7 +12,9 @@ import java.util.Map;
  * @param autoCreate      create every missing finding's issue in the same request
  * @param fields          create-screen values for {@code autoCreate}
  * @param jiraVersions    the Jira versions to look up in (empty = any); {@code autoCreate} needs exactly one
+ * @param countries       the Country options to look up in (empty = any)
  */
 public record ConfluenceAnalysisRequest(String pageId, List<String> attachmentIds, String affectedVersion,
-                                        boolean autoCreate, Map<String, Object> fields, List<String> jiraVersions) {
+                                        boolean autoCreate, Map<String, Object> fields, List<String> jiraVersions,
+                                        List<String> countries) {
 }

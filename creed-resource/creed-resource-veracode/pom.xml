@@ -83,6 +83,11 @@
             <artifactId>spring-boot-starter-webmvc-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- the create-screen cache (veracode.jira.meta-cache-ttl); version from the Boot BOM -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

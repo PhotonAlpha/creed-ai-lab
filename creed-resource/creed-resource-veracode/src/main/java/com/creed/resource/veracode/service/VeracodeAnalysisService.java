@@ -33,7 +33,8 @@ import java.util.stream.Collectors;
 /**
  * Uploaded Veracode XML reports -> findings -> Jira matches, and the creation of the missing issues.
  *
- * <p>Jira is never cached: an analysis is a read of Jira as it is now, which is what makes the creation
+ * <p>Jira issues are never cached (only create screens, briefly: {@code meta-cache-ttl}): an analysis is a read of
+ * Jira as it is now, which is what makes the creation
  * path safe. The reports are re-read from {@link UploadedReportStore} by id, and a create request names
  * findings by id with the whole chain re-read first, so a finding someone else filed in the meantime comes
  * back {@code ALREADY_EXISTS} instead of becoming a duplicate.
@@ -90,10 +91,12 @@ public class VeracodeAnalysisService {
 
     /**
      * @param read     the upload's reports (each finding's report is its issue's description and attachment)
-     * @param versions the page's Jira versions, Jira's spelling - searched, and (one of them) filed under
+     * @param versions  the page's Jira versions, Jira's spelling - searched, and (one of them) filed under
+     * @param countries the page's Countries - searched only
      */
     private record Snapshot(Read read, List<Finding> findings, JiraLookupService.CreateMeta meta,
-                            List<String> versions, Map<String, List<IssueRef>> matches) {
+                            List<String> versions, JiraLookupService.CountryFilter countries,
+                            Map<String, List<IssueRef>> matches) {
 
         String uploadId() {
             return read.upload().id();
@@ -117,9 +120,11 @@ public class VeracodeAnalysisService {
      *                        Display only: Jira is searched and filed by {@code jiraVersions}
      * @param fields          create-screen values for {@code autoCreate} (fieldId -> value or values)
      * @param jiraVersions    the Jira versions chosen on the page (see {@link #analyze})
+     * @param countries       the Countries chosen on the page (see {@link #analyze})
      */
     public AnalysisResponse analyzeUpload(List<UploadedFile> files, String versionOverride, boolean autoCreate,
-                                          Map<String, Object> fields, List<String> jiraVersions, JiraToken token) {
+                                          Map<String, Object> fields, List<String> jiraVersions,
+                                          List<String> countries, JiraToken token) {
         token.require();
         if (files.isEmpty()) {
             throw new IllegalArgumentException("no file: upload one or more Veracode detailed reports (XML, or a zip of them)");
@@ -139,21 +144,34 @@ public class VeracodeAnalysisService {
             }
         }
         UploadedReportStore.Upload upload = uploads.put(reports, files, overridden);
-        return analyze(upload.id(), autoCreate, fields, jiraVersions, token);
+        return analyze(upload.id(), autoCreate, fields, jiraVersions, countries, token);
     }
 
     /**
      * @param jiraVersions issues are looked up among these Jira versions (empty = any version); creating files under
      *                     the one chosen, so {@code autoCreate} needs exactly one ({@code jira_version_required})
+     * @param countries    issues are looked up among these Country options ({@code veracode.jira.country-field};
+     *                     empty = any). Creating does not set the field from them - the create screen's own value does
      */
     public AnalysisResponse analyze(String uploadId, boolean autoCreate, Map<String, Object> fields,
-                                    List<String> jiraVersions, JiraToken token) {
+                                    List<String> jiraVersions, List<String> countries, JiraToken token) {
+        return analyze(uploadId, autoCreate, fields, jiraVersions, countries, false, token);
+    }
+
+    /**
+     * @param skipSast only the Jira versions changed (asked for, 2026-11-12): SAST's half - three Jira calls that do
+     *                 not depend on them (Countries do: SAST is filtered by them too) - is not read again; {@code sast} is {@code null} and the page keeps
+     *                 the one it has. Ignored with {@code autoCreate}
+     */
+    public AnalysisResponse analyze(String uploadId, boolean autoCreate, Map<String, Object> fields,
+                                    List<String> jiraVersions, List<String> countries, boolean skipSast,
+                                    JiraToken token) {
         token.require();
         if (autoCreate) {
             createLock.lock();
         }
         try {
-            Snapshot s = load(uploadId, jiraVersions, token);
+            Snapshot s = load(uploadId, jiraVersions, countries, token);
             Map<String, Object> chosen = autoCreate ? jira.resolveFields(s.meta(), fields) : Map.of();
             String version = autoCreate ? jira.createVersion(s.versions()) : null;
             List<String> warnings = new ArrayList<>(s.read().warnings());
@@ -182,8 +200,10 @@ public class VeracodeAnalysisService {
             }
             return new AnalysisResponse(s.uploadId(), s.reports(), jiraProps.projectKey(),
                     List.copyOf(s.meta().versions().values()), s.versions(),
-                    s.versions().size() == 1 ? s.versions().getFirst() : null, s.meta().fields(), views, warnings,
-                    AnalysisResponse.Counts.of(views), s.read().sastFlaws(), sast(s.read(), token),
+                    s.versions().size() == 1 ? s.versions().getFirst() : null,
+                    JiraLookupService.countries(s.meta()), s.countries().values(), s.meta().fields(), views, warnings,
+                    AnalysisResponse.Counts.of(views), s.read().sastFlaws(),
+                    skipSast && !autoCreate ? null : sast(s.read(), countries, token),
                     applications(s.reports()), Instant.now(clock));
         } finally {
             if (autoCreate) {
@@ -197,12 +217,13 @@ public class VeracodeAnalysisService {
      * @param recreateClosed the one finding named is filed again when its issues are all finished
      */
     public CreateIssuesResponse create(String uploadId, List<String> findingIds, Map<String, Object> fields,
-                                       List<String> jiraVersions, boolean recreateClosed, JiraToken token) {
+                                       List<String> jiraVersions, List<String> countries, boolean recreateClosed,
+                                       JiraToken token) {
         token.require();
         requireOne(recreateClosed, findingIds);
         createLock.lock();
         try {
-            Snapshot s = load(uploadId, jiraVersions, token);
+            Snapshot s = load(uploadId, jiraVersions, countries, token);
             Map<String, Object> chosen = jira.resolveFields(s.meta(), fields);
             String version = jira.createVersion(s.versions());
             Map<String, Finding> byId = s.findings().stream()
@@ -307,7 +328,8 @@ public class VeracodeAnalysisService {
      * project or issue type, no permission) is the answer's {@code error}, not the analysis' - SCA is still shown.
      * Nothing is asked of Jira when no flaw is open.
      */
-    private AnalysisResponse.SastJira sast(Read read, JiraToken token) {
+    /** @param countries the page's Countries, applied to the SAST project's own Country field (asked for, 2026-11-12) */
+    private AnalysisResponse.SastJira sast(Read read, List<String> countries, JiraToken token) {
         List<SastFlaw> flaws = read.sastFlaws();
         List<SastIssue> issues = SastIssue.group(flaws);
         String project = jiraProps.sastProjectKey();
@@ -321,8 +343,9 @@ public class VeracodeAnalysisService {
         Map<String, List<IssueRef>> matches;
         try {
             meta = jira.sastCreateMeta(token);
-            matches = jira.findSast(issues, token);
-        } catch (UpstreamException e) {
+            matches = jira.findSast(issues, jira.countryFilter(meta, countries), token);
+        } catch (UpstreamException | IllegalArgumentException e) {
+            // a Country the SAST screen lacks (or no Country field there) is SAST's problem, reported in its tab
             log.warn("SAST issues not read from Jira ({} / {}): {}", project, type, e.getMessage());
             List<SastIssueView> views = issues.stream()
                     .map(i -> SastIssueView.of(i, jira.sastSummary(i), null, List.of(), List.of(), name, apps, false)).toList();
@@ -352,7 +375,8 @@ public class VeracodeAnalysisService {
      *                     at most one otherwise (none = the field left out)
      */
     public CreateIssuesResponse createSast(String uploadId, List<String> issueIds, Map<String, Object> fields,
-                                           List<String> jiraVersions, boolean recreateClosed, JiraToken token) {
+                                           List<String> jiraVersions, List<String> countries, boolean recreateClosed,
+                                           JiraToken token) {
         token.require();
         requireOne(recreateClosed, issueIds);
         createLock.lock();
@@ -367,7 +391,7 @@ public class VeracodeAnalysisService {
             Map<String, SastIssue> byId = issues.stream()
                     .collect(Collectors.toMap(SastIssue::id, Function.identity(), (a, b) -> a, LinkedHashMap::new));
             List<SastIssue> wanted = issueIds.stream().distinct().map(byId::get).filter(java.util.Objects::nonNull).toList();
-            Map<String, List<IssueRef>> matches = jira.findSast(wanted, token);
+            Map<String, List<IssueRef>> matches = jira.findSast(wanted, jira.countryFilter(meta, countries), token);
             List<Result> results = new ArrayList<>();
             for (String id : issueIds.stream().distinct().toList()) {
                 SastIssue issue = byId.get(id);
@@ -444,7 +468,7 @@ public class VeracodeAnalysisService {
                 List.copyOf(warnings));
     }
 
-    private Snapshot load(String uploadId, List<String> jiraVersions, JiraToken token) {
+    private Snapshot load(String uploadId, List<String> jiraVersions, List<String> countries, JiraToken token) {
         Read read = read(uploadId);
         UploadedReportStore.Upload upload = read.upload();
         List<ReportView> reports = read.reports();
@@ -454,11 +478,12 @@ public class VeracodeAnalysisService {
         List<Finding> findings = Finding.group(rows);
         JiraLookupService.CreateMeta meta = jira.createMeta(token);
         List<String> versions = jira.selectedVersions(meta, jiraVersions);
-        Map<String, List<IssueRef>> matches = jira.find(findings, versions, token);
+        JiraLookupService.CountryFilter countryFilter = jira.countryFilter(meta, countries);
+        Map<String, List<IssueRef>> matches = jira.find(findings, versions, countryFilter, token);
         log.info("upload {}: {} report(s), {} vulnerabilities -> {} findings, {} matched in Jira, {} SAST flaws, {} warnings",
                 upload.id(), reports.size(), rows.size(), findings.size(),
                 matches.values().stream().filter(l -> !l.isEmpty()).count(), sastFlaws.size(), warnings.size());
-        return new Snapshot(read, findings, meta, versions, matches);
+        return new Snapshot(read, findings, meta, versions, countryFilter, matches);
     }
 
     /** Every application of the reports, by its mapped name and link ({@code veracode.applications}) - for the page. */

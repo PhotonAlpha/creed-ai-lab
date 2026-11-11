@@ -37,12 +37,14 @@ const distinct = (values: (string | null | undefined)[]) =>
  * (summary, SCA issues, SAST issues). The title is the configured template; `{project}` and `{version}` default to
  * the reports' and can be changed here, `{timestamp}` is the server's time of creation.
  */
-export function ConfluenceExportModal({ open, analysis, settings, auth, jiraVersions, onClose }: {
+export function ConfluenceExportModal({ open, analysis, settings, auth, jiraVersions, countries, onClose }: {
   open: boolean;
   analysis: Analysis;
   settings: VeracodeSettings;
   auth: JiraAuth;
   jiraVersions: string[];
+  /** The SCA Country options looked up in, as on the page. */
+  countries: string[];
   onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -92,7 +94,7 @@ export function ConfluenceExportModal({ open, analysis, settings, auth, jiraVers
     setError(null);
     try {
       const page = await veracodeApi.exportToConfluence({
-        uploadId: analysis.uploadId, parentPageId, project: project.trim(), version: version.trim(), jiraVersions,
+        uploadId: analysis.uploadId, parentPageId, project: project.trim(), version: version.trim(), jiraVersions, countries,
       }, auth, confluenceAuth);
       saveParent(parent.trim());
       setCreated(page);

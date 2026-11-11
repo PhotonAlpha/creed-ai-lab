@@ -1,5 +1,6 @@
 package com.creed.resource.veracode.service;
 
+import com.creed.resource.veracode.api.dto.SastIssueView;
 import com.creed.resource.veracode.config.ApplicationProperties;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.SastFlaw;
@@ -81,8 +82,21 @@ final class JiraDescription {
      * issue id, first found), the first flaw's description - Veracode words it per CWE, so the flaws share it - and
      * the source of every report among the issue's applications.
      */
-    static String ofSast(SastIssue issue, List<ReportView> reports, ApplicationProperties apps) {
-        StringBuilder d = new StringBuilder("h3. Veracode SAST finding\n");
+    /**
+     * @param project {@code sast.project-name}: the head's {@code <name>: <project> - <category>} line
+     */
+    static String ofSast(SastIssue issue, List<ReportView> reports, ApplicationProperties apps, String project) {
+        StringBuilder d = new StringBuilder();
+        // first what the page's "Jira summary" column shows (asked for, 2026-11-12) - three lines per application:
+        //   Creed-CCS: IDB VERACODE STSA - OS Command Injection / CWE 78 <name> / CWE 78 (Flaw IDs: 2)
+        // the summary itself stays one line: it is what the issue is found by
+        for (SastIssueView.ApplicationBlock block : SastIssueView.blocks(issue, project, apps)) {
+            d.append(block.url() == null ? escape(block.name()) : "[" + escape(block.name()) + "|" + block.url() + "]")
+                    .append(": ").append(escape(block.heading())).append('\n')
+                    .append(escape(block.cwe())).append('\n')
+                    .append(escape(block.flawIds())).append("\n\n");
+        }
+        d.append("h3. Veracode SAST finding\n");
         d.append("||Field||Value||\n");
         row(d, "CWE", issue.cwe() != null && issue.cwe().matches("CWE-\\d+")
                 ? "[" + issue.cwe() + "|https://cwe.mitre.org/data/definitions/" + issue.cwe().substring(4) + ".html]"

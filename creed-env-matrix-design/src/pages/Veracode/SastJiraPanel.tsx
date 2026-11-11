@@ -34,13 +34,15 @@ const LABEL_BUTTON = { color: 'orange', icon: <TagOutlined /> } as const;
  * `{project} - CWE-89 - {category}` in the SAST project — its own issue type, create screen and version, so this
  * tab has its own field bar and version choice. The token is the page's.
  */
-export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onTokenNeeded, onUpdate }: {
+export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, countries, onTokenNeeded, onUpdate }: {
   analysis: Analysis;
   sast: SastJira;
   auth: JiraAuth;
   hasToken: boolean;
   /** The SCA versions chosen at the top: preselected here when the SAST project has the same one. */
   scaVersions: string[];
+  /** The Countries chosen at the top: SAST is looked up (and re-checked before creating) with them too. */
+  countries: string[];
   onTokenNeeded: () => void;
   onUpdate: (update: (previous: Analysis) => Analysis) => void;
 }) {
@@ -142,7 +144,7 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, onT
     setCreating(true);
     try {
       const { results } = await veracodeApi.createSastIssues(analysis.uploadId, ids, fieldValues,
-        version ? [version] : [], auth, recreateClosed);
+        version ? [version] : [], auth, recreateClosed, countries);
       applyResults(results);
     } catch (e) {
       message.error((e as Error).message);
