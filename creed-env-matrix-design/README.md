@@ -555,6 +555,10 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   field bar, not from here.
 - **Auto-create** asks first when ticked: the next analysis files an issue for every missing finding in one go. While on,
   an orange tag says so.
+- **Report templates** (menu *Report templates*, `/veracode-templates`): upload the company's Excel template, click
+  cells and bind them to SCA / SAST fields or summary values (a row made a data row repeats once per item at export),
+  save, then *Export with template* on the Veracode page (the backend writes JXLS markup and fills it; unbound sheets
+  stay as uploaded).
 - **Token dialogs** (Jira / Confluence): a *No token yet?* box says where to create one and links to that page in a new
   tab; create it there, come back and paste.
 - **Cards**: the three cards on top cast a shadow on hover; *Reports* folds and unfolds.

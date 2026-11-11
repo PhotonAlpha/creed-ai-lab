@@ -7,6 +7,7 @@ import com.creed.resource.veracode.service.JiraToken;
 import com.creed.resource.veracode.service.UploadedReportStore;
 import com.creed.resource.veracode.service.UpstreamException;
 import com.creed.resource.veracode.service.VeracodeXmlParser;
+import com.creed.resource.veracode.template.ReportTemplateService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,7 +29,7 @@ import java.util.Map;
  * <p>Scoped to {@link VeracodeController}: the Jira mock answers in Jira's own error shape, and must not
  * be rewritten into this one.
  */
-@RestControllerAdvice(assignableTypes = VeracodeController.class)
+@RestControllerAdvice(assignableTypes = {VeracodeController.class, ReportTemplateController.class})
 @Slf4j
 public class VeracodeExceptionHandler {
 
@@ -47,6 +48,11 @@ public class VeracodeExceptionHandler {
     @ExceptionHandler(UploadedReportStore.UploadNotFoundException.class)
     ResponseEntity<Map<String, Object>> uploadGone(UploadedReportStore.UploadNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body("upload_expired", e.getMessage(), null));
+    }
+
+    @ExceptionHandler(ReportTemplateService.TemplateNotFoundException.class)
+    ResponseEntity<Map<String, Object>> templateNotFound(ReportTemplateService.TemplateNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body("template_not_found", e.getMessage(), null));
     }
 
     @ExceptionHandler(MissingServletRequestPartException.class)

@@ -1,5 +1,5 @@
-# Veracode SCA report analysis. Plain HTTP on 18097, no database, no PKI: an uploaded Veracode XML report is
-# matched against Jira at request time. The frontend reaches it through Vite's `/api/veracode` proxy
+# Veracode SCA report analysis. Plain HTTP on 18097, no PKI: an uploaded Veracode XML report is matched against Jira
+# at request time. The only database is for report templates (an H2 file by default, see spring.datasource). The frontend reaches it through Vite's `/api/veracode` proxy
 # (VITE_VERACODE_TARGET).
 #
 #   mvn -pl creed-resource/creed-resource-veracode spring-boot:run -Dspring-boot.run.workingDirectory="$PWD"
@@ -20,6 +20,16 @@ spring:
       # A detailed report carries every static flaw too; only its SCA section is read (streamed).
       max-file-size: ${CREED_VERACODE_MAX_UPLOAD:50MB}
       max-request-size: ${CREED_VERACODE_MAX_UPLOAD:50MB}
+  # Report templates (an uploaded .xlsx + its cell bindings) live here. Default: an H2 file under the working
+  # directory - data/veracode/ of the repo root with spring-boot:run -Dspring-boot.run.workingDirectory="$PWD", of the
+  # module in an IDE run - so they survive a restart without Docker. PostgreSQL: the `postgres` profile.
+  datasource:
+    url: "${CREED_VERACODE_DB_URL:jdbc:h2:file:./data/veracode/veracode;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;AUTO_SERVER=TRUE}"
+    username: "${CREED_VERACODE_DB_USER:sa}"
+    password: "${CREED_VERACODE_DB_PASSWORD:}"
+  flyway:
+    # one set of scripts: H2 runs them in PostgreSQL mode
+    locations: classpath:db/migration
 
 veracode:
   # In-process stand-in for Jira under /mock/jira (MockJiraStore) and the sample report

@@ -212,6 +212,29 @@ and `autoCreate` take the choices as `fields` (`{"components": ["Security"], "cu
 an option by id or label, any case); they are checked against the screen first: a required field left empty is
 400 `jira_fields_required`, an unknown option 400 `bad_request`, before anything is created.
 
+## Report templates
+
+A company Excel report, filled with an analysis (asked for, 2026-11-12). `/veracode-templates` on the page:
+
+1. **Upload** the `.xlsx` (`POST /api/veracode/report-templates`, multipart `file`, optional `name`) - stored as is in
+   `report_template` (H2 file `data/veracode/veracode.mv.db` under the working directory; PostgreSQL with the
+   `postgres` profile, database `veracode`; Flyway `db/migration`).
+2. **The grid**: `GET /report-templates/{id}` answers every sheet as JSON - used range (cut at 500 × 60), cell text
+   as Excel shows it (cached formula results), bold, solid fill, merges, column widths - with the saved mapping.
+3. **Bind**: click a cell. Its row can be a *data row* of `sca` (the SCA findings table) or `sast` (the SAST Jira
+   table): the whole row repeats once per item at export, what is below moving down; its cells are bound to that
+   dataset's fields. Any other cell can show a `summary` field. `GET /report-templates/fields` lists them.
+4. **Save** (`PUT /report-templates/{id}/mapping`): refused (400, naming the cell) for an unknown sheet / dataset /
+   field, two data rows on one row, a data row inside a merge spanning rows, a summary cell on a data row, a cell
+   bound twice.
+5. **Export** (`GET /report-templates/{id}/export?uploadId=&jiraVersions=&countries=`, the Jira token as for the
+   Excel export): a fresh analysis written into the template. Sheets without bindings come out as uploaded.
+
+Only the upload and the mapping are stored. The JXLS template is derived at each export
+(`TemplateWorkbook.withJxlsMarkup`): `jx:area(lastCell=..)` on `A1` covering the sheet's used range,
+`jx:each(items="sca" var="r" lastCell=..)` on column A of each data row, `${r.<field>}` / `${summary.<field>}` in
+bound cells; an existing comment is kept, the commands appended. `GET /report-templates/{id}/jxls` downloads it.
+
 ## Configuration
 
 See `application.yml`. Everything external is `${CREED_…}`; locally Jira is the in-process mock

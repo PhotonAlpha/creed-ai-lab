@@ -10,6 +10,7 @@ import {
   BugOutlined,
   CloudDownloadOutlined,
   DiffOutlined,
+  FileExcelOutlined,
   FileTextOutlined,
   GlobalOutlined,
   KeyOutlined,
@@ -29,6 +30,7 @@ import { TopologyPage } from './pages/Topology';
 import { SplunkPage } from './pages/Splunk';
 import { AesPage } from './pages/Aes';
 import { VeracodePage } from './pages/Veracode';
+import { ReportTemplatesPage } from './pages/Veracode/templates';
 import { MigrationRiskPage } from './pages/MigrationRisk';
 import { InstallPage } from './pages/Ccrg/Install';
 import { PromptPage } from './pages/Ccrg/Prompt';
@@ -90,6 +92,7 @@ export function App() {
             { path: '/splunk', name: t('nav.splunk'), icon: <KeyOutlined /> },
             { path: '/aes', name: t('nav.aes'), icon: <LockOutlined /> },
             { path: '/veracode', name: t('nav.veracode'), icon: <BugOutlined /> },
+            { path: '/veracode-templates', name: t('nav.veracodeTemplates'), icon: <FileExcelOutlined /> },
             { path: '/migration-risk', name: t('nav.migrationRisk'), icon: <BranchesOutlined /> },
             {
               // The old ccrg-tool-ui (Vue), migrated; backend is ccrg-tool-starter behind /api/ccrg.
@@ -124,6 +127,7 @@ export function App() {
           <Route path="/splunk" element={<SplunkPage />} />
           <Route path="/aes" element={<AesPage />} />
           <Route path="/veracode" element={<VeracodePage />} />
+          <Route path="/veracode-templates" element={<ReportTemplatesPage />} />
           <Route path="/migration-risk" element={<MigrationRiskPage />} />
           <Route path="/ccrg" element={<Navigate to="/ccrg/install" replace />} />
           <Route path="/ccrg/install" element={<InstallPage />} />

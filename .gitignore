@@ -22,3 +22,6 @@ creed-simple-metrics/docs/camel-tutorial/generators
 creed-resource/creed-resource-env-matrix/src/main/resources/demo
 ccrg-tool-ui
 creed-resource/ccrg-tool-starter
+
+# creed-resource-veracode report templates (H2 file, under whichever working directory ran it)
+**/data/veracode/

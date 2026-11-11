@@ -1,0 +1,8 @@
+# Report templates in PostgreSQL (the creed-artifactory-db container) instead of the H2 file:
+#   mvn -pl creed-resource/creed-resource-veracode spring-boot:run -Dspring-boot.run.profiles=postgres ...
+# The database must exist (CREATE DATABASE veracode); Flyway creates the tables.
+spring:
+  datasource:
+    url: "${CREED_VERACODE_DB_URL:jdbc:postgresql://127.0.0.1:5432/veracode}"
+    username: "${CREED_VERACODE_DB_USER:artifactory}"
+    password: "${CREED_VERACODE_DB_PASSWORD:artifactory_pw}"

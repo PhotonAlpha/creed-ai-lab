@@ -68,6 +68,14 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-12 (latest, asked for): **report templates** - upload a company `.xlsx`, bind cells on `/veracode-templates`
+(data rows of `sca` / `sast`, `summary` cells), export an analysis through it with JXLS 3.0.0. Package `template/`
+(`TemplateWorkbook` read + markup, `TemplateFields` catalog + data, `ReportTemplateService` validation + fill,
+`ReportTemplateRepository` JdbcClient), `api/ReportTemplateController`. First database of the module: H2 file
+`./data/veracode/` (git-ignored), `postgres` profile, Flyway `V1__report_templates.sql`; tests on in-memory H2.
+`ReportTemplateApiTest` (upload -> mapping -> JXLS markup -> filled workbook, and the refusals). Checked live on
+18197 with the mocks: rows repeated, footer moved down, summary cell filled. **87 tests pass.**
+
 2026-11-12 (latest, asked for): **a created SAST issue's description starts with the page's "Jira summary" block** -
 `SastIssueView.blocks` per application (`<name>: <project> - <category>` / `CWE 78 <name>` / `CWE 78 (Flaw IDs: 2)`),
 the name linked when mapped; the summary is unchanged (it is the lookup key).

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
 import {
   Alert,
@@ -11,6 +11,7 @@ import {
   Col,
   Collapse,
   Descriptions,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -33,13 +34,13 @@ import {
 } from 'antd';
 import type { TableColumnsType } from 'antd';
 import {
-  CloudDownloadOutlined, CloudUploadOutlined, DownOutlined, ExperimentOutlined, FileTextOutlined, FilterOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined,
+  CloudDownloadOutlined, CloudUploadOutlined, DownOutlined, ExperimentOutlined, FileExcelOutlined, FileTextOutlined, FilterOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined,
   SettingOutlined, TagOutlined, TagsOutlined, UpOutlined,
 } from '@ant-design/icons';
-import { jiraAuthComplete, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
+import { jiraAuthComplete, reportTemplateApi, saveBlob, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
 import type {
   Analysis, ApplicationView, ConfluenceAuth, CreateField, CreateFieldValues, CreateResult, Finding, FindingStatus, IssueRef, JiraAuth,
-  JiraConnection, ReportView, ScaSummary, VeracodeSettings,
+  JiraConnection, ReportTemplateSummary, ReportView, ScaSummary, VeracodeSettings,
 } from '../../api/veracode';
 import { ConfluenceSource } from './ConfluenceSource';
 import { useConfluenceToken } from './useConfluenceToken';
@@ -520,6 +521,26 @@ export function VeracodePage() {
     }
   };
 
+  /** Company report templates (`/veracode-templates`), listed when the export menu opens. */
+  const navigate = useNavigate();
+  const [templateList, setTemplateList] = useState<ReportTemplateSummary[]>([]);
+  const [templateExporting, setTemplateExporting] = useState(false);
+  const exportWithTemplate = async (templateId: string) => {
+    if (!analysis) return;
+    if (!hasToken) {
+      setTokenOpen(true);
+      return;
+    }
+    setTemplateExporting(true);
+    try {
+      saveBlob(await reportTemplateApi.exportWith(templateId, analysis.uploadId, auth, jiraVersions, countries));
+    } catch (e) {
+      message.error((e as Error).message);
+    } finally {
+      setTemplateExporting(false);
+    }
+  };
+
   const exportXlsx = async () => {
     if (!analysis) return;
     if (!hasToken) {
@@ -528,13 +549,7 @@ export function VeracodePage() {
     }
     setExporting(true);
     try {
-      const { blob, filename } = await veracodeApi.exportXlsx(analysis.uploadId, auth, jiraVersions, countries);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
+      saveBlob(await veracodeApi.exportXlsx(analysis.uploadId, auth, jiraVersions, countries));
     } catch (e) {
       message.error((e as Error).message);
     } finally {
@@ -1186,6 +1201,29 @@ export function VeracodePage() {
                     <Button icon={<CloudDownloadOutlined />} onClick={exportXlsx} loading={exporting} disabled={!analysis}>
                       {t('veracode.export')}
                     </Button>
+                    {/* the same analysis through a company template bound on /veracode-templates */}
+                    <Dropdown
+                      trigger={['click']}
+                      disabled={!analysis}
+                      onOpenChange={(open) => {
+                        if (open) reportTemplateApi.list().then(setTemplateList).catch((e: Error) => message.error(e.message));
+                      }}
+                      menu={{
+                        items: [
+                          ...templateList.filter((x) => x.lists + x.values > 0)
+                            .map((x) => ({ key: x.id, label: x.name, icon: <FileExcelOutlined /> })),
+                          ...(templateList.some((x) => x.lists + x.values > 0)
+                            ? [] : [{ key: 'none', label: t('veracode.tpl.exportNone'), disabled: true }]),
+                          { type: 'divider' as const },
+                          { key: 'manage', label: t('veracode.tpl.manage') },
+                        ],
+                        onClick: ({ key }) => (key === 'manage' ? navigate('/veracode-templates') : void exportWithTemplate(key)),
+                      }}
+                    >
+                      <Button icon={<FileExcelOutlined />} loading={templateExporting} title={t('veracode.tpl.exportHint')}>
+                        {t('veracode.tpl.export')} <DownOutlined />
+                      </Button>
+                    </Dropdown>
                     {settings?.confluenceBaseUrl && (
                       <Tooltip title={t('veracode.confluenceExport.hint')}>
                         <Button icon={<CloudUploadOutlined />} disabled={!analysis}

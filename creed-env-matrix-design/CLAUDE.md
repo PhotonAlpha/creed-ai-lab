@@ -232,6 +232,9 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 新建 Jira 描述的 Source：上传的文件加为 Jira 附件；从 Confluence 下载的给出附件地址和所在页面的链接（`on page [标题|页面地址]`）。
 - SAST 标签页「Jira 标题」列按 application 显示三行（`<名称>: <SAST project-name> - <类别>` / `CWE 117 <名称>` / `CWE 117 (Flaw IDs: …)`），
   合并了原「未关闭漏洞」列；Jira 标题本身不变（仍按标题查找），新建的 SAST Jira 在描述开头写同样的三行（按 application）。
+- **报告模版**（`/veracode-templates`，`pages/Veracode/templates/`）：上传公司 Excel 模版（.xlsx）→ 后端解析成 JSON → 页面按 Excel 样子渲染（列字母、行号、合并、列宽、粗体、填充色）→
+  点选单元格：所在行可设为 SCA / SAST 数据行（导出时按条数向下重复，下方内容下移），该行单元格绑定数据集字段；其他单元格绑定汇总字段 → 保存映射
+  （后端校验，错误指出单元格）→ Veracode 页面「按模版导出」：重新分析并由后端写入 JXLS 占位符后填充。模版和映射存在后端 H2 文件库（`postgres` profile 用 PostgreSQL）。
 - 支持导出 Excel（Severity 按等级填充背景色；*SCA summary* 工作表与页面的 SCA 统计一致；*SAST flaws* / *SAST summary* 两个工作表对应 SAST 部分）。
 - 统计卡片（漏洞总数 / 已在 Jira / 缺失 / 已创建）按状态用不同背景色（主题 token）；表格分页受控，默认每页 50 条（20 / 50 / 100 / 200）。
 - 刷新页面不丢数据：分析结果、所选 Jira 版本、字段取值、过滤条件、每页条数存 sessionStorage（随标签页关闭清除）；

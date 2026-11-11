@@ -19,6 +19,8 @@
              (4.x is the Boot 4 / Jackson 3 line). -->
         <poi.version>5.4.1</poi.version>
         <logbook.version>4.2.0</logbook.version>
+        <!-- not in the Boot BOM; 3.0.0 is POI 5 + JEXL 3.3 (the poi-ooxml pinned above wins) -->
+        <jxls.version>3.0.0</jxls.version>
     </properties>
 
     <dependencies>
@@ -64,6 +66,40 @@
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
             <version>${poi.version}</version>
+        </dependency>
+
+        <!-- Report templates (asked for, 2026-11-12): a company .xlsx, its cells bound to SCA / SAST fields, written
+             back with JXLS markup and filled at export. -->
+        <dependency>
+            <groupId>org.jxls</groupId>
+            <artifactId>jxls-poi</artifactId>
+            <version>${jxls.version}</version>
+        </dependency>
+        <!-- ... kept in a database: an H2 file under the working directory by default, PostgreSQL with the
+             `postgres` profile. The starter, not bare flyway-core: Boot 4 moved Flyway's auto-configuration into
+             spring-boot-flyway, and with flyway-core alone no migration ever runs. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+        <!-- Flyway 10+ ships each dialect separately ("Unsupported Database: PostgreSQL" without it). -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
         </dependency>
 
        <!-- <dependency>

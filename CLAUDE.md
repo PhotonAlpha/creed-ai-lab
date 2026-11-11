@@ -12,11 +12,11 @@ narrative content belongs in a skill or a `HANDOFF.md` (§6).
 Java **21** source/target, built with **JDK 25** · Spring Boot **4.1.1** (Spring Framework 7,
 Jakarta EE 11, Tomcat 11) · Spring Cloud **2025.1.3** · **Jackson 3** (`tools.jackson.*`; annotations stay
 `com.fasterxml.jackson.annotation`) · Camel 4.23.0 (simple-metrics only) · Logbook 4.2.0 (simple-metrics; veracode's Jira client)
-· JasperReports 6.21.3 (jasper-report only)
+· JasperReports 6.21.3 (jasper-report only) · JXLS 3.0.0 (veracode report templates)
 · RefactoringMiner 3.1.6 + JGit 6.10 + JDT 3.39 + Thymeleaf (migration-risk only; 3.1.x is Java 23 bytecode → run on JDK 25) · httpclient5 5.6.4 (Boot-managed)
 · Maven 3.9.16, local repo **`/Users/ethan/Desktop/workspace/repos`**
 (not `~/.m2`) · frontend React 19 + TS + Vite 8 + **antd 5** + Ant Design Pro 2 + AntV G6 5 ·
-PostgreSQL on the `creed-artifactory-db` container (env-matrix and migration-risk — the latter also MySQL 8 via its `mysql` profile; everything else is in-memory).
+PostgreSQL on the `creed-artifactory-db` container (env-matrix and migration-risk — the latter also MySQL 8 via its `mysql` profile; veracode's report templates: an H2 file under `data/veracode/`, PostgreSQL with profile `postgres`; everything else is in-memory).
 
 Versions live in the root `pom.xml`. Only pin in a module pom when the BOM doesn't manage the
 artifact (e.g. POI in creed-report).
@@ -62,7 +62,7 @@ mvn -pl <module> spring-boot:run -Dspring-boot.run.profiles=primary \
 | `creed-resource-order` | 18091 / 18092 | `/api/order` | primary / secondary |
 | `creed-resource-payment` | 18093 / 18094 | `/api/payment` | primary / secondary |
 | `creed-resource-env-matrix` | 18095 / 18096 | `/api/env-matrix` | + `dev` = HTTP 3001 |
-| `creed-resource-veracode` | 18097 | `/api/veracode` | HTTP (HTTPS with profile `ssl`, one-way TLS), stateless; Veracode detailed report (XML / zip; SCA → Jira by CVE + jar, SAST → its own Jira project by CWE + category; report exportable as a Confluence child page (Thymeleaf storage XHTML, the report files attached); uploaded or a Confluence page's attachments, user's Confluence token) → Jira lookup/create (`@HttpExchange`: batched JQL search — DC v2 / Cloud v3 `search/jql` — createmeta, create; Apache HttpClient 5 + Logbook, TLS to Jira unverified, user's token) → xlsx; Jira mocked in-process + sample XML (`veracode.mock.enabled`) |
+| `creed-resource-veracode` | 18097 | `/api/veracode` | HTTP (HTTPS with profile `ssl`, one-way TLS), stateless except report templates (company .xlsx bound cell by cell → JXLS export; H2 file / `postgres`); Veracode detailed report (XML / zip; SCA → Jira by CVE + jar, SAST → its own Jira project by CWE + category; report exportable as a Confluence child page (Thymeleaf storage XHTML, the report files attached); uploaded or a Confluence page's attachments, user's Confluence token) → Jira lookup/create (`@HttpExchange`: batched JQL search — DC v2 / Cloud v3 `search/jql` — createmeta, create; Apache HttpClient 5 + Logbook, TLS to Jira unverified, user's token) → xlsx; Jira mocked in-process + sample XML (`veracode.mock.enabled`) |
 | `creed-resource-migration-risk` | 18098 | `/api/migration-risk` | HTTP; migration sync risk: repo1 HEAD vs repo2 directly, no baseline (git branches or plain folders; repo2 may be two repos, merged), one RefactoringMiner run repo1→repo2 → HIGH/MEDIUM/LOW items per file, config keys compared globally; saved per release in Postgres `migration_risk` (`h2` profile without Docker, `mysql` profile = `db/migration-mysql`) for SAFE/ATTENTION review; Thymeleaf AST-diff page `/api/migration-risk/view/diff`; repos only under `migration-risk.allowed-roots` (or https git URLs from `remotes.allowed-hosts`); re-runs track the sync (auto SYNCED, delta, resolved) |
 | `creed-env-matrix-design` | 5173 / 3002 | — | Vite, proxies `/api` → `VITE_API_TARGET` (`.env`: 18095) and the Splunk API → `VITE_SPLUNK_TARGET` (`.env`: creed-gateway-proxy 8088); CCRG comparator pages `/ccrg/*` (migrated from the Vue `ccrg-tool-ui`) → `/api/ccrg` → `VITE_CCRG_TARGET` (ccrg-tool-starter 8600, prefix stripped); legacy Node BFF `npm run bff` on 3002 |
 | `creed-mock-buddy` | 5173 / 4000 | — | HTTP / HTTPS (borrows `creed-gateway` cert), **Node/Fastify**; YAML mock server, standalone |

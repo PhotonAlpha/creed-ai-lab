@@ -31,6 +31,14 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 
 ## Rules that are easy to break
 
+- **Report templates store the upload and the mapping, never the JXLS file** (2026-11-12): the markup is written at
+  each export, so fixing `TemplateWorkbook.withJxlsMarkup` fixes every template. `TemplateFields` keys are the JXLS
+  property names (`${r.cveId}`) and live in saved mappings: renaming one breaks them - add, don't rename. A data
+  row's `jx:each` sits on column A and spans to the sheet's last used column, so the whole row (unbound cells and
+  styles too) repeats. The rows are plain maps with every key present (`""` for none) - a missing key would leave
+  the `${...}` text in the cell. The DB is the module's first: H2 in PostgreSQL mode by default (one migration
+  folder for both), in-memory in `application-test.yml`.
+
 - **Filing a closed issue again is single and confirmed** (2026-11-11, asked for): `recreateClosed` is honoured only
   with exactly one id and only while every matched issue is in `veracode.jira.closed-statuses`; it is re-checked
   server-side under `createLock`. Never thread it into bulk create or `autoCreate` - those must keep treating a closed

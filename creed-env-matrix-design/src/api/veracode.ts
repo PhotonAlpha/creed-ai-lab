@@ -627,3 +627,112 @@ export const veracodeApi = {
     return { blob: await response.blob(), filename };
   },
 };
+
+// ---- Report templates: a company .xlsx, its cells bound to SCA / SAST fields, filled at export (JXLS) ----
+
+/** `sca` = the SCA findings table, `sast` = the SAST Jira table, `summary` = one value of the analysis. */
+export type TemplateDataset = 'sca' | 'sast' | 'summary';
+
+export interface TemplateField {
+  key: string;
+  /** English; the page translates the keys it knows. */
+  label: string;
+}
+
+export interface TemplateCell {
+  col: number;
+  text: string;
+  bold: boolean;
+  /** `#RRGGBB` of a solid fill. */
+  fill: string | null;
+}
+
+export interface TemplateSheet {
+  name: string;
+  /** Rows / columns sent: the used range, cut at 500 × 60 (`truncated`). */
+  rows: number;
+  cols: number;
+  truncated: boolean;
+  data: { row: number; cells: TemplateCell[] }[];
+  merges: { firstRow: number; lastRow: number; firstCol: number; lastCol: number }[];
+  /** Column widths in pixels. */
+  widths: number[];
+}
+
+/** 0-based rows and columns, as POI counts them. */
+export interface TemplateMapping {
+  sheets: {
+    sheet: string;
+    /** Data rows: repeated once per item of the dataset at export, what is below moving down. */
+    lists: { dataset: 'sca' | 'sast'; row: number; cells: { col: number; field: string }[] }[];
+    /** Single cells showing a summary field. */
+    values: { row: number; col: number; field: string }[];
+  }[];
+}
+
+export interface ReportTemplateSummary {
+  id: string;
+  name: string;
+  fileName: string;
+  lists: number;
+  values: number;
+  updatedAt: string;
+}
+
+export interface ReportTemplateDetail {
+  id: string;
+  name: string;
+  fileName: string;
+  sheets: TemplateSheet[];
+  mapping: TemplateMapping;
+  updatedAt: string;
+}
+
+/** A download as the browser should save it; `filename*` (UTF-8) first - template names may be Chinese. */
+const download = async (response: Response, fallback: string) => {
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  const filename = encoded ? decodeURIComponent(encoded) : /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? fallback;
+  return { blob: await response.blob(), filename };
+};
+
+const TEMPLATES = '/report-templates';
+
+export const reportTemplateApi = {
+  list: () => requestAt<ReportTemplateSummary[]>(BASE, TEMPLATES),
+  fields: () => requestAt<Record<TemplateDataset, TemplateField[]>>(BASE, `${TEMPLATES}/fields`),
+  get: (id: string) => requestAt<ReportTemplateDetail>(BASE, `${TEMPLATES}/${encodeURIComponent(id)}`),
+  /** Multipart: `headers: {}` keeps `requestAt` from claiming JSON, so the browser writes the boundary. */
+  upload: (file: File, name?: string) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (name?.trim()) form.append('name', name.trim());
+    return requestAt<ReportTemplateDetail>(BASE, TEMPLATES, { method: 'POST', body: form, headers: {} });
+  },
+  saveMapping: (id: string, mapping: TemplateMapping) =>
+    requestAt<ReportTemplateDetail>(BASE, `${TEMPLATES}/${encodeURIComponent(id)}/mapping`,
+      { method: 'PUT', body: JSON.stringify(mapping) }),
+  remove: (id: string) => requestAt<void>(BASE, `${TEMPLATES}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** The workbook with its JXLS markup (jx: comments, `${...}` cells), as export fills it. */
+  jxls: async (id: string) =>
+    download(await fetch(`${BASE}${TEMPLATES}/${encodeURIComponent(id)}/jxls`), 'template-jxls.xlsx'),
+  /** A fresh analysis written into the template, with the page's lookup conditions. */
+  exportWith: async (id: string, uploadId: string, auth: JiraAuth, jiraVersions: string[], countries: string[]) => {
+    const query = withVersions(new URLSearchParams({ uploadId }), jiraVersions, countries);
+    return download(await fetch(`${BASE}${TEMPLATES}/${encodeURIComponent(id)}/export?${query}`,
+      { headers: tokenHeader(auth) }), 'report.xlsx');
+  },
+};
+
+/** Saves a downloaded file the way the page's other exports do. */
+export const saveBlob = ({ blob, filename }: { blob: Blob; filename: string }) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+};
