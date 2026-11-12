@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
-import { Alert, Button, Checkbox, Input, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Button, Checkbox, Input, Select, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { FileSearchOutlined, KeyOutlined, PlayCircleOutlined, SearchOutlined } from '@ant-design/icons';
+import { FileSearchOutlined, KeyOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { veracodeApi } from '../../api/veracode';
-import type { ConfluenceAttachment, ConfluenceAuth, ConfluenceConnection, ConfluencePageAttachments } from '../../api/veracode';
+import type {
+  ConfluenceAttachment, ConfluenceAuth, ConfluenceConnection, ConfluencePageAttachments, ConfluencePageChildren,
+} from '../../api/veracode';
 import { ApiError } from '../../api/client';
 import { useI18n } from '../../locales';
 
@@ -18,6 +20,11 @@ interface Props {
   /** Opens the token dialog. */
   onNeedToken: () => void;
   mock?: boolean;
+  /**
+   * `veracode.confluence.parent-page-id`: its child pages are listed once and picked from, filtered by title in the
+   * browser (asked for, 2026-11-13); `null` = the page id is typed.
+   */
+  parentPageId?: string | null;
   /** An analysis is running: nothing new can start. */
   busy: boolean;
   /** Restored from the page cache, and reported back so a reload keeps it. */
@@ -67,7 +74,9 @@ const size = (bytes: number | null) => (bytes == null ? '—'
  * Reports from a Confluence page instead of an upload: the page's attachments are listed with the user's own
  * Confluence token, the user ticks `.xml` / `.zip` ones, and the backend downloads and analyses them.
  */
-export function ConfluenceSource({ auth, hasToken, connection, onNeedToken, mock, busy, pageId, onPageIdChange, onAnalyze }: Props) {
+export function ConfluenceSource({
+  auth, hasToken, connection, onNeedToken, mock, parentPageId, busy, pageId, onPageIdChange, onAnalyze,
+}: Props) {
   const { t } = useI18n();
   const [listing, setListing] = useState<ConfluencePageAttachments | null>(null);
   const [listingLoading, setListingLoading] = useState(false);
@@ -81,6 +90,35 @@ export function ConfluenceSource({ auth, hasToken, connection, onNeedToken, mock
   const [date, setDate] = useState('');
   const [keyword, setKeyword] = useState('');
   const words = useMemo(() => keyword.toLowerCase().split(/\s+/).filter(Boolean), [keyword]);
+  const [children, setChildren] = useState<ConfluencePageChildren | null>(null);
+  const [childrenLoading, setChildrenLoading] = useState(false);
+
+  /** The parent's child pages, one call: the select filters them by title without asking the backend again. */
+  const loadChildren = useCallback(async () => {
+    if (!parentPageId || !hasToken) return;
+    setChildrenLoading(true);
+    setError(null);
+    try {
+      setChildren(await veracodeApi.confluenceChildren(parentPageId, auth));
+    } catch (e) {
+      setChildren(null);
+      if (e instanceof ApiError && e.body?.error === 'confluence_token_required') onNeedToken();
+      setError((e as Error).message);
+    } finally {
+      setChildrenLoading(false);
+    }
+  }, [parentPageId, hasToken, auth, onNeedToken]);
+
+  // once there is a token to list them with, and again when it changes
+  useEffect(() => {
+    void loadChildren();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parentPageId, hasToken, auth.token]);
+
+  /** Newest edit first: the latest scan's page is usually the one wanted. */
+  const childOptions = useMemo(() => [...(children?.children ?? [])]
+    .sort((a, b) => (b.modified ?? '').localeCompare(a.modified ?? ''))
+    .map((c) => ({ value: c.id, label: c.title, modified: c.modified })), [children]);
 
   /** The dates the page's names hold, newest first, with how many attachments carry each. */
   const dates = useMemo(() => {
@@ -185,7 +223,44 @@ export function ConfluenceSource({ auth, hasToken, connection, onNeedToken, mock
           )}
         />
       )}
-      <Space wrap>
+      {/* listing waits for Confluence (paged, as the user's token): the whole page shows it (asked for) */}
+      <Spin fullscreen spinning={listingLoading || childrenLoading}
+            tip={t(childrenLoading ? 'veracode.confluence.children.loading' : 'veracode.confluence.listing')} />
+      {parentPageId && (
+        <Space wrap style={{ marginBottom: 8 }}>
+          <Text>{t('veracode.confluence.children.label')}</Text>
+          <Select
+            showSearch
+            allowClear
+            // the title filter runs over the list already fetched: no backend call per keystroke
+            optionFilterProp="label"
+            value={childOptions.some((o) => o.value === pageIdOf(pageId)) ? pageIdOf(pageId) : undefined}
+            onChange={(id?: string) => onPageIdChange(id ?? '')}
+            options={childOptions}
+            optionRender={(o) => (
+              <Space size={8} style={{ width: '100%', justifyContent: 'space-between' }}>
+                <Text ellipsis style={{ maxWidth: 380 }}>{o.label}</Text>
+                {o.data.modified && <Text type="secondary">{new Date(o.data.modified).toLocaleDateString()}</Text>}
+              </Space>
+            )}
+            placeholder={t(hasToken ? 'veracode.confluence.children.placeholder' : 'veracode.confluence.token.needed')}
+            notFoundContent={t('veracode.confluence.children.none')}
+            disabled={!hasToken}
+            style={{ width: 460 }}
+          />
+          <Tooltip title={t('veracode.confluence.children.reload')}>
+            <Button icon={<ReloadOutlined />} disabled={!hasToken} onClick={() => void loadChildren()} />
+          </Tooltip>
+          {children && (
+            <Text type="secondary">
+              {t('veracode.confluence.children.under', { count: children.children.length })}
+              {' '}
+              <a href={children.url} target="_blank" rel="noreferrer">{children.title}</a>
+            </Text>
+          )}
+        </Space>
+      )}
+      <Space wrap style={{ display: 'flex' }}>
         <Tooltip title={t('veracode.confluence.pageHint')}>
           <Input
             value={pageId}

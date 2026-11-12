@@ -2,6 +2,7 @@ package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.client.confluence.ConfluenceAttachmentPage;
 import com.creed.resource.veracode.client.confluence.ConfluenceAttachmentPage.Attachment;
+import com.creed.resource.veracode.client.confluence.ConfluenceChildPages;
 import com.creed.resource.veracode.client.confluence.ConfluenceClient;
 import com.creed.resource.veracode.client.confluence.ConfluencePage;
 import com.creed.resource.veracode.client.confluence.ConfluenceUser;
@@ -61,6 +62,14 @@ public class ConfluenceService {
      */
     public record AttachmentView(String id, String title, String mediaType, Long size, int version, String created,
                                  String author, boolean supported) {
+    }
+
+    /** @param modified when the page was last edited (ISO-8601), {@code null} when Confluence does not say */
+    public record ChildPage(String id, String title, String url, String modified) {
+    }
+
+    /** A page and its direct children, as Confluence orders them. */
+    public record PageChildren(String pageId, String title, String url, List<ChildPage> children) {
     }
 
     public record PageAttachments(String pageId, String title, String spaceKey, String url,
@@ -243,6 +252,32 @@ public class ConfluenceService {
             }
             throw e;
         }
+    }
+
+    /**
+     * The page's child pages, every page of them: the page lists them once, then filters by title itself
+     * (asked for, 2026-11-13 - no call per keystroke).
+     */
+    public PageChildren children(String pageId, ConfluenceToken token) {
+        requireEnabled();
+        token.require();
+        String id = pageId(pageId);
+        ConfluencePage page = page(id, token);
+        Map<String, ChildPage> children = new LinkedHashMap<>();
+        for (int start = 0; ; ) {
+            int from = start;
+            ConfluenceChildPages chunk = UpstreamException.call(CONFLUENCE, () -> confluence.childPages(
+                    token.authorization(), id, from, props.pageSize(), "version"));
+            List<ConfluenceChildPages.Child> results = chunk == null || chunk.results() == null ? List.of() : chunk.results();
+            results.forEach(c -> children.putIfAbsent(c.id(), new ChildPage(c.id(), c.title(), props.pageUrl(c.id()),
+                    c.version() == null ? null : c.version().when())));
+            // as the attachments: an empty page, or no "next", ends it
+            if (results.isEmpty() || !chunk.hasNext()) {
+                break;
+            }
+            start += results.size();
+        }
+        return new PageChildren(page.id(), page.title(), props.pageUrl(page.id()), List.copyOf(children.values()));
     }
 
     private Listing list(String pageId, ConfluenceToken token) {

@@ -264,7 +264,29 @@ public class MockJiraController {
                 .toList();
     }
 
-    /** Only what the service sends: {@code {"update": {"labels": [{"add": "x"}]}}}; 204 like Jira. */
+    /** One issue, with its description (the search's JSON leaves it out, as the service never asks it there). */
+    @GetMapping("/rest/api/2/issue/{key}")
+    ResponseEntity<?> issue(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+                            @PathVariable String key) {
+        if (user(authorization) == null) {
+            return unauthorized();
+        }
+        MockJiraStore.Issue issue = store.find(key);
+        if (issue == null) {
+            return error(HttpStatus.NOT_FOUND, "Issue Does Not Exist", null);
+        }
+        Map<String, Object> json = new LinkedHashMap<>(toJson(issue));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> fields = new LinkedHashMap<>((Map<String, Object>) json.get("fields"));
+        fields.put("description", issue.description());
+        json.put("fields", fields);
+        return ResponseEntity.ok(json);
+    }
+
+    /**
+     * Only what the service sends: {@code {"update": {"labels": [{"add": "x"}]}}}, and {@code "fields":
+     * {"description": "..."}} with it; 204 like Jira.
+     */
     @PutMapping("/rest/api/2/issue/{key}")
     ResponseEntity<?> update(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
                              @PathVariable String key, @RequestBody JsonNode body) {
@@ -281,6 +303,9 @@ public class MockJiraController {
                         + "' contains spaces which is invalid."));
             }
             store.addLabel(key, label);
+        }
+        if (body.path("fields").has("description")) {
+            store.describe(key, body.path("fields").path("description").asString(null));
         }
         return ResponseEntity.noContent().build();
     }

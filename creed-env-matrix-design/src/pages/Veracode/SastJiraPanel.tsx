@@ -256,7 +256,7 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, cou
       fixed: 'right',
       // an existing issue of another application is labelled, not created again
       render: (_, i) => (i.needsLabel
-        ? createButton([i.id], t('veracode.labelOne'),
+        ? createButton([i.id], t('veracode.sastJira.labelOne'),
           t('veracode.sastJira.labelOneConfirm', { key: i.issues[0]?.key ?? '', labels: i.missingLabels.join(', ') }),
           { size: 'small', kind: LABEL_BUTTON })
         : i.status === 'MISSING' ? createButton([i.id], t('veracode.createOne'),
@@ -363,9 +363,9 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, cou
             t('veracode.sastJira.createConfirm', { count: selected.length, project: sast.projectKey, type: sast.issueType }))}
           {createButton(allMissing, t('veracode.createAllMissing', { count: allMissing.length }),
             t('veracode.sastJira.createConfirm', { count: allMissing.length, project: sast.projectKey, type: sast.issueType }))}
-          <Tooltip title={canCreate ? t('veracode.labelAllHint') : undefined}>
+          <Tooltip title={canCreate ? t('veracode.sastJira.labelAllHint') : undefined}>
             <span>
-              {createButton(allUnlabelled, t('veracode.labelAll', { count: allUnlabelled.length }),
+              {createButton(allUnlabelled, t('veracode.sastJira.labelAll', { count: allUnlabelled.length }),
                 t('veracode.sastJira.labelAllConfirm', { count: allUnlabelled.length }),
                 { kind: LABEL_BUTTON, icon: <TagsOutlined /> })}
             </span>

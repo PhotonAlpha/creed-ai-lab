@@ -49,6 +49,12 @@ public interface ConfluenceClient {
                                             @RequestHeader("X-Atlassian-Token") String xsrf, @PathVariable String id,
                                             @RequestBody MultiValueMap<String, HttpEntity<?>> files);
 
+    /** A page's direct children, paged by {@code start} as the attachments are. */
+    @GetExchange("/rest/api/content/{id}/child/page")
+    ConfluenceChildPages childPages(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+                                    @PathVariable String id, @RequestParam("start") int start,
+                                    @RequestParam("limit") int limit, @RequestParam("expand") String expand);
+
     @GetExchange("/rest/api/content/{id}/child/attachment")
     ConfluenceAttachmentPage attachments(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
                                          @PathVariable String id, @RequestParam("start") int start,

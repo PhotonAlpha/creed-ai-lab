@@ -295,6 +295,8 @@ export interface VeracodeSettings {
   confluenceCloud: boolean;
   /** The exported page's title template: `{project} - {version} - Reports (SAST,SCA) - {timestamp}`. */
   confluenceExportTitle: string;
+  /** `veracode.confluence.parent-page-id`: the page whose child pages are offered; `null` = type a page id. */
+  confluenceParentPageId?: string | null;
 }
 
 /**
@@ -468,6 +470,22 @@ export interface ConfluencePageAttachments {
   attachments: ConfluenceAttachment[];
 }
 
+export interface ConfluenceChildPage {
+  id: string;
+  title: string;
+  /** The page as a person opens it. */
+  url: string;
+  /** Last edited (ISO-8601). */
+  modified: string | null;
+}
+
+export interface ConfluencePageChildren {
+  pageId: string;
+  title: string;
+  url: string;
+  children: ConfluenceChildPage[];
+}
+
 /** Spelled out because `requestAt` drops its own Content-Type as soon as `init.headers` is set. */
 export interface UploadOptions {
   /** Shown instead of the report's version; display only. */
@@ -551,6 +569,11 @@ export const veracodeApi = {
   testConfluence: (auth: ConfluenceAuth) =>
     requestAt<ConfluenceConnection>(BASE, '/confluence/connection', { method: 'POST', headers: confluenceHeader(auth) }),
 
+  /** The page's child pages, all of them: the page filters them by title itself. */
+  confluenceChildren: (pageId: string, auth: ConfluenceAuth) =>
+    requestAt<ConfluencePageChildren>(BASE, `/confluence/pages/${encodeURIComponent(pageId)}/children`,
+      { headers: confluenceHeader(auth) }),
+
   confluenceAttachments: (pageId: string, auth: ConfluenceAuth) =>
     requestAt<ConfluencePageAttachments>(BASE, `/confluence/pages/${encodeURIComponent(pageId)}/attachments`,
       { headers: confluenceHeader(auth) }),
@@ -630,8 +653,13 @@ export const veracodeApi = {
 
 // ---- Report templates: a company .xlsx, its cells bound to SCA / SAST fields, filled at export (JXLS) ----
 
-/** `sca` = the SCA findings table, `sast` = the SAST Jira table, `summary` = one value of the analysis. */
-export type TemplateDataset = 'sca' | 'sast' | 'summary';
+/**
+ * `sca` = the SCA findings table, `sast` = the SAST Jira table, `scaStats` / `sastStats` = the SCA / SAST statistics
+ * (one row per report), `summary` = one value of the analysis.
+ */
+export type TemplateDataset = 'sca' | 'sast' | 'scaStats' | 'sastStats' | 'summary';
+/** What a data row can repeat. */
+export type ListDataset = Exclude<TemplateDataset, 'summary'>;
 
 export interface TemplateField {
   key: string;
@@ -664,7 +692,7 @@ export interface TemplateMapping {
   sheets: {
     sheet: string;
     /** Data rows: repeated once per item of the dataset at export, what is below moving down. */
-    lists: { dataset: 'sca' | 'sast'; row: number; cells: { col: number; field: string }[] }[];
+    lists: { dataset: ListDataset; row: number; cells: { col: number; field: string }[] }[];
     /** Single cells showing a summary field. */
     values: { row: number; col: number; field: string }[];
   }[];

@@ -53,8 +53,15 @@ public class ReportTemplateService {
                          TemplateMapping mapping, Instant updatedAt) {
     }
 
-    /** @param fileName what the browser saves it as: the template's name and the export time */
+    /**
+     * @param fileName what the browser saves it as: the template's name and the export time, with the upload's
+     *                 extension ({@code .xlsm} keeps its macros, and Excel refuses one under {@code .xlsx})
+     */
     public record Filled(String fileName, byte[] content) {
+
+        public boolean macroEnabled() {
+            return fileName.toLowerCase(java.util.Locale.ROOT).endsWith(".xlsm");
+        }
     }
 
     public static class TemplateNotFoundException extends RuntimeException {
@@ -76,7 +83,7 @@ public class ReportTemplateService {
     public Detail create(String name, String fileName, byte[] content) {
         List<TemplateWorkbook.SheetView> sheets = TemplateWorkbook.read(content);
         String title = name == null || name.isBlank()
-                ? fileName.replaceFirst("(?i)\\.xlsx$", "") : name.trim();
+                ? fileName.replaceFirst("(?i)\\.xls[xm]$", "") : name.trim();
         Instant now = clock.instant();
         ReportTemplateRepository.Row row = new ReportTemplateRepository.Row(UUID.randomUUID().toString(),
                 title.length() > 200 ? title.substring(0, 200) : title, fileName, content,
@@ -116,7 +123,7 @@ public class ReportTemplateService {
     /** The workbook with its JXLS markup, as export fills it - to look at, or to fill elsewhere. */
     public Filled jxlsTemplate(String id) {
         ReportTemplateRepository.Row row = require(id);
-        return new Filled(row.name() + "-jxls.xlsx",
+        return new Filled(row.name() + "-jxls" + extension(row.fileName()),
                 TemplateWorkbook.withJxlsMarkup(row.content(), mapping(row.mapping())));
     }
 
@@ -136,7 +143,12 @@ public class ReportTemplateService {
                 .buildAndFill(data);
         String stamp = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
                 .withZone(confluence.exportZone()).format(now);
-        return new Filled(row.name() + "-" + stamp + ".xlsx", filled);
+        return new Filled(row.name() + "-" + stamp + extension(row.fileName()), filled);
+    }
+
+    /** The upload's: {@code .xlsm} or {@code .xlsx}. */
+    static String extension(String fileName) {
+        return fileName != null && fileName.toLowerCase(java.util.Locale.ROOT).endsWith(".xlsm") ? ".xlsm" : ".xlsx";
     }
 
     private ReportTemplateRepository.Row require(String id) {
@@ -167,7 +179,7 @@ public class ReportTemplateService {
             Set<String> cells = new HashSet<>();
             for (TemplateMapping.ListBinding list : sm.lists()) {
                 String where = sm.sheet() + "!" + (list.row() + 1);
-                if (!TemplateFields.SCA.equals(list.dataset()) && !TemplateFields.SAST.equals(list.dataset())) {
+                if (!TemplateFields.isList(list.dataset())) {
                     throw new IllegalArgumentException(where + ": unknown dataset '" + list.dataset() + "'");
                 }
                 checkRow(list.row(), where);

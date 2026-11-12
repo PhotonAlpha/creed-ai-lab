@@ -34,7 +34,8 @@ import java.util.zip.ZipOutputStream;
  * <p>Page {@value #PAGE} holds the sample report as XML, both sample reports zipped with their {@code .xsd} - the
  * zip downloads through a redirect, as Cloud hands files to its media service (outside the base URL, here
  * {@code /mock/confluence-media}), whose signed URL takes no token - and a PDF
- * that cannot be analysed. Page {@value #EMPTY_PAGE} has no attachments; any other id is Confluence's 404.
+ * that cannot be analysed. Page {@value #EMPTY_PAGE} has no attachments; both are the children of {@value #PARENT}
+ * (the configured parent page). Any other id is Confluence's 404.
  *
  * <p>Authentication as {@link MockJiraController}'s ({@code Bearer} or {@code Basic}, {@code invalid} refused).
  * Without any, {@code user/current} answers {@code anonymous} as Cloud does, and everything else 401s.
@@ -46,6 +47,7 @@ public class MockConfluenceController {
     static final String BASE = "/mock/confluence";
     public static final String PAGE = "98765";
     public static final String EMPTY_PAGE = "98766";
+    public static final String PARENT = "98700";
     static final String XML_ID = "att1001";
     static final String ZIP_ID = "att1002";
     static final String PDF_ID = "att1003";
@@ -117,12 +119,42 @@ public class MockConfluenceController {
                     : Map.of("id", id, "type", "page", "title", made.title(),
                             "space", Map.of("key", made.spaceKey(), "name", "Creed")));
         }
-        if (!PAGE.equals(id) && !EMPTY_PAGE.equals(id)) {
+        if (!PAGE.equals(id) && !EMPTY_PAGE.equals(id) && !PARENT.equals(id)) {
             return notFound(id);
         }
-        return ResponseEntity.ok(Map.of("id", id, "type", "page",
-                "title", PAGE.equals(id) ? "Veracode reports - creed" : "Release notes",
+        return ResponseEntity.ok(Map.of("id", id, "type", "page", "title", title(id),
                 "space", Map.of("key", "CREED", "name", "Creed")));
+    }
+
+    private static String title(String id) {
+        return switch (id) {
+            case PAGE -> "Veracode reports - creed";
+            case PARENT -> "Veracode";
+            default -> "Release notes";
+        };
+    }
+
+    /** {@value #PARENT}'s children: the two static pages, then the pages created under it; one listing page. */
+    @GetMapping(BASE + "/rest/api/content/{id}/child/page")
+    ResponseEntity<Map<String, Object>> childPages(@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String auth,
+                                                   @PathVariable String id) {
+        if (MockJiraController.user(auth) == null) {
+            return unauthorized();
+        }
+        if (!PAGE.equals(id) && !EMPTY_PAGE.equals(id) && !PARENT.equals(id) && !created.containsKey(id)) {
+            return notFound(id);
+        }
+        List<Map<String, Object>> results = new java.util.ArrayList<>();
+        if (PARENT.equals(id)) {
+            for (String child : List.of(PAGE, EMPTY_PAGE)) {
+                results.add(Map.of("id", child, "type", "page", "title", title(child),
+                        "version", Map.of("number", 3, "when", "2026-11-09T08:30:00.000Z")));
+            }
+        }
+        createdPages().stream().filter(p -> id.equals(p.parentId())).forEach(p -> results.add(Map.of("id", p.id(),
+                "type", "page", "title", p.title(), "version", Map.of("number", 1, "when", "2026-11-13T08:30:00.000Z"))));
+        return ResponseEntity.ok(Map.of("results", results, "start", 0, "limit", 25, "size", results.size(),
+                "_links", Map.of()));
     }
 
     /**

@@ -76,7 +76,7 @@ public class VeracodeController {
     VeracodeSettings settings() {
         return new VeracodeSettings(jira.projectKey(), jira.issueType(), jira.baseUrl(), mock, jira.summaryTemplate(),
                 jira.looksLikeCloud(), confluenceProps.baseUrl(), confluenceProps.looksLikeCloud(),
-                confluenceProps.exportTitle());
+                confluenceProps.exportTitle(), confluenceProps.parentPageId());
     }
 
     /**
@@ -149,6 +149,12 @@ public class VeracodeController {
     }
 
     /** The page's attachments, each with whether it can be analysed ({@code .xml} / {@code .zip}). */
+    /** The child pages of {@code pageId} - the configured {@code parent-page-id}, on the page. */
+    @GetMapping("/confluence/pages/{pageId}/children")
+    ConfluenceService.PageChildren confluenceChildren(@PathVariable String pageId, ConfluenceToken token) {
+        return confluence.children(pageId, token);
+    }
+
     @GetMapping("/confluence/pages/{pageId}/attachments")
     ConfluenceService.PageAttachments confluenceAttachments(@PathVariable String pageId, ConfluenceToken token) {
         return confluence.attachments(pageId, token);

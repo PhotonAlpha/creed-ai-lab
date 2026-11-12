@@ -68,6 +68,18 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-13 (latest, asked for, nine items): **export with template hung** - the JXLS area spanned POI's used range,
+i.e. every formatted blank cell (whole-row formatting = out to XFD, 16384 cells copied per data row; reproduced at
+>10 min). `TemplateWorkbook.extent` now bounds the area (and the page's grid) by what shows. **`.xlsm` templates**
+(macros and extension kept). **`scaStats` / `sastStats` datasets** (one row per report, `ReportView.sca` / `.sast`).
+Field `fileName` labelled *Library file* (as the page's column). **Create version = `fields.versions`**
+(`JiraLookupService.createVersion(meta, fields, lookup)`), the lookup's versions optional. **Labelling updates the
+description** (one `PUT` writes labels + description; read with `JiraClient.issue`, rewritten per application - asked for,
+SCA and SAST alike: `JiraDescription.mergeSca` / `mergeSast`, applications not in the analysis keep their part; SAST
+source lines now name their application, `Source (<name>): ...`); the page's buttons renamed *Add label & finding* / *Sync label & description*. **Confluence child pages**:
+`veracode.confluence.parent-page-id`, `GET /confluence/pages/{id}/children`, mock parent `98700`; the page filters
+titles itself, full-screen spinner while listing. **92 tests pass**; UI typechecked, not clicked through.
+
 2026-11-12 (latest, asked for): **report templates** - upload a company `.xlsx`, bind cells on `/veracode-templates`
 (data rows of `sca` / `sast`, `summary` cells), export an analysis through it with JXLS 3.0.0. Package `template/`
 (`TemplateWorkbook` read + markup, `TemplateFields` catalog + data, `ReportTemplateService` validation + fill,

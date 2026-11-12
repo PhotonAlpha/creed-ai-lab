@@ -1,23 +1,35 @@
 import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { Tag, Tooltip, theme } from 'antd';
-import type { TemplateMapping, TemplateSheet } from '../../../api/veracode';
+import type { ListDataset, TemplateDataset, TemplateMapping, TemplateSheet } from '../../../api/veracode';
 import { bindingAt, columnName, listAt } from './mappingEdit';
 
 /** Rows / columns past the used range the user can still bind (a data row is often the empty one under a header). */
 const SPARE_ROWS = 3;
 const SPARE_COLS = 1;
 
-export const DATASET_COLOR = { sca: 'blue', sast: 'orange', summary: 'purple' } as const;
+export const DATASET_COLOR: Record<TemplateDataset, string> = {
+  sca: 'blue', sast: 'orange', scaStats: 'cyan', sastStats: 'green', summary: 'purple',
+};
+
+/** A data row's band (row background) and its row number's color, per dataset. */
+const bandColors = (token: ReturnType<typeof theme.useToken>['token'], dataset: ListDataset) => ({
+  sca: { band: token.colorPrimaryBg, text: token.colorPrimary },
+  sast: { band: token.colorWarningBg, text: token.colorWarning },
+  scaStats: { band: token.cyan1, text: token.cyan7 },
+  sastStats: { band: token.colorSuccessBg, text: token.colorSuccess },
+}[dataset]);
 
 /**
  * The sheet drawn as Excel does - column letters, row numbers, merges, widths, bold and fills - with what each cell is
  * bound to on top. A click selects a cell; the side panel binds it.
  */
-export function TemplateGrid({ sheet, mapping, label, selected, onSelect }: {
+export function TemplateGrid({ sheet, mapping, label, datasetName, selected, onSelect }: {
   sheet: TemplateSheet;
   mapping: TemplateMapping['sheets'][number];
-  label: (dataset: 'sca' | 'sast' | 'summary', field: string) => string;
+  label: (dataset: TemplateDataset, field: string) => string;
+  /** A dataset's name, for the row number's tooltip. */
+  datasetName: (dataset: ListDataset) => string;
   selected: { row: number; col: number } | null;
   onSelect: (row: number, col: number) => void;
 }) {
@@ -76,13 +88,14 @@ export function TemplateGrid({ sheet, mapping, label, selected, onSelect }: {
         <tbody>
           {Array.from({ length: rows }, (_, r) => {
             const list = listAt(mapping, r);
-            const band = list ? (list.dataset === 'sca' ? token.colorPrimaryBg : token.colorWarningBg) : undefined;
+            const colors = list ? bandColors(token, list.dataset) : undefined;
+            const band = colors?.band;
             return (
               <tr key={r}>
                 <th style={{ ...head, left: 0, background: band ?? head.background }}>
                   {list ? (
-                    <Tooltip title={list.dataset.toUpperCase()}>
-                      <span style={{ color: list.dataset === 'sca' ? token.colorPrimary : token.colorWarning, fontWeight: 600 }}>
+                    <Tooltip title={datasetName(list.dataset)}>
+                      <span style={{ color: colors?.text, fontWeight: 600 }}>
                         {r + 1}
                       </span>
                     </Tooltip>

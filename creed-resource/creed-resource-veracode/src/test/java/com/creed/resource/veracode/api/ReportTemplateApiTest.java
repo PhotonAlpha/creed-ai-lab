@@ -3,11 +3,14 @@ package com.creed.resource.veracode.api;
 import com.creed.resource.veracode.mock.MockJiraStore;
 import com.creed.resource.veracode.service.JiraToken;
 import com.jayway.jsonpath.JsonPath;
+import org.apache.poi.ss.usermodel.BorderStyle;
+import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbookType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -77,10 +80,21 @@ class ReportTemplateApiTest {
             }
             sca.createRow(4).createCell(0).setCellValue("(data)");
             sca.createRow(6).createCell(0).setCellValue("End of report");
+            // formatted by whole rows, as company templates are: cells out to XFD and down to row 200 that show
+            // nothing. An area over them is what made an export hang (2026-11-13) - the markup must stay at E7
+            CellStyle bordered = wb.createCellStyle();
+            bordered.setBorderBottom(BorderStyle.THIN);
+            for (int r = 0; r < 200; r++) {
+                Row row = sca.getRow(r) != null ? sca.getRow(r) : sca.createRow(r);
+                row.createCell(16_383).setCellStyle(bordered);
+            }
             Sheet sast = wb.createSheet("SAST code flaws");
             Row sastHeader = sast.createRow(0);
             sastHeader.createCell(0).setCellValue("Jira summary");
             sastHeader.createCell(1).setCellValue("Flaw IDs");
+            Sheet stats = wb.createSheet("Statistics");
+            stats.createRow(0).createCell(0).setCellValue("Application");
+            stats.createRow(3).createCell(0).setCellValue("Application");
             wb.write(out);
             return out.toByteArray();
         }
@@ -92,7 +106,11 @@ class ReportTemplateApiTest {
         String body = mvc.perform(multipart("/api/veracode/report-templates").file(file))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("公司模版"))
-                .andExpect(jsonPath("$.sheets.length()").value(2))
+                .andExpect(jsonPath("$.sheets.length()").value(3))
+                // the grid is the content, not the formatted blank cells out to XFD
+                .andExpect(jsonPath("$.sheets[0].cols").value(4))
+                .andExpect(jsonPath("$.sheets[0].rows").value(7))
+                .andExpect(jsonPath("$.sheets[0].truncated").value(false))
                 .andExpect(jsonPath("$.sheets[0].name").value("SCA components"))
                 .andExpect(jsonPath("$.sheets[0].data[0].cells[0].text").value("Veracode SCA report"))
                 .andExpect(jsonPath("$.sheets[0].merges[0].lastCol").value(3))
@@ -108,7 +126,12 @@ class ReportTemplateApiTest {
                  {"col":3,"field":"jiraKeys"},{"col":4,"field":"no"}]}],
                "values":[{"row":1,"col":1,"field":"projectKey"}]},
               {"sheet":"SAST code flaws",
-               "lists":[{"dataset":"sast","row":1,"cells":[{"col":0,"field":"summary"},{"col":1,"field":"flawIds"}]}]}
+               "lists":[{"dataset":"sast","row":1,"cells":[{"col":0,"field":"summary"},{"col":1,"field":"flawIds"}]}]},
+              {"sheet":"Statistics",
+               "lists":[{"dataset":"scaStats","row":1,"cells":[{"col":0,"field":"application"},{"col":1,"field":"vulnerabilities"},
+                          {"col":2,"field":"veryHigh"},{"col":3,"field":"maxCvss"}]},
+                        {"dataset":"sastStats","row":4,"cells":[{"col":0,"field":"application"},{"col":1,"field":"open"},
+                          {"col":2,"field":"rating"}]}]}
             ]}""";
 
     @Test
@@ -119,7 +142,7 @@ class ReportTemplateApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.mapping.sheets[0].lists[0].cells.length()").value(5));
         mvc.perform(get("/api/veracode/report-templates"))
-                .andExpect(jsonPath("$[?(@.id=='" + id + "')].lists").value(org.hamcrest.Matchers.contains(2)))
+                .andExpect(jsonPath("$[?(@.id=='" + id + "')].lists").value(org.hamcrest.Matchers.contains(4)))
                 .andExpect(jsonPath("$[?(@.id=='" + id + "')].values").value(org.hamcrest.Matchers.contains(1)));
 
         // the JXLS template: markup, nothing filled
@@ -171,11 +194,55 @@ class ReportTemplateApiTest {
             assertThat(sast.getRow(1).getCell(0).getStringCellValue()).startsWith("creed-sast - CWE-");
             assertThat(sast.getRow(2).getCell(0).getStringCellValue()).startsWith("creed-sast - CWE-");
             assertThat(sast.getRow(1).getCell(1).getStringCellValue()).isNotBlank();
+
+            // the statistics, one row per report (one here), numbers as numbers
+            Sheet stats = wb.getSheet("Statistics");
+            assertThat(stats.getRow(1).getCell(0).getStringCellValue()).isEqualTo("creed-platform-2026-10-06-Creed");
+            assertThat(stats.getRow(1).getCell(1).getNumericCellValue()).isPositive();
+            assertThat(stats.getRow(1).getCell(3).getNumericCellValue()).isEqualTo(10.0);
+            // the SAST row below kept its place: the SCA row above it did not grow
+            assertThat(stats.getRow(3).getCell(0).getStringCellValue()).isEqualTo("Application");
+            assertThat(stats.getRow(4).getCell(0).getStringCellValue()).isEqualTo("creed-platform-2026-10-06-Creed");
+            assertThat(stats.getRow(4).getCell(1).getNumericCellValue()).isPositive();
         }
 
         mvc.perform(delete("/api/veracode/report-templates/" + id)).andExpect(status().isNoContent());
         mvc.perform(get("/api/veracode/report-templates/" + id)).andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("template_not_found"));
+    }
+
+    /** A macro-enabled workbook (asked for, 2026-11-13) comes back as one: its type, name and content type kept. */
+    @Test
+    void anXlsmTemplateIsFilledAsAnXlsm() throws Exception {
+        byte[] xlsm;
+        try (XSSFWorkbook wb = new XSSFWorkbook(XSSFWorkbookType.XLSM); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            wb.createSheet("Report").createRow(0).createCell(0).setCellValue("Project");
+            wb.write(out);
+            xlsm = out.toByteArray();
+        }
+        String body = mvc.perform(multipart("/api/veracode/report-templates").file(new MockMultipartFile("file",
+                        "macro.xlsm", "application/vnd.ms-excel.sheet.macroEnabled.12", xlsm)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("macro"))
+                .andReturn().getResponse().getContentAsString();
+        String id = JsonPath.read(body, "$.id");
+        mvc.perform(put("/api/veracode/report-templates/" + id + "/mapping").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sheets\":[{\"sheet\":\"Report\",\"values\":[{\"row\":0,\"col\":1,\"field\":\"projectKey\"}]}]}"))
+                .andExpect(status().isOk());
+        String uploadId = JsonPath.read(mvc.perform(multipart("/api/veracode/analysis/upload")
+                        .file(new MockMultipartFile("file", "detailedreport.xml", "application/xml",
+                                new ClassPathResource(VeracodeController.SAMPLE).getContentAsByteArray())))
+                .andReturn().getResponse().getContentAsString(), "$.uploadId");
+        var response = mvc.perform(get("/api/veracode/report-templates/" + id + "/export").param("uploadId", uploadId))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .contentType("application/vnd.ms-excel.sheet.macroEnabled.12"))
+                .andReturn().getResponse();
+        assertThat(response.getHeader("Content-Disposition")).contains(".xlsm");
+        try (XSSFWorkbook wb = new XSSFWorkbook(new ByteArrayInputStream(response.getContentAsByteArray()))) {
+            assertThat(wb.getWorkbookType()).isEqualTo(XSSFWorkbookType.XLSM);
+            assertThat(wb.getSheet("Report").getRow(0).getCell(1).getStringCellValue()).isEqualTo("CREED");
+        }
     }
 
     @Test

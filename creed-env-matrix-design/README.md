@@ -544,7 +544,12 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
     `application.yml` (`IDB VERACODE STSA`); the tab has its own affects-version choice (required when the issue type
     requires it) and field bar. Labels as for SCA: a created issue carries the label of every application with
     open flaws in it; an existing issue lacking an application's label shows *Label missing* and gets it with
-    **Add label** / **Add all labels** (orange) instead of a second issue. On both tabs a finding whose issues are
+    **Sync label & description** / **Sync all** (orange) instead of a second issue: the label is added and the
+    description rewritten for the applications the issue now covers (the *Jira summary* blocks, flaws, sources); an
+    application not in this analysis keeps its blocks, rows and source line. On the SCA tab the same button
+    is **Add label & finding**: the label, and the description rewritten as one *Veracode SCA finding* table per
+    application: this analysis' applications get new tables, others (filed from an earlier analysis) keep theirs; any
+    other text in it goes. On both tabs a finding whose issues are
     **all** Closed / Done (`veracode.jira.closed-statuses`) gets a red **Re-create**: a dialog lists the closed issues
     and asks the user to make sure it is a regression, not a duplicate; one row at a time, never in bulk, and the
     server re-reads Jira first (an issue reopened meanwhile means nothing is created). Rows expand to the flaws (application, file:line, module). A SAST project Jira refuses
@@ -555,10 +560,18 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   field bar, not from here.
 - **Auto-create** asks first when ticked: the next analysis files an issue for every missing finding in one go. While on,
   an orange tag says so.
-- **Report templates** (menu *Report templates*, `/veracode-templates`): upload the company's Excel template, click
-  cells and bind them to SCA / SAST fields or summary values (a row made a data row repeats once per item at export),
-  save, then *Export with template* on the Veracode page (the backend writes JXLS markup and fills it; unbound sheets
-  stay as uploaded).
+- **Report templates** (menu *Report templates*, `/veracode-templates`): upload the company's Excel template (`.xlsx`
+  or macro-enabled `.xlsm` - the export keeps the macros and the extension), click cells and bind them to SCA / SAST
+  fields, SCA / SAST statistics (one row per report, as the page's statistics tables) or summary values (a row made a
+  data row repeats once per item at export), save, then *Export with template* on the Veracode page - the main export:
+  a large gradient button joined to an arrow button, one gradient running across both (antd's *Gradient Button* demo,
+  `Space.Compact`), first in the findings card's toolbar; the gradient one exports with the template used last (named
+  on it), the arrow picks a template (the backend
+  writes JXLS markup and fills it; unbound sheets stay as uploaded).
+- **The Jira version to create under** is the first field of the *Jira fields* bar (required), apart from the lookup's
+  *Jira versions*, which are optional and may name several or none. One lookup version is carried over.
+- **The findings card's toolbar** sits under its title, not in it: row one the exports (template, Excel, Confluence)
+  on the left and the create / label buttons on the right, row two the status / application / search filters.
 - **Token dialogs** (Jira / Confluence): a *No token yet?* box says where to create one and links to that page in a new
   tab; create it there, come back and paste.
 - **Cards**: the three cards on top cast a shadow on hover; *Reports* folds and unfolds.
@@ -582,6 +595,10 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   link (`GBT-T1-Creed-CCS` → `Creed-CCS`, `https://…/browse`). Tables on the page, the Jira description (*Veracode
   application*) and the Confluence export (*Repository*) show the name, linked; it is also the application's Jira label
   (replacing the `application-label` regex). Without an entry the `app_name` itself is used.
+- **Confluence report page**: with `veracode.confluence.parent-page-id` configured (`CREED_CONFLUENCE_PARENT_PAGE`)
+  the source tab lists that page's child pages once (newest edit first); typing in the select filters them by title in
+  the browser. Picking one fills the page id; *List attachments* then works as before. Listing shows a full-screen
+  spinner.
 - **Confluence attachments** are listed newest first, at most 50 by default (50 / 100 / 200 / all), filtered by default
   to names with a report date `dd_MMM_yyyy` (`09_Nov_2026`) and to `.zip` — the page usually holds PDFs of the same
   scans. Both filters can be turned off. When the page keeps every run (`03_Nov_2026`, `09_Nov_2026`, …) a *report

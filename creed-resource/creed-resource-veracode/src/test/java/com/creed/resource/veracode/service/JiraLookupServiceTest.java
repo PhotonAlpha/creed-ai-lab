@@ -293,7 +293,7 @@ class JiraLookupServiceTest {
 
     private static JiraIssue issue(String key, String project, String summary) {
         return new JiraIssue("1", key, new JiraIssue.Fields(summary, new JiraIssue.Status("To Do"),
-                List.of(JiraVersion.named("2.3.0")), List.of(), null, null, new JiraIssue.Project(project)));
+                List.of(JiraVersion.named("2.3.0")), List.of(), null, null, new JiraIssue.Project(project), null));
     }
 
     private static Finding finding(String cve, String file) {
@@ -418,6 +418,11 @@ class JiraLookupServiceTest {
         @Override
         public void addAttachments(String authorization, String xsrf, String key,
                                    org.springframework.util.MultiValueMap<String, org.springframework.http.HttpEntity<?>> files) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public JiraIssue issue(String authorization, String key, String fields) {
             throw new UnsupportedOperationException();
         }
 

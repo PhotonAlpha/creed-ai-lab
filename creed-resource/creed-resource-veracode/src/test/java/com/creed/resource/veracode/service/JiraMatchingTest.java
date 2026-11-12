@@ -123,7 +123,7 @@ class JiraMatchingTest {
 
     private static JiraIssue issue(String summary, String version) {
         return new JiraIssue("1", "CREED-1", new JiraIssue.Fields(summary, null, List.of(JiraVersion.named(version)),
-                List.of(), null, null, null));
+                List.of(), null, null, null, null));
     }
 
     static Finding finding(String cveId, String cwe, String file, String... components) {

@@ -164,8 +164,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   Confluence 用用户自己的令牌（「Confluence 令牌」对话框，Cloud = 邮箱 + API 令牌，Data Center = 个人访问令牌，可「测试连接」，
   存储方式同 Jira 令牌，请求头 `X-Confluence-Token` / `X-Confluence-User`）；后端未配置 `veracode.confluence.base-url` 时只显示上传。
   两种来源都读取 SCA 部分（对接 Jira）和 SAST 静态分析漏洞（按 CWE + 类别对接 Jira，见下）；报告的影响版本（根节点 `version`，上传前可手工改）**只在表格中展示**，不参与 Jira 查询和创建。
-- **Jira 版本**是可搜索的多选下拉（版本多时不撑大页面，列表来自测试连接 / 分析结果）：查找时按所选版本过滤（`affectedVersion in`，不选 = 全部版本），
-  新建时关联所选版本，所以创建必须正好选一个；切换版本会自动重新分析。
+- **Jira 版本**是可搜索的多选下拉（版本多时不撑大页面，列表来自测试连接 / 分析结果）：查找时按所选版本过滤（`affectedVersion in`，不选 = 全部版本），非必填；切换版本会自动重新分析。
+  **新建时的版本**是「Jira 字段」栏第一个字段「Jira 版本」（必填，按 Jira 的 `versions` 字段随 `fields` 发送），查询条件正好选一个版本时自动带入。
   查询条件（Jira 版本 / Country）改动时只查一次：下拉框打开期间的点选只改状态，关闭下拉框才提交（关闭状态下删标签或清空则立即提交），
   集合没变不发请求；请求带 `skipSast`，只重查 SCA，页面保留原来的 SAST 结果；后端在 `meta-cache-ttl`（60s）内复用创建界面信息 —— 一次改动 = 1 次 Jira 搜索。
   默认值在后端配置 `veracode.jira.defaults`：`affects-versions`（测试连接后，若页面还没选 Jira 版本且该 Jira 有这些版本则选中，没有则页面不变）、
@@ -190,9 +190,10 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   label：`veracode`、`{project}`、application label（不含 `cve_id`）（`veracode.applications` 中映射的名称，如 `GBT-T1-Creed-CCS` → `Creed-CCS`；没有映射时为 `app_name`）；
   描述表格按页面列顺序，含完整 `cve_summary`。
 - 可一次上传多个 XML：不同 application 时表格可按 application 过滤、分组（可折叠）；相同 CVE + 相同 jar 的 Jira 已存在时不再重复创建，
-  而是给它加上该 application 的 label（行上显示「缺少 label」，按钮为「添加 label」）。
+  而是给它加上该 application 的 label，并重写描述（不是追加）：每个 application 一张 SCA finding 表格，本次分析中的用新数据，不在本次分析中的保留原表格（行上显示「缺少 label」，按钮为「添加 label 与描述」）。
+  SAST 同理，按钮为「同步 label 与描述」：加 label 并按现在覆盖的 application 重写描述，与 SCA 规则一致：不在本次分析中的 application 保留原有的三行、漏洞行和来源（来源行带 application：`Source (名称): …`）。
   按钮按颜色区分：创建 = 蓝色（primary）+ ➕ 图标，添加 label = 橙色 + 标签图标（与「缺少 label」标签、统计卡片同色）；
-  工具栏「创建全部缺失」只建缺失的，「添加全部 label」一键给所有缺少 label 的 Jira 加上，避免遗漏。
+  工具栏「创建全部缺失」只建缺失的，「全部添加 label 与描述」（SAST：「全部同步 label 与描述」）一键给所有缺少 label 的 Jira 加上，避免遗漏。
 - 已关闭的 Jira：一个漏洞（SCA 或 SAST）找到的 Jira **全部**为 Closed / Done（`veracode.jira.closed-statuses`）时，该行显示红色「重新创建」，
   点击后弹框列出已关闭的 Jira 并提醒慎重，确认后只为这一行新建（`recreateClosed`，后端只接受单个 id，并重新检查状态）；批量创建仍视为已存在。
   application 显示在分组（折叠面板）标题上，单个报告时显示在上方的报告表中；只有关闭分组、多个 application 混在一个表里时才显示 application 列。
@@ -222,6 +223,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   SCA / SAST 两个表格按 repository 排序；SAST 的 Details 与页面的「Jira 标题」列相同（按 application 三行）。
 - application 映射（`veracode.applications`：`app_name` → 名称 + 链接）：页面表格、Jira 描述、Confluence 的 Repository 显示映射名称并可点击跳转，
   映射名称也是 Jira label；没有映射时用 `app_name`。
+- Confluence 报告页面：配置 `veracode.confluence.parent-page-id` 时先列出该父页面的子页面（一次调用，最近修改在前），下拉框输入标题在前端过滤，选中后填入页面 ID，再「列出附件」；列出子页面 / 附件时全屏 loading。
 - Confluence 附件列表：按上传时间倒序，默认最多 50 个，默认只列文件名含 `dd_MMM_yyyy` 日期且为 `.zip` 的附件（可取消）；
   「报告日期」下拉框按文件名中的日期再筛选（最新在前），列出后默认选最新日期，可选「所有日期」；
   关键字输入框在前端过滤已列出的结果（不调用后端，文件名 / 类型 / 上传者包含全部关键字）。
@@ -232,9 +234,10 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 新建 Jira 描述的 Source：上传的文件加为 Jira 附件；从 Confluence 下载的给出附件地址和所在页面的链接（`on page [标题|页面地址]`）。
 - SAST 标签页「Jira 标题」列按 application 显示三行（`<名称>: <SAST project-name> - <类别>` / `CWE 117 <名称>` / `CWE 117 (Flaw IDs: …)`），
   合并了原「未关闭漏洞」列；Jira 标题本身不变（仍按标题查找），新建的 SAST Jira 在描述开头写同样的三行（按 application）。
-- **报告模版**（`/veracode-templates`，`pages/Veracode/templates/`）：上传公司 Excel 模版（.xlsx）→ 后端解析成 JSON → 页面按 Excel 样子渲染（列字母、行号、合并、列宽、粗体、填充色）→
-  点选单元格：所在行可设为 SCA / SAST 数据行（导出时按条数向下重复，下方内容下移），该行单元格绑定数据集字段；其他单元格绑定汇总字段 → 保存映射
-  （后端校验，错误指出单元格）→ Veracode 页面「按模版导出」：重新分析并由后端写入 JXLS 占位符后填充。模版和映射存在后端 H2 文件库（`postgres` profile 用 PostgreSQL）。
+- **报告模版**（`/veracode-templates`，`pages/Veracode/templates/`）：上传公司 Excel 模版（.xlsx / .xlsm，导出保留宏与扩展名）→ 后端解析成 JSON → 页面按 Excel 样子渲染（列字母、行号、合并、列宽、粗体、填充色）→
+  点选单元格：所在行可设为 SCA / SAST / SCA 统计 / SAST 统计数据行（导出时按条数向下重复，统计每个报告一行，下方内容下移），该行单元格绑定数据集字段；其他单元格绑定汇总字段 → 保存映射
+  （后端校验，错误指出单元格）→ Veracode 页面「按模版导出」：重新分析并由后端写入 JXLS 占位符后填充。
+  「按模版导出」是主要导出：按 antd「Gradient Button」示例：大号渐变主按钮与右侧只有箭头的按钮左右拼在一起（`Space.Compact`），两者共用一条渐变（宽度 = 整组宽度，左按钮画开头、箭头画结尾；画在 `::after` 上，因为 antd 在拼接主按钮的第二个的 `::before` 上画分隔线），悬停整组淡出（CSS module `gradientButton.module.css`，项目没有 antd-style），位于 SCA「漏洞」卡片内容区第一行最左（导出组：按模版导出 / 导出 Excel / 导出到 Confluence；同一行右侧是创建 / 加 label 按钮，第二行是状态、application、搜索过滤 —— 卡片标题栏不再放按钮）；渐变按钮直接用上次用过的模版（存 localStorage，按钮上显示模版名），右侧箭头选择模版 / 管理模版。模版和映射存在后端 H2 文件库（`postgres` profile 用 PostgreSQL）。
 - 支持导出 Excel（Severity 按等级填充背景色；*SCA summary* 工作表与页面的 SCA 统计一致；*SAST flaws* / *SAST summary* 两个工作表对应 SAST 部分）。
 - 统计卡片（漏洞总数 / 已在 Jira / 缺失 / 已创建）按状态用不同背景色（主题 token）；表格分页受控，默认每页 50 条（20 / 50 / 100 / 200）。
 - 刷新页面不丢数据：分析结果、所选 Jira 版本、字段取值、过滤条件、每页条数存 sessionStorage（随标签页关闭清除）；

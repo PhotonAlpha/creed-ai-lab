@@ -12,6 +12,7 @@ import {
   Collapse,
   Descriptions,
   Dropdown,
+  Flex,
   Empty,
   Form,
   Input,
@@ -49,6 +50,7 @@ import { JiraTokenModal } from './JiraTokenModal';
 import { emptyAuth, jiraTokenStore } from './jiraToken';
 import { pageCache } from './pageCache';
 import { SastPanel, SastSummaryTable } from './SastPanel';
+import gradient from './gradientButton.module.css';
 import { JiraFieldsBar } from './JiraFieldsBar';
 import { SastJiraPanel } from './SastJiraPanel';
 import { ConfluenceExportModal } from './ConfluenceExportModal';
@@ -77,6 +79,8 @@ const creatable = (f: Finding) => f.status === 'MISSING' || f.needsLabel;
  */
 const CREATE_BUTTON = { color: 'primary', icon: <PlusCircleOutlined /> } as const;
 const LABEL_BUTTON = { color: 'orange', icon: <TagOutlined /> } as const;
+/** The report template "Export with template" used last, per browser. */
+const LAST_TEMPLATE_KEY = 'veracode.lastTemplate';
 
 /** The Jira issue a finding belongs to, whichever application reported it — the backend's `Finding.issueKey`. */
 const issueKey = (f: Finding) => `${f.cveId ?? `Unknown|${f.cwe ?? 'Unknown'}`}@${f.fileName}`;
@@ -126,6 +130,8 @@ interface CachedView {
   groupByApplication: boolean;
   versionOverride: string;
   fieldValues: CreateFieldValues;
+  /** The Jira version created issues are filed under; absent in a view cached before it was a field of its own. */
+  createVersion?: string;
   statusFilter: StatusFilter;
   keyword: string;
   jiraFilters: JiraFilters;
@@ -222,25 +228,44 @@ export function VeracodePage() {
     ])));
   }, [createFields]);
   const missingFields = createFields.filter((f) => f.required && !fieldValues[f.fieldId]?.length).map((f) => f.name);
-  /** Refused server-side otherwise; the buttons say why first. */
-  const canCreate = hasToken && missingFields.length === 0 && jiraVersions.length === 1;
-  const createBlocked = !hasToken
-    ? t('veracode.token.needed')
-    : jiraVersions.length !== 1
-      ? t('veracode.jiraVersion.chooseOne')
-      : missingFields.length > 0 ? t('veracode.fields.missing', { names: missingFields.join(', ') }) : undefined;
   /** Before the first analysis the connection test names them. */
   const versionList = analysis?.jiraVersions ?? connection?.versionNames ?? [];
+  /**
+   * The version created issues are filed under - a Jira field of its own (asked for, 2026-11-13): the lookup's
+   * versions are optional, and narrowing the lookup to one just to create with it changed what was found.
+   */
+  const [createVersion, setCreateVersion] = useState<string | undefined>(cached?.view.createVersion);
+  // one lookup version is the likely one to file under; a version this Jira does not have is dropped
+  useEffect(() => {
+    if (!createVersion && jiraVersions.length === 1) setCreateVersion(jiraVersions[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jiraVersions]);
+  useEffect(() => {
+    if (createVersion && versionList.length > 0 && !versionList.includes(createVersion)) setCreateVersion(undefined);
+  }, [versionList, createVersion]);
+  /** What creating sends: the create screen's values, the version as Jira's own `versions` field. */
+  const createValues = useMemo<CreateFieldValues>(
+    () => (createVersion ? { ...fieldValues, versions: [createVersion] } : fieldValues),
+    [fieldValues, createVersion],
+  );
+  /** Refused server-side otherwise; the buttons say why first. */
+  const canCreate = hasToken && missingFields.length === 0 && !!createVersion;
+  const createBlocked = !hasToken
+    ? t('veracode.token.needed')
+    : !createVersion
+      ? t('veracode.jiraVersion.chooseOne')
+      : missingFields.length > 0 ? t('veracode.fields.missing', { names: missingFields.join(', ') }) : undefined;
   /** Empty when the issue type's create screen has no Country field: the select is then not shown. */
   const countryList = analysis?.countries ?? connection?.countries ?? [];
 
   /** Everything restorable, written whenever it changes. */
   useEffect(() => {
     pageCache.save<CachedView>(analysis, {
-      jiraVersions, countries, applications, groupByApplication, versionOverride, fieldValues, statusFilter, keyword,
-      jiraFilters, pageSize: page.pageSize, source, confluencePageId,
+      jiraVersions, countries, applications, groupByApplication, versionOverride, fieldValues, createVersion, statusFilter,
+      keyword, jiraFilters, pageSize: page.pageSize, source, confluencePageId,
     });
-  }, [analysis, jiraVersions, countries, applications, groupByApplication, versionOverride, fieldValues, statusFilter, keyword,
+  }, [analysis, jiraVersions, countries, applications, groupByApplication, versionOverride, fieldValues, createVersion,
+    statusFilter, keyword,
     jiraFilters, page.pageSize, source, confluencePageId]);
 
   /** Back to the first page whenever the rows change underneath it. */
@@ -299,9 +324,9 @@ export function VeracodePage() {
   const analyze = useCallback(
     (uploadId: string, auto: boolean, versions: string[] = jiraVersions, chosenCountries: string[] = countries,
       lookupOnly = false) =>
-      withToken(() => void run(() => veracodeApi.analyze(uploadId, auth, versions, auto, fieldValues, chosenCountries,
+      withToken(() => void run(() => veracodeApi.analyze(uploadId, auth, versions, auto, createValues, chosenCountries,
         lookupOnly && !auto), auto, lookupOnly && !auto)),
-    [run, auth, withToken, fieldValues, jiraVersions, countries],
+    [run, auth, withToken, createValues, jiraVersions, countries],
   );
 
   /**
@@ -406,7 +431,7 @@ export function VeracodePage() {
     }
   };
   const options = () => ({
-    affectedVersion: versionOverride, jiraVersions, countries, autoCreate: autoCreate && canCreate, fields: fieldValues,
+    affectedVersion: versionOverride, jiraVersions, countries, autoCreate: autoCreate && canCreate, fields: createValues,
   });
 
   /**
@@ -510,7 +535,7 @@ export function VeracodePage() {
     if (!analysis || ids.length === 0) return;
     setCreating(true);
     try {
-      const { results } = await veracodeApi.createIssues(analysis.uploadId, ids, fieldValues, jiraVersions, auth, recreateClosed,
+      const { results } = await veracodeApi.createIssues(analysis.uploadId, ids, createValues, jiraVersions, auth, recreateClosed,
         countries);
       applyResults(results);
     } catch (e) {
@@ -521,10 +546,47 @@ export function VeracodePage() {
     }
   };
 
-  /** Company report templates (`/veracode-templates`), listed when the export menu opens. */
+  /**
+   * Company report templates (`/veracode-templates`): the page's main export (asked for, 2026-11-13). Listed once an
+   * analysis is there and again when the menu opens; the last one used is a single click.
+   */
   const navigate = useNavigate();
   const [templateList, setTemplateList] = useState<ReportTemplateSummary[]>([]);
   const [templateExporting, setTemplateExporting] = useState(false);
+  const [templateMenuOpen, setTemplateMenuOpen] = useState(false);
+  const [lastTemplateId, setLastTemplateId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(LAST_TEMPLATE_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const boundTemplates = templateList.filter((x) => x.lists + x.values > 0);
+  /** Gone (deleted, unbound) = no default: the button opens the menu instead. */
+  const lastTemplate = boundTemplates.find((x) => x.id === lastTemplateId);
+  const loadTemplates = useCallback(
+    () => reportTemplateApi.list().then(setTemplateList).catch((e: Error) => message.error(e.message)),
+    [message],
+  );
+  const hasAnalysis = !!analysis;
+  useEffect(() => {
+    if (hasAnalysis) void loadTemplates();
+  }, [hasAnalysis, loadTemplates]);
+  /**
+   * The joined export buttons share one gradient: its width is the group's (+2px: each gradient overhangs its button by
+   * 1px), kept as the label - the template's name - changes.
+   */
+  const gradientObserver = useRef<ResizeObserver | null>(null);
+  /** A callback ref: the group mounts with the analysis (and again with its tab), each time observed afresh. */
+  const gradientGroup = useCallback((group: HTMLSpanElement | null) => {
+    gradientObserver.current?.disconnect();
+    gradientObserver.current = null;
+    if (!group) return;
+    const sync = () => group.style.setProperty('--gradient-width', `${group.offsetWidth + 2}px`);
+    sync();
+    gradientObserver.current = new ResizeObserver(sync);
+    gradientObserver.current.observe(group);
+  }, []);
   const exportWithTemplate = async (templateId: string) => {
     if (!analysis) return;
     if (!hasToken) {
@@ -534,6 +596,12 @@ export function VeracodePage() {
     setTemplateExporting(true);
     try {
       saveBlob(await reportTemplateApi.exportWith(templateId, analysis.uploadId, auth, jiraVersions, countries));
+      setLastTemplateId(templateId);
+      try {
+        localStorage.setItem(LAST_TEMPLATE_KEY, templateId);
+      } catch {
+        // a per-browser convenience only
+      }
     } catch (e) {
       message.error((e as Error).message);
     } finally {
@@ -830,6 +898,7 @@ export function VeracodePage() {
                         connection={confluenceToken.connection}
                         onNeedToken={confluenceToken.openDialog}
                         mock={settings.mock}
+                        parentPageId={settings.confluenceParentPageId}
                         busy={loading}
                         pageId={confluencePageId}
                         onPageIdChange={setConfluencePageId}
@@ -921,7 +990,6 @@ export function VeracodePage() {
                   options={versionList.map((v) => ({ value: v, label: v }))}
                   placeholder={t('veracode.jiraVersion.placeholder')}
                   notFoundContent={t('veracode.jiraVersion.none')}
-                  status={autoCreate && jiraVersions.length !== 1 ? 'warning' : undefined}
                   disabled={loading}
                   style={{ width: 300 }}
                 />
@@ -971,8 +1039,15 @@ export function VeracodePage() {
               </Tooltip>
             )}
           </Space>
-          {createFields.length > 0 && (
-            <JiraFieldsBar fields={createFields} values={fieldValues} onChange={setFieldValues} />
+          {(createFields.length > 0 || versionList.length > 0) && (
+            <JiraFieldsBar
+              fields={createFields}
+              values={fieldValues}
+              onChange={setFieldValues}
+              versions={versionList}
+              version={createVersion}
+              onVersionChange={setCreateVersion}
+            />
           )}
         </Card>
         {analysis && (
@@ -1120,44 +1195,79 @@ export function VeracodePage() {
               <ProCard
                 bordered
                 title={t('veracode.findings')}
-                extra={(
+              >
+                {/*
+                  the toolbar under the title, not in it (asked for: the title bar was crowded) - row one the actions:
+                  the exports, the main one first (asked for), and the create / label buttons; row two the filters
+                */}
+                <Flex wrap justify="space-between" align="center" gap="small" style={{ marginBottom: 12 }}>
                   <Space wrap>
-                    <Segmented<StatusFilter>
-                      value={statusFilter}
-                      onChange={setStatusFilter}
-                      options={[
-                        { value: 'ALL', label: t('veracode.filter.all') },
-                        { value: 'EXISTS', label: t('veracode.status.EXISTS') },
-                        { value: 'MISSING', label: t('veracode.status.MISSING') },
-                        { value: 'CREATED', label: t('veracode.status.CREATED') },
-                      ]}
-                    />
-                    {severalApplications && (
-                      <>
-                        <Select
-                          mode="multiple"
-                          allowClear
-                          maxTagCount="responsive"
-                          placeholder={t('veracode.application.filter')}
-                          value={applications}
-                          onChange={setApplications}
-                          options={applicationList.map((a) => ({ value: a, label: applicationLabel(a, analysis?.applications) || '—' }))}
-                          style={{ width: 240 }}
-                        />
-                        <Space size={4}>
-                          <Switch size="small" checked={groupByApplication} onChange={setGroupByApplication} />
-                          <Text>{t('veracode.application.group')}</Text>
-                        </Space>
-                      </>
+                    {/*
+                      the analysis through a company template bound on /veracode-templates - antd's "Gradient Button":
+                      a large gradient primary button (the last template) joined to a large gradient arrow (pick a
+                      template), one gradient across both (gradientButton.module.css)
+                    */}
+                    <span ref={gradientGroup} className={gradient.group}>
+                      <Space.Compact>
+                        <Tooltip title={lastTemplate ? t('veracode.tpl.exportLastHint', { name: lastTemplate.name }) : t('veracode.tpl.exportHint')}>
+                          <Button
+                            type="primary"
+                            size="large"
+                            className={`${gradient.gradient} ${gradient.start}`}
+                            icon={<FileExcelOutlined />}
+                            loading={templateExporting}
+                            disabled={!analysis}
+                            onClick={() => (lastTemplate ? void exportWithTemplate(lastTemplate.id) : setTemplateMenuOpen(true))}
+                          >
+                            {/* the default template named on the button; a long name is cut, the tooltip has it whole */}
+                            {lastTemplate
+                              ? `${t('veracode.tpl.export')}: ${lastTemplate.name.length > 24 ? `${lastTemplate.name.slice(0, 23)}…` : lastTemplate.name}`
+                              : t('veracode.tpl.export')}
+                          </Button>
+                        </Tooltip>
+                        <Dropdown
+                          trigger={['click']}
+                          disabled={!analysis}
+                          open={templateMenuOpen}
+                          onOpenChange={(open) => {
+                            setTemplateMenuOpen(open);
+                            if (open) void loadTemplates();
+                          }}
+                          menu={{
+                            selectedKeys: lastTemplate ? [lastTemplate.id] : [],
+                            items: [
+                              ...boundTemplates.map((x) => ({ key: x.id, label: x.name, icon: <FileExcelOutlined /> })),
+                              ...(boundTemplates.length > 0 ? [] : [{ key: 'none', label: t('veracode.tpl.exportNone'), disabled: true }]),
+                              { type: 'divider' as const },
+                              { key: 'manage', label: t('veracode.tpl.manage') },
+                            ],
+                            onClick: ({ key }) => {
+                              setTemplateMenuOpen(false);
+                              if (key === 'manage') navigate('/veracode-templates');
+                              else void exportWithTemplate(key);
+                            },
+                          }}
+                        >
+                          {/* only the arrow, gradient as well: one button to the eye, the same height, no wider than needed */}
+                          <Button type="primary" size="large" className={`${gradient.gradient} ${gradient.end}`} icon={<DownOutlined />}
+                                  disabled={!analysis}
+                                  title={t('veracode.tpl.pickTemplate')} aria-label={t('veracode.tpl.pickTemplate')} />
+                        </Dropdown>
+                      </Space.Compact>
+                    </span>
+                    <Button icon={<CloudDownloadOutlined />} onClick={exportXlsx} loading={exporting} disabled={!analysis}>
+                      {t('veracode.export')}
+                    </Button>
+                    {settings?.confluenceBaseUrl && (
+                      <Tooltip title={t('veracode.confluenceExport.hint')}>
+                        <Button icon={<CloudUploadOutlined />} disabled={!analysis}
+                                onClick={() => (hasToken ? setConfluenceExportOpen(true) : setTokenOpen(true))}>
+                          {t('veracode.confluenceExport.button')}
+                        </Button>
+                      </Tooltip>
                     )}
-                    <Input.Search
-                      allowClear
-                      defaultValue={keyword}
-                      placeholder={t('veracode.search')}
-                      onSearch={setKeyword}
-                      onChange={(e) => !e.target.value && setKeyword('')}
-                      style={{ width: 280 }}
-                    />
+                  </Space>
+                  <Space wrap>
                     <Tooltip title={createBlocked}>
                       <span>
                         <Popconfirm
@@ -1198,43 +1308,46 @@ export function VeracodePage() {
                         </Popconfirm>
                       </span>
                     </Tooltip>
-                    <Button icon={<CloudDownloadOutlined />} onClick={exportXlsx} loading={exporting} disabled={!analysis}>
-                      {t('veracode.export')}
-                    </Button>
-                    {/* the same analysis through a company template bound on /veracode-templates */}
-                    <Dropdown
-                      trigger={['click']}
-                      disabled={!analysis}
-                      onOpenChange={(open) => {
-                        if (open) reportTemplateApi.list().then(setTemplateList).catch((e: Error) => message.error(e.message));
-                      }}
-                      menu={{
-                        items: [
-                          ...templateList.filter((x) => x.lists + x.values > 0)
-                            .map((x) => ({ key: x.id, label: x.name, icon: <FileExcelOutlined /> })),
-                          ...(templateList.some((x) => x.lists + x.values > 0)
-                            ? [] : [{ key: 'none', label: t('veracode.tpl.exportNone'), disabled: true }]),
-                          { type: 'divider' as const },
-                          { key: 'manage', label: t('veracode.tpl.manage') },
-                        ],
-                        onClick: ({ key }) => (key === 'manage' ? navigate('/veracode-templates') : void exportWithTemplate(key)),
-                      }}
-                    >
-                      <Button icon={<FileExcelOutlined />} loading={templateExporting} title={t('veracode.tpl.exportHint')}>
-                        {t('veracode.tpl.export')} <DownOutlined />
-                      </Button>
-                    </Dropdown>
-                    {settings?.confluenceBaseUrl && (
-                      <Tooltip title={t('veracode.confluenceExport.hint')}>
-                        <Button icon={<CloudUploadOutlined />} disabled={!analysis}
-                                onClick={() => (hasToken ? setConfluenceExportOpen(true) : setTokenOpen(true))}>
-                          {t('veracode.confluenceExport.button')}
-                        </Button>
-                      </Tooltip>
-                    )}
                   </Space>
-                )}
-              >
+                </Flex>
+                <Space wrap style={{ marginBottom: 16 }}>
+                  <Segmented<StatusFilter>
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    options={[
+                      { value: 'ALL', label: t('veracode.filter.all') },
+                      { value: 'EXISTS', label: t('veracode.status.EXISTS') },
+                      { value: 'MISSING', label: t('veracode.status.MISSING') },
+                      { value: 'CREATED', label: t('veracode.status.CREATED') },
+                    ]}
+                  />
+                  {severalApplications && (
+                    <>
+                      <Select
+                        mode="multiple"
+                        allowClear
+                        maxTagCount="responsive"
+                        placeholder={t('veracode.application.filter')}
+                        value={applications}
+                        onChange={setApplications}
+                        options={applicationList.map((a) => ({ value: a, label: applicationLabel(a, analysis?.applications) || '—' }))}
+                        style={{ width: 240 }}
+                      />
+                      <Space size={4}>
+                        <Switch size="small" checked={groupByApplication} onChange={setGroupByApplication} />
+                        <Text>{t('veracode.application.group')}</Text>
+                      </Space>
+                    </>
+                  )}
+                  <Input.Search
+                    allowClear
+                    defaultValue={keyword}
+                    placeholder={t('veracode.search')}
+                    onSearch={setKeyword}
+                    onChange={(e) => !e.target.value && setKeyword('')}
+                    style={{ width: 280 }}
+                  />
+                </Space>
                 {analysis && issues.length > 0 && (
                   <Space wrap style={{ marginBottom: 16 }}>
                     {(['status', 'priority', 'assignee', 'version'] as const).map((key) => (
@@ -1302,7 +1415,7 @@ export function VeracodePage() {
                       sast={analysis.sast}
                       auth={auth}
                       hasToken={hasToken}
-                      scaVersions={jiraVersions}
+                      scaVersions={createVersion ? [createVersion] : jiraVersions}
                       countries={countries}
                       onTokenNeeded={() => setTokenOpen(true)}
                       onUpdate={(update) => setAnalysis((prev) => (prev ? update(prev) : prev))}

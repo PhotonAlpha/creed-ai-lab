@@ -53,5 +53,6 @@ veracode:
   confluence:
     # Never called over the network either: the test swaps the client onto MockMvc.
     base-url: http://localhost/mock/confluence
+    parent-page-id: "98700"
     # Three attachments on the mock page: two pages of the listing
     page-size: 2

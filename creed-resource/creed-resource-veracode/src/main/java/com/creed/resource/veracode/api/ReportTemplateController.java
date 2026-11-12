@@ -9,6 +9,7 @@ import com.creed.resource.veracode.template.TemplateMapping;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -44,13 +45,16 @@ public class ReportTemplateController {
         return templates.list();
     }
 
-    /** What a cell can be bound to: {@code sca} / {@code sast} for data rows, {@code summary} for single cells. */
+    /**
+     * What a cell can be bound to: {@code sca} / {@code sast} / {@code scaStats} / {@code sastStats} for data rows,
+     * {@code summary} for single cells.
+     */
     @GetMapping("/fields")
     Map<String, List<TemplateFields.Field>> fields() {
         return TemplateFields.CATALOG;
     }
 
-    /** @param name shown in the list; blank = the file name without {@code .xlsx} */
+    /** @param name shown in the list; blank = the file name without {@code .xlsx} / {@code .xlsm} */
     @PostMapping(consumes = "multipart/form-data")
     ReportTemplateService.Detail upload(@RequestPart("file") MultipartFile file,
                                         @RequestParam(required = false) String name) throws IOException {
@@ -96,9 +100,11 @@ public class ReportTemplateController {
         return xlsx(templates.fill(id, result));
     }
 
+    static final MediaType XLSM = MediaType.parseMediaType("application/vnd.ms-excel.sheet.macroEnabled.12");
+
     private static ResponseEntity<byte[]> xlsx(ReportTemplateService.Filled file) {
         return ResponseEntity.ok()
-                .contentType(VeracodeController.XLSX)
+                .contentType(file.macroEnabled() ? XLSM : VeracodeController.XLSX)
                 // a template name may be Chinese: filename* (RFC 5987) carries it
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
                         .filename(file.fileName(), StandardCharsets.UTF_8).build().toString())

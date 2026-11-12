@@ -32,7 +32,19 @@ public interface JiraClient {
     JiraCreatedIssue createIssue(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
                                  @RequestBody JiraCreateIssueRequest request);
 
-    /** Jira answers 204: the body is {@code {"update": {"labels": [{"add": "x"}]}}} - only the named labels change. */
+    /**
+     * One issue's fields - read before labelling an existing issue for another application (2026-11-13): the new
+     * description keeps the tables of applications the analysis does not hold. @param fields comma-separated
+     */
+    @GetExchange("/rest/api/2/issue/{key}")
+    JiraIssue issue(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+                    @PathVariable String key,
+                    @RequestParam String fields);
+
+    /**
+     * Jira answers 204: the body is {@code {"update": {"labels": [{"add": "x"}]}}} - only the named labels change - and
+     * with a labelling, {@code "fields": {"description": "..."}}.
+     */
     @PutExchange(url = "/rest/api/2/issue/{key}", contentType = "application/json")
     void updateIssue(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
                      @PathVariable String key,

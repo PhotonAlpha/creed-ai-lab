@@ -28,7 +28,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.IntFunction;
+import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -392,7 +394,8 @@ public class JiraLookupService {
         Set<String> known = new HashSet<>();
         meta.fields().forEach(f -> known.add(f.fieldId()));
         for (String key : given.keySet()) {
-            if (!known.contains(key)) {
+            // the Jira version to file under: read by createVersion, the create request sets it itself
+            if (!known.contains(key) && !JiraFieldMeta.VERSIONS.equals(key)) {
                 throw new IllegalArgumentException("field '" + key + "' is not one the page fills for " + meta.issueType()
                         + " (fields: " + String.join(", ", known) + ")");
             }
@@ -524,8 +527,21 @@ public class JiraLookupService {
     }
 
     /**
-     * The version a created issue is filed against: the one selected version. None or several is
-     * {@link VersionRequiredException} - answered before anything is created.
+     * The version a created issue is filed against: the page's Jira fields' {@code versions} (asked for, 2026-11-13: the
+     * lookup's versions are optional, and choosing one to create with narrowed the lookup too), else - a caller that
+     * does not send it - the one selected lookup version.
+     *
+     * @param fields the page's create values; {@code versions} = one version name, checked against the create screen
+     * @param lookup from {@link #selectedVersions}: the lookup's versions
+     */
+    public String createVersion(CreateMeta meta, Map<String, Object> fields, List<String> lookup) {
+        List<String> chosen = texts(fields == null ? null : fields.get(JiraFieldMeta.VERSIONS));
+        return createVersion(chosen.isEmpty() ? lookup : selectedVersions(meta, chosen));
+    }
+
+    /**
+     * The one version in {@code selected}. None or several is {@link VersionRequiredException} - answered before
+     * anything is created.
      */
     public String createVersion(List<String> selected) {
         if (selected.size() != 1) {
@@ -538,7 +554,7 @@ public class JiraLookupService {
     public static class VersionRequiredException extends RuntimeException {
         public VersionRequiredException(List<String> selected) {
             super(selected.isEmpty()
-                    ? "choose the Jira version to file the issues against (Jira versions on the page)"
+                    ? "choose the Jira version to file the issues against (Jira fields on the page)"
                     : "choose one Jira version to file the issues against, not " + selected.size() + " ("
                             + String.join(", ", selected) + ")");
         }
@@ -624,25 +640,44 @@ public class JiraLookupService {
 
     /**
      * The issue another application already has for this finding: the finding's application label is added
-     * ({@code update.labels.add}, the other labels untouched) instead of filing a second issue.
+     * ({@code update.labels.add}, the other labels untouched) instead of filing a second issue, and the description
+     * rewritten (asked for, 2026-11-13: not appended to) as one "Veracode SCA finding" table per application - this
+     * analysis' applications from its findings, the others' tables kept from the old description
+     * ({@link JiraDescription#mergeSca}).
+     *
+     * @param sharing  the analysis' findings of the same {@link Finding#issueKey}, this one among them
+     * @param reportOf each finding's report: its Source line
      */
-    public IssueRef addApplicationLabel(IssueRef issue, Finding finding, JiraToken token) {
+    public IssueRef addApplicationLabel(IssueRef issue, Finding finding, List<Finding> sharing,
+                                        Function<Finding, ReportView> reportOf, JiraToken token) {
         String label = applicationLabel(finding);
-        return label == null ? issue : addLabels(issue, List.of(label), finding.id(), token);
+        return label == null ? issue : addLabels(issue, List.of(label), finding.id(),
+                current -> JiraDescription.mergeSca(current, sharing, reportOf, apps), token);
     }
 
-    /** The labels the issue lacks, added in one update ({@code update.labels.add} each, the others untouched). */
-    IssueRef addLabels(IssueRef issue, List<String> labels, String forId, JiraToken token) {
+    /**
+     * The labels the issue lacks, added in one update ({@code update.labels.add} each, the others untouched), the
+     * description rewritten in the same update. It is read first: the analysis may not hold every application the
+     * issue covers, and those applications' parts are kept (asked for, 2026-11-13).
+     *
+     * @param description the issue's current description ({@code null} = none) -> the one to write
+     */
+    IssueRef addLabels(IssueRef issue, List<String> labels, String forId, UnaryOperator<String> description,
+                       JiraToken token) {
         List<String> missing = labels.stream().filter(l -> !issue.hasLabel(l)).toList();
         if (missing.isEmpty()) {
             return issue;
         }
+        String current = UpstreamException.call(JIRA,
+                () -> jira.issue(token.authorization(), issue.key(), "description")).description();
+        Map<String, Object> update = new LinkedHashMap<>();
+        update.put("update", Map.of("labels", missing.stream().map(l -> Map.of("add", l)).toList()));
+        update.put("fields", Map.of("description", description.apply(current)));
         UpstreamException.call(JIRA, () -> {
-            jira.updateIssue(token.authorization(), issue.key(), Map.of("update", Map.of("labels",
-                    missing.stream().map(l -> Map.of("add", l)).toList())));
+            jira.updateIssue(token.authorization(), issue.key(), update);
             return null;
         });
-        log.info("labelled {} with {} for {}", issue.key(), missing, forId);
+        log.info("labelled {} with {} for {}, description updated", issue.key(), missing, forId);
         return issue.withLabels(missing);
     }
 
@@ -845,9 +880,17 @@ public class JiraLookupService {
         return sastApplicationLabels(issue).stream().filter(l -> issues.stream().noneMatch(i -> i.hasLabel(l))).toList();
     }
 
-    /** {@link #missingSastLabels} added to the first of the issues. */
-    public IssueRef addSastLabels(SastIssue issue, List<IssueRef> issues, JiraToken token) {
-        return addLabels(issues.getFirst(), missingSastLabels(issue, issues), issue.id(), token);
+    /**
+     * {@link #missingSastLabels} added to the first of the issues, and its description rewritten as a new issue's
+     * would be (asked for, 2026-11-13: in line with the page's "Jira summary", one block per application - a new
+     * application changes it), the parts of applications this analysis does not hold kept
+     * ({@link JiraDescription#mergeSast}).
+     *
+     * @param reports the analysis' reports: the description's sources
+     */
+    public IssueRef addSastLabels(SastIssue issue, List<IssueRef> issues, List<ReportView> reports, JiraToken token) {
+        return addLabels(issues.getFirst(), missingSastLabels(issue, issues), issue.id(),
+                current -> JiraDescription.mergeSast(current, issue, reports, apps, props.sastProject()), token);
     }
 
     /** {@code sast.summary-template} filled in ({@code {project} - {cwe} - {category}}), cut to Jira's 255. */

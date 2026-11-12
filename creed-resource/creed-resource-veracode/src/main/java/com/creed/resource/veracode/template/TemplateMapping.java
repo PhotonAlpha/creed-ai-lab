@@ -38,7 +38,8 @@ public record TemplateMapping(List<SheetMapping> sheets) {
 
     /**
      * A template row that becomes one row per item of {@code dataset} ({@code sca} = the SCA findings table,
-     * {@code sast} = the SAST Jira table). The whole row is repeated - its unbound cells keep their text and style.
+     * {@code sast} = the SAST Jira table, {@code scaStats} / {@code sastStats} = the statistics, one row per report).
+     * The whole row is repeated - its unbound cells keep their text and style.
      *
      * @param cells the row's bound cells; each shows a field of the dataset
      */

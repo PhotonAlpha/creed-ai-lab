@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 import { reportTemplateApi, saveBlob } from '../../../api/veracode';
 import type {
-  ReportTemplateDetail, ReportTemplateSummary, TemplateDataset, TemplateField, TemplateMapping,
+  ListDataset, ReportTemplateDetail, ReportTemplateSummary, TemplateDataset, TemplateField, TemplateMapping,
 } from '../../../api/veracode';
 import { useI18n } from '../../../locales';
 import type { MessageKey } from '../../../locales';
@@ -141,6 +141,8 @@ export function ReportTemplatesPage() {
   }, [current, selected]);
   const counts = countBindings(draft);
 
+  const datasetName = useCallback((dataset: ListDataset) => t(`veracode.tpl.dataset.${dataset}`), [t]);
+
   const fieldOptions = (dataset: TemplateDataset) => (fields?.[dataset] ?? []).map((f) => ({
     value: f.key, label: label(dataset, f.key),
   }));
@@ -152,7 +154,7 @@ export function ReportTemplatesPage() {
           <Card
             title={t('veracode.tpl.list')}
             extra={(
-              <Upload accept=".xlsx" showUploadList={false} beforeUpload={(f) => upload(f)} disabled={uploading}>
+              <Upload accept=".xlsx,.xlsm" showUploadList={false} beforeUpload={(f) => upload(f)} disabled={uploading}>
                 <Button size="small" type="primary" icon={<UploadOutlined />} loading={uploading}>
                   {t('veracode.tpl.upload')}
                 </Button>
@@ -236,8 +238,9 @@ export function ReportTemplatesPage() {
                 <Paragraph type="secondary" style={{ marginTop: 0 }}>
                   {t('veracode.tpl.howTo')}
                   {' '}
-                  <Tag color={DATASET_COLOR.sca}>SCA</Tag>
-                  <Tag color={DATASET_COLOR.sast}>SAST</Tag>
+                  {(['sca', 'sast', 'scaStats', 'sastStats'] as const).map((d) => (
+                    <Tag key={d} color={DATASET_COLOR[d]}>{datasetName(d)}</Tag>
+                  ))}
                   <Tag color={DATASET_COLOR.summary}>{t('veracode.tpl.summary')}</Tag>
                   {t('veracode.tpl.counts', counts)}
                 </Paragraph>
@@ -262,6 +265,7 @@ export function ReportTemplatesPage() {
                                 sheet={s}
                                 mapping={bound}
                                 label={label}
+                                datasetName={datasetName}
                                 selected={sheet === s.name ? selected : null}
                                 onSelect={(row, col) => setSelected({ row, col })}
                               />
@@ -283,7 +287,7 @@ export function ReportTemplatesPage() {
                           )}
                           <div>
                             <Text strong>{t('veracode.tpl.rowKind', { row: selected.row + 1 })}</Text>
-                            <Select<'none' | 'sca' | 'sast'>
+                            <Select<'none' | ListDataset>
                               style={{ width: '100%', marginTop: 4 }}
                               value={list?.dataset ?? 'none'}
                               onChange={(v) => setDraft(setDataRow(draft, sheet, selected.row, v === 'none' ? null : v))}
@@ -291,6 +295,8 @@ export function ReportTemplatesPage() {
                                 { value: 'none', label: t('veracode.tpl.plainRow') },
                                 { value: 'sca', label: t('veracode.tpl.scaRow') },
                                 { value: 'sast', label: t('veracode.tpl.sastRow') },
+                                { value: 'scaStats', label: t('veracode.tpl.scaStatsRow') },
+                                { value: 'sastStats', label: t('veracode.tpl.sastStatsRow') },
                               ]}
                             />
                             <Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: token.fontSizeSM }}>
@@ -299,7 +305,7 @@ export function ReportTemplatesPage() {
                           </div>
                           <div>
                             <Text strong>
-                              {list ? t('veracode.tpl.columnField', { dataset: list.dataset.toUpperCase() }) : t('veracode.tpl.summaryField')}
+                              {list ? t('veracode.tpl.columnField', { dataset: datasetName(list.dataset) }) : t('veracode.tpl.summaryField')}
                             </Text>
                             <Select
                               allowClear

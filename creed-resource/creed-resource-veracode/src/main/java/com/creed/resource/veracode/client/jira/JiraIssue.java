@@ -8,8 +8,9 @@ import java.util.List;
 public record JiraIssue(String id, String key, Fields fields) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
+    /** @param description wiki markup (v2); only {@code JiraClient.issue} asks for it, the search never does */
     public record Fields(String summary, Status status, List<JiraVersion> versions, List<String> labels,
-                         Named priority, Person assignee, Project project) {
+                         Named priority, Person assignee, Project project, String description) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -30,6 +31,10 @@ public record JiraIssue(String id, String key, Fields fields) {
 
     public String summary() {
         return fields == null || fields.summary() == null ? "" : fields.summary();
+    }
+
+    public String description() {
+        return fields == null ? null : fields.description();
     }
 
     public String projectKey() {

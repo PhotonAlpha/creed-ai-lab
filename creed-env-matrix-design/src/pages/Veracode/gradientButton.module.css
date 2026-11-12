@@ -1,0 +1,46 @@
+/*
+ * antd's "Gradient Button" demo (Button, linear-gradient: 135deg #6253e1 -> #04befe, fading to the primary colour on
+ * hover) without antd-style, which this project does not have, and without .ant-* selectors: the class goes on a
+ * primary Button.
+ *
+ * On ::after, not the demo's ::before: in a Space.Compact antd draws the divider of two primary buttons on the second
+ * one's ::before (width 1px, more specific than a class), which squeezed the gradient into that line. ::after paints
+ * over the divider; the labels are lifted above it.
+ *
+ * Joined buttons share one gradient (asked for): --gradient-width is the whole group's width (set by the page), each
+ * button paints its part of it - .start the beginning, .end the end - so the colour runs on across the seam. Hovering
+ * the group fades all of it.
+ */
+.group {
+  display: inline-flex;
+}
+
+.gradient:not(:disabled) > span {
+  position: relative;
+  z-index: 1;
+}
+
+.gradient:not(:disabled)::after {
+  content: '';
+  background: linear-gradient(135deg, #6253e1, #04befe);
+  background-size: var(--gradient-width, 100%) 100%;
+  background-repeat: no-repeat;
+  position: absolute;
+  inset: -1px;
+  opacity: 1;
+  transition: all 0.3s; /* motionDurationSlow */
+  border-radius: inherit;
+}
+
+.start:not(:disabled)::after {
+  background-position: left center;
+}
+
+.end:not(:disabled)::after {
+  background-position: right center;
+}
+
+.gradient:not(:disabled):hover::after,
+.group:hover .gradient:not(:disabled)::after {
+  opacity: 0;
+}

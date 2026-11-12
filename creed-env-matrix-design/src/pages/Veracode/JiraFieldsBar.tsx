@@ -5,13 +5,19 @@ import { useI18n } from '../../locales';
 const { Text } = Typography;
 
 /**
- * The create screen's fields this page fills (Component/s, required fields without a Jira default). Options come
- * from Jira through the user's token; values are option ids, or the typed text.
+ * The create screen's fields this page fills: first the Jira version created issues are filed under (Affects
+ * Version/s, required - asked for, 2026-11-13: apart from the lookup's versions), then Component/s and the required
+ * fields without a Jira default. Options come from Jira through the user's token; values are option ids, or the typed
+ * text.
  */
-export function JiraFieldsBar({ fields, values, onChange }: {
+export function JiraFieldsBar({ fields, values, onChange, versions, version, onVersionChange }: {
   fields: CreateField[];
   values: CreateFieldValues;
   onChange: (values: CreateFieldValues) => void;
+  /** The versions the issue type can be filed against; absent = no version select (SAST has its own). */
+  versions?: string[];
+  version?: string;
+  onVersionChange?: (version: string | undefined) => void;
 }) {
   const { t } = useI18n();
   const set = (fieldId: string, value: string[]) => onChange({ ...values, [fieldId]: value });
@@ -20,6 +26,24 @@ export function JiraFieldsBar({ fields, values, onChange }: {
       <Tooltip title={t('veracode.fields.hint')}>
         <Text strong>{t('veracode.fields.title')}</Text>
       </Tooltip>
+      {versions && onVersionChange && (
+        <Space size={4}>
+          <Tooltip title={t('veracode.fields.versionHint')}>
+            <Text><Text type="danger">* </Text>{t('veracode.fields.version')}</Text>
+          </Tooltip>
+          <Select
+            allowClear
+            showSearch
+            value={version}
+            onChange={(v?: string) => onVersionChange(v)}
+            options={versions.map((v) => ({ value: v, label: v }))}
+            status={version ? undefined : 'warning'}
+            placeholder={t('veracode.fields.versionPlaceholder')}
+            notFoundContent={t('veracode.jiraVersion.none')}
+            style={{ minWidth: 160 }}
+          />
+        </Space>
+      )}
       {fields.map((f) => {
         const value = values[f.fieldId] ?? [];
         const label = <Text>{f.required && <Text type="danger">* </Text>}{f.name}</Text>;

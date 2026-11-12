@@ -11,8 +11,10 @@ package com.creed.resource.veracode.api.dto;
  * @param confluenceBaseUrl {@code null} = no Confluence configured: the page offers uploads only
  * @param confluenceCloud   the Confluence token dialog's preselected deployment
  * @param confluenceExportTitle the exported page's title template ({@code {project}}, {@code {version}}, {@code {timestamp}})
+ * @param confluenceParentPageId {@code veracode.confluence.parent-page-id}: whose child pages the page lists;
+ *                               {@code null} = none configured
  */
 public record VeracodeSettings(String projectKey, String issueType, String jiraBaseUrl, boolean mock,
                                String summaryTemplate, boolean cloud, String confluenceBaseUrl,
-                               boolean confluenceCloud, String confluenceExportTitle) {
+                               boolean confluenceCloud, String confluenceExportTitle, String confluenceParentPageId) {
 }

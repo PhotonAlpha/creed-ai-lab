@@ -131,6 +131,9 @@ veracode:
   # The default is the in-process mock (page 98765).
   confluence:
     base-url: "https://ethancaoq.atlassian.net/wiki"
+    # The page the reports' pages are filed under: the page lists its child pages to pick one from (filtered by
+    # title in the browser), then that page's attachments. Blank = the user types a page id.
+    parent-page-id: ${CREED_CONFLUENCE_PARENT_PAGE:131219}
     page-size: 50
     # Larger attachments are not downloaded (read into memory whole); a zip is then bounded by upload.max-unzipped-size
     max-download-size: ${CREED_CONFLUENCE_MAX_DOWNLOAD:50MB}

@@ -473,7 +473,9 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
     标题 `{project} - CWE-89 - {category}`，**按这个标题查找和创建**（查找不带版本）。项目、问题类型、label 单独配置：
     `application.yml` 的 `veracode.jira.sast`（`IDB VERACODE STSA`）；标签页有自己的影响版本（问题类型要求时必选）和 Jira 字段。
     label 与 SCA 一致：新建的 Jira 带上其中每个有未关闭漏洞的 application 的 label；已存在但缺少某个 application label 的 Jira
-    显示「缺少 label」，用橙色的「添加 label」/「添加全部 label」补上，而不是再建一个。
+    显示「缺少 label」，用橙色的「同步 label 与描述」/「全部同步」补上，而不是再建一个：加上 label，并按它现在覆盖的 application
+    重写描述（「Jira 标题」各 application 的三行、漏洞、来源）；不在本次分析中的 application 保留原有的三行、漏洞行和来源。
+    SCA 标签页的同类按钮为「添加 label 与描述」：加上 label，并重写描述：每个 application 一张 *Veracode SCA finding* 表格，本次分析中的 application 用新表格，不在本次分析中的（以前分析时建的）保留原表格，其他文字去掉。
   - **已关闭的 Jira 可以重新创建**（SCA 与 SAST 相同）：一个漏洞找到的 Jira 全部为 Closed / Done（后端 `veracode.jira.closed-statuses`）时，
     该行显示红色「重新创建」。点击后弹框列出这些已关闭的 Jira，提醒确认确实需要重新跟踪而不是重复报告，选「仍然创建」才新建。
     只能逐行进行，「创建全部缺失」不会这样做；后端会重新读取 Jira，期间有 Jira 被重新打开则不再新建。
@@ -481,8 +483,10 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
 - **Country**（「Jira 设置」里的多选下拉）：只查找 Country 为所选值之一的 Jira（SCA 和 SAST 都过滤，JQL `cf[<id>] in (...)`），不选 = 不限。
   选项来自创建界面上的 Country 字段（后端 `veracode.jira.country-field`），没有该字段时下拉框置灰并提示原因。新建 Jira 的 Country 取自 Jira 字段栏，不取这里的值。
 - **自动创建**：勾选时先弹框提醒「下一次分析会一次性为所有缺失的漏洞创建 Jira」，确认后才开启，开启期间旁边显示橙色提示。
-- **报告模版**（菜单「报告模版」，`/veracode-templates`）：上传公司的 Excel 模版，点击单元格绑定 SCA / SAST 字段或汇总字段（某一行设为数据行后，导出时该行按数据条数向下重复），
-  保存后在 Veracode 页面用「按模版导出」生成报告（后端写入 JXLS 占位符并填充，未绑定的 sheet 原样保留）。
+- **报告模版**（菜单「报告模版」，`/veracode-templates`）：上传公司的 Excel 模版（`.xlsx` 或带宏的 `.xlsm`，导出保留宏和扩展名），
+  点击单元格绑定 SCA / SAST 字段、SCA / SAST 统计（每个报告一行，与页面的统计表一致）或汇总字段（某一行设为数据行后，导出时该行按数据条数向下重复），
+  保存后在 Veracode 页面用「按模版导出」生成报告（主要导出：大号渐变按钮与右侧箭头按钮左右拼在一起，两者共用一条连续的渐变（样式同 antd 的 Gradient Button 示例），在「漏洞」卡片内容区第一行最左，导出 Excel / 导出到 Confluence 跟在后面，同一行右侧是创建按钮，第二行是过滤条件；渐变按钮直接用上次用过的模版（按钮上显示模版名），右侧箭头选择其他模版）（后端写入 JXLS 占位符并填充，未绑定的 sheet 原样保留）。
+- **新建 Jira 的版本**是「Jira 字段」栏的第一个字段（必填），与查询条件的「Jira 版本」分开 —— 查询条件可以不选或多选；查询条件正好选一个时自动带入。
 - **令牌对话框**（Jira / Confluence）：「还没有令牌？」一栏说明在哪里生成，并提供在新标签页打开令牌页面的链接，生成后回到对话框粘贴即可。
 - **卡片**：顶部三张卡片悬停时有阴影；「报告概要」可收起 / 展开。
   - SCA 统计下方的「SAST 统计」：评级、分数、报告给出的漏洞总数 / 未缓解数，然后是列出的、未关闭、已缓解、已修复、
@@ -500,6 +504,8 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
 - **application 名称**（2026-11-10）：后端配置 `veracode.applications` 把 `app_name` 映射为名称和链接（`GBT-T1-Creed-CCS` → `Creed-CCS`，`https://…/browse`）。
   页面表格、Jira 描述（*Veracode application*）和导出的 Confluence 页面（*Repository*）显示该名称，点击直接跳转；它也是该 application 的 Jira label
   （取代 `application-label` 正则，label 不带链接）。没有映射时使用 `app_name` 本身。
+- **Confluence 报告页面**：配置了 `veracode.confluence.parent-page-id`（`CREED_CONFLUENCE_PARENT_PAGE`）时，来源标签页列出该页面的全部子页面一次
+  （最近修改在前），在下拉框中输入即可按标题过滤（只在浏览器中过滤）；选中后填入页面 ID，再点「列出附件」与原来一致。列出时全屏 loading。
 - **Confluence 附件**按上传时间倒序列出，默认最多显示 50 个（50 / 100 / 200 / 全部），默认只显示文件名中带报告日期 `dd_MMM_yyyy`（`09_Nov_2026`）
   且后缀为 `.zip` 的附件 —— 页面上通常还有同一次扫描的 PDF。两个过滤条件都可以取消。
   页面保留每次扫描（`03_Nov_2026`、`09_Nov_2026` …）时，「报告日期」下拉框列出文件名中出现的日期（最新在前，带附件数），

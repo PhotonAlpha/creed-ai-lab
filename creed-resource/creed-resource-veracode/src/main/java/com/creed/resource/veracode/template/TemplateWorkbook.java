@@ -27,12 +27,13 @@ import java.util.Map;
 
 /**
  * The uploaded workbook, both ways: read into what the page's grid draws, and written back with JXLS markup from a
- * {@link TemplateMapping}. {@code .xlsx} only - JXLS's POI transformer and the comments it reads are OOXML.
+ * {@link TemplateMapping}. {@code .xlsx} and {@code .xlsm} (asked for, 2026-11-13: POI keeps the macros through the
+ * markup and the fill) - JXLS's POI transformer and the comments it reads are OOXML, so no {@code .xls}.
  *
  * <p>The markup, per sheet with bindings:
  * <ul>
- *   <li>{@code jx:area(lastCell="..")} in a comment on {@code A1}, covering the sheet's used range - cells outside an
- *       area would not be filled, and the whole sheet keeps its layout;</li>
+ *   <li>{@code jx:area(lastCell="..")} in a comment on {@code A1}, covering the sheet's content ({@link #extent}) and
+ *       the bound cells - cells outside an area would not be filled, and the whole sheet keeps its layout;</li>
  *   <li>per data row, {@code jx:each(items="sca" var="r" lastCell="..")} on its column {@code A}, spanning the row:
  *       the whole row repeats, unbound cells included, and what is below it moves down;</li>
  *   <li>bound cells hold {@code ${r.<field>}} (data rows) or {@code ${summary.<field>}}.</li>
@@ -73,7 +74,7 @@ public final class TemplateWorkbook {
         try {
             return new XSSFWorkbook(new ByteArrayInputStream(xlsx));
         } catch (IOException | RuntimeException e) {
-            throw new IllegalArgumentException("not an Excel workbook (.xlsx): " + e.getMessage(), e);
+            throw new IllegalArgumentException("not an Excel workbook (.xlsx / .xlsm): " + e.getMessage(), e);
         }
     }
 
@@ -93,8 +94,9 @@ public final class TemplateWorkbook {
     }
 
     private static SheetView read(XSSFWorkbook wb, Sheet sheet, DataFormatter formatter) {
-        int usedRows = sheet.getLastRowNum() + 1;
-        int usedCols = usedCols(sheet, usedRows);
+        CellAddress extent = extent(sheet, true);
+        int usedRows = extent.getRow() + 1;
+        int usedCols = extent.getColumn() + 1;
         int rows = Math.min(usedRows, MAX_ROWS);
         int cols = Math.min(Math.max(usedCols, 1), MAX_COLS);
         List<RowView> data = new ArrayList<>();
@@ -134,15 +136,36 @@ public final class TemplateWorkbook {
                 widths);
     }
 
-    private static int usedCols(Sheet sheet, int usedRows) {
-        int cols = 0;
-        for (int r = 0; r < usedRows; r++) {
-            Row row = sheet.getRow(r);
-            if (row != null) {
-                cols = Math.max(cols, row.getLastCellNum());
+    /**
+     * The last row and column that show something: a value or formula, a merge, with {@code fills} a solid fill too
+     * ({@code -1} each on an empty sheet). Not POI's used range: that counts every cell the file has, and a company
+     * template formatted by whole rows has cells out to column XFD - a JXLS area that wide copies 16384 cells per data
+     * row, which is how an export once took longer than any request timeout (2026-11-13).
+     */
+    static CellAddress extent(Sheet sheet, boolean fills) {
+        int lastRow = -1;
+        int lastCol = -1;
+        for (Row row : sheet) {
+            for (Cell cell : row) {
+                if (shows(cell, fills)) {
+                    lastRow = Math.max(lastRow, cell.getRowIndex());
+                    lastCol = Math.max(lastCol, cell.getColumnIndex());
+                }
             }
         }
-        return cols;
+        for (CellRangeAddress m : sheet.getMergedRegions()) {
+            lastRow = Math.max(lastRow, m.getLastRow());
+            lastCol = Math.max(lastCol, m.getLastColumn());
+        }
+        return new CellAddress(lastRow, lastCol);
+    }
+
+    private static boolean shows(Cell cell, boolean fills) {
+        return switch (cell.getCellType()) {
+            case BLANK -> fills && fill((XSSFCellStyle) cell.getCellStyle()) != null;
+            case STRING -> !cell.getStringCellValue().isEmpty() || fills && fill((XSSFCellStyle) cell.getCellStyle()) != null;
+            default -> true;
+        };
     }
 
     private static String fill(XSSFCellStyle style) {
@@ -170,18 +193,18 @@ public final class TemplateWorkbook {
     }
 
     private static void mark(XSSFWorkbook wb, Sheet sheet, TemplateMapping.SheetMapping sm) {
-        int lastRow = sheet.getLastRowNum();
+        // what shows, not the used range: an area out to every formatted blank cell is what made exports hang
+        CellAddress extent = extent(sheet, false);
+        int lastRow = Math.max(extent.getRow(), 0);
+        int lastCol = Math.max(extent.getColumn(), 0);
         for (TemplateMapping.ListBinding list : sm.lists()) {
             lastRow = Math.max(lastRow, list.row());
-        }
-        for (TemplateMapping.CellBinding value : sm.values()) {
-            lastRow = Math.max(lastRow, value.row());
-        }
-        int lastCol = Math.max(usedCols(sheet, lastRow + 1) - 1, 0);
-        for (TemplateMapping.ListBinding list : sm.lists()) {
             for (TemplateMapping.FieldCell cell : list.cells()) {
                 lastCol = Math.max(lastCol, cell.col());
             }
+        }
+        for (TemplateMapping.CellBinding value : sm.values()) {
+            lastRow = Math.max(lastRow, value.row());
         }
         for (TemplateMapping.CellBinding value : sm.values()) {
             lastCol = Math.max(lastCol, value.col());

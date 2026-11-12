@@ -18,7 +18,9 @@ import java.util.Locale;
  * @param baseUrl         everything before {@code /rest/api}: {@code https://acme.atlassian.net/wiki} on Cloud, the
  *                        context root ({@code https://wiki.acme.com} or {@code .../confluence}) on Data Center. Blank =
  *                        the page offers no Confluence source
- * @param pageSize        {@code limit} per page of the attachment listing
+ * @param parentPageId    the page whose child pages the page offers to list attachments of (asked for, 2026-11-13:
+ *                        the report pages live under one parent); blank = the user types a page id
+ * @param pageSize        {@code limit} per page of the attachment and child page listings
  * @param maxDownloadSize an attachment larger than this (by the size Confluence lists) is not downloaded - it is read
  *                        into memory whole
  * @param readTimeout     downloads included: a 50 MB attachment over a slow link takes a while
@@ -31,6 +33,7 @@ import java.util.Locale;
 @ConfigurationProperties("veracode.confluence")
 public record ConfluenceProperties(
         String baseUrl,
+        String parentPageId,
         @DefaultValue("50") @Min(1) @Max(200) int pageSize,
         @DefaultValue("50MB") DataSize maxDownloadSize,
         @DefaultValue("10") @Min(1) @Max(100) int maxConnections,
@@ -42,6 +45,7 @@ public record ConfluenceProperties(
 
     public ConfluenceProperties {
         baseUrl = baseUrl == null || baseUrl.isBlank() ? null : baseUrl.trim().replaceAll("/+$", "");
+        parentPageId = parentPageId == null || parentPageId.isBlank() ? null : parentPageId.trim();
     }
 
     public java.time.ZoneId exportZone() {

@@ -1,4 +1,4 @@
-import type { TemplateMapping } from '../../../api/veracode';
+import type { ListDataset, TemplateMapping } from '../../../api/veracode';
 
 type SheetMapping = TemplateMapping['sheets'][number];
 type ListBinding = SheetMapping['lists'][number];
@@ -40,7 +40,7 @@ const withSheet = (m: TemplateMapping, next: SheetMapping): TemplateMapping => (
  * Makes `row` a data row of `dataset`, or a plain row again (`null`). Summary cells on it go: they would repeat
  * with the row (the backend refuses that).
  */
-export const setDataRow = (m: TemplateMapping, sheet: string, row: number, dataset: 'sca' | 'sast' | null) => {
+export const setDataRow = (m: TemplateMapping, sheet: string, row: number, dataset: ListDataset | null) => {
   const sm = sheetMapping(m, sheet);
   const existing = listAt(sm, row);
   const lists = sm.lists.filter((l) => l.row !== row);

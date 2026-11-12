@@ -60,7 +60,12 @@ An issue covers a finding when all three hold:
 **Jira issue** is that without the application: the same CVE in the same jar reported by another application is the
 same issue. Such a finding shows *label missing* until the issue carries its application's label; "create" then adds
 the label (`PUT /rest/api/2/issue/{key}` `update.labels.add`, outcome `LABELED`) instead of filing a second issue —
-also within one request, when both applications' findings were missing.
+also within one request, when both applications' findings were missing. The same update writes the description
+(`fields.description`), read first (`GET /rest/api/2/issue/{key}?fields=description`) and rewritten, never appended
+to - per application: SCA `JiraDescription.mergeSca`, one *Veracode SCA finding* table per application (this analysis'
+new, other applications' tables kept, other text dropped); SAST `mergeSast`, as a new issue's would be plus what the
+old one held of applications not in this analysis (head blocks, `Veracode application(s)` entries, flaw rows,
+`Source (<application>): ...` lines; the open-flaw count and highest severity include them).
 
 **A closed issue may be filed again, one at a time.** A finding (SCA or SAST) whose issues are **all** in
 `veracode.jira.closed-statuses` (default `Closed, Done`, any case) is `recreatable` in the analysis; the page asks
@@ -100,8 +105,9 @@ hyphens are text, not NOT operators; an advisory without a CVE is searched as pl
 read inline (no per-issue `GET`). Jira's `summary ~` only narrows; rules 1–3 are decided here on what it returns.
 Data Center: `/rest/api/2/search` (`startAt`); Cloud: `/rest/api/3/search/jql` (`nextPageToken`) — Cloud retired
 the v2 search. Requests carry the page's choice as `jiraVersions` (repeated query parameter on upload / sample / export, a JSON
-array on analyse / create). Creating needs exactly one — the version the issues are filed under — else 400
-`jira_version_required`; `/jira/connection` returns the list (`versionNames`) for the page's dropdown. A report
+array on analyse / create). The version issues are **filed under** is the create `fields`' `versions` (Jira's own
+field id; the page's *Jira fields* bar, required - 2026-11-13), checked against the create screen; a request without it
+falls back to exactly one lookup version, else 400 `jira_version_required`; `/jira/connection` returns the list (`versionNames`) for the page's dropdown. A report
 with 300 findings takes 6 searches instead of 300 picker calls plus a read
 per candidate. The project's versions are the
 *Affects Version/s* `allowedValues` of the configured issue type's create screen.
@@ -158,6 +164,7 @@ REST API v1, the same paths on Cloud and Data Center, read **with the user's own
 | Endpoint | |
 |---|---|
 | `POST /api/veracode/confluence/connection` | `user/current`: `{ok, user, problem: UNREACHABLE / TOKEN_REJECTED}` (Cloud answers a bad token as `anonymous`, counted as rejected) |
+| `GET /api/veracode/confluence/pages/{pageId}/children` | page title / link + its child pages (paged `child/page`, `expand=version`: id, title, link, last edit) - the page lists `veracode.confluence.parent-page-id`'s once and filters by title itself |
 | `GET /api/veracode/confluence/pages/{pageId}/attachments` | page title / space / link + every attachment (paged `child/attachment`), `supported` = `.xml` / `.zip`; 404 `confluence_page_not_found` |
 | `POST /api/veracode/analysis/confluence` | `{pageId, attachmentIds, affectedVersion, autoCreate, fields, jiraVersions}` → downloaded and analysed as an upload of the same files (a zip is the reports in it) |
 
@@ -216,22 +223,27 @@ an option by id or label, any case); they are checked against the screen first: 
 
 A company Excel report, filled with an analysis (asked for, 2026-11-12). `/veracode-templates` on the page:
 
-1. **Upload** the `.xlsx` (`POST /api/veracode/report-templates`, multipart `file`, optional `name`) - stored as is in
+1. **Upload** the `.xlsx` or `.xlsm` (`POST /api/veracode/report-templates`, multipart `file`, optional `name`) - stored as is in
    `report_template` (H2 file `data/veracode/veracode.mv.db` under the working directory; PostgreSQL with the
    `postgres` profile, database `veracode`; Flyway `db/migration`).
-2. **The grid**: `GET /report-templates/{id}` answers every sheet as JSON - used range (cut at 500 × 60), cell text
+2. **The grid**: `GET /report-templates/{id}` answers every sheet as JSON - what shows (values, merges, fills; cut at
+   500 × 60 - not POI's used range, which counts formatted blank cells out to column XFD), cell text
    as Excel shows it (cached formula results), bold, solid fill, merges, column widths - with the saved mapping.
-3. **Bind**: click a cell. Its row can be a *data row* of `sca` (the SCA findings table) or `sast` (the SAST Jira
-   table): the whole row repeats once per item at export, what is below moving down; its cells are bound to that
+3. **Bind**: click a cell. Its row can be a *data row* of `sca` (the SCA findings table), `sast` (the SAST Jira
+   table), `scaStats` or `sastStats` (the SCA / SAST statistics, one row per report - stated values a report omits are
+   empty, not 0): the whole row repeats once per item at export, what is below moving down; its cells are bound to that
    dataset's fields. Any other cell can show a `summary` field. `GET /report-templates/fields` lists them.
 4. **Save** (`PUT /report-templates/{id}/mapping`): refused (400, naming the cell) for an unknown sheet / dataset /
    field, two data rows on one row, a data row inside a merge spanning rows, a summary cell on a data row, a cell
    bound twice.
 5. **Export** (`GET /report-templates/{id}/export?uploadId=&jiraVersions=&countries=`, the Jira token as for the
-   Excel export): a fresh analysis written into the template. Sheets without bindings come out as uploaded.
+   Excel export): a fresh analysis written into the template. Sheets without bindings come out as uploaded. An
+   `.xlsm` comes back as `.xlsm` (`application/vnd.ms-excel.sheet.macroEnabled.12`), macros kept.
 
 Only the upload and the mapping are stored. The JXLS template is derived at each export
-(`TemplateWorkbook.withJxlsMarkup`): `jx:area(lastCell=..)` on `A1` covering the sheet's used range,
+(`TemplateWorkbook.withJxlsMarkup`): `jx:area(lastCell=..)` on `A1` covering the cells that show something (a value,
+a formula, a merge) and the bound cells - **not** the used range: a template formatted by whole rows has cells out to
+XFD, and JXLS copying 16384 cells per data row hung the export (2026-11-13),
 `jx:each(items="sca" var="r" lastCell=..)` on column A of each data row, `${r.<field>}` / `${summary.<field>}` in
 bound cells; an existing comment is kept, the commands appended. `GET /report-templates/{id}/jxls` downloads it.
 

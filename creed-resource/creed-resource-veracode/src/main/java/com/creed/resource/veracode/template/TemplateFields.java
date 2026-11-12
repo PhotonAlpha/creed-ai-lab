@@ -7,6 +7,8 @@ import com.creed.resource.veracode.config.ApplicationProperties;
 import com.creed.resource.veracode.domain.SastFlaw;
 import com.creed.resource.veracode.service.JiraLookupService.IssueRef;
 import com.creed.resource.veracode.service.ReportView;
+import com.creed.resource.veracode.service.SastSummary;
+import com.creed.resource.veracode.service.ScaSummary;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -22,7 +24,8 @@ import java.util.stream.Collectors;
 
 /**
  * What a template cell can show, and the values at export: the rows of the page's two tables - SCA findings
- * ({@value #SCA}) and SAST Jira issues ({@value #SAST}) - and one {@value #SUMMARY} of the analysis. The keys are the
+ * ({@value #SCA}) and SAST Jira issues ({@value #SAST}) - the per-report SCA / SAST statistics ({@value #SCA_STATS},
+ * {@value #SAST_STATS}: the page's two statistics tables, one row per report) and one {@value #SUMMARY} of the analysis. The keys are the
  * JXLS expressions' property names ({@code ${r.cveId}}, {@code ${summary.projectKey}}): renaming one breaks every saved
  * mapping that uses it.
  */
@@ -30,7 +33,14 @@ public final class TemplateFields {
 
     public static final String SCA = "sca";
     public static final String SAST = "sast";
+    public static final String SCA_STATS = "scaStats";
+    public static final String SAST_STATS = "sastStats";
     public static final String SUMMARY = "summary";
+
+    /** The datasets a data row can repeat: every one but {@value #SUMMARY}. */
+    public static boolean isList(String dataset) {
+        return dataset != null && !SUMMARY.equals(dataset) && CATALOG.containsKey(dataset);
+    }
 
     /** @param label English; the page translates the keys it knows */
     public record Field(String key, String label) {
@@ -52,7 +62,7 @@ public final class TemplateFields {
                 new Field("title", "Title (CVE|CWE)"),
                 new Field("cveId", "CVE"),
                 new Field("cwe", "CWE"),
-                new Field("fileName", "Component file"),
+                new Field("fileName", "Library file"),
                 new Field("components", "Components"),
                 new Field("severity", "Severity"),
                 new Field("cvss", "CVSS"),
@@ -79,6 +89,24 @@ public final class TemplateFields {
                 new Field("jiraKeys", "Jira keys"),
                 new Field("jiraStatuses", "Jira statuses"),
                 new Field("jiraUrls", "Jira links")));
+        catalog.put(SCA_STATS, statsFields(List.of(
+                new Field("thirdPartyComponents", "Third-party components"),
+                new Field("violatesPolicy", "Violates policy"),
+                new Field("componentsViolatedPolicy", "Components violating policy"),
+                new Field("blacklistedComponents", "Blacklisted components"),
+                new Field("vulnerableComponents", "Vulnerable components"),
+                new Field("vulnerabilities", "Vulnerabilities"),
+                new Field("mitigated", "Mitigated")), List.of(new Field("maxCvss", "Highest CVSS"))));
+        catalog.put(SAST_STATS, statsFields(List.of(
+                new Field("rating", "Rating"),
+                new Field("score", "Score"),
+                new Field("totalFlaws", "Total flaws (Veracode)"),
+                new Field("flawsNotMitigated", "Flaws not mitigated (Veracode)"),
+                new Field("flaws", "Flaws listed"),
+                new Field("open", "Open"),
+                new Field("mitigated", "Mitigated"),
+                new Field("fixed", "Fixed"),
+                new Field("affectsPolicy", "Open, affecting policy")), List.of()));
         catalog.put(SUMMARY, List.of(
                 new Field("projectKey", "Jira project"),
                 new Field("jiraVersions", "Jira versions searched"),
@@ -101,6 +129,29 @@ public final class TemplateFields {
         return java.util.Collections.unmodifiableMap(catalog);
     }
 
+    /** A statistics row: which report, its own fields, the six severity counts, then {@code tail}. */
+    private static List<Field> statsFields(List<Field> own, List<Field> tail) {
+        List<Field> fields = new ArrayList<>(List.of(
+                new Field("no", "No. (1, 2, ...)"),
+                new Field("application", "Veracode application"),
+                new Field("report", "Report file"),
+                new Field("scanVersion", "Scan version")));
+        fields.addAll(own);
+        for (String level : ScaSummary.LEVELS) {
+            fields.add(new Field(severityKey(level), level));
+        }
+        fields.add(new Field("unknownSeverity", "Unknown severity"));
+        fields.addAll(tail);
+        return List.copyOf(fields);
+    }
+
+    /** {@code Very High} -> {@code veryHigh}. */
+    static String severityKey(String level) {
+        String camel = java.util.Arrays.stream(level.toLowerCase(java.util.Locale.ROOT).split(" "))
+                .map(w -> Character.toUpperCase(w.charAt(0)) + w.substring(1)).collect(Collectors.joining());
+        return Character.toLowerCase(camel.charAt(0)) + camel.substring(1);
+    }
+
     public static boolean known(String dataset, String field) {
         return CATALOG.getOrDefault(dataset, List.of()).stream().anyMatch(f -> f.key().equals(field));
     }
@@ -115,6 +166,8 @@ public final class TemplateFields {
         data.put(SCA, numbered(a.findings().stream().map(f -> sca(f, apps)).toList()));
         List<SastIssueView> sastIssues = a.sast() == null ? List.of() : a.sast().issues();
         data.put(SAST, numbered(sastIssues.stream().map(i -> sast(i, apps)).toList()));
+        data.put(SCA_STATS, numbered(a.reports().stream().map(r -> scaStats(r, apps)).toList()));
+        data.put(SAST_STATS, numbered(a.reports().stream().map(r -> sastStats(r, apps)).toList()));
         data.put(SUMMARY, summary(a, sastIssues, apps, now, zone));
         return data;
     }
@@ -169,6 +222,63 @@ public final class TemplateFields {
         row.put("status", i.status() == null ? "" : i.status().name());
         putIssues(row, i.issues(), false);
         return row;
+    }
+
+    private static Map<String, Object> report(ReportView r, ApplicationProperties apps) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("application", text(r.appName() == null ? null : apps.name(r.appName())));
+        row.put("report", text(r.fileName()));
+        row.put("scanVersion", text(r.scanVersion()));
+        return row;
+    }
+
+    /**
+     * A report without an SCA section has every stated value {@code ""}, not 0 - 0 would claim SCA found nothing
+     * (as on the page).
+     */
+    private static Map<String, Object> scaStats(ReportView r, ApplicationProperties apps) {
+        Map<String, Object> row = report(r, apps);
+        ScaSummary s = r.sca();
+        row.put("thirdPartyComponents", value(s == null ? null : s.thirdPartyComponents()));
+        row.put("violatesPolicy", s == null || s.violatesPolicy() == null ? "" : s.violatesPolicy() ? "Yes" : "No");
+        row.put("componentsViolatedPolicy", value(s == null ? null : s.componentsViolatedPolicy()));
+        row.put("blacklistedComponents", value(s == null ? null : s.blacklistedComponents()));
+        row.put("vulnerableComponents", value(s == null ? null : s.vulnerableComponents()));
+        row.put("vulnerabilities", value(s == null ? null : s.vulnerabilities()));
+        row.put("mitigated", value(s == null ? null : s.mitigated()));
+        putSeverities(row, s == null ? null : s.bySeverity());
+        row.put("unknownSeverity", value(s == null ? null : s.unknownSeverity()));
+        row.put("maxCvss", value(s == null ? null : s.maxCvss()));
+        return row;
+    }
+
+    private static Map<String, Object> sastStats(ReportView r, ApplicationProperties apps) {
+        Map<String, Object> row = report(r, apps);
+        SastSummary s = r.sast();
+        row.put("rating", value(s == null ? null : s.rating()));
+        row.put("score", value(s == null ? null : s.score()));
+        row.put("totalFlaws", value(s == null ? null : s.totalFlaws()));
+        row.put("flawsNotMitigated", value(s == null ? null : s.flawsNotMitigated()));
+        row.put("flaws", value(s == null ? null : s.flaws()));
+        row.put("open", value(s == null ? null : s.open()));
+        row.put("mitigated", value(s == null ? null : s.mitigated()));
+        row.put("fixed", value(s == null ? null : s.fixed()));
+        row.put("affectsPolicy", value(s == null ? null : s.affectsPolicy()));
+        putSeverities(row, s == null ? null : s.bySeverity());
+        row.put("unknownSeverity", value(s == null ? null : s.unknownSeverity()));
+        return row;
+    }
+
+    private static void putSeverities(Map<String, Object> row, List<ScaSummary.SeverityCount> counts) {
+        for (String level : ScaSummary.LEVELS) {
+            row.put(severityKey(level), counts == null ? "" : counts.stream()
+                    .filter(c -> level.equalsIgnoreCase(c.severity())).mapToInt(ScaSummary.SeverityCount::count).sum());
+        }
+    }
+
+    /** A number stays a number (Excel can sum it); none is an empty cell. */
+    private static Object value(Object value) {
+        return value == null ? "" : value;
     }
 
     private static void putIssues(Map<String, Object> row, List<IssueRef> issues, boolean assignees) {

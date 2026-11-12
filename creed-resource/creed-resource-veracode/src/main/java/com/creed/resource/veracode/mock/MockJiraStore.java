@@ -106,6 +106,18 @@ public class MockJiraStore {
         return null;
     }
 
+    /** {@code fields.description} set. */
+    public synchronized void describe(String key, String description) {
+        for (int i = 0; i < issues.size(); i++) {
+            Issue it = issues.get(i);
+            if (it.key().equalsIgnoreCase(key)) {
+                issues.set(i, new Issue(it.id(), it.key(), it.summary(), description, it.status(), it.priority(),
+                        it.assignee(), it.reporter(), it.versions(), it.components(), it.environment(), it.labels(),
+                        it.issueType(), it.country()));
+            }
+        }
+    }
+
     public synchronized void attach(String key, String filename) {
         attachments.computeIfAbsent(key.toUpperCase(java.util.Locale.ROOT), k -> new ArrayList<>()).add(filename);
     }

@@ -31,6 +31,24 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 
 ## Rules that are easy to break
 
+- **The JXLS area is the content, never POI's used range** (2026-11-13, an export hung): `getLastRowNum` /
+  `getLastCellNum` count every formatted blank cell - whole-row formatting reaches XFD, and JXLS copies each one per
+  data row. `TemplateWorkbook.extent` (values, formulas, merges; fills too for the grid) bounds both. Datasets: `sca`,
+  `sast`, `scaStats`, `sastStats` (`TemplateFields.isList`), `summary`. `.xlsm` goes through unchanged (POI keeps
+  `vbaProject.bin`); the export's extension and content type follow the upload's file name.
+
+- **Labelling an existing issue rewrites its description** (2026-11-13, asked for): `addLabels` sends labels +
+  `fields.description` in one PUT. It is read first (`JiraClient.issue`) and rewritten **per application**,
+  SCA and SAST alike (asked for: not appended; an application not in this analysis must keep its part - the analysis
+  may hold only the newest application). SCA `JiraDescription.mergeSca`: tables keyed by their `|Veracode
+  application|` row. SAST `mergeSast`: head blocks by `<name>: `, flaw rows by their first cell, `Source (<name>): `
+  lines - so never drop the application from a SAST source line; an untagged (pre-2026-11-13) one is not kept.
+  Applications compare by display name (`displayName` strips a `[name|url]` link). Other text is dropped. The mock has
+  `GET /issue/{key}` and its PUT honours `fields.description`.
+
+- **Create version = `fields.versions`** (2026-11-13): `createVersion(meta, fields, lookup)`; `resolveFields` lets the
+  `versions` key through without treating it as a screen field. The lookup's `jiraVersions` stay optional / several.
+
 - **Report templates store the upload and the mapping, never the JXLS file** (2026-11-12): the markup is written at
   each export, so fixing `TemplateWorkbook.withJxlsMarkup` fixes every template. `TemplateFields` keys are the JXLS
   property names (`${r.cveId}`) and live in saved mappings: renaming one breaks them - add, don't rename. A data

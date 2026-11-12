@@ -173,7 +173,7 @@ public class VeracodeAnalysisService {
         try {
             Snapshot s = load(uploadId, jiraVersions, countries, token);
             Map<String, Object> chosen = autoCreate ? jira.resolveFields(s.meta(), fields) : Map.of();
-            String version = autoCreate ? jira.createVersion(s.versions()) : null;
+            String version = autoCreate ? jira.createVersion(s.meta(), fields, s.versions()) : null;
             List<String> warnings = new ArrayList<>(s.read().warnings());
             Map<String, IssueRef> createdNow = new HashMap<>();
             List<FindingView> views = new ArrayList<>();
@@ -225,7 +225,7 @@ public class VeracodeAnalysisService {
         try {
             Snapshot s = load(uploadId, jiraVersions, countries, token);
             Map<String, Object> chosen = jira.resolveFields(s.meta(), fields);
-            String version = jira.createVersion(s.versions());
+            String version = jira.createVersion(s.meta(), fields, s.versions());
             Map<String, Finding> byId = s.findings().stream()
                     .collect(Collectors.toMap(Finding::id, Function.identity(), (a, b) -> a, LinkedHashMap::new));
             Map<String, IssueRef> createdNow = new HashMap<>();
@@ -264,7 +264,9 @@ public class VeracodeAnalysisService {
             if (!needsLabel(f, existing)) {
                 return new Result(f.id(), Outcome.ALREADY_EXISTS, existing, null);
             }
-            IssueRef labelled = jira.addApplicationLabel(existing.getFirst(), f, token);
+            // every application of this upload whose finding the issue covers: the description is written for all of them
+            List<Finding> sharing = s.findings().stream().filter(o -> o.issueKey().equals(f.issueKey())).toList();
+            IssueRef labelled = jira.addApplicationLabel(existing.getFirst(), f, sharing, s::reportOf, token);
             List<IssueRef> issues = new ArrayList<>(existing);
             issues.set(0, labelled);
             createdNow.putIfAbsent(f.issueKey(), labelled);
@@ -410,7 +412,7 @@ public class VeracodeAnalysisService {
                             continue;
                         }
                         List<IssueRef> labelled = new ArrayList<>(existing);
-                        labelled.set(0, jira.addSastLabels(issue, existing, token));
+                        labelled.set(0, jira.addSastLabels(issue, existing, read.reports(), token));
                         results.add(new Result(id, Outcome.LABELED, List.copyOf(labelled),
                                 "added label(s) " + String.join(", ", missing) + " to " + existing.getFirst().key()));
                         continue;

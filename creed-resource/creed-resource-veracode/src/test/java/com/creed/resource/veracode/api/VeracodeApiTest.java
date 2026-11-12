@@ -363,6 +363,36 @@ class VeracodeApiTest {
         assertThat(jira.all()).last().extracting(MockJiraStore.Issue::versions).isEqualTo(List.of("2.4.0"));
     }
 
+    /**
+     * The version to file under is a Jira field of its own (asked for, 2026-11-13): the lookup may name none (any
+     * version) or several, and choosing one to create with no longer narrows the lookup.
+     */
+    @Test
+    void theCreateVersionIsAJiraFieldApartFromTheLookupVersions() throws Exception {
+        String uploadId = upload();
+        String ids = "\"findingIds\":[\"creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar\"]";
+        // looked up in two versions (several = refused before), filed under the field's
+        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content("{\"uploadId\":\""
+                        + uploadId + "\"," + ids + ",\"jiraVersions\":[\"2.3.0\",\"2.4.0\"],\"fields\":{\"components\":[\"Security\"],"
+                        + "\"customfield_10100\":\"Production\",\"versions\":[\"2.2.1\"]}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.results[0].outcome").value("CREATED"))
+                .andExpect(jsonPath("$.results[0].issues[0].versions", contains("2.2.1")));
+        assertThat(jira.all()).last().extracting(MockJiraStore.Issue::versions).isEqualTo(List.of("2.2.1"));
+        // a version the create screen does not offer is a 400 before anything is created
+        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content("{\"uploadId\":\""
+                        + uploadId + "\"," + ids.replace("CVE-2022-22965@spring-beans", "CVE-2016-1000027@spring-web")
+                        + ",\"fields\":{\"components\":[\"Security\"],\"customfield_10100\":\"Production\",\"versions\":\"9.9.9\"}}"))
+                .andExpect(status().isBadRequest());
+        // auto-create too, with no lookup version at all
+        mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("autoCreate", "true")
+                        .param("fields", "{\"components\":[\"Security\"],\"customfield_10100\":\"Production\",\"versions\":[\"2.4.0\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.selectedVersions.length()").value(0))
+                .andExpect(jsonPath("$.counts.created").isNotEmpty());
+        assertThat(jira.all()).last().extracting(MockJiraStore.Issue::versions).isEqualTo(List.of("2.4.0"));
+    }
+
     @Test
     void autoCreateFilesEveryMissingFindingAndFindsThemAgain() throws Exception {
         String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("autoCreate", "true")
@@ -456,7 +486,26 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.error").value("confluence_token_required"));
         mvc.perform(get("/api/veracode/settings"))
                 .andExpect(jsonPath("$.confluenceBaseUrl").value("http://localhost/mock/confluence"))
-                .andExpect(jsonPath("$.confluenceCloud").value(false));
+                .andExpect(jsonPath("$.confluenceCloud").value(false))
+                .andExpect(jsonPath("$.confluenceParentPageId").value("98700"));
+    }
+
+    /** The configured parent's children (asked for, 2026-11-13): the page picks one, then lists its attachments. */
+    @Test
+    void confluenceListsTheParentPagesChildren() throws Exception {
+        mvc.perform(get("/api/veracode/confluence/pages/98700/children").header(ConfluenceToken.HEADER, TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Veracode"))
+                .andExpect(jsonPath("$.children[*].id", contains("98765", "98766")))
+                .andExpect(jsonPath("$.children[0].title").value("Veracode reports - creed"))
+                .andExpect(jsonPath("$.children[0].url").value("http://localhost/mock/confluence/pages/viewpage.action?pageId=98765"))
+                .andExpect(jsonPath("$.children[0].modified").value("2026-11-09T08:30:00.000Z"));
+        mvc.perform(get("/api/veracode/confluence/pages/1/children").header(ConfluenceToken.HEADER, TOKEN))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("confluence_page_not_found"));
+        mvc.perform(get("/api/veracode/confluence/pages/98700/children"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("confluence_token_required"));
     }
 
     @Test
@@ -532,11 +581,20 @@ class VeracodeApiTest {
                 .andReturn().getResponse().getContentAsString();
 
         String uploadId = JsonPath.read(body, "$.uploadId");
+        String sqlKey = JsonPath.read(body, "$.sast.issues[1].issues[0].key");
+        jira.describe(sqlKey, "written by hand");
         // "add label": the existing issue gets the gateway's label, no second issue
         mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON).content(sastCreate.formatted(uploadId)))
                 .andExpect(jsonPath("$.results[0].outcome").value("LABELED"))
                 .andExpect(jsonPath("$.results[0].issues[0].labels", contains("veracode-sast", "creed-sast",
                         "creed-platform-2026-10-06-Creed", "Creed-Gateway")));
+        // ... and its description overwritten, as SCA's (2026-11-13): the page's "Jira summary", a block per application
+        assertThat(jira.find(sqlKey).description()).doesNotContain("written by hand");
+        assertThat(jira.find(sqlKey).description())
+                .startsWith("[Creed-Gateway|https://git.example.com/projects/GATEWAY/browse]: creed-sast - Improper Neutralization")
+                .contains("\n\ncreed-platform-2026-10-06-Creed: creed-sast - Improper Neutralization")
+                .contains("h3. Veracode SAST finding");
+        assertThat(jira.find(sqlKey).description().split("h3. Veracode SAST finding", -1)).hasSize(2);
         mvc.perform(post("/api/veracode/jira/sast-issues").contentType(MediaType.APPLICATION_JSON).content(sastCreate.formatted(uploadId)))
                 .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"));
 
@@ -614,6 +672,10 @@ class VeracodeApiTest {
                 .andReturn().getResponse().getContentAsString();
         String uploadId = JsonPath.read(body, "$.uploadId");
 
+        // labelling rewrites the description (asked for, 2026-11-13): a table per application - an application filed
+        // from an earlier analysis keeps its own, other text goes
+        jira.describe("CREED-101", "written by hand\n\nh3. Veracode SCA finding\n||Field||Value||\n"
+                + "|Veracode application|creed-legacy|\n|Severity|Very High|\n");
         // both applications miss CVE-2022-22965: one issue is created, the second application only labels it
         mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content("""
                         {"uploadId":"%s","findingIds":["creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar",
@@ -629,6 +691,16 @@ class VeracodeApiTest {
         assertThat(jira.find("CREED-105").labels()).containsExactly("veracode", "creed", "creed-platform-2026-10-06-Creed",
                 "creed-pay-gateway-api");
         assertThat(jira.find("CREED-101").labels()).contains("creed-platform-2026-10-06-Creed", "creed-pay-gateway-api");
+        for (String key : List.of("CREED-105", "CREED-101")) {
+            String description = jira.find(key).description();
+            assertThat(description.split("h3. Veracode SCA finding", -1)).as(key).hasSize(key.equals("CREED-101") ? 4 : 3);
+            assertThat(description).as(key).startsWith("h3. Veracode SCA finding")
+                    .contains("|Veracode application|creed-platform-2026-10-06-Creed|",
+                            "|Veracode application|creed-pay-gateway-api|")
+                    .doesNotContain("written by hand");
+        }
+        assertThat(jira.find("CREED-101").description()).startsWith("h3. Veracode SCA finding\n||Field||Value||\n"
+                + "|Veracode application|creed-legacy|\n|Severity|Very High|\n");
 
         mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"uploadId\":\"" + uploadId + "\",\"jiraVersions\":[\"2.3.0\"]}"))
@@ -803,7 +875,7 @@ class VeracodeApiTest {
         assertThat(created.labels()).containsExactly("veracode-sast", "creed-sast", "creed-platform-2026-10-06-Creed");
         assertThat(created.versions()).containsExactly("2.3.0");
         assertThat(created.description()).contains("ScriptRunner.java", "CWE-78",
-                "Source: uploaded report detailedreport.xml (attached to this issue)");
+                "Source (creed-platform-2026-10-06-Creed): uploaded report detailedreport.xml (attached to this issue)");
         // headed by the page's "Jira summary" column: name: project - category / CWE line / flaw ids
         assertThat(created.description()).startsWith("creed-platform-2026-10-06-Creed: creed-sast - "
                 + "Improper Neutralization of Special Elements used in an OS Command\nCWE 78");

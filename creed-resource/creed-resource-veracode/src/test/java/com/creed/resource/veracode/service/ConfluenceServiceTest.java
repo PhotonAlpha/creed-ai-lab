@@ -27,7 +27,7 @@ class ConfluenceServiceTest {
     @Test
     void anyDownloadLinkUnderTheBaseUrlIsTaken() {
         ConfluenceService service = new ConfluenceService(null, new com.creed.resource.veracode.config.ConfluenceProperties(
-                "https://acme.atlassian.net/wiki/", 50, org.springframework.util.unit.DataSize.ofMegabytes(50), 1,
+                "https://acme.atlassian.net/wiki/", null, 50, org.springframework.util.unit.DataSize.ofMegabytes(50), 1,
                 java.time.Duration.ofSeconds(1), java.time.Duration.ofSeconds(1), "{project}", "yyyy", null));
         // Cloud now, Data Center / older Cloud
         assertThat(service.downloadUrl(attachment("/rest/api/content/164038/child/attachment/att131236/download")))
