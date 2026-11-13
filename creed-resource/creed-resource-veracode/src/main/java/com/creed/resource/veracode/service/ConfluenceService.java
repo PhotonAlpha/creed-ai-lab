@@ -28,9 +28,12 @@ import java.util.Objects;
 /**
  * A Confluence page's attachments as a report source: list them, then download the chosen ones as if uploaded.
  *
- * <p>The page names attachments by id only. The server lists the page again and downloads from the listing's
- * {@code _links.download} under the configured base URL - never a URL from the request, so the page cannot make
- * this service fetch anything but that Confluence's attachments.
+ * <p>The page names attachments by id only. The server reads each one by id - checking it is an attachment of the
+ * named page - and downloads from its {@code _links.download} under the configured base URL; never a URL from the
+ * request, so the page cannot make this service fetch anything but that Confluence's attachments. It does not list the
+ * page again for that (2026-11-13: a page with 2500+ attachments took dozens of listing calls per analysis and Confluence
+ * answered 429).
+
  */
 @Service
 @RequiredArgsConstructor
@@ -104,20 +107,21 @@ public class ConfluenceService {
                 listing.page().space() == null ? null : listing.page().space().key(), props.pageUrl(pageId), views);
     }
 
-    /** The chosen attachments' bytes, named by their titles - what an upload of the same files would be. */
+    /**
+     * The chosen attachments' bytes, named by their titles - what an upload of the same files would be. One read per
+     * attachment ({@link #attachmentOf}) and its download; the page's other attachments are never listed.
+     */
     public List<UploadedFile> download(String pageId, List<String> attachmentIds, ConfluenceToken token) {
+        requireEnabled();
+        token.require();
+        String page = pageId(pageId);
         if (attachmentIds == null || attachmentIds.isEmpty()) {
             throw new IllegalArgumentException("no attachment chosen: pick one or more .xml / .zip attachments");
         }
-        log.info("download:{}", attachmentIds);
-        Listing listing = list(pageId, token);
+        log.info("Confluence page {}: downloading {}", page, attachmentIds);
         List<UploadedFile> files = new ArrayList<>();
-        for (String id : attachmentIds.stream().filter(Objects::nonNull).distinct().toList()) {
-            Attachment a = listing.attachments().get(id);
-            if (a == null) {
-                throw new IllegalArgumentException("attachment " + id + " is not on page " + pageId
-                        + " (any more): list the attachments again");
-            }
+        for (String id : attachmentIds.stream().filter(Objects::nonNull).map(String::trim).distinct().toList()) {
+            Attachment a = attachmentOf(page, id, token);
             if (!supported(a.title())) {
                 throw new UnsupportedFileException(a.title() + " is neither .xml nor .zip");
             }
@@ -132,12 +136,41 @@ public class ConfluenceService {
                 throw new UnsupportedFileException(a.title() + " is larger than "
                         + props.maxDownloadSize().toMegabytes() + "MB (veracode.confluence.max-download-size)");
             }
-            log.info("Confluence page {}: downloaded '{}' ({} bytes)", pageId, a.title(), content.length);
+            log.info("Confluence page {}: downloaded '{}' ({} bytes)", page, a.title(), content.length);
             // the URL goes into the Jira issues filed from it, instead of the file itself
-            files.add(new UploadedFile(a.title(), content, url.toString(), listing.page().title(),
-                    props.pageUrl(listing.page().id())));
+            files.add(new UploadedFile(a.title(), content, url.toString(),
+                    a.container().title() != null ? a.container().title() : page, props.pageUrl(page)));
         }
         return files;
+    }
+
+    /**
+     * The attachment {@code id}, if it is one of page {@code pageId}'s: read by id with its page ({@code container}).
+     * Anything else - no such id, one the token may not see (Confluence's 404 / 403), a page id, another page's
+     * attachment - is the same 400, so ids of other pages are neither fetched nor told apart.
+     */
+    private Attachment attachmentOf(String pageId, String id, ConfluenceToken token) {
+        IllegalArgumentException notOnPage = new IllegalArgumentException("attachment " + id + " is not on page "
+                + pageId + " (any more): list the attachments again");
+        // Confluence's attachment ids: att12345 (v1), a bare number on older Data Center - nothing else reaches the path
+        if (!id.matches("(att)?\\d{1,19}")) {
+            throw notOnPage;
+        }
+        Attachment a;
+        try {
+            a = UpstreamException.call(CONFLUENCE, () -> confluence.attachment(token.authorization(), id,
+                    "version,container"));
+        } catch (UpstreamException e) {
+            if (e.status() == 404 || e.status() == 403) {
+                throw notOnPage;
+            }
+            throw e;
+        }
+        if (a == null || !"attachment".equals(a.type()) || a.container() == null
+                || !pageId.equals(a.container().id())) {
+            throw notOnPage;
+        }
+        return a;
     }
 
     /**

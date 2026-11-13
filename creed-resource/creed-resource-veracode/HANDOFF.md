@@ -68,6 +68,10 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-13 (asked for): **analysing Confluence attachments no longer lists the page** - `ConfluenceService.download`
+reads each chosen id (`GET /rest/api/content/{id}?expand=version,container`, page checked through `container`) instead
+of re-listing every attachment: a page with 2500+ of them got Confluence's 429. 2 attachments = 2 reads + 2 downloads.
+
 2026-11-13 (asked for): **traceId / spanId on every console line** - Micrometer Tracing on Brave
 (`spring-boot-micrometer-tracing-brave` + `micrometer-tracing-bridge-brave`), Boot's default correlation pattern
 (`[traceId-spanId]`, blank outside a request), sampling 1.0 (`CREED_VERACODE_TRACE_SAMPLING`), no exporter. Jira /

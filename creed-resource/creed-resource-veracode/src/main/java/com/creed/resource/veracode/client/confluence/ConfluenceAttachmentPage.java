@@ -19,10 +19,18 @@ public record ConfluenceAttachmentPage(List<Attachment> results, int start, int 
      * @param extensions Cloud's (and Data Center's) {@code mediaType} and {@code fileSize}
      * @param metadata   Data Center 6/7 put the {@code mediaType} here
      * @param links      {@code download}: the file's path under the base URL
+     * @param type       {@code attachment} - read by id, the content resource answers pages too
+     * @param container  the page it is on; only with {@code expand=container} (read by id), absent in a listing
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Attachment(String id, String title, Extensions extensions, Metadata metadata, Version version,
-                             @JsonProperty("_links") Map<String, String> links) {
+                             @JsonProperty("_links") Map<String, String> links, String type, Container container) {
+
+        /** A listing's entry: no type or container, the page is the one listed. */
+        public Attachment(String id, String title, Extensions extensions, Metadata metadata, Version version,
+                          Map<String, String> links) {
+            this(id, title, extensions, metadata, version, links, null, null);
+        }
 
         public String mediaType() {
             return extensions != null && extensions.mediaType() != null ? extensions.mediaType()
@@ -36,6 +44,10 @@ public record ConfluenceAttachmentPage(List<Attachment> results, int start, int 
         public String download() {
             return links == null ? null : links.get("download");
         }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Container(String id, String type, String title) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

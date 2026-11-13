@@ -74,8 +74,11 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   like any create-screen field. `covers()` does not re-check it (the search reads no Country), so the mock's `matching`
   must honour the clause - it parses `cf[10300] in (...)` literally; another field id needs the mock pattern changed.
 
-- **Confluence downloads: ids in, URLs never.** `POST /analysis/confluence` takes attachment ids; the server re-lists
-  the page and downloads its own `_links.download` under `veracode.confluence.base-url`. Redirects are followed in
+- **Confluence downloads: ids in, URLs never.** `POST /analysis/confluence` takes attachment ids; the server reads
+  **each id** (`ConfluenceClient.attachment`, `expand=version,container`; `attachmentOf` checks `type` = attachment and
+  `container.id` = the page - one 400 for every other case) and downloads its own `_links.download` under
+  `veracode.confluence.base-url`. **Never list the page to download** (2026-11-13: 2500+ attachments = dozens of listing
+  calls per analysis, Confluence 429) - `VeracodeApiTest` asserts the mock's `attachmentListings()` stays 0. Redirects are followed in
   `ConfluenceService.fetch` (the client has redirects off, like Jira's) and the token goes only to URLs **under the
   base URL** (`withinBase`: origin + path prefix) — Cloud redirects to its media service, which must not get it. The
   mock's media endpoint lives outside `/mock/confluence` and 403s a token, so the test catches a leak.

@@ -627,6 +627,8 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.findings[?(@.id=='creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar')].issues[0].key")
                         .value("CREED-101"))
                 .andReturn().getResponse().getContentAsString();
+        // read by id: the page's attachments are not listed again (a page with thousands of them hit Confluence's 429)
+        assertThat(confluence.attachmentListings()).isZero();
         // filed from a downloaded report: the description links the Confluence attachment, Jira gets no file
         mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content("""
                         {"uploadId":"%s","findingIds":["creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar"],%s}
@@ -646,6 +648,15 @@ class VeracodeApiTest {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"pageId\":\"98766\",\"attachmentIds\":[\"att1001\"]}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(containsString("not on page 98766")));
+        // a page id is content too, but not an attachment; an unknown id and a non-id are the same refusal
+        for (String id : new String[] {MockConfluenceController.PARENT, "att9999", "../user/current"}) {
+            mvc.perform(post("/api/veracode/analysis/confluence").header(ConfluenceToken.HEADER, TOKEN)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"pageId\":\"98765\",\"attachmentIds\":[\"" + id + "\"]}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value(containsString("not on page 98765")));
+        }
+        assertThat(confluence.attachmentListings()).isZero();
         // no Jira token: refused before anything is downloaded
         anonymous.perform(post("/api/veracode/analysis/confluence").header(ConfluenceToken.HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"pageId\":\"98765\",\"attachmentIds\":[\"att1001\"]}"))

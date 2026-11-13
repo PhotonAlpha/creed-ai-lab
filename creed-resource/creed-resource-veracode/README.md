@@ -176,8 +176,10 @@ REST API v1, the same paths on Cloud and Data Center, read **with the user's own
 | `GET /api/veracode/confluence/pages/{pageId}/attachments` | page title / space / link + every attachment (paged `child/attachment`), `supported` = `.xml` / `.zip`; 404 `confluence_page_not_found` |
 | `POST /api/veracode/analysis/confluence` | `{pageId, attachmentIds, affectedVersion, autoCreate, fields, jiraVersions}` → downloaded and analysed as an upload of the same files (a zip is the reports in it) |
 
-- The request names attachments **by id only**: the server lists the page again and downloads from the listing's
-  `_links.download` under the base URL — never a URL from the request. An id not on that page is a 400. The link's
+- The request names attachments **by id only**: the server reads each one by id (`GET /rest/api/content/{id}?expand=version,container`
+  — one call per chosen attachment, the page is **not** listed again: a page with thousands of attachments got Confluence's
+  429) and downloads from its `_links.download` under the base URL — never a URL from the request. An id that is not an
+  attachment of that page (`container`), or that the token may not see, is a 400. The link's
   shape varies (Data Center `/download/attachments/{page}/{file}?version=1`, Cloud now
   `/rest/api/content/{page}/child/attachment/{id}/download`): any path that stays under the base URL once
   normalised is taken.

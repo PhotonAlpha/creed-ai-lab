@@ -55,6 +55,15 @@ public interface ConfluenceClient {
                                     @PathVariable String id, @RequestParam("start") int start,
                                     @RequestParam("limit") int limit, @RequestParam("expand") String expand);
 
+    /**
+     * One attachment by its id ({@code att...}) - the same content resource as a page. {@code expand=container} names
+     * the page it is on, {@code _links.download} comes with it: what a download needs, without listing the page (a page
+     * with thousands of attachments is dozens of listing calls, and Confluence rate-limits them).
+     */
+    @GetExchange("/rest/api/content/{id}")
+    ConfluenceAttachmentPage.Attachment attachment(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+                                                   @PathVariable String id, @RequestParam("expand") String expand);
+
     @GetExchange("/rest/api/content/{id}/child/attachment")
     ConfluenceAttachmentPage attachments(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
                                          @PathVariable String id, @RequestParam("start") int start,

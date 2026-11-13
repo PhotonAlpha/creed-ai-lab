@@ -75,8 +75,16 @@ public class MockConfluenceController {
         return created.values().stream().sorted(java.util.Comparator.comparing(CreatedPage::id)).toList();
     }
 
+    /** Calls to {@code child/attachment} (the listing): a download must not make any - it reads the ids it was given. */
+    private final java.util.concurrent.atomic.AtomicInteger listings = new java.util.concurrent.atomic.AtomicInteger();
+
+    public int attachmentListings() {
+        return listings.get();
+    }
+
     public void reset() {
         created.clear();
+        listings.set(0);
     }
 
     public MockConfluenceController() {
@@ -108,6 +116,15 @@ public class MockConfluenceController {
                                              @RequestParam(required = false) String expand) {
         if (MockJiraController.user(auth) == null) {
             return unauthorized();
+        }
+        File attachment = files.get(id);
+        if (attachment != null) {
+            // the content resource answers attachments too; the page it is on only with expand=container
+            Map<String, Object> body = new LinkedHashMap<>(attachmentJson(PAGE, attachment));
+            if (expand != null && expand.contains("container")) {
+                body.put("container", Map.of("id", PAGE, "type", "page", "title", title(PAGE)));
+            }
+            return ResponseEntity.ok(body);
         }
         CreatedPage made = created.get(id);
         if (made != null) {
@@ -230,15 +247,13 @@ public class MockConfluenceController {
         if (MockJiraController.user(auth) == null) {
             return unauthorized();
         }
+        listings.incrementAndGet();
         if (!PAGE.equals(id) && !EMPTY_PAGE.equals(id)) {
             return notFound(id);
         }
         List<File> all = PAGE.equals(id) ? List.copyOf(files.values()) : List.of();
-        List<Map<String, Object>> results = all.stream().skip(start).limit(limit).map(f -> Map.<String, Object>of(
-                "id", f.id(), "type", "attachment", "title", f.title(),
-                "extensions", Map.of("mediaType", f.mediaType(), "fileSize", f.content().length),
-                "version", Map.of("number", 1, "when", "2026-11-06T08:30:00.000Z", "by", Map.of("displayName", "ci-veracode")),
-                "_links", Map.of("download", downloadLink(id, f)))).toList();
+        List<Map<String, Object>> results = all.stream().skip(start).limit(limit)
+                .map(f -> attachmentJson(id, f)).toList();
         Map<String, Object> links = new LinkedHashMap<>();
         links.put("base", ServletUriComponentsBuilder.fromCurrentContextPath().path(BASE).toUriString());
         if (start + results.size() < all.size()) {
@@ -264,6 +279,13 @@ public class MockConfluenceController {
             return ResponseEntity.status(HttpStatus.FOUND).location(media).build();
         }
         return ResponseEntity.ok().contentType(MediaType.parseMediaType(file.mediaType())).body(file.content());
+    }
+
+    private static Map<String, Object> attachmentJson(String pageId, File f) {
+        return Map.of("id", f.id(), "type", "attachment", "title", f.title(),
+                "extensions", Map.of("mediaType", f.mediaType(), "fileSize", f.content().length),
+                "version", Map.of("number", 1, "when", "2026-11-06T08:30:00.000Z", "by", Map.of("displayName", "ci-veracode")),
+                "_links", Map.of("download", downloadLink(pageId, f)));
     }
 
     /**
