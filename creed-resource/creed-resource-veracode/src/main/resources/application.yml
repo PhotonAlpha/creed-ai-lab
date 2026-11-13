@@ -33,6 +33,11 @@ spring:
     locations: classpath:db/migration,classpath:db/defaults
 
 veracode:
+  logbook:
+    # Bodies Logbook prints (prefix match, any case): others - a downloaded zip / XML, a multipart attachment upload - are
+    # logged without their body, and not buffered for it (JsonBodyOnlyStrategy). Empty = every body.
+    allowed-content-types: [application/json]
+
   http:
     # Jira and Confluence: a 429 / 503 is retried once only when its Retry-After is at most this long; a longer one fails
     # the call at once, naming the rate limit (HttpClient's default waited however long the server asked).

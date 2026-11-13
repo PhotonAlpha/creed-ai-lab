@@ -68,6 +68,9 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-13 (asked for): **Logbook prints JSON bodies only** (`JsonBodyOnlyStrategy`, `veracode.logbook.allowed-content-types`):
+a Confluence attachment download or a multipart upload is logged as method / URL / status / headers, without its bytes.
+
 2026-11-13 (asked for): **template export hung, two causes fixed.** (1) JXLS copies conditional formatting cell by cell,
 quadratic in rows x rules (40 rules: 400 rows 15 s, 2000 rows minutes) - it is now taken off before the fill and put back
 after it with POI's row shifter (`TemplateWorkbook.forFill` / `withConditionalFormatting`): 2000 rows ~2 s, one entry per

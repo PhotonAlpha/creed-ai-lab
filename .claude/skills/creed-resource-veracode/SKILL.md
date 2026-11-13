@@ -186,6 +186,12 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   `org.zalando.logbook.Logbook`. It sees the wire, i.e. the user's Bearer token: never drop `Authorization` from
   `logbook.obfuscate.headers`. The starter's inbound servlet filter is off (`logbook.filter.enabled: false`) —
   turning it on would log `X-Jira-Token` and whole uploads.
+- **Logbook logs JSON bodies only** (2026-11-13, asked for, as creed-simple-metrics): `config/JsonBodyOnlyStrategy`
+  (bean in `LogbookConfiguration`, so Logbook's own `Strategy` and the `logbook.strategy` property back off) leaves out -
+  and never buffers - a body whose type is not in `veracode.logbook.allowed-content-types` (`application/json`): the
+  Confluence download (zip / XML) was printed byte for byte, Logbook's default replacer covers neither type. The exchange
+  is still logged (unlike simple-metrics' request gate) so a failed attachment upload stays visible. A request's type
+  comes from its entity: Logbook runs before HttpClient's protocol step adds the header. `JsonBodyOnlyStrategyTest`.
 - **HttpClient 5 has a cookie store by default — keep `disableCookieManagement()`**: one client serves every
   user's token, and a kept `JSESSIONID` would carry one user's session into the next (tokenless) request.
 - Exception handler is `@RestControllerAdvice(assignableTypes = VeracodeController.class)`: the mock must
