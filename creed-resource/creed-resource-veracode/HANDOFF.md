@@ -68,6 +68,14 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-13 (asked for): **template export hung, two causes fixed.** (1) JXLS copies conditional formatting cell by cell,
+quadratic in rows x rules (40 rules: 400 rows 15 s, 2000 rows minutes) - it is now taken off before the fill and put back
+after it with POI's row shifter (`TemplateWorkbook.forFill` / `withConditionalFormatting`): 2000 rows ~2 s, one entry per
+rule instead of thousands. (2) the export re-analyses against Jira, and HttpClient waited out any `Retry-After` of a 429
+before retrying - now only up to `veracode.http.max-retry-wait` (5s), else a 502 naming the rate limit. The export logs
+`report template '...' filled in N ms: {sca=.., ...}`. A data row's `jx:each` is a comment on its column A (Excel hides
+comments); without it JXLS would leave the cells empty, not hang.
+
 2026-11-13 (asked for): **createmeta read once, not per SCA / SAST** - the cache now holds Jira's raw reads (issue types
 per project, fields per issue type), so SAST on SCA's project / type (the default) shares them, and "test connection"
 keeps what it read. An analysis right after a test = searches only (SCA + SAST); cold = 1 issue types + 1 fields read,

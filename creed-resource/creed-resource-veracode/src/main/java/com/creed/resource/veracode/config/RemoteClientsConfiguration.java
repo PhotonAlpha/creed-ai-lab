@@ -5,6 +5,7 @@ import com.creed.resource.veracode.client.jira.JiraClient;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.DefaultHttpRequestRetryStrategy;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
@@ -12,7 +13,11 @@ import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuil
 import org.apache.hc.client5.http.ssl.ClientTlsStrategyBuilder;
 import org.apache.hc.client5.http.ssl.HostnameVerificationPolicy;
 import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
+import org.apache.hc.core5.http.HttpResponse;
+import org.apache.hc.core5.http.protocol.HttpContext;
+import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
@@ -60,13 +65,20 @@ public class RemoteClientsConfiguration {
         return connectionManager(props.connectTimeout(), props.maxConnections());
     }
 
+    /**
+     * The longest {@code Retry-After} a 429 / 503 is waited out for, once: a longer one fails the call at once with the
+     * rate limit named (UpstreamException), instead of holding the request for as long as Jira / Confluence asks.
+     */
+    @Value("${veracode.http.max-retry-wait:5s}")
+    private Duration maxRetryWait;
+
     @Bean
     JiraClient jiraClient(RestClient.Builder builder, PoolingHttpClientConnectionManager jiraConnectionManager,
                           Logbook logbook, JiraProperties props) {
         log.info("Jira client -> {} project {} (each user's own token, Apache HttpClient 5, TLS not verified)",
                 props.baseUrl(), props.projectKey());
         HttpComponentsClientHttpRequestFactory requestFactory =
-                new HttpComponentsClientHttpRequestFactory(httpClient(jiraConnectionManager, props.readTimeout(), logbook));
+                new HttpComponentsClientHttpRequestFactory(httpClient(jiraConnectionManager, props.readTimeout(), maxRetryWait, logbook));
         // no default Authorization: a call without the user's token is refused before it gets here (JiraToken)
         builder.baseUrl(props.baseUrl()).requestFactory(requestFactory);
         return jiraClient(builder.build());
@@ -96,7 +108,7 @@ public class RemoteClientsConfiguration {
         log.info("Confluence client -> {} (each user's own token, Apache HttpClient 5, TLS not verified)",
                 props.enabled() ? props.baseUrl() : "<off: veracode.confluence.base-url is blank>");
         builder.requestFactory(new HttpComponentsClientHttpRequestFactory(
-                httpClient(confluenceConnectionManager, props.readTimeout(), logbook)));
+                httpClient(confluenceConnectionManager, props.readTimeout(), maxRetryWait, logbook)));
         if (props.enabled()) {
             builder.baseUrl(props.baseUrl());
         }
@@ -127,8 +139,10 @@ public class RemoteClientsConfiguration {
         return pool;
     }
 
-    static CloseableHttpClient httpClient(PoolingHttpClientConnectionManager pool, Duration readTimeout, Logbook logbook) {
+    static CloseableHttpClient httpClient(PoolingHttpClientConnectionManager pool, Duration readTimeout,
+                                          Duration maxRetryWait, Logbook logbook) {
         return HttpClients.custom()
+                .setRetryStrategy(new BoundedRetry(maxRetryWait))
                 .setConnectionManager(pool)
                 .setConnectionManagerShared(true)
                 .setDefaultRequestConfig(RequestConfig.custom()
@@ -139,5 +153,27 @@ public class RemoteClientsConfiguration {
                 .disableCookieManagement()
                 .addExecInterceptorFirst("logbook", new LogbookHttpExecHandler(logbook))
                 .build();
+    }
+
+    /**
+     * HttpClient 5's default retry, bounded: it re-sends a 429 / 503 once after the server's {@code Retry-After},
+     * however long - a rate-limited Jira Cloud held each call (and an analysis or a template export several of them)
+     * for as long as it asked, and then answered 429 again (2026-11-13). Retried only when the wait is at most
+     * {@code maxWait}; I/O failures of idempotent requests are retried as before.
+     */
+    static final class BoundedRetry extends DefaultHttpRequestRetryStrategy {
+
+        private final long maxWaitMillis;
+
+        BoundedRetry(Duration maxWait) {
+            super(1, TimeValue.ofSeconds(1));
+            this.maxWaitMillis = maxWait.toMillis();
+        }
+
+        @Override
+        public boolean retryRequest(HttpResponse response, int execCount, HttpContext context) {
+            return super.retryRequest(response, execCount, context)
+                    && getRetryInterval(response, execCount, context).toMilliseconds() <= maxWaitMillis;
+        }
     }
 }

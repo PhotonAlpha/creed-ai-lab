@@ -1,5 +1,7 @@
 package com.creed.resource.veracode.template;
 
+import org.apache.poi.ss.SpreadsheetVersion;
+import org.apache.poi.ss.formula.FormulaShifter;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.ClientAnchor;
 import org.apache.poi.ss.usermodel.Comment;
@@ -14,13 +16,19 @@ import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.ss.util.CellReference;
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFColor;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.xssf.usermodel.helpers.XSSFRowShifter;
+import org.apache.xmlbeans.XmlException;
+import org.openxmlformats.schemas.spreadsheetml.x2006.main.CTConditionalFormatting;
+import org.openxmlformats.schemas.spreadsheetml.x2006.main.CTWorksheet;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -179,16 +187,121 @@ public final class TemplateWorkbook {
 
     /** The workbook with the mapping's JXLS markup; the uploaded bytes are left as they were. */
     public static byte[] withJxlsMarkup(byte[] xlsx, TemplateMapping mapping) {
+        return markup(xlsx, mapping, null);
+    }
+
+    /**
+     * What JXLS fills: the markup, and the conditional formatting of every sheet with a data row taken off, to be put
+     * back by {@link #withConditionalFormatting} once filled.
+     *
+     * <p>JXLS copies conditional formatting cell by cell - each copied cell adds a rule entry, checked against all the
+     * entries before it - so an export's time grew with the square of rows x rules: 40 rules took 15 s for 400 rows, and
+     * minutes for a real report (2026-11-13, an export that never came back). Put back afterwards, each rule stays one
+     * entry whose ranges follow the rows.
+     *
+     * @param formatting sheet name -> its {@code <conditionalFormatting>} elements, as XML, in the sheet's order
+     */
+    public record ForFill(byte[] workbook, Map<String, List<String>> formatting) {
+    }
+
+    public static ForFill forFill(byte[] xlsx, TemplateMapping mapping) {
+        Map<String, List<String>> held = new LinkedHashMap<>();
+        return new ForFill(markup(xlsx, mapping, held), held);
+    }
+
+    private static byte[] markup(byte[] xlsx, TemplateMapping mapping, Map<String, List<String>> detach) {
         try (XSSFWorkbook wb = open(xlsx); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             for (TemplateMapping.SheetMapping sm : mapping.sheets()) {
                 if (!sm.isEmpty()) {
                     mark(wb, wb.getSheet(sm.sheet()), sm);
+                }
+                if (detach != null && !sm.lists().isEmpty()) {
+                    CTWorksheet ws = wb.getSheet(sm.sheet()).getCTWorksheet();
+                    List<String> xml = new ArrayList<>();
+                    for (int i = ws.sizeOfConditionalFormattingArray() - 1; i >= 0; i--) {
+                        xml.addFirst(ws.getConditionalFormattingArray(i).xmlText());
+                        ws.removeConditionalFormatting(i);
+                    }
+                    if (!xml.isEmpty()) {
+                        detach.put(sm.sheet(), xml);
+                    }
                 }
             }
             wb.write(out);
             return out.toByteArray();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * The conditional formatting {@link #forFill} took off, back on the filled workbook, its ranges and formulas moved as
+     * JXLS moved the rows. A data row filled with {@code n} items is {@code n} rows: everything below moves {@code n - 1}
+     * (up one when there is none, the row removed), a range that ends on the data row ends on its last copy, one that
+     * spans it grows - POI's own row shifter ({@link XSSFRowShifter#updateConditionalFormatting}), which also shifts the
+     * rules' relative references. Lists are applied bottom-up, so each shift sees the rows as the template had them.
+     *
+     * @param items dataset -> how many items it was filled with
+     */
+    public static byte[] withConditionalFormatting(byte[] filled, TemplateMapping mapping, ForFill held,
+                                                   Map<String, Integer> items) {
+        if (held.formatting().isEmpty()) {
+            return filled;
+        }
+        try (XSSFWorkbook wb = open(filled); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            for (TemplateMapping.SheetMapping sm : mapping.sheets()) {
+                List<String> xml = held.formatting().get(sm.sheet());
+                XSSFSheet sheet = wb.getSheet(sm.sheet());
+                if (xml == null || sheet == null) {
+                    continue;
+                }
+                CTWorksheet ws = sheet.getCTWorksheet();
+                for (String one : xml) {
+                    ws.addNewConditionalFormatting().set(CTConditionalFormatting.Factory.parse(one));
+                }
+                XSSFRowShifter shifter = new XSSFRowShifter(sheet);
+                int lastRow = SpreadsheetVersion.EXCEL2007.getLastRowIndex();
+                List<TemplateMapping.ListBinding> bottomUp = sm.lists().stream()
+                        .sorted(Comparator.comparingInt(TemplateMapping.ListBinding::row).reversed()).toList();
+                for (TemplateMapping.ListBinding list : bottomUp) {
+                    int moved = items.getOrDefault(list.dataset(), 0) - 1;
+                    if (moved == 0) {
+                        continue;
+                    }
+                    // rows that would leave the sheet do not move: a whole-column range keeps ending on the last row
+                    shifter.updateConditionalFormatting(FormulaShifter.createForRowShift(wb.getSheetIndex(sheet),
+                            sheet.getSheetName(), list.row() + 1, lastRow - Math.max(moved, 0), moved,
+                            SpreadsheetVersion.EXCEL2007));
+                    if (moved > 0) {
+                        endOnLastCopy(ws, list.row(), moved);
+                    }
+                }
+            }
+            wb.write(out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        } catch (XmlException e) {
+            throw new IllegalStateException("conditional formatting taken off the template no longer parses", e);
+        }
+    }
+
+    /** A range ending on the data row covers its copies too; the shifter moved only what is below the row. */
+    private static void endOnLastCopy(CTWorksheet ws, int row, int moved) {
+        for (CTConditionalFormatting cf : ws.getConditionalFormattingArray()) {
+            List<String> ranges = new ArrayList<>();
+            boolean changed = false;
+            for (Object ref : cf.getSqref()) {
+                CellRangeAddress range = CellRangeAddress.valueOf(ref.toString());
+                if (range.getLastRow() == row) {
+                    range.setLastRow(row + moved);
+                    changed = true;
+                }
+                ranges.add(range.formatAsString());
+            }
+            if (changed) {
+                cf.setSqref(ranges);
+            }
         }
     }
 

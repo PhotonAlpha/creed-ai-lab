@@ -31,6 +31,18 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 
 ## Rules that are easy to break
 
+- **Conditional formatting never goes through JXLS** (2026-11-13, an export that never came back): JXLS copies it cell
+  by cell (`PoiCellData.writeToCell` -> `updateConditionalFormatting`, no switch to turn it off) and each copy is checked
+  against all before it - 40 rules x 400 rows = 15 s, real reports minutes. `ReportTemplateService.fill` uses
+  `TemplateWorkbook.forFill` (markup + every sheet-with-a-data-row's `<conditionalFormatting>` taken off as XML) and
+  `withConditionalFormatting` (put back, then per list bottom-up POI's `XSSFRowShifter.updateConditionalFormatting` by
+  `n - 1` from the row below + ranges ending on the data row stretched to its last copy). Pinned against JXLS's own
+  output (same cells per rule, n = 0/1/3/20) and by `ConditionalFormattingFillTest`. JXLS's row layout it relies on: n
+  items = n rows, below moves `n - 1`, none removes the row. A missing `jx:each` does not hang (cells left empty).
+- **Jira / Confluence never wait out a long Retry-After** (2026-11-13): HttpClient 5's default retry re-sends a 429 /
+  503 once after `Retry-After` however long - one rate-limited call held the request for as long as Jira asked.
+  `RemoteClientsConfiguration.BoundedRetry` retries only up to `veracode.http.max-retry-wait` (5s); `UpstreamException`
+  names a 429 with its Retry-After. `BoundedRetryTest` runs it against a local server.
 - **The JXLS area is the content, never POI's used range** (2026-11-13, an export hung): `getLastRowNum` /
   `getLastCellNum` count every formatted blank cell - whole-row formatting reaches XFD, and JXLS copies each one per
   data row. `TemplateWorkbook.extent` (values, formulas, merges; fills too for the grid) bounds both. Datasets: `sca`,

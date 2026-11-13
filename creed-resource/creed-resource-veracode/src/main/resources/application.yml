@@ -33,6 +33,11 @@ spring:
     locations: classpath:db/migration,classpath:db/defaults
 
 veracode:
+  http:
+    # Jira and Confluence: a 429 / 503 is retried once only when its Retry-After is at most this long; a longer one fails
+    # the call at once, naming the rate limit (HttpClient's default waited however long the server asked).
+    max-retry-wait: ${CREED_VERACODE_MAX_RETRY_WAIT:5s}
+
   trace:
     # Every response carries its traceId (web/TraceIdResponseFilter) - the id the console prints as [traceId-spanId] on
     # every line of that request. Blank = no header.

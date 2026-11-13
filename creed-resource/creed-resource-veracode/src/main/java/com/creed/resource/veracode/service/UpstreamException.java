@@ -48,6 +48,12 @@ public class UpstreamException extends RuntimeException {
         try {
             return call.get();
         } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 429) {
+                // the client waited out only a short Retry-After (veracode.http.max-retry-wait): say how long Jira asks
+                String after = e.getResponseHeaders() == null ? null : e.getResponseHeaders().getFirst("Retry-After");
+                throw new UpstreamException(system, 429, "rate limited" + (after == null ? "" : ", retry after "
+                        + after + (after.matches("\\d+") ? " s" : "")) + " (" + detail(e) + ")");
+            }
             throw new UpstreamException(system, e.getStatusCode().value(), detail(e));
         } catch (ResourceAccessException e) {
             throw new UpstreamException(system, 0, e.getMostSpecificCause().toString());

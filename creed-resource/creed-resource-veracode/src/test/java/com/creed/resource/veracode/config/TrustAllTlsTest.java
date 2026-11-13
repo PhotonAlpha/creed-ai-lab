@@ -79,7 +79,7 @@ class TrustAllTlsTest {
     @Test
     void acceptsAnUntrustedCertificateForAnotherName() throws Exception {
         try (PoolingHttpClientConnectionManager pool = RemoteClientsConfiguration.connectionManager(Duration.ofSeconds(5), 2);
-             CloseableHttpClient client = RemoteClientsConfiguration.httpClient(pool, Duration.ofSeconds(5), Logbook.create())) {
+             CloseableHttpClient client = RemoteClientsConfiguration.httpClient(pool, Duration.ofSeconds(5), Duration.ofSeconds(5), Logbook.create())) {
             String body = client.execute(new HttpGet(url()), response -> EntityUtils.toString(response.getEntity()));
             assertThat(body).isEqualTo("ok");
         }

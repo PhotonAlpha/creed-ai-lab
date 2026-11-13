@@ -136,11 +136,22 @@ public class ReportTemplateService {
                     + "' has no bound cells yet: bind them on the template page first");
         }
         Instant now = clock.instant();
-        byte[] template = TemplateWorkbook.withJxlsMarkup(row.content(), mapping);
+        long started = System.nanoTime();
+        // conditional formatting off while JXLS fills (it copies it cell by cell: quadratic), back on afterwards
+        TemplateWorkbook.ForFill template = TemplateWorkbook.forFill(row.content(), mapping);
         Map<String, Object> data = TemplateFields.data(analysis, apps, now, confluence.exportZone());
-        byte[] filled = JxlsPoiTemplateFillerBuilder.newInstance()
-                .withTemplate(new ByteArrayInputStream(template))
-                .buildAndFill(data);
+        Map<String, Integer> items = new java.util.LinkedHashMap<>();
+        data.forEach((dataset, value) -> {
+            if (value instanceof java.util.Collection<?> c) {
+                items.put(dataset, c.size());
+            }
+        });
+        byte[] filled = TemplateWorkbook.withConditionalFormatting(JxlsPoiTemplateFillerBuilder.newInstance()
+                .withTemplate(new ByteArrayInputStream(template.workbook()))
+                .buildAndFill(data), mapping, template, items);
+        log.info("report template '{}' filled in {} ms: {} item(s) per dataset, {} conditional formatting(s) put back",
+                row.name(), (System.nanoTime() - started) / 1_000_000, items,
+                template.formatting().values().stream().mapToInt(List::size).sum());
         String stamp = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
                 .withZone(confluence.exportZone()).format(now);
         return new Filled(row.name() + "-" + stamp + extension(row.fileName()), filled);
