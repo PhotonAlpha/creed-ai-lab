@@ -599,17 +599,32 @@ public class JiraLookupService {
         return result;
     }
 
-    /** Every page of one search; Cloud and Data Center page differently. */
+    /**
+     * Every page of one search; Cloud and Data Center page differently. Besides Jira's own "last page" (Cloud
+     * {@code isLast} / no token, Data Center {@code total}, an empty page), a page that brings no issue not already read
+     * ends it, as does a Cloud token seen before: a Jira that keeps handing out a token (or ignores {@code startAt}
+     * without a {@code total}) would otherwise be asked forever - and an export with it (2026-11-13: several issues per
+     * library made every batch page, where one issue each had fit in one page). Logged when it happens.
+     */
     private List<JiraIssue> search(String jql, JiraToken token) {
         Map<String, JiraIssue> byKey = new LinkedHashMap<>();
         if (token.cloud()) {
+            Set<String> tokens = new java.util.HashSet<>();
             String next = null;
             do {
                 String from = next;
                 JiraSearchResult page = UpstreamException.call(JIRA,
                         () -> jira.searchJql(token.authorization(), jql, FIELDS, from, props.pageSize()));
-                page.issuesOrEmpty().forEach(i -> byKey.putIfAbsent(i.key(), i));
-                next = page.issuesOrEmpty().isEmpty() || Boolean.TRUE.equals(page.isLast()) ? null : page.nextPageToken();
+                boolean more = addNew(byKey, page);
+                next = !more || Boolean.TRUE.equals(page.isLast()) ? null : page.nextPageToken();
+                if (next != null && !tokens.add(next)) {
+                    log.warn("Jira search: nextPageToken {} came back again after {} issue(s) - stopped paging", next,
+                            byKey.size());
+                    next = null;
+                } else if (!more && !page.issuesOrEmpty().isEmpty()) {
+                    log.warn("Jira search: a page of {} issue(s) read before, isLast={} - stopped paging after {} issue(s)",
+                            page.issuesOrEmpty().size(), page.isLast(), byKey.size());
+                }
             } while (next != null);
         } else {
             int startAt = 0;
@@ -617,14 +632,27 @@ public class JiraLookupService {
                 int from = startAt;
                 JiraSearchResult page = UpstreamException.call(JIRA,
                         () -> jira.search(token.authorization(), jql, FIELDS, from, props.pageSize()));
-                page.issuesOrEmpty().forEach(i -> byKey.putIfAbsent(i.key(), i));
+                boolean more = addNew(byKey, page);
                 startAt += page.issuesOrEmpty().size();
-                if (page.issuesOrEmpty().isEmpty() || page.total() != null && startAt >= page.total()) {
+                if (!more || page.total() != null && startAt >= page.total()) {
+                    if (!more && !page.issuesOrEmpty().isEmpty()) {
+                        log.warn("Jira search: startAt={} answered {} issue(s) read before (total={}) - stopped paging",
+                                from, page.issuesOrEmpty().size(), page.total());
+                    }
                     break;
                 }
             }
         }
         return List.copyOf(byKey.values());
+    }
+
+    /** @return whether the page brought an issue not read before (an empty page brings none) */
+    private static boolean addNew(Map<String, JiraIssue> byKey, JiraSearchResult page) {
+        boolean added = false;
+        for (JiraIssue issue : page.issuesOrEmpty()) {
+            added |= byKey.putIfAbsent(issue.key(), issue) == null;
+        }
+        return added;
     }
 
 

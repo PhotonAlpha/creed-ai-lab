@@ -68,6 +68,12 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-13 (asked for: "3 Jira per library - is that why the export hangs?"): not on its own - reproduced with the mock
+(3-4 issues per library, page size 5 so every search pages, DC and Cloud): export in 0.2-0.5 s. What more issues per
+library does change is that every search batch pages, and the paging loop had no stop besides Jira's own: a page that
+brings no new issue or a repeated Cloud token now ends it, with a WARN. To see where a still-hanging export waits:
+`GET /actuator/threaddump` while it hangs (the `http-nio-18097-exec-*` thread inside `ReportTemplateController.export`).
+
 2026-11-13 (asked for): **Logbook prints JSON bodies only** (`JsonBodyOnlyStrategy`, `veracode.logbook.allowed-content-types`):
 a Confluence attachment download or a multipart upload is logged as method / URL / status / headers, without its bytes.
 

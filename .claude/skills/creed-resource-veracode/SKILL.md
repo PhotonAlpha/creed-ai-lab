@@ -132,6 +132,12 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   the issue - one GET + one PUT per issue, each of those findings answered `LABELED` from it (2026-11-13, perf). Never
   label a finding the request did not name. Several files per upload (`UploadedReportStore.ReportFile`). Create requests carry ids only; the server re-reads the upload + Jira under a
   per-process lock → `ALREADY_EXISTS` instead of duplicates. Don't switch to client-supplied finding data.
+- **A search page that brings nothing new ends the search** (2026-11-13): `JiraLookupService.search` stops on Jira's
+  own last page *and* on a page whose issues were all read already or a Cloud `nextPageToken` seen before (WARN logged)
+  - a Jira that keeps paging would otherwise hold the lookup, and the template export, forever. Several issues per
+  library is what makes every batch page (150 issues over `page-size` 50), so this path only shows with real data.
+  `aSearchWhosePagingNeverEndsStopsWhenNothingNewComes` (old loop: timeout). Measured with the mock, 3-4 issues per
+  library, page size 5: export 0.2-0.5 s - not a cause on its own.
 - **Lookup = batched JQL search** (2026-11-06, replaced the picker + per-candidate `GET`, asked for: too many calls).
   `Jql.lookup(project, versions, findings)` ORs the `summary ~` terms (a CVE as the quoted id itself,
   `"\"CVE-2021-44228\""` — asked for; unquoted, its `-` would be Lucene's NOT), `search-batch-size` findings per call, fields

@@ -100,6 +100,32 @@ class JiraLookupServiceTest {
         assertThat(jira.pages).isZero();
     }
 
+    /** Several issues per library made every search page; a Jira whose paging never ends must not hang the lookup. */
+    @Test
+    void aSearchWhosePagingNeverEndsStopsWhenNothingNewComes() {
+        FakeJira jira = new FakeJira();
+        jira.pagingIgnored = true;
+        jira.found = List.of(
+                issue("CREED-1", "CREED", "creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar"),
+                issue("CREED-2", "CREED", "creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar (2)"),
+                issue("CREED-3", "CREED", "creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar (3)"));
+        Finding log4shell = finding("CVE-2021-44228", "log4j-core-2.14.1.jar");
+        JiraLookupService service = service(jira, 50);
+
+        Map<String, List<JiraLookupService.IssueRef>> cloud = org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+                Duration.ofSeconds(5), () -> service.find(List.of(log4shell), List.of("2.3.0"),
+                        JiraLookupService.CountryFilter.ANY, new JiraToken("api-token", "me@example.com")));
+        Map<String, List<JiraLookupService.IssueRef>> dataCenter = org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+                Duration.ofSeconds(5), () -> service.find(List.of(log4shell), List.of("2.3.0"),
+                        JiraLookupService.CountryFilter.ANY, TOKEN));
+
+        // page size 1: one page per issue, then the repeat that ends it
+        assertThat(cloud.get(log4shell.id())).hasSize(1);
+        assertThat(jira.cloudPages).isEqualTo(2);
+        assertThat(dataCenter.get(log4shell.id())).hasSize(1);
+        assertThat(jira.pages).isEqualTo(2);
+    }
+
     @Test
     void withoutTheFileInTheSummaryTemplateTheCveAloneDecides() {
         FakeJira jira = new FakeJira();
@@ -430,6 +456,8 @@ class JiraLookupServiceTest {
         List<JiraFieldMeta> fields = List.of(
                 new JiraFieldMeta("summary", "Summary", true, false, null, null, null),
                 new JiraFieldMeta("versions", "Affects Version/s", true, false, ARRAY, values("2.3.0"), null));
+        /** A Jira whose paging never ends: Cloud tokens back to page one, Data Center ignoring startAt, no total. */
+        boolean pagingIgnored;
         /** What every search answers, whatever the JQL - the service decides the match. */
         List<JiraIssue> found = List.of();
         final List<String> jqls = new ArrayList<>();
@@ -470,6 +498,10 @@ class JiraLookupServiceTest {
             if (startAt == 0) {
                 jqls.add(jql);
             }
+            if (pagingIgnored) {
+                // the first page whatever startAt says, and no total to stop at
+                return new JiraSearchResult(0, null, null, null, found.stream().limit(maxResults).toList());
+            }
             List<JiraIssue> page = found.stream().skip(startAt).limit(maxResults).toList();
             return new JiraSearchResult(startAt, found.size(), null, null, page);
         }
@@ -478,6 +510,10 @@ class JiraLookupServiceTest {
         public synchronized JiraSearchResult searchJql(String authorization, String jql, String fields, String nextPageToken,
                                           int maxResults) {
             cloudPages++;
+            if (pagingIgnored) {
+                // a fresh token each time, every one leading back to the first page
+                return new JiraSearchResult(null, null, false, "token-" + cloudPages, found.stream().limit(maxResults).toList());
+            }
             int from = nextPageToken == null ? 0 : Integer.parseInt(nextPageToken);
             List<JiraIssue> page = found.stream().skip(from).limit(maxResults).toList();
             boolean last = from + page.size() >= found.size();
