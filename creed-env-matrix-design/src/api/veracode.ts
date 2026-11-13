@@ -524,13 +524,35 @@ const json = (body: unknown, auth: JiraAuth): RequestInit => ({
   headers: { 'Content-Type': 'application/json', ...tokenHeader(auth) },
 });
 
-export const veracodeApi = {
-  settings: () => requestAt<VeracodeSettings>(BASE, '/settings'),
+/**
+ * One request for identical reads in flight (2026-11-13: every call was sent twice on the first load). React's
+ * StrictMode mounts each component twice in development, so every load effect fires twice - and the Jira ones
+ * (connection test, analysis) ran Jira into 429 Too Many Requests. The second caller gets the first one's promise.
+ *
+ * Reads only: a create must stay one request per click. The entry is gone once the request settles, so a later
+ * identical call asks again (nothing is cached), and the key - which holds the token headers - never outlives it.
+ */
+const inFlight = new Map<string, Promise<unknown>>();
+const shared = <T>(path: string, init: RequestInit | undefined, send: () => Promise<T>): Promise<T> => {
+  const key = JSON.stringify([init?.method ?? 'GET', path, init?.headers ?? null, init?.body ?? null]);
+  const running = inFlight.get(key);
+  if (running) return running as Promise<T>;
+  const promise = send().finally(() => inFlight.delete(key));
+  inFlight.set(key, promise);
+  return promise;
+};
+/** `requestAt(BASE, ...)` through `shared`. */
+const read = <T>(path: string, init?: RequestInit) => shared(path, init, () => requestAt<T>(BASE, path, init));
 
-  /** Re-analyse an upload against Jira as it is now. */
+export const veracodeApi = {
+  settings: () => read<VeracodeSettings>('/settings'),
+
+  /** Re-analyse an upload against Jira as it is now. Shared while in flight unless it creates (`autoCreate`). */
   analyze: (uploadId: string, auth: JiraAuth, jiraVersions: string[], autoCreate = false, fields?: CreateFieldValues,
-    countries: string[] = [], skipSast = false) =>
-    requestAt<Analysis>(BASE, '/analysis', json({ uploadId, autoCreate, fields, jiraVersions, countries, skipSast }, auth)),
+    countries: string[] = [], skipSast = false) => {
+    const init = json({ uploadId, autoCreate, fields, jiraVersions, countries, skipSast }, auth);
+    return autoCreate ? requestAt<Analysis>(BASE, '/analysis', init) : read<Analysis>('/analysis', init);
+  },
 
   /**
    * Multipart, so not through `requestAt`: that sets a JSON Content-Type whenever there is a body, and
@@ -567,15 +589,15 @@ export const veracodeApi = {
     }),
 
   testConfluence: (auth: ConfluenceAuth) =>
-    requestAt<ConfluenceConnection>(BASE, '/confluence/connection', { method: 'POST', headers: confluenceHeader(auth) }),
+    read<ConfluenceConnection>('/confluence/connection', { method: 'POST', headers: confluenceHeader(auth) }),
 
   /** The page's child pages, all of them: the page filters them by title itself. */
   confluenceChildren: (pageId: string, auth: ConfluenceAuth) =>
-    requestAt<ConfluencePageChildren>(BASE, `/confluence/pages/${encodeURIComponent(pageId)}/children`,
+    read<ConfluencePageChildren>(`/confluence/pages/${encodeURIComponent(pageId)}/children`,
       { headers: confluenceHeader(auth) }),
 
   confluenceAttachments: (pageId: string, auth: ConfluenceAuth) =>
-    requestAt<ConfluencePageAttachments>(BASE, `/confluence/pages/${encodeURIComponent(pageId)}/attachments`,
+    read<ConfluencePageAttachments>(`/confluence/pages/${encodeURIComponent(pageId)}/attachments`,
       { headers: confluenceHeader(auth) }),
 
   /**
@@ -633,7 +655,7 @@ export const veracodeApi = {
 
   /** What the token may create in the project, and the create-screen fields the page has to ask for. */
   testConnection: (auth: JiraAuth) =>
-    requestAt<JiraConnection>(BASE, '/jira/connection', { method: 'POST', headers: tokenHeader(auth) }),
+    read<JiraConnection>('/jira/connection', { method: 'POST', headers: tokenHeader(auth) }),
 
   /**
    * A fresh analysis as .xlsx. Fetched rather than opened as a link so a failure shows the server's
@@ -730,9 +752,9 @@ const download = async (response: Response, fallback: string) => {
 const TEMPLATES = '/report-templates';
 
 export const reportTemplateApi = {
-  list: () => requestAt<ReportTemplateSummary[]>(BASE, TEMPLATES),
-  fields: () => requestAt<Record<TemplateDataset, TemplateField[]>>(BASE, `${TEMPLATES}/fields`),
-  get: (id: string) => requestAt<ReportTemplateDetail>(BASE, `${TEMPLATES}/${encodeURIComponent(id)}`),
+  list: () => read<ReportTemplateSummary[]>(TEMPLATES),
+  fields: () => read<Record<TemplateDataset, TemplateField[]>>(`${TEMPLATES}/fields`),
+  get: (id: string) => read<ReportTemplateDetail>(`${TEMPLATES}/${encodeURIComponent(id)}`),
   /** Multipart: `headers: {}` keeps `requestAt` from claiming JSON, so the browser writes the boundary. */
   upload: (file: File, name?: string) => {
     const form = new FormData();
@@ -771,7 +793,7 @@ export interface ApplicationAlias {
 const ALIASES = '/application-aliases';
 
 export const applicationAliasApi = {
-  list: () => requestAt<ApplicationAlias[]>(BASE, ALIASES),
+  list: () => read<ApplicationAlias[]>(ALIASES),
   /** The whole table: the backend replaces what it holds. */
   save: (aliases: ApplicationAlias[]) =>
     requestAt<ApplicationAlias[]>(BASE, ALIASES, { method: 'PUT', body: JSON.stringify(aliases) }),

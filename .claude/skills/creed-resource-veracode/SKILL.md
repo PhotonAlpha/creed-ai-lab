@@ -80,6 +80,11 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   base URL** (`withinBase`: origin + path prefix) — Cloud redirects to its media service, which must not get it. The
   mock's media endpoint lives outside `/mock/confluence` and 403s a token, so the test catches a leak.
 
+- **Page reads are shared while in flight** (2026-11-13, Jira answered 429): StrictMode's dev double mount sent every
+  load effect twice (connection test, settings, restore-analysis, Confluence lists). `api/veracode.ts` `read()` /
+  `shared()` hands an identical request in flight (method + path + headers + body) the first one's promise; the entry
+  is dropped on settle - not a cache. A new read-only call goes through `read`; anything that creates or writes
+  (`createIssues`, `analyze` with `autoCreate`, uploads, saves) must not - two clicks are two requests.
 - **Every follow-up names the upload id** (`report.id`): analyse / create / export. `UploadedReportStore`
   holds parsed rows in memory (TTL, max entries) → `upload_expired` 404 after restart / on another instance.
   Over-size uploads need the unscoped `UploadLimitExceptionHandler` (multipart fails before a handler is chosen).
