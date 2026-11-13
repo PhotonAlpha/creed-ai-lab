@@ -68,6 +68,11 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-13 (asked for): **template upload shows its progress** - the page sends `Accept: text/event-stream` and the
+upload answers as Server-Sent Events (bytes sent, then the server reading: sheet i/n, row r/rows, then storing) under a
+full-screen Spin; without that header the same POST answers JSON as before. **A sheet larger than shown (500 x 60)
+blocks saving bindings** - red alert naming the sheets and their real size on the page, 400 from `saveMapping`.
+
 2026-11-13 (asked: generated template had `jx:area(lastCell="L1047958")` / `"L1046388"`): one area per mapped sheet, but
 both reached the bottom of the sheet - cells far down that show nothing (a formula column with an empty result filled
 down the sheet). Those no longer count for the area, and the export leaves them out below it: measured on a million-row

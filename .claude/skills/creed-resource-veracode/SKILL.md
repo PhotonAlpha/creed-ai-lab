@@ -31,6 +31,17 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 
 ## Rules that are easy to break
 
+- **Template upload progress = SSE on the same POST** (2026-11-13, asked for): `ReportTemplateController.uploadWithProgress`
+  (`produces = text/event-stream`; anything else still gets the JSON handler - `ReportTemplateApiTest` uploads without
+  `Accept` and must keep getting JSON). Multipart bytes are read on the request thread, the workbook on a virtual thread
+  wrapped in `ContextSnapshot` (traceId); events `progress` (`TemplateWorkbook.Progress`: parse / sheet row-of-rows at
+  most once per percent / store), `done` (the Detail), `error` (`{error, message}`, sent instead of `completeWithError`,
+  which would re-dispatch to /error). A gone client does not stop the store. The page reads it with XMLHttpRequest
+  (`reportTemplateApi.uploadWithProgress`: upload bytes + `responseText` frames) - not EventSource, which cannot POST.
+  Test it with `asyncStarted()` + `asyncDispatch`. Vite's proxy streams it unbuffered (measured).
+- **A sheet larger than the page shows blocks saving bindings** (2026-11-13, asked for): `saveMapping` refuses when any
+  `SheetView.truncated` (500 x 60; `usedRows`/`usedCols` are the real size) - what the grid cannot show cannot be
+  checked; the page disables Save and lists them in a red alert.
 - **Cells that show nothing never stretch the area, and never reach JXLS below it** (2026-11-13, a template's areas
   ended at L1047958 / L1046388: a helper column `=IF(E5="","",...)` filled to the bottom of two sheets, then rows
   deleted). `shows()`: whitespace text and a formula whose *cached* result is empty text do not show. `forFill` also
