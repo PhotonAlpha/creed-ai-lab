@@ -68,6 +68,12 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-13 (asked: "does another workbook's sheet names break it?"): no - sheets are found by the name the uploaded
+workbook gives them (stored in the mapping, checked on save); every name Excel allows exports correctly
+(`TemplateMarkupTest`). Found on the way: a bound cell holding a formula kept it (POI's `setCellValue` on a formula cell
+only sets the cached result), so the export showed the formula's result - bound cells are now blanked first, and a cell
+of an array formula is refused on save.
+
 2026-11-13 (asked for: "3 Jira per library - is that why the export hangs?"): not on its own - reproduced with the mock
 (3-4 issues per library, page size 5 so every search pages, DC and Cloud): export in 0.2-0.5 s. What more issues per
 library does change is that every search batch pages, and the paging loop had no stop besides Jira's own: a page that

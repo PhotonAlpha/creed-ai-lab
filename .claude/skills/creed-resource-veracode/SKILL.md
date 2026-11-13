@@ -31,6 +31,12 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 
 ## Rules that are easy to break
 
+- **Sheets are found by the name the workbook gives them, nothing else** (2026-11-13, asked): the mapping stores the
+  name of the sheet it was bound on (`SheetMapping.sheet`, from `TemplateWorkbook.read`), save checks it exists, no
+  name is ever fixed in code. Any name Excel allows works through markup + JXLS + the conditional formatting
+  (`TemplateMarkupTest`: CJK, `'`, `!`, `,;`, `A1`, `R1C1`, `TRUE`, 31 chars). **A bound cell is blanked first**
+  (`TemplateWorkbook.bind`): `setCellValue` on a formula cell keeps the formula, so a bound `=ROW()-4` came out as its
+  result, never the placeholder; a cell of a multi-cell array formula is refused on save.
 - **Conditional formatting never goes through JXLS** (2026-11-13, an export that never came back): JXLS copies it cell
   by cell (`PoiCellData.writeToCell` -> `updateConditionalFormatting`, no switch to turn it off) and each copy is checked
   against all before it - 40 rules x 400 rows = 15 s, real reports minutes. `ReportTemplateService.fill` uses

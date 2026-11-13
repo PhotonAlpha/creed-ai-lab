@@ -332,11 +332,11 @@ public final class TemplateWorkbook {
                     .add("jx:each(items=\"" + list.dataset() + "\" var=\"r\" lastCell=\"" + ref(list.row(), lastCol)
                             + "\")");
             for (TemplateMapping.FieldCell cell : list.cells()) {
-                cell(sheet, list.row(), cell.col()).setCellValue("${r." + cell.field() + "}");
+                bind(cell(sheet, list.row(), cell.col()), "${r." + cell.field() + "}");
             }
         }
         for (TemplateMapping.CellBinding value : sm.values()) {
-            cell(sheet, value.row(), value.col()).setCellValue("${" + TemplateFields.SUMMARY + "." + value.field() + "}");
+            bind(cell(sheet, value.row(), value.col()), "${" + TemplateFields.SUMMARY + "." + value.field() + "}");
         }
 
         CreationHelper factory = wb.getCreationHelper();
@@ -357,6 +357,25 @@ public final class TemplateWorkbook {
             comment.setString(factory.createRichTextString(text));
             cell.setCellComment(comment);
         });
+    }
+
+    /**
+     * The placeholder in place of whatever the cell held, its style kept. Blanked first: on a formula cell
+     * {@code setCellValue} only replaces the cached result and keeps the formula - JXLS then saw the formula, never the
+     * placeholder, and a bound "No." column holding {@code =ROW()-4} came out as the formula's result (2026-11-13).
+     */
+    private static void bind(Cell cell, String placeholder) {
+        if (cell.getCellType() == org.apache.poi.ss.usermodel.CellType.FORMULA) {
+            cell.setBlank();
+        }
+        cell.setCellValue(placeholder);
+    }
+
+    /** Whether binding the cell would have to cut a multi-cell array formula, which Excel does not allow either. */
+    static boolean inArrayFormula(Sheet sheet, int row, int col) {
+        Row r = sheet.getRow(row);
+        Cell c = r == null ? null : r.getCell(col);
+        return c != null && c.isPartOfArrayFormulaGroup();
     }
 
     private static Cell cell(Sheet sheet, int row, int col) {

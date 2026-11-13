@@ -210,6 +210,7 @@ public class ReportTemplateService {
                         throw new IllegalArgumentException(at + ": no field '" + cell.field() + "' in "
                                 + list.dataset());
                     }
+                    arrayFormula(sheet, list.row(), cell.col(), at);
                     if (!cells.add(at)) {
                         throw new IllegalArgumentException(at + ": bound twice");
                     }
@@ -226,10 +227,19 @@ public class ReportTemplateService {
                 if (!TemplateFields.known(TemplateFields.SUMMARY, value.field())) {
                     throw new IllegalArgumentException(at + ": no summary field '" + value.field() + "'");
                 }
+                arrayFormula(sheet, value.row(), value.col(), at);
                 if (!cells.add(at)) {
                     throw new IllegalArgumentException(at + ": bound twice");
                 }
             }
+        }
+    }
+
+    /** A cell of a multi-cell array formula cannot take a value of its own (Excel refuses it too). */
+    private static void arrayFormula(Sheet sheet, int row, int col, String at) {
+        if (TemplateWorkbook.inArrayFormula(sheet, row, col)) {
+            throw new IllegalArgumentException(at + ": the cell is part of an array formula - remove the formula in "
+                    + "Excel or bind another cell");
         }
     }
 
