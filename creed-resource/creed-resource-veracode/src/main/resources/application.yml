@@ -66,9 +66,10 @@ veracode:
     # select (several = any of them), searched as cf[<id>] in (...). Not on the create screen = no select. Creating
     # does not take the value from the select - the create screen's own field (defaults.fields) does.
     country-field: ${CREED_JIRA_COUNTRY_FIELD:Country}
-    # An analysis reuses a create screen (issue types + fields) it read within this long, per token / project / issue type:
-    # changing the Jira versions or Country then costs one Jira search instead of three calls. Issues are never cached,
-    # and "test connection" always reads afresh. 0 = off.
+    # An analysis reuses a create screen (issue types + fields) read within this long, per token / project / issue type:
+    # changing the Jira versions or Country then costs one Jira search instead of three calls. SCA and SAST on one
+    # project share the reads; "test connection" reads afresh and keeps what it read, so the analysis after it reads no
+    # create screen. Issues are never cached. 0 = off.
     meta-cache-ttl: 60s
     # No Jira account here: every call (lookup, createmeta, create) uses the token the user typed on the page,
     # sent as X-Jira-Token. The page asks Cloud or Data Center: Cloud adds the Atlassian e-mail (X-Jira-User) and

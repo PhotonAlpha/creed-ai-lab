@@ -68,6 +68,12 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-13 (asked for): **createmeta read once, not per SCA / SAST** - the cache now holds Jira's raw reads (issue types
+per project, fields per issue type), so SAST on SCA's project / type (the default) shares them, and "test connection"
+keeps what it read. An analysis right after a test = searches only (SCA + SAST); cold = 1 issue types + 1 fields read,
+then the searches. Why createmeta at all: the page's version list and create fields, the chosen versions checked
+before the JQL (Jira 400s an unknown one), the Country field id for `cf[N]`, the issue-type / Affects Version checks.
+
 2026-11-13 (asked for): **analysing Confluence attachments no longer lists the page** - `ConfluenceService.download`
 reads each chosen id (`GET /rest/api/content/{id}?expand=version,container`, page checked through `container`) instead
 of re-listing every attachment: a page with 2500+ of them got Confluence's 429. 2 attachments = 2 reads + 2 downloads.

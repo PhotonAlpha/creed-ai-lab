@@ -130,28 +130,55 @@ class JiraLookupServiceTest {
         assertThat(service.labels(unknown)).containsExactly("veracode", "creed", "two_words");
     }
 
-    /** A lookup-condition change re-analyses: the create screen is reused per token, until a connection test. */
+    /**
+     * A lookup-condition change re-analyses: the create screen is reused per token. "Test connection" reads afresh and
+     * keeps what it read - the analysis after it reads no create screen.
+     */
     @Test
-    void aCreateScreenIsReusedPerTokenUntilTheConnectionIsTested() {
+    void aCreateScreenIsReusedPerTokenAndRefreshedByTheConnectionTest() {
         FakeJira jira = new FakeJira();
-        JiraProperties base = properties("{project} - {cve}|{cwe} - {file}", 50);
-        JiraLookupService service = service(jira, new JiraProperties(base.baseUrl(), base.projectKey(),
-                base.issueType(), base.projectName(), base.summaryTemplate(), base.labels(), base.browseUrl(),
-                base.pageSize(), base.searchBatchSize(), base.maxConnections(), base.connectTimeout(), base.readTimeout(),
-                base.defaults(), base.sast(), base.closedStatuses(), base.countryField(), Duration.ofMinutes(1),
-                base.searchConcurrency()));
+        JiraLookupService service = service(jira, cachedFor(Duration.ofMinutes(1)));
 
         service.createMeta(TOKEN);
         service.createMeta(TOKEN);
         assertThat(jira.typeReads).isEqualTo(1);
+        assertThat(jira.fieldReads).isEqualTo(1);
         // another user's token reads its own
         service.createMeta(new JiraToken("other-token", null));
         assertThat(jira.typeReads).isEqualTo(2);
-        // "test connection" reads afresh, and so does the next analysis with that token
+        // "test connection" reads afresh...
         service.connection(TOKEN);
-        int afterTest = jira.typeReads;
+        assertThat(jira.typeReads).isEqualTo(3);
+        int fieldsAfterTest = jira.fieldReads;
+        // ...and the analysis after it, SCA and SAST, reuses that read
         service.createMeta(TOKEN);
-        assertThat(jira.typeReads).isEqualTo(afterTest + 1);
+        service.sastCreateMeta(TOKEN);
+        assertThat(jira.typeReads).isEqualTo(3);
+        assertThat(jira.fieldReads).isEqualTo(fieldsAfterTest);
+    }
+
+    /** SAST on SCA's project and issue type (the default): one analysis, one issue types read and one fields read. */
+    @Test
+    void scaAndSastShareTheReadsOfOneCreateScreen() {
+        FakeJira jira = new FakeJira();
+        JiraLookupService service = service(jira, cachedFor(Duration.ofMinutes(1)));
+
+        // side by side, as an analysis runs them
+        java.util.concurrent.Future<JiraLookupService.CreateMeta> sast =
+                Concurrently.start("test-sast", () -> service.sastCreateMeta(TOKEN));
+        JiraLookupService.CreateMeta sca = service.createMeta(TOKEN);
+
+        assertThat(Concurrently.join(sast).issueTypeId()).isEqualTo(sca.issueTypeId());
+        assertThat(jira.typeReads).isEqualTo(1);
+        assertThat(jira.fieldReads).isEqualTo(1);
+    }
+
+    private static JiraProperties cachedFor(Duration ttl) {
+        JiraProperties base = properties("{project} - {cve}|{cwe} - {file}", 50);
+        return new JiraProperties(base.baseUrl(), base.projectKey(),
+                base.issueType(), base.projectName(), base.summaryTemplate(), base.labels(), base.browseUrl(),
+                base.pageSize(), base.searchBatchSize(), base.maxConnections(), base.connectTimeout(), base.readTimeout(),
+                base.defaults(), base.sast(), base.closedStatuses(), base.countryField(), ttl, base.searchConcurrency());
     }
 
     @Test
@@ -409,7 +436,11 @@ class JiraLookupServiceTest {
         int pages;
         int cloudPages;
         String lastAuthorization;
+        /** Reads started, not pages: the fake answers a page per item, the counter counts the first page only. */
+        final java.util.concurrent.atomic.AtomicInteger typeReadCount = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicInteger fieldReadCount = new java.util.concurrent.atomic.AtomicInteger();
         int typeReads;
+        int fieldReads;
 
         @Override
         public JiraCreatedIssue createIssue(String authorization, JiraCreateIssueRequest request) {
@@ -455,7 +486,9 @@ class JiraLookupServiceTest {
 
         @Override
         public JiraPage<JiraIssueType> createIssueTypes(String authorization, String project, int startAt, int maxResults) {
-            typeReads++;
+            if (startAt == 0) {
+                typeReads = typeReadCount.incrementAndGet();
+            }
             lastAuthorization = authorization;
             return page(types, startAt);
         }
@@ -463,6 +496,9 @@ class JiraLookupServiceTest {
         @Override
         public JiraPage<JiraFieldMeta> createFields(String authorization, String project, String issueTypeId,
                                                     int startAt, int maxResults) {
+            if (startAt == 0) {
+                fieldReads = fieldReadCount.incrementAndGet();
+            }
             return page(fields, startAt);
         }
 

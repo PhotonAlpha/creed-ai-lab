@@ -62,10 +62,14 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   server-side under `createLock`. Never thread it into bulk create or `autoCreate` - those must keep treating a closed
   issue as filed, or every re-analysis duplicates the project's history.
 
-- **Only create screens are cached, never issues** (2026-11-12): `meta-cache-ttl` keeps `CreateMeta` in a Caffeine cache
-  (bean in `config/JiraMetaCacheConfiguration`, injected; `expireAfterWrite`, max 500; concurrent misses load once; TTL 0 = every
-  entry expires on write) per SHA-256 of the
-  authorization header + project + issue type; `connection()` drops that token's entries. Lookups and creates must
+- **Only create screens are cached, never issues** (2026-11-12): `meta-cache-ttl` keeps Jira's **raw createmeta reads**
+  in a Caffeine cache (bean in `config/JiraMetaCacheConfiguration`, injected; `expireAfterWrite`, max 500; concurrent
+  misses load once; TTL 0 = every entry expires on write): `<sha256 of the authorization header>|types|<project>` and
+  `|fields|<project>|<issueTypeId>` - **not per SCA / SAST** (2026-11-13, asked for: SAST on SCA's project and type read
+  the same screen a second time, in parallel). `CreateMeta` is rebuilt from them each time (cheap). `connection()` drops
+  that token's entries and then fills them as it reads, so the analysis after a test reads no createmeta. `cached()` is
+  only ever called around a raw read - nesting it (as the old per-kind `CreateMeta` wrapper would) is Caffeine's
+  recursive-load error. Lookups and creates must
   keep reading Jira every time - the duplicate-free create path depends on it. `skipSast` must stay ignored with
   `autoCreate` (auto-create files SAST too).
 

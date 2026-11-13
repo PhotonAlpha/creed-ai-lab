@@ -77,7 +77,7 @@ public class JiraLookupService {
      * {@code JiraMetaCacheConfiguration}): metadata, which changes when someone edits the Jira scheme - not issues,
      * which every analysis and create reads afresh.
      */
-    private final Cache<String, CreateMeta> metaCache;
+    private final Cache<String, List<?>> metaCache;
 
     /** @param assignee display name; {@code null} = unassigned */
     /** @param labels the issue's labels - an application's label missing from them is added, not a second issue */
@@ -188,7 +188,8 @@ public class JiraLookupService {
 
     public Connection connection(JiraToken token) {
         token.require();
-        // "test connection" is how a user says "I changed something in Jira": what this token had cached goes
+        // "test connection" is how a user says "I changed something in Jira": what this token had cached goes, and what
+        // the test reads now is cached in its place - the analysis that usually follows reads no create screen again
         String fingerprint = fingerprint(token);
         metaCache.invalidateAll(metaCache.asMap().keySet().stream().filter(k -> k.startsWith(fingerprint + "|")).toList());
         Target target = sca(token);
@@ -270,10 +271,6 @@ public class JiraLookupService {
     public CreateMeta createMeta(JiraToken token) {
         token.require();
         Target target = sca(token);
-        return cached(token, "sca", target, () -> readCreateMeta(token, target));
-    }
-
-    private CreateMeta readCreateMeta(JiraToken token, Target target) {
         List<JiraIssueType> types = creatableTypes(token, target.projectKey());
         JiraIssueType type = byName(types, target.issueType());
         if (type == null) {
@@ -295,10 +292,6 @@ public class JiraLookupService {
     public CreateMeta sastCreateMeta(JiraToken token) {
         token.require();
         Target target = sast();
-        return cached(token, "sast", target, () -> readSastCreateMeta(token, target));
-    }
-
-    private CreateMeta readSastCreateMeta(JiraToken token, Target target) {
         List<JiraIssueType> types = creatableTypes(token, target.projectKey());
         JiraIssueType type = byName(types, target.issueType());
         if (type == null) {
@@ -309,14 +302,17 @@ public class JiraLookupService {
     }
 
     /**
-     * The create screen from {@link #metaCache} while fresh, else read and kept. A failed read (an exception from
-     * {@code read}) is not kept: the next analysis asks Jira again. Keyed by a hash of the authorization header - the
-     * token itself is never held.
+     * A createmeta read from {@link #metaCache} while fresh, else read and kept. Keyed by what Jira was asked (token,
+     * project, issue type id) - not by SCA / SAST: with both on one project (the default) they share the issue types
+     * read, and on one issue type the fields read too; the SAST half runs beside the SCA half, and Caffeine makes the
+     * second miss wait for the first's read. A failed read is not kept: the next analysis asks Jira again. The token is
+     * held only as a hash of the authorization header.
+     *
+     * <p>Never call it from inside another {@code cached} read: Caffeine refuses a load that loads the same cache.
      */
-    private CreateMeta cached(JiraToken token, String kind, Target target, java.util.function.Supplier<CreateMeta> read) {
-        String key = fingerprint(token) + "|" + kind + "|" + target.projectKey() + "|"
-                + target.issueType().toLowerCase(Locale.ROOT);
-        return metaCache.get(key, k -> read.get());
+    @SuppressWarnings("unchecked")
+    private <T> List<T> cached(String key, java.util.function.Supplier<List<T>> read) {
+        return (List<T>) metaCache.get(key, k -> read.get());
     }
 
     private static String fingerprint(JiraToken token) {
@@ -352,12 +348,14 @@ public class JiraLookupService {
 
     /** Sub-task types are left out: they cannot be created without a parent. */
     private List<JiraIssueType> creatableTypes(JiraToken token, String projectKey) {
-        return pages(from -> jira.createIssueTypes(token.authorization(), projectKey, from, props.pageSize()))
-                .stream().filter(t -> !Boolean.TRUE.equals(t.subtask())).toList();
+        return cached(fingerprint(token) + "|types|" + projectKey.toLowerCase(Locale.ROOT), () ->
+                pages(from -> jira.createIssueTypes(token.authorization(), projectKey, from, props.pageSize()))
+                        .stream().filter(t -> !Boolean.TRUE.equals(t.subtask())).toList());
     }
 
     private List<JiraFieldMeta> fieldsOf(JiraToken token, String projectKey, JiraIssueType type) {
-        return pages(from -> jira.createFields(token.authorization(), projectKey, type.id(), from, props.pageSize()));
+        return cached(fingerprint(token) + "|fields|" + projectKey.toLowerCase(Locale.ROOT) + "|" + type.id(), () ->
+                pages(from -> jira.createFields(token.authorization(), projectKey, type.id(), from, props.pageSize())));
     }
 
     private static JiraFieldMeta versionsField(List<JiraFieldMeta> fields) {
