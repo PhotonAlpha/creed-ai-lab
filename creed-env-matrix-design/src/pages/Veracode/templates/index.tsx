@@ -14,6 +14,7 @@ import type {
 import { useI18n } from '../../../locales';
 import type { MessageKey } from '../../../locales';
 import enUS from '../../../locales/en-US';
+import { ApplicationAliasesPanel } from './ApplicationAliasesPanel';
 import { DATASET_COLOR, TemplateGrid } from './TemplateGrid';
 import {
   bindingAt, cellRef, countBindings, emptyDataRows, listAt, setCellField, setDataRow, sheetMapping,
@@ -40,6 +41,7 @@ export function ReportTemplatesPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [tab, setTab] = useState<'templates' | 'aliases'>('templates');
 
   const dirty = !!detail && JSON.stringify(detail.mapping) !== JSON.stringify(draft);
 
@@ -148,186 +150,201 @@ export function ReportTemplatesPage() {
   }));
 
   return (
-    <PageContainer title={t('veracode.tpl.title')} subTitle={t('veracode.tpl.subtitle')}>
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={6}>
-          <Card
-            title={t('veracode.tpl.list')}
-            extra={(
-              <Upload accept=".xlsx,.xlsm" showUploadList={false} beforeUpload={(f) => upload(f)} disabled={uploading}>
-                <Button size="small" type="primary" icon={<UploadOutlined />} loading={uploading}>
-                  {t('veracode.tpl.upload')}
-                </Button>
-              </Upload>
-            )}
-          >
-            <List<ReportTemplateSummary>
-              dataSource={templates}
-              locale={{ emptyText: <Empty description={t('veracode.tpl.none')} /> }}
-              renderItem={(item) => (
-                <List.Item
-                  onClick={() => open(item.id)}
-                  style={{
-                    cursor: 'pointer',
-                    paddingInline: 8,
-                    borderRadius: token.borderRadius,
-                    background: item.id === detail?.id ? token.controlItemBgActive : undefined,
-                  }}
-                  actions={[
-                    <Tooltip key="jxls" title={t('veracode.tpl.jxlsHint')}>
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<FileSearchOutlined />}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          reportTemplateApi.jxls(item.id).then(saveBlob).catch((err: Error) => message.error(err.message));
-                        }}
-                      />
-                    </Tooltip>,
-                    <Popconfirm
-                      key="delete"
-                      title={t('veracode.tpl.deleteConfirm', { name: item.name })}
-                      onConfirm={(e) => {
-                        e?.stopPropagation();
-                        void remove(item.id);
-                      }}
-                      onCancel={(e) => e?.stopPropagation()}
-                    >
-                      <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
-                    </Popconfirm>,
-                  ]}
-                >
-                  <List.Item.Meta
-                    avatar={<FileExcelOutlined style={{ fontSize: 20, color: token.colorSuccess }} />}
-                    title={<Text ellipsis={{ tooltip: item.name }}>{item.name}</Text>}
-                    description={item.lists + item.values > 0
-                      ? t('veracode.tpl.bound', { lists: item.lists, values: item.values })
-                      : <Text type="warning">{t('veracode.tpl.unbound')}</Text>}
-                  />
-                </List.Item>
+    <PageContainer
+      title={t('veracode.tpl.title')}
+      subTitle={tab === 'aliases' ? t('veracode.alias.subtitle') : t('veracode.tpl.subtitle')}
+      tabList={[
+        { tab: t('veracode.tpl.tab.templates'), key: 'templates' },
+        { tab: t('veracode.tpl.tab.aliases'), key: 'aliases' },
+      ]}
+      tabActiveKey={tab}
+      onTabChange={(key) => setTab(key as 'templates' | 'aliases')}
+    >
+      {/* both stay mounted: each holds unsaved edits a tab switch must not drop */}
+      <div hidden={tab !== 'aliases'}>
+        <ApplicationAliasesPanel />
+      </div>
+      <div hidden={tab !== 'templates'}>
+        <Row gutter={[16, 16]}>
+          <Col xs={24} lg={6}>
+            <Card
+              title={t('veracode.tpl.list')}
+              extra={(
+                <Upload accept=".xlsx,.xlsm" showUploadList={false} beforeUpload={(f) => upload(f)} disabled={uploading}>
+                  <Button size="small" type="primary" icon={<UploadOutlined />} loading={uploading}>
+                    {t('veracode.tpl.upload')}
+                  </Button>
+                </Upload>
               )}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={18}>
-          <Spin spinning={loading}>
-            {!detail ? (
-              <Card><Empty description={t('veracode.tpl.pick')} /></Card>
-            ) : (
-              <Card
-                title={(
-                  <Space size={8} wrap>
-                    <FileExcelOutlined style={{ color: token.colorSuccess }} />
-                    {detail.name}
-                    <Text type="secondary" style={{ fontWeight: 'normal' }}>{detail.fileName}</Text>
-                    {dirty && <Tag color="warning">{t('veracode.tpl.unsaved')}</Tag>}
-                  </Space>
-                )}
-                extra={(
-                  <Space>
-                    <Button icon={<UndoOutlined />} disabled={!dirty} onClick={() => setDraft(detail.mapping)}>
-                      {t('veracode.tpl.revert')}
-                    </Button>
-                    <Button type="primary" icon={<SaveOutlined />} disabled={!dirty} loading={saving} onClick={() => void save()}>
-                      {t('veracode.tpl.save')}
-                    </Button>
-                  </Space>
-                )}
-              >
-                <Paragraph type="secondary" style={{ marginTop: 0 }}>
-                  {t('veracode.tpl.howTo')}
-                  {' '}
-                  {(['sca', 'sast', 'scaStats', 'sastStats'] as const).map((d) => (
-                    <Tag key={d} color={DATASET_COLOR[d]}>{datasetName(d)}</Tag>
-                  ))}
-                  <Tag color={DATASET_COLOR.summary}>{t('veracode.tpl.summary')}</Tag>
-                  {t('veracode.tpl.counts', counts)}
-                </Paragraph>
-                <Row gutter={16}>
-                  <Col xs={24} xl={17}>
-                    <Tabs
-                      activeKey={sheet}
-                      onChange={(key) => {
-                        setSheet(key);
-                        setSelected(null);
-                      }}
-                      items={detail.sheets.map((s) => {
-                        const bound = sheetMapping(draft, s.name);
-                        const n = bound.lists.length + bound.values.length;
-                        return {
-                          key: s.name,
-                          label: n > 0 ? <Space size={4}>{s.name}<Tag style={{ marginInlineEnd: 0 }}>{n}</Tag></Space> : s.name,
-                          children: (
-                            <>
-                              {s.truncated && <Alert type="info" showIcon style={{ marginBottom: 8 }} message={t('veracode.tpl.truncated')} />}
-                              <TemplateGrid
-                                sheet={s}
-                                mapping={bound}
-                                label={label}
-                                datasetName={datasetName}
-                                selected={sheet === s.name ? selected : null}
-                                onSelect={(row, col) => setSelected({ row, col })}
-                              />
-                            </>
-                          ),
-                        };
-                      })}
+            >
+              <List<ReportTemplateSummary>
+                dataSource={templates}
+                locale={{ emptyText: <Empty description={t('veracode.tpl.none')} /> }}
+                renderItem={(item) => (
+                  <List.Item
+                    onClick={() => open(item.id)}
+                    style={{
+                      cursor: 'pointer',
+                      paddingInline: 8,
+                      borderRadius: token.borderRadius,
+                      background: item.id === detail?.id ? token.controlItemBgActive : undefined,
+                    }}
+                    actions={[
+                      <Tooltip key="jxls" title={t('veracode.tpl.jxlsHint')}>
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<FileSearchOutlined />}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            reportTemplateApi.jxls(item.id).then(saveBlob).catch((err: Error) => message.error(err.message));
+                          }}
+                        />
+                      </Tooltip>,
+                      <Popconfirm
+                        key="delete"
+                        title={t('veracode.tpl.deleteConfirm', { name: item.name })}
+                        onConfirm={(e) => {
+                          e?.stopPropagation();
+                          void remove(item.id);
+                        }}
+                        onCancel={(e) => e?.stopPropagation()}
+                      >
+                        <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+                      </Popconfirm>,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      avatar={<FileExcelOutlined style={{ fontSize: 20, color: token.colorSuccess }} />}
+                      title={<Text ellipsis={{ tooltip: item.name }}>{item.name}</Text>}
+                      description={item.lists + item.values > 0
+                        ? t('veracode.tpl.bound', { lists: item.lists, values: item.values })
+                        : <Text type="warning">{t('veracode.tpl.unbound')}</Text>}
                     />
-                  </Col>
-                  <Col xs={24} xl={7}>
-                    {/* the binding of the selected cell: its row as a data row, then the cell's field */}
-                    <Card size="small" title={selected ? `${sheet}!${cellRef(selected.row, selected.col)}` : t('veracode.tpl.cell')}>
-                      {!selected ? (
-                        <Text type="secondary">{t('veracode.tpl.clickCell')}</Text>
-                      ) : (
-                        <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                          {selectedText && (
-                            <Descriptions size="small" column={1} items={[{ label: t('veracode.tpl.text'), children: selectedText }]} />
-                          )}
-                          <div>
-                            <Text strong>{t('veracode.tpl.rowKind', { row: selected.row + 1 })}</Text>
-                            <Select<'none' | ListDataset>
-                              style={{ width: '100%', marginTop: 4 }}
-                              value={list?.dataset ?? 'none'}
-                              onChange={(v) => setDraft(setDataRow(draft, sheet, selected.row, v === 'none' ? null : v))}
-                              options={[
-                                { value: 'none', label: t('veracode.tpl.plainRow') },
-                                { value: 'sca', label: t('veracode.tpl.scaRow') },
-                                { value: 'sast', label: t('veracode.tpl.sastRow') },
-                                { value: 'scaStats', label: t('veracode.tpl.scaStatsRow') },
-                                { value: 'sastStats', label: t('veracode.tpl.sastStatsRow') },
-                              ]}
-                            />
-                            <Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: token.fontSizeSM }}>
-                              {t(list ? 'veracode.tpl.dataRowHint' : 'veracode.tpl.plainRowHint')}
-                            </Text>
-                          </div>
-                          <div>
-                            <Text strong>
-                              {list ? t('veracode.tpl.columnField', { dataset: datasetName(list.dataset) }) : t('veracode.tpl.summaryField')}
-                            </Text>
-                            <Select
-                              allowClear
-                              showSearch
-                              optionFilterProp="label"
-                              style={{ width: '100%', marginTop: 4 }}
-                              placeholder={t('veracode.tpl.chooseField')}
-                              value={binding?.field}
-                              onChange={(v?: string) => setDraft(setCellField(draft, sheet, selected.row, selected.col, v ?? null))}
-                              options={fieldOptions(list ? list.dataset : 'summary')}
-                            />
-                          </div>
-                        </Space>
-                      )}
-                    </Card>
-                  </Col>
-                </Row>
-              </Card>
-            )}
-          </Spin>
-        </Col>
-      </Row>
+                  </List.Item>
+                )}
+              />
+            </Card>
+          </Col>
+          <Col xs={24} lg={18}>
+            <Spin spinning={loading}>
+              {!detail ? (
+                <Card><Empty description={t('veracode.tpl.pick')} /></Card>
+              ) : (
+                <Card
+                  title={(
+                    <Space size={8} wrap>
+                      <FileExcelOutlined style={{ color: token.colorSuccess }} />
+                      {detail.name}
+                      <Text type="secondary" style={{ fontWeight: 'normal' }}>{detail.fileName}</Text>
+                      {dirty && <Tag color="warning">{t('veracode.tpl.unsaved')}</Tag>}
+                    </Space>
+                  )}
+                  extra={(
+                    <Space>
+                      <Button icon={<UndoOutlined />} disabled={!dirty} onClick={() => setDraft(detail.mapping)}>
+                        {t('veracode.tpl.revert')}
+                      </Button>
+                      <Button type="primary" icon={<SaveOutlined />} disabled={!dirty} loading={saving} onClick={() => void save()}>
+                        {t('veracode.tpl.save')}
+                      </Button>
+                    </Space>
+                  )}
+                >
+                  <Paragraph type="secondary" style={{ marginTop: 0 }}>
+                    {t('veracode.tpl.howTo')}
+                    {' '}
+                    {(['sca', 'sast', 'scaStats', 'sastStats'] as const).map((d) => (
+                      <Tag key={d} color={DATASET_COLOR[d]}>{datasetName(d)}</Tag>
+                    ))}
+                    <Tag color={DATASET_COLOR.summary}>{t('veracode.tpl.summary')}</Tag>
+                    {t('veracode.tpl.counts', counts)}
+                  </Paragraph>
+                  <Row gutter={16}>
+                    <Col xs={24} xl={17}>
+                      <Tabs
+                        activeKey={sheet}
+                        onChange={(key) => {
+                          setSheet(key);
+                          setSelected(null);
+                        }}
+                        items={detail.sheets.map((s) => {
+                          const bound = sheetMapping(draft, s.name);
+                          const n = bound.lists.length + bound.values.length;
+                          return {
+                            key: s.name,
+                            label: n > 0 ? <Space size={4}>{s.name}<Tag style={{ marginInlineEnd: 0 }}>{n}</Tag></Space> : s.name,
+                            children: (
+                              <>
+                                {s.truncated && <Alert type="info" showIcon style={{ marginBottom: 8 }} message={t('veracode.tpl.truncated')} />}
+                                <TemplateGrid
+                                  sheet={s}
+                                  mapping={bound}
+                                  label={label}
+                                  datasetName={datasetName}
+                                  selected={sheet === s.name ? selected : null}
+                                  onSelect={(row, col) => setSelected({ row, col })}
+                                />
+                              </>
+                            ),
+                          };
+                        })}
+                      />
+                    </Col>
+                    <Col xs={24} xl={7}>
+                      {/* the binding of the selected cell: its row as a data row, then the cell's field */}
+                      <Card size="small" title={selected ? `${sheet}!${cellRef(selected.row, selected.col)}` : t('veracode.tpl.cell')}>
+                        {!selected ? (
+                          <Text type="secondary">{t('veracode.tpl.clickCell')}</Text>
+                        ) : (
+                          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                            {selectedText && (
+                              <Descriptions size="small" column={1} items={[{ label: t('veracode.tpl.text'), children: selectedText }]} />
+                            )}
+                            <div>
+                              <Text strong>{t('veracode.tpl.rowKind', { row: selected.row + 1 })}</Text>
+                              <Select<'none' | ListDataset>
+                                style={{ width: '100%', marginTop: 4 }}
+                                value={list?.dataset ?? 'none'}
+                                onChange={(v) => setDraft(setDataRow(draft, sheet, selected.row, v === 'none' ? null : v))}
+                                options={[
+                                  { value: 'none', label: t('veracode.tpl.plainRow') },
+                                  { value: 'sca', label: t('veracode.tpl.scaRow') },
+                                  { value: 'sast', label: t('veracode.tpl.sastRow') },
+                                  { value: 'scaStats', label: t('veracode.tpl.scaStatsRow') },
+                                  { value: 'sastStats', label: t('veracode.tpl.sastStatsRow') },
+                                ]}
+                              />
+                              <Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: token.fontSizeSM }}>
+                                {t(list ? 'veracode.tpl.dataRowHint' : 'veracode.tpl.plainRowHint')}
+                              </Text>
+                            </div>
+                            <div>
+                              <Text strong>
+                                {list ? t('veracode.tpl.columnField', { dataset: datasetName(list.dataset) }) : t('veracode.tpl.summaryField')}
+                              </Text>
+                              <Select
+                                allowClear
+                                showSearch
+                                optionFilterProp="label"
+                                style={{ width: '100%', marginTop: 4 }}
+                                placeholder={t('veracode.tpl.chooseField')}
+                                value={binding?.field}
+                                onChange={(v?: string) => setDraft(setCellField(draft, sheet, selected.row, selected.col, v ?? null))}
+                                options={fieldOptions(list ? list.dataset : 'summary')}
+                              />
+                            </div>
+                          </Space>
+                        )}
+                      </Card>
+                    </Col>
+                  </Row>
+                </Card>
+              )}
+            </Spin>
+          </Col>
+        </Row>
+      </div>
     </PageContainer>
   );
 }

@@ -1,6 +1,6 @@
 package com.creed.resource.veracode.api.dto;
 
-import com.creed.resource.veracode.config.ApplicationProperties;
+import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.SastFlaw;
 import com.creed.resource.veracode.domain.SastIssue;
@@ -40,7 +40,7 @@ public record SastIssueView(String id, String summary, String cwe, String cweNam
      * CWE 117 (Flaw IDs: 257, 258)
      * </pre>
      *
-     * @param name    the application's mapped name ({@code veracode.applications}), else its {@code app_name}
+     * @param name    the application's alias (application aliases), else its {@code app_name}
      * @param url     its link; {@code null} without a mapping
      * @param heading what follows {@code name: } - {@code {sast project-name} - {category}}
      * @param cwe     {@code CWE 117 Improper Output Neutralization for Logs}
@@ -51,7 +51,7 @@ public record SastIssueView(String id, String summary, String cwe, String cweNam
     }
 
     public static SastIssueView of(SastIssue i, String summary, FindingStatus status, List<IssueRef> issues,
-                                   List<String> missingLabels, String project, ApplicationProperties apps,
+                                   List<String> missingLabels, String project, ApplicationAliases apps,
                                    boolean recreatable) {
         return new SastIssueView(i.id(), summary, i.cwe(), i.cweName(), i.category(), i.severity(), i.flaws(),
                 i.applications(), status, List.copyOf(issues), !missingLabels.isEmpty(), List.copyOf(missingLabels),
@@ -59,7 +59,7 @@ public record SastIssueView(String id, String summary, String cwe, String cweNam
     }
 
     /** Also the head of a created SAST issue's description ({@code JiraDescription.ofSast}): the page's column, as filed. */
-    public static List<ApplicationBlock> blocks(SastIssue i, String project, ApplicationProperties apps) {
+    public static List<ApplicationBlock> blocks(SastIssue i, String project, ApplicationAliases apps) {
         // "CWE-117" reads "CWE 117" here, as asked
         String cwe = i.cwe() == null ? Finding.UNKNOWN : i.cwe().replaceFirst("(?i)^CWE-", "CWE ");
         String cweLine = i.cweName() == null || i.cweName().isBlank() ? cwe : cwe + " " + i.cweName().trim();

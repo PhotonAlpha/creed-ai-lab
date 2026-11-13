@@ -1,6 +1,6 @@
 package com.creed.resource.veracode.service;
 
-import com.creed.resource.veracode.config.ApplicationProperties;
+import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.SastFlaw;
 import com.creed.resource.veracode.domain.SastIssue;
@@ -14,8 +14,8 @@ class JiraDescriptionTest {
 
     private static final ReportView REPORT = new ReportView("r.xml", "app", null, "2.3.0", "2.3.0", false, null, null,
             null, null, null, "r.xml", null, null, null);
-    private static final ApplicationProperties APPS = new ApplicationProperties(List.of(
-            new ApplicationProperties.Application("GBT-T1-Creed-CCS", "Creed-CCS", "https://example.com/projects/CCS/browse")));
+    private static final ApplicationAliases APPS = ApplicationAliases.of(List.of(
+            new com.creed.resource.veracode.domain.ApplicationAlias("GBT-T1-Creed-CCS", "Creed-CCS", "https://example.com/projects/CCS/browse")));
 
     @Test
     void noPipeInACellSplitsTheRow() {

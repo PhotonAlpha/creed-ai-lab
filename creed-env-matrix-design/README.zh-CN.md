@@ -501,7 +501,8 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
   可在对话框中修改。和导出 Excel 一样，Jira 状态是导出时重新读取的。
   分析的报告文件（上传的，或从 Confluence 取的）会作为附件加到新页面上，并在页面最后一行 *Veracode report(s)* 中链接。
 - **导出 Excel**：下载一次新的分析结果（*Findings*、*SCA summary*（同上的统计）、*SAST flaws*（含每个漏洞对应的 Jira）、*SAST summary* 与 *Source* 五个工作表）。
-- **application 名称**（2026-11-10）：后端配置 `veracode.applications` 把 `app_name` 映射为名称和链接（`GBT-T1-Creed-CCS` → `Creed-CCS`，`https://…/browse`）。
+- **应用别名**（2026-11-10；2026-11-13 起在「报告模版」页的「应用别名」标签页编辑，存数据库，原后端配置 `veracode.applications` 废弃；
+  「导出 JSON」/「导入 JSON」在环境之间搬运，导入按 app_name 合并、点保存才写库；每行可一键复制）：把 `app_name` 映射为别名和仓库地址（`GBT-T1-Creed-CCS` → `Creed-CCS`，`https://…/browse`）。
   页面表格、Jira 描述（*Veracode application*）和导出的 Confluence 页面（*Repository*）显示该名称，点击直接跳转；它也是该 application 的 Jira label
   （取代 `application-label` 正则，label 不带链接）。没有映射时使用 `app_name` 本身。
 - **Confluence 报告页面**：配置了 `veracode.confluence.parent-page-id`（`CREED_CONFLUENCE_PARENT_PAGE`）时，来源标签页列出该页面的全部子页面一次

@@ -28,14 +28,14 @@ import java.util.Map;
  *                       Matching reads which of {@code {file}} / {@code {component}} it holds: an issue must name
  *                       those, plus the CVE (or Unknown + CWE)
  * @param labels         added to every created issue, with {@code projectName} and the application's label - its
- *                       mapped name ({@link ApplicationProperties}), else its {@code app_name}; not the CVE. Another
+ *                       alias (application aliases), else its {@code app_name}; not the CVE. Another
  *                       application reporting the same issue adds its label
  * @param browseUrl      template for issue links, {@code {key}} is replaced
  * @param pageSize       {@code maxResults} per page of the paged calls (create metadata, searches)
  * @param searchBatchSize findings per lookup search: their CVEs are OR'ed into one JQL. Bounded by the URL length
  *                       (the JQL is a query parameter) - 50 CVE phrases are about 3 KB encoded
- * @param maxConnections pooled connections to Jira (lookups run one after another per request; this bounds
- *                       concurrent requests)
+ * @param maxConnections pooled connections to Jira, shared by every request: keep it above
+ *                       {@code searchConcurrency} x 2 (an analysis searches SCA and SAST side by side)
  * @param defaults       what the page preselects once the connection test has read Jira - only values Jira offers
  * @param sast           where SAST (static-analysis) issues go - their own project, issue type, labels and summary
  * @param closedStatuses statuses (any case) of a finished issue: a finding whose issues are all in one may be filed
@@ -46,6 +46,8 @@ import java.util.Map;
  * @param metaCacheTtl   how long an analysis reuses a create screen it read (issue types + fields, per token, project
  *                       and issue type): a lookup-condition change then costs one Jira search, not three calls. Issues
  *                       themselves are never cached; the connection test always reads afresh. {@code 0} = off
+ * @param searchConcurrency lookup searches (batches of {@code searchBatchSize}) one analysis runs at once, for SCA and
+ *                       for SAST each - they do not depend on each other. {@code 1} = one after another
  */
 @Validated
 @ConfigurationProperties("veracode.jira")
@@ -66,7 +68,8 @@ public record JiraProperties(
         @DefaultValue Sast sast,
         @DefaultValue({"Closed", "Done"}) List<String> closedStatuses,
         @DefaultValue("Country") String countryField,
-        @DefaultValue("60s") Duration metaCacheTtl) {
+        @DefaultValue("60s") Duration metaCacheTtl,
+        @DefaultValue("4") @Min(1) @Max(50) int searchConcurrency) {
 
     /** Every issue is finished ({@code closed-statuses}); {@code false} for none - a missing one is just created. */
     public boolean allClosed(List<String> statuses) {

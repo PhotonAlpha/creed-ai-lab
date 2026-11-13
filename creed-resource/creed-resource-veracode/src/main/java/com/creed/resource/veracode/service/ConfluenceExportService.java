@@ -3,7 +3,7 @@ package com.creed.resource.veracode.service;
 import com.creed.resource.veracode.api.dto.AnalysisResponse;
 import com.creed.resource.veracode.api.dto.FindingView;
 import com.creed.resource.veracode.api.dto.SastIssueView;
-import com.creed.resource.veracode.config.ApplicationProperties;
+import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.config.ConfluenceProperties;
 import com.creed.resource.veracode.domain.SastFlaw;
 import com.creed.resource.veracode.domain.Severity;
@@ -51,7 +51,7 @@ public class ConfluenceExportService {
     private final VeracodeAnalysisService analysis;
     private final ConfluenceService confluence;
     private final ConfluenceProperties props;
-    private final ApplicationProperties apps;
+    private final ApplicationAliases apps;
     private final ITemplateEngine templates;
     private final Clock clock;
 
@@ -62,7 +62,7 @@ public class ConfluenceExportService {
     }
 
     /**
-     * A Veracode application by its mapped name ({@code veracode.applications}), else its {@code app_name}.
+     * A Veracode application by its alias (application aliases), else its {@code app_name}.
      *
      * @param url its link; {@code null} without a mapping - the name is then text
      */
@@ -222,7 +222,7 @@ public class ConfluenceExportService {
                 new SummaryRow("SAST", openFlaws.size(), sast)), scaRows, sastRows, files, source);
     }
 
-    /** The applications under their mapped names, alphabetical (case ignored), each once. */
+    /** The applications under their aliases, alphabetical (case ignored), each once. */
     private List<Repository> repositories(List<String> appNames) {
         Map<String, Repository> byName = new LinkedHashMap<>();
         for (String app : distinct(appNames)) {

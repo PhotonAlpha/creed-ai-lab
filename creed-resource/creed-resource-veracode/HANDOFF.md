@@ -116,7 +116,12 @@ has no closed SAST issue).
 2026-11-10 ( `sample/changes.jpg`, asked for): **application mapping** `veracode.applications` (`app-name` →
 `name`, `url`; `config/ApplicationProperties`) replaces `veracode.jira.application-label` (removed): the mapped name
 (else the `app_name`) is the Jira label, the Jira description's linked *Veracode application*, the Confluence export's
-linked *Repository*, and `AnalysisResponse.applications` for the page. **Issue source**: `ReportView.sourceName` /
+linked *Repository*, and `AnalysisResponse.applications` for the page. **2026-11-13 (asked for): renamed application
+aliases and moved into the database** - `application_alias` (Flyway `V2`; `db/defaults/V2_1` seeds the three entries
+application.yml had), `domain/ApplicationAlias(appName, alias, repositoryUrl)`, read through `ApplicationAliases`
+(`alias/ApplicationAliasService`, in memory, reloaded on save), `GET/PUT /api/veracode/application-aliases`, the
+*Application aliases* tab of `/veracode-templates`. `config/ApplicationProperties` is gone; a leftover
+`veracode.applications` is imported at start with a WARN. **Issue source**: `ReportView.sourceName` /
 `sourceUrl` (the file a report came in; the Confluence attachment URL when downloaded) + `sourcePageTitle` / `sourcePageUrl` (the page holding it); the
 description's *Source* links a downloaded file and its page (`on page [title|url]`), an uploaded one is attached to every issue created from it (`JiraClient.addAttachments`, mock
 `POST /mock/jira/rest/api/2/issue/{key}/attachments`, `MockJiraStore.attachments`); attach failure = the result's
@@ -211,6 +216,9 @@ it was not checked in a browser (the browser extension could not attach to any p
 - **Lookup is a batched JQL search** (2026-11-06, asked for: the picker was one call per finding plus a read per
   candidate, and its `hs` history section ignored `currentJQL`). `Jql.lookup` ORs the findings' `summary ~` terms,
   `search-batch-size` (50) per call; DC `/rest/api/2/search`, Cloud `/rest/api/3/search/jql` (v2 search retired there).
+  Since 2026-11-13 the batches run `search-concurrency` (4, `CREED_JIRA_SEARCH_CONCURRENCY`) at a time, and SAST is read
+  beside SCA (`Concurrently`): an analysis takes its slowest search, not the sum. Labelling an issue several
+  applications of one request lack is one read + one update (`Filing`), not a pair per application.
   A match also needs every Component(s) in the summary (`componentsNamed`) while the template has `{component}`.
 - **Versions are the page's, not the report's** (2026-11-06, asked for): `jiraVersions` on every request, `affectedVersion
   in (...)` (none = any), create files under the one chosen (else 400 `jira_version_required`). `FindingView.jiraVersion`,

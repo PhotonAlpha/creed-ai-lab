@@ -1,7 +1,7 @@
 package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.api.dto.SastIssueView;
-import com.creed.resource.veracode.config.ApplicationProperties;
+import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.SastFlaw;
 import com.creed.resource.veracode.domain.SastIssue;
@@ -26,10 +26,10 @@ final class JiraDescription {
 
     /**
      * One table, the page's columns in the page's order (the title's {@code cve_id|cwe_id} as two rows); the
-     * {@code cve_summary} is its last row, in full. The application is shown by its mapped name, linked
-     * ({@code veracode.applications}).
+     * {@code cve_summary} is its last row, in full. The application is shown by its alias, linked
+     * (application aliases).
      */
-    static String of(Finding f, ReportView report, ApplicationProperties apps) {
+    static String of(Finding f, ReportView report, ApplicationAliases apps) {
         StringBuilder d = new StringBuilder(SCA_HEADING).append('\n');
         d.append("||Field||Value||\n");
         // not one "cve|cwe" cell: | ends a cell, and Jira Cloud renders an escaped \| as a backslash and a new cell
@@ -66,7 +66,7 @@ final class JiraDescription {
      * @param current the issue's description, {@code null} for none
      */
     static String mergeSca(String current, List<Finding> findings, Function<Finding, ReportView> reportOf,
-                           ApplicationProperties apps) {
+                           ApplicationAliases apps) {
         Map<String, String> fresh = new LinkedHashMap<>();
         for (Finding f : findings) {
             fresh.putIfAbsent(displayName(application(f.application(), apps)), of(f, reportOf.apply(f), apps));
@@ -142,8 +142,8 @@ final class JiraDescription {
         return d.toString();
     }
 
-    /** The mapped name, a link when the mapping has one; the {@code app_name} as text otherwise. */
-    static String application(String appName, ApplicationProperties apps) {
+    /** The alias, a link when it has a repository URL; the {@code app_name} as text otherwise. */
+    static String application(String appName, ApplicationAliases apps) {
         String name = apps.name(appName);
         String url = apps.url(appName);
         return name == null ? null : url == null ? escape(name) : "[" + escape(name) + "|" + url + "]";
@@ -156,7 +156,7 @@ final class JiraDescription {
      *
      * @param project {@code sast.project-name}: the head's {@code <name>: <project> - <category>} line
      */
-    static String ofSast(SastIssue issue, List<ReportView> reports, ApplicationProperties apps, String project) {
+    static String ofSast(SastIssue issue, List<ReportView> reports, ApplicationAliases apps, String project) {
         // first what the page's "Jira summary" column shows (asked for, 2026-11-12) - three lines per application:
         //   Creed-CCS: IDB VERACODE STSA - OS Command Injection / CWE 78 <name> / CWE 78 (Flaw IDs: 2)
         // the summary itself stays one line: it is what the issue is found by
@@ -205,7 +205,7 @@ final class JiraDescription {
      *
      * @param current the issue's description, {@code null} for none
      */
-    static String mergeSast(String current, SastIssue issue, List<ReportView> reports, ApplicationProperties apps,
+    static String mergeSast(String current, SastIssue issue, List<ReportView> reports, ApplicationAliases apps,
                             String project) {
         String fresh = ofSast(issue, reports, apps, project);
         int table = current == null ? -1 : current.indexOf(SAST_HEADING);
@@ -315,7 +315,7 @@ final class JiraDescription {
     }
 
     /** What the page's "Jira summary" column shows, three lines per application. */
-    private static String sastHead(SastIssue issue, String project, ApplicationProperties apps) {
+    private static String sastHead(SastIssue issue, String project, ApplicationAliases apps) {
         StringBuilder d = new StringBuilder();
         for (SastIssueView.ApplicationBlock block : SastIssueView.blocks(issue, project, apps)) {
             d.append(block.url() == null ? escape(block.name()) : "[" + escape(block.name()) + "|" + block.url() + "]")

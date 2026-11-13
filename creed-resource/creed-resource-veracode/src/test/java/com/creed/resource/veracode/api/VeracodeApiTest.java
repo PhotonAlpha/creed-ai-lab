@@ -51,11 +51,13 @@ import java.util.zip.ZipOutputStream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -279,7 +281,7 @@ class VeracodeApiTest {
         // the page's choices, sent as Jira's option ids
         assertThat(created.components()).containsExactly("Security");
         assertThat(created.environment()).isEqualTo("Production");
-        // configured, project-name, the application's label (no veracode.applications entry: its app_name); no CVE
+        // configured, project-name, the application's label (no application alias: its app_name); no CVE
         assertThat(created.labels()).containsExactly("veracode", "creed", "creed-platform-2026-10-06-Creed");
         // no "\\|" escape anywhere: Jira Cloud renders it as a backslash and an extra cell
         assertThat(created.description()).doesNotContain("\\|");
@@ -687,7 +689,7 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.results[1].issues[0].key").value("CREED-105"))
                 .andExpect(jsonPath("$.results[2].issues[0].key").value("CREED-101"));
         assertThat(jira.all()).hasSize(5);
-        // no veracode.applications entry: each application is labelled by its app_name
+        // no application alias: each application is labelled by its app_name
         assertThat(jira.find("CREED-105").labels()).containsExactly("veracode", "creed", "creed-platform-2026-10-06-Creed",
                 "creed-pay-gateway-api");
         assertThat(jira.find("CREED-101").labels()).contains("creed-platform-2026-10-06-Creed", "creed-pay-gateway-api");
@@ -707,6 +709,73 @@ class VeracodeApiTest {
                 .andExpect(jsonPath("$.counts.needsLabel").value(2))
                 .andExpect(jsonPath("$.findings[?(@.id=='creed-pay-gateway-api|CVE-2022-22965@spring-beans-5.3.17.jar')].status")
                         .value("EXISTS"));
+    }
+
+    /**
+     * Application aliases live in the database, edited as one table (asked for, 2026-11-13): the old
+     * {@code veracode.applications} of application-test.yml was imported at start, and a save renames at once.
+     */
+    @Test
+    void applicationAliasesAreEditedAsOneTable() throws Exception {
+        String imported = mvc.perform(get("/api/veracode/application-aliases"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].appName", contains("creed-gateway-2026-10-08-Gateway")))
+                .andExpect(jsonPath("$[0].alias").value("Creed-Gateway"))
+                .andExpect(jsonPath("$[0].repositoryUrl").value("https://git.example.com/projects/GATEWAY/browse"))
+                .andReturn().getResponse().getContentAsString();
+        String[][] refused = {
+                {"[{\"appName\":\" \",\"alias\":\"x\"}]", "row 1: the Veracode application name is required"},
+                {"[{\"appName\":\"a\",\"alias\":\"x\"},{\"appName\":\"A \",\"alias\":\"y\"}]", "row 2: 'A' is listed twice"},
+                {"[{\"appName\":\"a\"}]", "give 'a' an alias or a repository URL"},
+                {"[{\"appName\":\"a\",\"repositoryUrl\":\"javascript:alert(1)\"}]", "must be http(s)"},
+        };
+        for (String[] r : refused) {
+            mvc.perform(put("/api/veracode/application-aliases").contentType(MediaType.APPLICATION_JSON).content(r[0]))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("bad_request"))
+                    .andExpect(jsonPath("$.message").value(containsString(r[1])));
+        }
+        try {
+            mvc.perform(put("/api/veracode/application-aliases").contentType(MediaType.APPLICATION_JSON).content("""
+                            [{"appName":" CREED-PLATFORM-2026-10-06-Creed ","alias":" Creed-Platform ","repositoryUrl":""}]
+                            """))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].appName").value("CREED-PLATFORM-2026-10-06-Creed"))
+                    .andExpect(jsonPath("$[0].alias").value("Creed-Platform"))
+                    .andExpect(jsonPath("$[0].repositoryUrl").value(nullValue()));
+            // the next analysis shows - and would label - the application by it, its app_name matched in any case
+            mvc.perform(multipart("/api/veracode/analysis/upload").file(sample()).param("jiraVersions", "2.3.0"))
+                    .andExpect(jsonPath("$.applications[0].name").value("Creed-Platform"))
+                    .andExpect(jsonPath("$.applications[0].url").value(nullValue()));
+        } finally {
+            mvc.perform(put("/api/veracode/application-aliases").contentType(MediaType.APPLICATION_JSON).content(imported))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    /** Two applications missing their labels on one issue: one read and one update for both, not a pair each. */
+    @Test
+    void applicationsSharingAnIssueAreLabelledInOneUpdate() throws Exception {
+        MockMultipartFile billing = new MockMultipartFile("file", "billing.xml", "application/xml",
+                new String(otherApplication().getBytes(), StandardCharsets.UTF_8)
+                        .replace("creed-pay-gateway-api", "creed-billing").getBytes(StandardCharsets.UTF_8));
+        String body = mvc.perform(multipart("/api/veracode/analysis/upload").file(otherApplication()).file(billing)
+                        .param("jiraVersions", "2.3.0"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON).content("""
+                        {"uploadId":"%s","findingIds":["creed-pay-gateway-api|CVE-2021-44228@log4j-core-2.14.1.jar",
+                         "creed-billing|CVE-2021-44228@log4j-core-2.14.1.jar"],%s}
+                        """.formatted(JsonPath.<String>read(body, "$.uploadId"), FIELDS)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.results[*].outcome", contains("LABELED", "LABELED")))
+                .andExpect(jsonPath("$.results[0].message").value("added label creed-pay-gateway-api to CREED-101"))
+                .andExpect(jsonPath("$.results[1].message").value("added label creed-billing to CREED-101"))
+                .andExpect(jsonPath("$.results[1].issues[0].labels", hasItems("creed-pay-gateway-api", "creed-billing")));
+        assertThat(jira.find("CREED-101").labels()).contains("creed-pay-gateway-api", "creed-billing");
+        assertThat(jira.descriptionWrites("CREED-101")).isEqualTo(1);
+        assertThat(jira.find("CREED-101").description())
+                .contains("|Veracode application|creed-pay-gateway-api|", "|Veracode application|creed-billing|");
     }
 
     @Test

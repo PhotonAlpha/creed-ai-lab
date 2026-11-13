@@ -8,7 +8,7 @@ import com.creed.resource.veracode.client.jira.JiraIssue;
 import com.creed.resource.veracode.client.jira.JiraIssueType;
 import com.creed.resource.veracode.client.jira.JiraPage;
 import com.creed.resource.veracode.client.jira.JiraSearchResult;
-import com.creed.resource.veracode.config.ApplicationProperties;
+import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.SastIssue;
@@ -71,7 +71,7 @@ public class JiraLookupService {
 
     private final JiraClient jira;
     private final JiraProperties props;
-    private final ApplicationProperties apps;
+    private final ApplicationAliases apps;
     /**
      * Create screens read for analyses, by token fingerprint + project + issue type ({@code meta-cache-ttl}; built in
      * {@code JiraMetaCacheConfiguration}): metadata, which changes when someone edits the Jira scheme - not issues,
@@ -562,7 +562,7 @@ public class JiraLookupService {
 
     /**
      * One JQL search per {@code search-batch-size} findings, {@code affectedVersion in (...)} the selected versions
-     * (none selected = any version, or none).
+     * (none selected = any version, or none). The batches are searched {@code search-concurrency} at a time.
      *
      * @param versions  from {@link #selectedVersions}
      * @param countries from {@link #countryFilter}: Jira alone decides it - the issues are read without the field
@@ -572,16 +572,28 @@ public class JiraLookupService {
                                             JiraToken token) {
         Map<String, List<IssueRef>> result = new LinkedHashMap<>();
         findings.forEach(f -> result.put(f.id(), new ArrayList<>()));
+        List<List<Finding>> batches = new ArrayList<>();
+        List<java.util.concurrent.Callable<List<JiraIssue>>> searches = new ArrayList<>();
         for (int from = 0; from < findings.size(); from += props.searchBatchSize()) {
             List<Finding> batch = findings.subList(from, Math.min(findings.size(), from + props.searchBatchSize()));
             String jql = Jql.lookup(props.projectKey(), versions, countries.field(), countries.values(), batch);
-            if (jql == null) {
-                continue;
+            if (jql != null) {
+                batches.add(batch);
+                searches.add(() -> search(jql, token));
             }
-            for (JiraIssue issue : search(jql, token)) {
-                for (Finding f : batch) {
-                    if (covers(issue, f, versions, props.summaryTemplate())) {
-                        result.get(f.id()).add(toRef(issue));
+        }
+        List<List<JiraIssue>> found = Concurrently.all("jira-search", props.searchConcurrency(), searches);
+        for (int b = 0; b < batches.size(); b++) {
+            // a batch tests every finding against every issue returned: each finding's patterns are built once
+            List<Wanted> batch = batches.get(b).stream().map(f -> Wanted.of(f, props.summaryTemplate())).toList();
+            for (JiraIssue issue : found.get(b)) {
+                if (!versionMatches(issue, versions)) {
+                    continue;
+                }
+                Summary summary = Summary.of(issue.summary());
+                for (Wanted w : batch) {
+                    if (w.namedIn(summary)) {
+                        result.get(w.finding().id()).add(toRef(issue));
                     }
                 }
             }
@@ -639,19 +651,22 @@ public class JiraLookupService {
     }
 
     /**
-     * The issue another application already has for this finding: the finding's application label is added
+     * The issue another application already has for these findings: their application labels are added
      * ({@code update.labels.add}, the other labels untouched) instead of filing a second issue, and the description
      * rewritten (asked for, 2026-11-13: not appended to) as one "Veracode SCA finding" table per application - this
      * analysis' applications from its findings, the others' tables kept from the old description
-     * ({@link JiraDescription#mergeSca}).
+     * ({@link JiraDescription#mergeSca}). One read and one update however many findings: they share the issue, and
+     * the description written is the same for each.
      *
-     * @param sharing  the analysis' findings of the same {@link Finding#issueKey}, this one among them
-     * @param reportOf each finding's report: its Source line
+     * @param labelling the findings being filed whose labels the issue lacks
+     * @param sharing   the analysis' findings of the same {@link Finding#issueKey}, those among them
+     * @param reportOf  each finding's report: its Source line
      */
-    public IssueRef addApplicationLabel(IssueRef issue, Finding finding, List<Finding> sharing,
-                                        Function<Finding, ReportView> reportOf, JiraToken token) {
-        String label = applicationLabel(finding);
-        return label == null ? issue : addLabels(issue, List.of(label), finding.id(),
+    public IssueRef addApplicationLabels(IssueRef issue, List<Finding> labelling, List<Finding> sharing,
+                                         Function<Finding, ReportView> reportOf, JiraToken token) {
+        List<String> labels = labelling.stream().map(this::applicationLabel).filter(Objects::nonNull).distinct().toList();
+        return labels.isEmpty() ? issue : addLabels(issue, labels,
+                String.join(", ", labelling.stream().map(Finding::id).toList()),
                 current -> JiraDescription.mergeSca(current, sharing, reportOf, apps), token);
     }
 
@@ -682,7 +697,7 @@ public class JiraLookupService {
     }
 
     /**
-     * The label of the finding's Veracode application: its mapped name ({@code veracode.applications}), else its
+     * The label of the finding's Veracode application: its alias (application aliases), else its
      * {@code app_name} - Jira-safe; {@code null} without one.
      */
     public String applicationLabel(Finding finding) {
@@ -751,11 +766,67 @@ public class JiraLookupService {
      *                 otherwise the issues this page creates could never match
      */
     static boolean covers(JiraIssue issue, Finding finding, List<String> versions, String template) {
-        boolean versionMatches = versions.isEmpty()
+        return versionMatches(issue, versions) && Wanted.of(finding, template).namedIn(Summary.of(issue.summary()));
+    }
+
+    private static boolean versionMatches(JiraIssue issue, List<String> versions) {
+        return versions.isEmpty()
                 || issue.versionNames().stream().anyMatch(v -> versions.stream().anyMatch(v::equalsIgnoreCase));
-        return versionMatches && summaryNames(issue.summary(), finding)
-                && (!template.contains("{file}") || named(issue.summary(), finding.fileName()))
-                && (!template.contains("{component}") || componentsNamed(issue.summary(), finding));
+    }
+
+    /** An issue's summary as matching reads it: as written (the CVE pattern), and {@link #normalise}d with a space each side. */
+    private record Summary(String text, String words) {
+
+        static Summary of(String summary) {
+            String text = Objects.requireNonNullElse(summary, "");
+            return new Summary(text, " " + Finding.normalise(text) + " ");
+        }
+
+        /** {@code run} is already normalised; blank = nothing to ask for. */
+        boolean hasRun(String run) {
+            return run.isEmpty() || words.contains(" " + run + " ");
+        }
+    }
+
+    /**
+     * What a summary must name to cover a finding ({@link #summaryNames}, plus the file and the components where the
+     * template writes them), built once per finding.
+     *
+     * @param cve  the CVE as a pattern; {@code null} for a finding without one
+     * @param runs normalised word runs that must all appear; {@code null} = nothing can match (Unknown without a CWE)
+     */
+    private record Wanted(Finding finding, Pattern cve, List<String> runs) {
+
+        static Wanted of(Finding finding, String template) {
+            List<String> runs = new ArrayList<>();
+            Pattern cve = null;
+            if (finding.cve() != null) {
+                Matcher parts = CVE_PARTS.matcher(finding.cve());
+                String pattern = parts.matches()
+                        ? "CVE[\\s_-]*" + parts.group(1) + "[\\s_-]*" + parts.group(2)
+                        : Pattern.quote(finding.cve());
+                cve = Pattern.compile("(?<![A-Za-z0-9])" + pattern + "(?![0-9])", Pattern.CASE_INSENSITIVE);
+            } else if (finding.cveId() != null) {
+                runs.add(Finding.normalise(finding.cveId()));
+            } else if (finding.cwe() == null) {
+                return new Wanted(finding, null, null);
+            } else {
+                runs.add(Finding.normalise(Finding.UNKNOWN));
+                runs.add(Finding.normalise(finding.cwe()));
+            }
+            if (template.contains("{file}")) {
+                runs.add(Finding.normalise(finding.fileName()));
+            }
+            if (template.contains("{component}")) {
+                finding.components().forEach(c -> runs.add(Finding.normalise(c)));
+            }
+            return new Wanted(finding, cve, List.copyOf(runs));
+        }
+
+        boolean namedIn(Summary summary) {
+            return runs != null && (cve == null || cve.matcher(summary.text()).find())
+                    && runs.stream().allMatch(summary::hasRun);
+        }
     }
 
     /**
@@ -764,7 +835,8 @@ public class JiraLookupService {
      * nor in "log4j-core 2.14.10 ...".
      */
     static boolean componentsNamed(String summary, Finding finding) {
-        return finding.components().stream().allMatch(c -> named(summary, c));
+        Summary s = Summary.of(summary);
+        return finding.components().stream().allMatch(c -> s.hasRun(Finding.normalise(c)));
     }
 
     /**
@@ -773,8 +845,7 @@ public class JiraLookupService {
      * "... log4j-core-2.14.10.jar". Blank text = nothing to ask for.
      */
     static boolean named(String summary, String text) {
-        String wanted = Finding.normalise(text);
-        return wanted.isEmpty() || (" " + Finding.normalise(summary) + " ").contains(" " + wanted + " ");
+        return Summary.of(summary).hasRun(Finding.normalise(text));
     }
 
     /**
@@ -784,37 +855,34 @@ public class JiraLookupService {
      * run. No id: "Unknown" and the CWE - the CWE is then what tells one Unknown from another.
      */
     static boolean summaryNames(String summary, Finding finding) {
-        if (finding.cve() != null) {
-            Matcher cve = CVE_PARTS.matcher(finding.cve());
-            String pattern = cve.matches()
-                    ? "CVE[\\s_-]*" + cve.group(1) + "[\\s_-]*" + cve.group(2)
-                    : Pattern.quote(finding.cve());
-            return Pattern.compile("(?<![A-Za-z0-9])" + pattern + "(?![0-9])", Pattern.CASE_INSENSITIVE)
-                    .matcher(summary).find();
-        }
-        if (finding.cveId() != null) {
-            return named(summary, finding.cveId());
-        }
-        return named(summary, Finding.UNKNOWN) && finding.cwe() != null && named(summary, finding.cwe());
+        return Wanted.of(finding, "").namedIn(Summary.of(summary));
     }
 
     /**
-     * SAST lookups: one JQL per {@code search-batch-size} issues in the SAST project, by summary only.
+     * SAST lookups: one JQL per {@code search-batch-size} issues in the SAST project, by summary only, the batches
+     * {@code search-concurrency} at a time.
      *
      * @return SAST issue id -> covering Jira issues, every issue present
      */
     public Map<String, List<IssueRef>> findSast(List<SastIssue> issues, CountryFilter countries, JiraToken token) {
         Map<String, List<IssueRef>> result = new LinkedHashMap<>();
         issues.forEach(i -> result.put(i.id(), new ArrayList<>()));
+        List<List<SastIssue>> batches = new ArrayList<>();
+        List<java.util.concurrent.Callable<List<JiraIssue>>> searches = new ArrayList<>();
         for (int from = 0; from < issues.size(); from += props.searchBatchSize()) {
             List<SastIssue> batch = issues.subList(from, Math.min(issues.size(), from + props.searchBatchSize()));
             String jql = Jql.sastLookup(props.sastProjectKey(), countries.field(), countries.values(), batch);
-            if (jql == null) {
-                continue;
+            if (jql != null) {
+                batches.add(batch);
+                searches.add(() -> search(jql, token));
             }
-            for (JiraIssue issue : search(jql, token)) {
-                for (SastIssue i : batch) {
-                    if (coversSast(issue.summary(), i)) {
+        }
+        List<List<JiraIssue>> found = Concurrently.all("jira-sast-search", props.searchConcurrency(), searches);
+        for (int b = 0; b < batches.size(); b++) {
+            for (JiraIssue issue : found.get(b)) {
+                Summary summary = Summary.of(issue.summary());
+                for (SastIssue i : batches.get(b)) {
+                    if (coversSast(summary, i)) {
                         result.get(i.id()).add(toRef(issue));
                     }
                 }
@@ -851,7 +919,7 @@ public class JiraLookupService {
 
     /**
      * A SAST issue's labels, as SCA's: {@code sast.labels}, {@code sast.project-name} and the label of every application
-     * with an open flaw in it (its mapped name, else its {@code app_name}), Jira-safe (spaces become {@code _}).
+     * with an open flaw in it (its alias, else its {@code app_name}), Jira-safe (spaces become {@code _}).
      */
     List<String> sastLabels(SastIssue issue) {
         Set<String> labels = new LinkedHashSet<>();
@@ -861,7 +929,7 @@ public class JiraLookupService {
         return List.copyOf(labels);
     }
 
-    /** The labels of the issue's applications (mapped name, else {@code app_name}), Jira-safe. */
+    /** The labels of the issue's applications (alias, else {@code app_name}), Jira-safe. */
     public List<String> sastApplicationLabels(SastIssue issue) {
         Set<String> labels = new LinkedHashSet<>();
         issue.applications().forEach(a -> addLabel(labels, label(apps.name(a))));
@@ -909,7 +977,11 @@ public class JiraLookupService {
      * separators ignored: {@code CWE-89} is not in "... CWE-890 ...", and the category is not a prefix of a longer one.
      */
     static boolean coversSast(String summary, SastIssue issue) {
-        return named(summary, issue.cweText()) && named(summary, issue.categoryText());
+        return coversSast(Summary.of(summary), issue);
+    }
+
+    private static boolean coversSast(Summary summary, SastIssue issue) {
+        return summary.hasRun(Finding.normalise(issue.cweText())) && summary.hasRun(Finding.normalise(issue.categoryText()));
     }
 
     /** Every page: until an empty one, {@code isLast}, or {@code total} reached - whichever Jira sends. */

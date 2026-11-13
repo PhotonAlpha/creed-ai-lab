@@ -3,7 +3,7 @@ package com.creed.resource.veracode.template;
 import com.creed.resource.veracode.api.dto.AnalysisResponse;
 import com.creed.resource.veracode.api.dto.FindingView;
 import com.creed.resource.veracode.api.dto.SastIssueView;
-import com.creed.resource.veracode.config.ApplicationProperties;
+import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.domain.SastFlaw;
 import com.creed.resource.veracode.service.JiraLookupService.IssueRef;
 import com.creed.resource.veracode.service.ReportView;
@@ -161,7 +161,7 @@ public final class TemplateFields {
      * {@code r.cveId} off a map as off a bean - with every catalog key present ({@code ""} rather than missing, so an
      * empty value is an empty cell, not the expression left in it).
      */
-    public static Map<String, Object> data(AnalysisResponse a, ApplicationProperties apps, Instant now, ZoneId zone) {
+    public static Map<String, Object> data(AnalysisResponse a, ApplicationAliases apps, Instant now, ZoneId zone) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put(SCA, numbered(a.findings().stream().map(f -> sca(f, apps)).toList()));
         List<SastIssueView> sastIssues = a.sast() == null ? List.of() : a.sast().issues();
@@ -184,7 +184,7 @@ public final class TemplateFields {
         return out;
     }
 
-    private static Map<String, Object> sca(FindingView f, ApplicationProperties apps) {
+    private static Map<String, Object> sca(FindingView f, ApplicationAliases apps) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("application", text(f.application() == null ? null : apps.name(f.application())));
         row.put("title", text(f.title()));
@@ -202,7 +202,7 @@ public final class TemplateFields {
         return row;
     }
 
-    private static Map<String, Object> sast(SastIssueView i, ApplicationProperties apps) {
+    private static Map<String, Object> sast(SastIssueView i, ApplicationAliases apps) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("summary", text(i.summary()));
         // the page's "Jira summary" column: three lines per application, a blank line between applications
@@ -224,7 +224,7 @@ public final class TemplateFields {
         return row;
     }
 
-    private static Map<String, Object> report(ReportView r, ApplicationProperties apps) {
+    private static Map<String, Object> report(ReportView r, ApplicationAliases apps) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("application", text(r.appName() == null ? null : apps.name(r.appName())));
         row.put("report", text(r.fileName()));
@@ -236,7 +236,7 @@ public final class TemplateFields {
      * A report without an SCA section has every stated value {@code ""}, not 0 - 0 would claim SCA found nothing
      * (as on the page).
      */
-    private static Map<String, Object> scaStats(ReportView r, ApplicationProperties apps) {
+    private static Map<String, Object> scaStats(ReportView r, ApplicationAliases apps) {
         Map<String, Object> row = report(r, apps);
         ScaSummary s = r.sca();
         row.put("thirdPartyComponents", value(s == null ? null : s.thirdPartyComponents()));
@@ -252,7 +252,7 @@ public final class TemplateFields {
         return row;
     }
 
-    private static Map<String, Object> sastStats(ReportView r, ApplicationProperties apps) {
+    private static Map<String, Object> sastStats(ReportView r, ApplicationAliases apps) {
         Map<String, Object> row = report(r, apps);
         SastSummary s = r.sast();
         row.put("rating", value(s == null ? null : s.rating()));
@@ -294,7 +294,7 @@ public final class TemplateFields {
     }
 
     private static Map<String, Object> summary(AnalysisResponse a, List<SastIssueView> sastIssues,
-                                               ApplicationProperties apps, Instant now, ZoneId zone) {
+                                               ApplicationAliases apps, Instant now, ZoneId zone) {
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("projectKey", text(a.projectKey()));
         s.put("jiraVersions", a.selectedVersions().isEmpty() ? "(any)" : String.join(", ", a.selectedVersions()));

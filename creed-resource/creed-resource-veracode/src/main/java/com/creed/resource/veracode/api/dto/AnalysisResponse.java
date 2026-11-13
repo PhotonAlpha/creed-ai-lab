@@ -23,7 +23,7 @@ import java.util.List;
  * @param sastFlaws    every report's static-analysis flaws, as listed (fixed and mitigated included)
  * @param sast         the open flaws as SAST Jira issues (one per CWE + category) in the SAST project; {@code null}
  *                     when the request said {@code skipSast}
- * @param applications the reports' Veracode applications under their mapped names and links
+ * @param applications the reports' Veracode applications under their aliases and repository links
  */
 public record AnalysisResponse(String uploadId, List<ReportView> reports, String projectKey, List<String> jiraVersions,
                                List<String> selectedVersions, String createVersion,
@@ -34,9 +34,9 @@ public record AnalysisResponse(String uploadId, List<ReportView> reports, String
                                Instant analyzedAt) {
 
     /**
-     * A Veracode application as the page shows it ({@code veracode.applications}).
+     * A Veracode application as the page shows it (application aliases).
      *
-     * @param name its mapped name, else {@code appName}
+     * @param name its alias, else {@code appName}
      * @param url  where the name links to; {@code null} without a mapping
      */
     public record Application(String appName, String name, String url) {

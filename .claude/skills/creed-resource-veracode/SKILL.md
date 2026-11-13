@@ -92,13 +92,20 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 - **Finding = (application, `cve_id` or Unknown+`cwe_id`, component `file_name`)** (2026-11-06, asked for) — id
   `creed-platform|CVE-2021-44228@log4j-core-2.14.1.jar`; `Finding.issueKey` is the same without the application: one
   Jira issue per CVE + jar across applications, each application's label added (`addApplicationLabel`, outcome
-  `LABELED`, `needsLabel` on the view) instead of a duplicate. `createdNow` in `VeracodeAnalysisService.file` carries
-  that within one request. Several files per upload (`UploadedReportStore.ReportFile`). Create requests carry ids only; the server re-reads the upload + Jira under a
+  `LABELED`, `needsLabel` on the view) instead of a duplicate. `Filing` in `VeracodeAnalysisService.file` carries
+  that within one request: the issue created / labelled per `issueKey` (its labels as they are now - the analysis'
+  `matches` are stale after the first update), and labelling takes along every other finding *of the request* sharing
+  the issue - one GET + one PUT per issue, each of those findings answered `LABELED` from it (2026-11-13, perf). Never
+  label a finding the request did not name. Several files per upload (`UploadedReportStore.ReportFile`). Create requests carry ids only; the server re-reads the upload + Jira under a
   per-process lock → `ALREADY_EXISTS` instead of duplicates. Don't switch to client-supplied finding data.
 - **Lookup = batched JQL search** (2026-11-06, replaced the picker + per-candidate `GET`, asked for: too many calls).
   `Jql.lookup(project, versions, findings)` ORs the `summary ~` terms (a CVE as the quoted id itself,
   `"\"CVE-2021-44228\""` — asked for; unquoted, its `-` would be Lucene's NOT), `search-batch-size` findings per call, fields
-  inline. Cloud has no `/rest/api/2/search` — `token.cloud()` picks `/rest/api/3/search/jql`. Still no `/myself`,
+  inline. The batches run `search-concurrency` (4) at a time and the SAST half (screen + searches) beside the SCA
+  half (`Concurrently`, virtual threads; 2026-11-13, perf): `max-connections` must stay above twice that, and a test
+  fake recording calls must be thread-safe and not assert their order. Matching builds each finding's CVE pattern
+  once per batch (`Wanted`) and normalises a summary once (`Summary`) - don't go back to compiling per issue x finding.
+  Cloud has no `/rest/api/2/search` — `token.cloud()` picks `/rest/api/3/search/jql`. Still no `/myself`,
   `/project/{key}/versions`. Keep the JQL to the three clauses the mock parses (project, affectedVersion, summary ~).
 - **Match = a chosen Jira version (any, if none chosen) + `cve_id` (Unknown: "Unknown" + CWE) + the `file_name` as a
   whole-word run** (`named`; only when `summary-template` has `{file}`, components likewise with `{component}`).
@@ -169,10 +176,17 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   sequence") - write `th:ri:filename`. The report files are attached after the page is created
   (`ConfluenceService.attach`: multipart, `X-Atlassian-Token: nocheck`); build the parts as a `LinkedMultiValueMap` of
   `HttpEntity` - `MultipartBodyBuilder` needs Reactive Streams, absent here (`NoClassDefFoundError: Publisher`).
-- **Application label = the mapped name** (`veracode.applications`, `config/ApplicationProperties`: `app-name` → `name`,
-  `url`, matched case-insensitively; no entry = the `app_name`) since 2026-11-10 - the `application-label` regex is
-  gone. A list, not a map keyed by `app_name`: relaxed binding drops characters from map keys. The same name (linked)
-  is shown on the page, in the Jira description and as the Confluence *Repository*. Changing a mapping changes the label,
+- **Application label = the application alias** (`domain/ApplicationAlias`: `appName` → `alias`, `repositoryUrl`, matched
+  case-insensitively; none = the `app_name`) since 2026-11-10 - the `application-label` regex is gone. **Since 2026-11-13
+  (asked for) the aliases are a table, not configuration**: `application_alias` (Flyway `V2`, key = `app_name`
+  trimmed + lower-cased: H2 has no expression index), edited on `/veracode-templates`' *Application aliases* tab, saved
+  whole (`PUT /api/veracode/application-aliases`, validated: app name required and once, an alias or a link, http(s)).
+  Code reads them through the `ApplicationAliases` interface (`ApplicationAliases.of(list)` in unit tests); the bean
+  is `alias/ApplicationAliasService`, which holds the table in memory and reloads it after a save - load and save under
+  one lock, so a reader can never put the old list back. `db/defaults/V2_1` seeds what application.yml held (tests
+  leave the location out). An old `veracode.applications` in a configuration is imported at start (app names the
+  table lacks) with a WARN - application-test.yml keeps one on purpose, it is the import's test. The same name (linked)
+  is shown on the page, in the Jira description and as the Confluence *Repository*. Changing an alias changes the label,
   so existing issues show "label missing" until labelled again.
 - **Uploaded report files are attached to every created issue** (SCA and SAST, `JiraLookupService.attach`, multipart
   `file` parts + `X-Atlassian-Token: no-check`, `MultipartFiles` shared with the Confluence attach); a file downloaded

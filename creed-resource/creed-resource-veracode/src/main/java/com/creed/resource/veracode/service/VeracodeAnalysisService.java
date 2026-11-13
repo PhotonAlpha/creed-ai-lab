@@ -7,7 +7,7 @@ import com.creed.resource.veracode.api.dto.CreateIssuesResponse.Result;
 import com.creed.resource.veracode.api.dto.FindingStatus;
 import com.creed.resource.veracode.api.dto.FindingView;
 import com.creed.resource.veracode.api.dto.SastIssueView;
-import com.creed.resource.veracode.config.ApplicationProperties;
+import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.ReportRow;
@@ -26,6 +26,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Future;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -65,7 +67,7 @@ public class VeracodeAnalysisService {
     private final UploadedReportStore uploads;
     private final JiraLookupService jira;
     private final JiraProperties jiraProps;
-    private final ApplicationProperties apps;
+    private final ApplicationAliases apps;
     private final Clock clock;
 
     /**
@@ -170,19 +172,25 @@ public class VeracodeAnalysisService {
         if (autoCreate) {
             createLock.lock();
         }
+        Future<AnalysisResponse.SastJira> sast = null;
         try {
-            Snapshot s = load(uploadId, jiraVersions, countries, token);
+            Read read = read(uploadId);
+            // SAST's project, screen and searches do not depend on SCA's: read side by side (auto-create files SCA only)
+            if (!skipSast || autoCreate) {
+                sast = Concurrently.start("jira-sast", () -> sast(read, countries, token));
+            }
+            Snapshot s = load(read, jiraVersions, countries, token);
             Map<String, Object> chosen = autoCreate ? jira.resolveFields(s.meta(), fields) : Map.of();
             String version = autoCreate ? jira.createVersion(s.meta(), fields, s.versions()) : null;
             List<String> warnings = new ArrayList<>(s.read().warnings());
-            Map<String, IssueRef> createdNow = new HashMap<>();
+            Filing filing = new Filing(s.findings().stream().map(Finding::id).collect(Collectors.toSet()));
             List<FindingView> views = new ArrayList<>();
             for (Finding f : s.findings()) {
                 List<IssueRef> issues = s.matches().getOrDefault(f.id(), List.of());
                 FindingStatus status = issues.isEmpty() ? FindingStatus.MISSING : FindingStatus.EXISTS;
                 if (autoCreate) {
                     try {
-                        Result r = file(f, s, version, chosen, createdNow, false, token);
+                        Result r = file(f, s, version, chosen, filing, false, token);
                         if (r.outcome() == Outcome.CREATED) {
                             status = FindingStatus.CREATED;
                         } else if (r.outcome() == Outcome.LABELED) {
@@ -203,9 +211,12 @@ public class VeracodeAnalysisService {
                     s.versions().size() == 1 ? s.versions().getFirst() : null,
                     JiraLookupService.countries(s.meta()), s.countries().values(), s.meta().fields(), views, warnings,
                     AnalysisResponse.Counts.of(views), s.read().sastFlaws(),
-                    skipSast && !autoCreate ? null : sast(s.read(), countries, token),
+                    sast == null ? null : Concurrently.join(sast),
                     applications(s.reports()), Instant.now(clock));
         } finally {
+            if (sast != null) {
+                sast.cancel(true);
+            }
             if (autoCreate) {
                 createLock.unlock();
             }
@@ -228,7 +239,7 @@ public class VeracodeAnalysisService {
             String version = jira.createVersion(s.meta(), fields, s.versions());
             Map<String, Finding> byId = s.findings().stream()
                     .collect(Collectors.toMap(Finding::id, Function.identity(), (a, b) -> a, LinkedHashMap::new));
-            Map<String, IssueRef> createdNow = new HashMap<>();
+            Filing filing = new Filing(new java.util.HashSet<>(findingIds));
             List<Result> results = new ArrayList<>();
             for (String id : findingIds.stream().distinct().toList()) {
                 Finding f = byId.get(id);
@@ -237,7 +248,7 @@ public class VeracodeAnalysisService {
                     continue;
                 }
                 try {
-                    results.add(file(f, s, version, chosen, createdNow, recreateClosed, token));
+                    results.add(file(f, s, version, chosen, filing, recreateClosed, token));
                 } catch (UpstreamException e) {
                     log.warn("create failed for {}: {}", id, e.getMessage());
                     results.add(new Result(id, Outcome.FAILED, List.of(), e.getMessage()));
@@ -250,33 +261,72 @@ public class VeracodeAnalysisService {
     }
 
     /**
+     * What one request has done so far, by {@link Finding#issueKey}: later findings of the same issue see it instead
+     * of the analysis' read of Jira.
+     *
+     * @param filed    the findings this request files - the ones another finding's label update may take along
+     * @param issues   the issue created, or labelled, for an issue key; its labels as they are now
+     * @param labelled findings whose label went in with another finding's update -> that update's result
+     */
+    private record Filing(Set<String> filed, Map<String, IssueRef> issues, Map<String, Result> labelled) {
+
+        Filing(Set<String> filed) {
+            this(filed, new HashMap<>(), new HashMap<>());
+        }
+    }
+
+    /**
      * One finding filed: its issue exists (found in Jira, or created by this request for another application's
      * finding of the same {@link Finding#issueKey}) -> labelled with the finding's application if it is not yet;
      * none -> created. {@code recreateClosed} and all of them finished -> created again.
+     *
+     * <p>Labelling takes along every other finding of the request that shares the issue and lacks its label: one
+     * read and one update for the issue, not one pair per application (the description written is the same).
      */
-    private Result file(Finding f, Snapshot s, String version, Map<String, Object> fields,
-                        Map<String, IssueRef> createdNow, boolean recreateClosed, JiraToken token) {
-        List<IssueRef> existing = s.matches().getOrDefault(f.id(), List.of());
-        if (existing.isEmpty() && createdNow.containsKey(f.issueKey())) {
-            existing = List.of(createdNow.get(f.issueKey()));
+    private Result file(Finding f, Snapshot s, String version, Map<String, Object> fields, Filing filing,
+                        boolean recreateClosed, JiraToken token) {
+        Result done = filing.labelled().get(f.id());
+        if (done != null) {
+            return done;
         }
+        List<IssueRef> existing = current(s.matches().getOrDefault(f.id(), List.of()), filing.issues().get(f.issueKey()));
         if (!existing.isEmpty() && !(recreateClosed && allClosed(existing))) {
             if (!needsLabel(f, existing)) {
                 return new Result(f.id(), Outcome.ALREADY_EXISTS, existing, null);
             }
             // every application of this upload whose finding the issue covers: the description is written for all of them
             List<Finding> sharing = s.findings().stream().filter(o -> o.issueKey().equals(f.issueKey())).toList();
-            IssueRef labelled = jira.addApplicationLabel(existing.getFirst(), f, sharing, s::reportOf, token);
+            List<IssueRef> before = existing;
+            List<Finding> labelling = sharing.stream()
+                    .filter(o -> o == f || filing.filed().contains(o.id()) && needsLabel(o, before)).toList();
+            IssueRef labelled = jira.addApplicationLabels(existing.getFirst(), labelling, sharing, s::reportOf, token);
             List<IssueRef> issues = new ArrayList<>(existing);
             issues.set(0, labelled);
-            createdNow.putIfAbsent(f.issueKey(), labelled);
-            return new Result(f.id(), Outcome.LABELED, List.copyOf(issues),
-                    "added label " + jira.applicationLabel(f) + " to " + labelled.key());
+            filing.issues().put(f.issueKey(), labelled);
+            for (Finding o : labelling) {
+                filing.labelled().put(o.id(), new Result(o.id(), Outcome.LABELED, List.copyOf(issues),
+                        "added label " + jira.applicationLabel(o) + " to " + labelled.key()));
+            }
+            return filing.labelled().get(f.id());
         }
         ReportView report = s.reportOf(f);
         IssueRef created = jira.create(f, version, fields, report, token);
-        createdNow.put(f.issueKey(), created);
+        filing.issues().put(f.issueKey(), created);
         return new Result(f.id(), Outcome.CREATED, List.of(created), attach(created, List.of(report), s.read(), token));
+    }
+
+    /**
+     * The analysis' issues for a finding, with what this request did to one of them since: its labels as they are now.
+     * No issue found but one filed for the issue key by this request -> that one.
+     */
+    private static List<IssueRef> current(List<IssueRef> matched, IssueRef filed) {
+        if (filed == null) {
+            return matched;
+        }
+        if (matched.isEmpty()) {
+            return List.of(filed);
+        }
+        return matched.stream().map(i -> i.key().equals(filed.key()) ? filed : i).toList();
     }
 
     /**
@@ -471,7 +521,10 @@ public class VeracodeAnalysisService {
     }
 
     private Snapshot load(String uploadId, List<String> jiraVersions, List<String> countries, JiraToken token) {
-        Read read = read(uploadId);
+        return load(read(uploadId), jiraVersions, countries, token);
+    }
+
+    private Snapshot load(Read read, List<String> jiraVersions, List<String> countries, JiraToken token) {
         UploadedReportStore.Upload upload = read.upload();
         List<ReportView> reports = read.reports();
         List<ReportRow> rows = read.rows();
@@ -488,7 +541,7 @@ public class VeracodeAnalysisService {
         return new Snapshot(read, findings, meta, versions, countryFilter, matches);
     }
 
-    /** Every application of the reports, by its mapped name and link ({@code veracode.applications}) - for the page. */
+    /** Every application of the reports, by its alias and repository link (application aliases) - for the page. */
     private List<AnalysisResponse.Application> applications(List<ReportView> reports) {
         return reports.stream().map(ReportView::appName).filter(java.util.Objects::nonNull).distinct()
                 .map(a -> new AnalysisResponse.Application(a, apps.name(a), apps.url(a))).toList();

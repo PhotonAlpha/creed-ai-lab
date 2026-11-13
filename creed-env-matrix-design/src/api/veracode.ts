@@ -755,6 +755,28 @@ export const reportTemplateApi = {
   },
 };
 
+/**
+ * A Veracode application under a name of its own (was `veracode.applications` in the backend's configuration): the alias
+ * is what the Veracode page, Jira (description and label) and the Confluence export show, linked to the repository.
+ */
+export interface ApplicationAlias {
+  /** The report's `app_name`, matched in any case. */
+  appName: string;
+  /** Blank = the `app_name`. */
+  alias?: string | null;
+  /** Blank = no link. */
+  repositoryUrl?: string | null;
+}
+
+const ALIASES = '/application-aliases';
+
+export const applicationAliasApi = {
+  list: () => requestAt<ApplicationAlias[]>(BASE, ALIASES),
+  /** The whole table: the backend replaces what it holds. */
+  save: (aliases: ApplicationAlias[]) =>
+    requestAt<ApplicationAlias[]>(BASE, ALIASES, { method: 'PUT', body: JSON.stringify(aliases) }),
+};
+
 /** Saves a downloaded file the way the page's other exports do. */
 export const saveBlob = ({ blob, filename }: { blob: Blob; filename: string }) => {
   const url = URL.createObjectURL(blob);

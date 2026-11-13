@@ -9,7 +9,7 @@ import com.creed.resource.veracode.client.jira.JiraIssueType;
 import com.creed.resource.veracode.client.jira.JiraPage;
 import com.creed.resource.veracode.client.jira.JiraSearchResult;
 import com.creed.resource.veracode.client.jira.JiraVersion;
-import com.creed.resource.veracode.config.ApplicationProperties;
+import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.config.JiraMetaCacheConfiguration;
 import com.creed.resource.veracode.config.JiraProperties;
 import com.creed.resource.veracode.domain.Finding;
@@ -75,8 +75,8 @@ class JiraLookupServiceTest {
         assertThat(found.get(log4shell.id())).extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-1");
         assertThat(found.get(spring4shell.id())).extracting(JiraLookupService.IssueRef::key).containsExactly("CREED-3");
         assertThat(found.get(text4shell.id())).isEmpty();
-        // three findings, batches of two: two searches, not one call (plus a read per candidate) per finding
-        assertThat(jira.jqls).containsExactly(
+        // three findings, batches of two: two searches, not one call (plus a read per candidate) per finding - side by side
+        assertThat(jira.jqls).containsExactlyInAnyOrder(
                 "project = \"CREED\" AND affectedVersion in (\"2.3.0\") AND (summary ~ \"\\\"CVE-2021-44228\\\"\" OR "
                         + "summary ~ \"\\\"CVE-2022-22965\\\"\") ORDER BY key",
                 "project = \"CREED\" AND affectedVersion in (\"2.3.0\") AND (summary ~ \"\\\"CVE-2022-42889\\\"\") ORDER BY key");
@@ -138,7 +138,8 @@ class JiraLookupServiceTest {
         JiraLookupService service = service(jira, new JiraProperties(base.baseUrl(), base.projectKey(),
                 base.issueType(), base.projectName(), base.summaryTemplate(), base.labels(), base.browseUrl(),
                 base.pageSize(), base.searchBatchSize(), base.maxConnections(), base.connectTimeout(), base.readTimeout(),
-                base.defaults(), base.sast(), base.closedStatuses(), base.countryField(), Duration.ofMinutes(1)));
+                base.defaults(), base.sast(), base.closedStatuses(), base.countryField(), Duration.ofMinutes(1),
+                base.searchConcurrency()));
 
         service.createMeta(TOKEN);
         service.createMeta(TOKEN);
@@ -371,8 +372,8 @@ class JiraLookupServiceTest {
     }
 
     /** CREED-PAY-GATEWAY-API is mapped (case ignored); every other application keeps its app_name. */
-    private static final ApplicationProperties APPS = new ApplicationProperties(List.of(
-            new ApplicationProperties.Application("creed-pay-gateway-api", "Pay-Gateway", "https://git/pay")));
+    private static final ApplicationAliases APPS = ApplicationAliases.of(List.of(
+            new com.creed.resource.veracode.domain.ApplicationAlias("creed-pay-gateway-api", "Pay-Gateway", "https://git/pay")));
 
     private static JiraLookupService service(JiraClient jira, int searchBatchSize) {
         return service(jira, properties("{project} - {cve}|{cwe} - {file}", searchBatchSize));
@@ -392,7 +393,7 @@ class JiraLookupServiceTest {
                 Duration.ofSeconds(1), Duration.ofSeconds(1), defaults,
                 new JiraProperties.Sast(null, null, "IDB VERACODE STSA", "{project} - {cwe} - {category}",
                         List.of("IDB VERACODE STSA", "veracode"), new JiraProperties.CreateDefaults(null, null)),
-                List.of("Closed", "Done"), "Country", Duration.ZERO);
+                List.of("Closed", "Done"), "Country", Duration.ZERO, 4);
     }
 
     /** Pages of one item each (pageSize 1), so paging is walked as well. */
@@ -432,7 +433,8 @@ class JiraLookupServiceTest {
         }
 
         @Override
-        public JiraSearchResult search(String authorization, String jql, String fields, int startAt, int maxResults) {
+        public synchronized JiraSearchResult search(String authorization, String jql, String fields, int startAt,
+                                                    int maxResults) {
             pages++;
             if (startAt == 0) {
                 jqls.add(jql);
@@ -442,7 +444,7 @@ class JiraLookupServiceTest {
         }
 
         @Override
-        public JiraSearchResult searchJql(String authorization, String jql, String fields, String nextPageToken,
+        public synchronized JiraSearchResult searchJql(String authorization, String jql, String fields, String nextPageToken,
                                           int maxResults) {
             cloudPages++;
             int from = nextPageToken == null ? 0 : Integer.parseInt(nextPageToken);

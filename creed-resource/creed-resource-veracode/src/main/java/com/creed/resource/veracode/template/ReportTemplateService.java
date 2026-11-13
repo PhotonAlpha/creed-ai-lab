@@ -1,7 +1,7 @@
 package com.creed.resource.veracode.template;
 
 import com.creed.resource.veracode.api.dto.AnalysisResponse;
-import com.creed.resource.veracode.config.ApplicationProperties;
+import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.config.ConfluenceProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,7 +41,7 @@ public class ReportTemplateService {
 
     private final ReportTemplateRepository repository;
     private final JsonMapper json;
-    private final ApplicationProperties apps;
+    private final ApplicationAliases apps;
     private final ConfluenceProperties confluence;
     private final Clock clock;
 

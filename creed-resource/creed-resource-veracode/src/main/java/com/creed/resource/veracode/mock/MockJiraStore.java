@@ -26,7 +26,7 @@ public class MockJiraStore {
     public static final String PROJECT = "CREED";
     /**
      * The sample report's application ({@code creed-platform-2026-10-06-Creed}) as a label: its {@code app_name}, the
-     * label of an application {@code veracode.applications} does not map.
+     * label of an application without an alias.
      */
     public static final String SAMPLE_APPLICATION_LABEL = "creed-platform-2026-10-06-Creed";
 
@@ -40,6 +40,8 @@ public class MockJiraStore {
     private final List<Issue> issues = new ArrayList<>();
     /** Issue key -> the names of the files attached to it, in order. */
     private final java.util.Map<String, List<String>> attachments = new java.util.HashMap<>();
+    /** Description updates per issue key - one per labelling, however many applications it adds. */
+    private final java.util.Map<String, Integer> descriptionWrites = new java.util.HashMap<>();
     private final AtomicInteger sequence = new AtomicInteger();
 
     public MockJiraStore() {
@@ -49,6 +51,7 @@ public class MockJiraStore {
     public synchronized void reset() {
         issues.clear();
         attachments.clear();
+        descriptionWrites.clear();
         sequence.set(100);
         seed("creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar",
                 "In Progress", "Highest", "Alice Wang", "2.3.0", "Singapore");
@@ -108,6 +111,7 @@ public class MockJiraStore {
 
     /** {@code fields.description} set. */
     public synchronized void describe(String key, String description) {
+        descriptionWrites.merge(key.toUpperCase(java.util.Locale.ROOT), 1, Integer::sum);
         for (int i = 0; i < issues.size(); i++) {
             Issue it = issues.get(i);
             if (it.key().equalsIgnoreCase(key)) {
@@ -116,6 +120,10 @@ public class MockJiraStore {
                         it.issueType(), it.country()));
             }
         }
+    }
+
+    public synchronized int descriptionWrites(String key) {
+        return descriptionWrites.getOrDefault(key.toUpperCase(java.util.Locale.ROOT), 0);
     }
 
     public synchronized void attach(String key, String filename) {

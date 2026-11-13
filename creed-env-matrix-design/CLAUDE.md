@@ -187,7 +187,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 按 Jira 标题匹配：CVE 出现在标题任意位置即可（忽略大小写和 `-` `_` 空格，但不会匹配更长的编号）；无 `cve_id` 时按 `Unknown` + `cwe_id`；
   且组件 `file_name` 要作为完整的词出现在标题中（`log4j-api-2.14.1.jar` 或 `log4j-core-2.14.10.jar` 不算），标题模板含 `{file}` 时生效。
 - 新建 Jira 标题 `{project} - {cve_id}|{cwe_id} - {file_name}`，`{project}` 为 `veracode.jira.project-name`（不是 Veracode application）；
-  label：`veracode`、`{project}`、application label（不含 `cve_id`）（`veracode.applications` 中映射的名称，如 `GBT-T1-Creed-CCS` → `Creed-CCS`；没有映射时为 `app_name`）；
+  label：`veracode`、`{project}`、application label（不含 `cve_id`）（应用别名，如 `GBT-T1-Creed-CCS` → `Creed-CCS`；没有映射时为 `app_name`）；
   描述表格按页面列顺序，含完整 `cve_summary`。
 - 可一次上传多个 XML：不同 application 时表格可按 application 过滤、分组（可折叠）；相同 CVE + 相同 jar 的 Jira 已存在时不再重复创建，
   而是给它加上该 application 的 label，并重写描述（不是追加）：每个 application 一张 SCA finding 表格，本次分析中的用新数据，不在本次分析中的保留原表格（行上显示「缺少 label」，按钮为「添加 label 与描述」）。
@@ -221,8 +221,11 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   标题 `{project} - {version} - Reports (SAST,SCA) - {yyyy-MM-dd HH-mm-ss}`（`veracode.confluence.export-title`；project / version 默认取报告的，可在对话框修改）。
   页面底部「Veracode report(s):」附上分析的报告文件（上传的或从 Confluence 取的原文件，作为新页面的附件并链接）。
   SCA / SAST 两个表格按 repository 排序；SAST 的 Details 与页面的「Jira 标题」列相同（按 application 三行）。
-- application 映射（`veracode.applications`：`app_name` → 名称 + 链接）：页面表格、Jira 描述、Confluence 的 Repository 显示映射名称并可点击跳转，
-  映射名称也是 Jira label；没有映射时用 `app_name`。
+- 应用别名（`app_name` → 别名 + 仓库地址；2026-11-13 起在 `/veracode-templates` 的「应用别名」标签页编辑，存数据库，
+  `ApplicationAliasesPanel.tsx` + `applicationAliasApi`，整表保存；每行可复制（插在下方，重复的 app_name 标红）；
+  导出 JSON = 已保存的内容（与 `GET`/`PUT` 同格式），导入 JSON 按 app_name 合并进编辑中的表格，点保存才写库；原后端配置 `veracode.applications` 已废弃）：页面表格、Jira 描述、
+  Confluence 的 Repository 显示别名并可点击跳转，别名也是 Jira label；没有别名时用 `app_name`。
+  模版页两个标签页都保持挂载（`hidden`），切换不丢未保存的修改——antd `Row` 自带 `display:flex` 会盖掉 `hidden`，所以外面包一层 `div`。
 - Confluence 报告页面：配置 `veracode.confluence.parent-page-id` 时先列出该父页面的子页面（一次调用，最近修改在前），下拉框输入标题在前端过滤，选中后填入页面 ID，再「列出附件」；列出子页面 / 附件时全屏 loading。
 - Confluence 附件列表：按上传时间倒序，默认最多 50 个，默认只列文件名含 `dd_MMM_yyyy` 日期且为 `.zip` 的附件（可取消）；
   「报告日期」下拉框按文件名中的日期再筛选（最新在前），列出后默认选最新日期，可选「所有日期」；

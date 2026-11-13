@@ -29,7 +29,8 @@ import java.util.Map;
  * <p>Scoped to {@link VeracodeController}: the Jira mock answers in Jira's own error shape, and must not
  * be rewritten into this one.
  */
-@RestControllerAdvice(assignableTypes = {VeracodeController.class, ReportTemplateController.class})
+@RestControllerAdvice(assignableTypes = {VeracodeController.class, ReportTemplateController.class,
+        ApplicationAliasController.class})
 @Slf4j
 public class VeracodeExceptionHandler {
 

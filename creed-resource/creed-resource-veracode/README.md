@@ -99,7 +99,8 @@ report, folders, `__MACOSX/` and dot files are skipped. A zip and plain XML file
 inflated bytes, not declared sizes: `veracode.upload.max-unzipped-size` (500MB) and `max-archive-reports` (50);
 no `.xml` inside, or an unreadable zip, is `400 unsupported_file`. Entry names that are not UTF-8 are read as GB18030.
 
-**Lookup is a JQL search, batched**: one search per `search-batch-size` (default 50) findings —
+**Lookup is a JQL search, batched**: one search per `search-batch-size` (default 50) findings, `search-concurrency`
+(default 4) of them at once, the SAST searches beside them —
 `project = "…" [AND affectedVersion in ("…", …)] AND (summary ~ "\"CVE-2021-44228\"" OR summary ~ … ) ORDER BY key` (the CVE id as written, quoted so its
 hyphens are text, not NOT operators; an advisory without a CVE is searched as plain words), fields
 read inline (no per-issue `GET`). Jira's `summary ~` only narrows; rules 1–3 are decided here on what it returns.
@@ -118,28 +119,35 @@ per candidate. The project's versions are the
   `{application}`; blank = the project key), `{cve}` / `{cwe}` "Unknown" when absent. E.g.
   `creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar`;
 - labels: `labels` (`veracode`), `project-name`, and the **application label** (not the `cve_id` — it is in the
-  summary): the application's name under `veracode.applications` (`GBT-T1-Creed-CCS` → `Creed-CCS`), else its
+  summary): the application's alias (`GBT-T1-Creed-CCS` → `Creed-CCS`, see *Application aliases*), else its
   `app_name`. Spaces become `_` (Jira refuses them);
 - description: one wiki-markup table in the page's order — Title (`cve_id|cwe_id`, NVD / MITRE links), Veracode
-  application (the mapped name, linked to its `url`), Library file, Component(s), Severity, CVSS, Affected version,
+  application (its alias, linked to its repository URL), Library file, Component(s), Severity, CVSS, Affected version,
   Location, Description (the **full** `cve_summary`) — then the *Source*: a report downloaded from Confluence is
   linked by its attachment URL and by the page holding it (`on page [title|viewpage URL]`); an uploaded file is **attached to the issue** right after it is created (`POST
   /rest/api/2/issue/{key}/attachments`, `X-Atlassian-Token: no-check`; a failed attach leaves the issue and is
   reported as the result's message / a warning). Then the report in it, the scan and the policy. SAST issues get the
   same *Source* line per report and the same attachments.
 
-**Application names** — `veracode.applications`, a list of `app-name` (any case) → `name`, `url`:
+**Application aliases** — a Veracode `app_name` (any case) under an alias and a repository URL, edited on the
+report-templates page (*Application aliases* tab) and kept in the database (`application_alias`); until 2026-11-13 this
+was `veracode.applications` in the configuration.
 
-```yaml
-veracode:
-  applications:
-    - app-name: GBT-T1-Creed-CCS
-      name: Creed-CCS
-      url: https://example.com/projects/xxxx/browse
-```
+| | |
+|---|---|
+| `GET /api/veracode/application-aliases` | `[{"appName":"GBT-T1-Creed-CCS","alias":"Creed-CCS","repositoryUrl":"https://…/browse"}]` |
+| `PUT /api/veracode/application-aliases` | the whole table, replacing it; 400 for a row without an app name, an app name twice, neither alias nor URL, a non-http(s) URL |
 
-The name is shown (linked) on the page, in the Jira description and in the Confluence export's *Repository*, and is
-the application's Jira label. An application without an entry keeps its `app_name`, without a link.
+The alias is shown (linked) on the page, in the Jira description and in the Confluence export's *Repository*, and is
+the application's Jira label. An application without one keeps its `app_name`, without a link. A save applies to the
+next analysis on this instance (another instance reads the table at its next start). A `veracode.applications` list
+still in a configuration is imported at start - the app names the table does not have - with a warning to remove it.
+
+To carry the aliases to another environment: *Export JSON* on the tab (what is saved - the `GET` body), *Import JSON*
+there (merged into the table by app name, saved when you click Save) - or `PUT` the file as it is:
+`curl -X PUT -H 'Content-Type: application/json' --data @application-aliases-2026-11-13.json <host>/api/veracode/application-aliases`
+(that replaces the whole table). The database is the only copy: the page never writes `db/defaults/V2_1` (a Flyway
+script, run once per database - editing it after it ran fails Flyway's checksum validation at start).
 
 **Preselected values** — `veracode.jira.defaults`, applied when the connection test has read Jira, and only as
 far as that Jira offers them (one it lacks is dropped; the page then keeps what it had):

@@ -9,6 +9,9 @@ spring:
     url: "jdbc:h2:mem:veracode-test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1"
     username: sa
     password: ""
+  # schema only: db/defaults' application aliases would rename the sample's applications
+  flyway:
+    locations: classpath:db/migration
 server:
   port: 0
 otel:
@@ -45,7 +48,9 @@ veracode:
       labels: [veracode-sast]
       defaults:
         affects-versions: [9.9.9, 2.4.0]
-  # The second sample report's application under another name, with a link; the first sample's stays its app_name
+  # The second sample report's application under another name, with a link; the first sample's stays its app_name.
+  # Deliberately the old property: it is imported into application_alias at start (ApplicationAliasService), which
+  # VeracodeApiTest relies on - that is the import's test.
   applications:
     - app-name: creed-gateway-2026-10-08-Gateway
       name: Creed-Gateway

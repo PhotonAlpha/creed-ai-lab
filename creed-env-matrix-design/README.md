@@ -591,7 +591,8 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   its last line, *Veracode report(s)*.
 - **Export Excel** downloads a fresh analysis (sheets *Findings*, *SCA summary* — the same statistics —,
   *SAST flaws* — with each flaw's Jira issue —, *SAST summary* and *Source*).
-- **Application names** (2026-11-10): `veracode.applications` in the backend config maps an `app_name` to a name and a
+- **Application aliases** (2026-11-10; since 2026-11-13 edited on the report-templates page's *Application aliases* tab and
+  kept in the database - the backend's `veracode.applications` is retired): an `app_name` under an alias and a repository
   link (`GBT-T1-Creed-CCS` → `Creed-CCS`, `https://…/browse`). Tables on the page, the Jira description (*Veracode
   application*) and the Confluence export (*Repository*) show the name, linked; it is also the application's Jira label
   (replacing the `application-label` regex). Without an entry the `app_name` itself is used.
