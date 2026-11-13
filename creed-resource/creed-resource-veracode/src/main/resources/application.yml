@@ -33,6 +33,10 @@ spring:
     locations: classpath:db/migration,classpath:db/defaults
 
 veracode:
+  templates:
+    # A report template upload answered as Server-Sent Events (the page's progress) stays open at most this long.
+    upload-timeout: ${CREED_VERACODE_TEMPLATE_UPLOAD_TIMEOUT:10m}
+
   logbook:
     # Bodies Logbook prints (prefix match, any case): others - a downloaded zip / XML, a multipart attachment upload - are
     # logged without their body, and not buffered for it (JsonBodyOnlyStrategy). Empty = every body.

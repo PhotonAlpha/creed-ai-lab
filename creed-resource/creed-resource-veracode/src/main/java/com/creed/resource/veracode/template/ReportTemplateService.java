@@ -81,7 +81,14 @@ public class ReportTemplateService {
 
     /** Stored as uploaded, unbound; a file POI cannot read as {@code .xlsx} is refused here, not at export. */
     public Detail create(String name, String fileName, byte[] content) {
-        List<TemplateWorkbook.SheetView> sheets = TemplateWorkbook.read(content);
+        return create(name, fileName, content, p -> { });
+    }
+
+    /** @param progress the reading's phases and rows, then {@code store} (the page's upload progress) */
+    public Detail create(String name, String fileName, byte[] content,
+                         java.util.function.Consumer<TemplateWorkbook.Progress> progress) {
+        List<TemplateWorkbook.SheetView> sheets = TemplateWorkbook.read(content, progress);
+        progress.accept(TemplateWorkbook.Progress.of("store"));
         String title = name == null || name.isBlank()
                 ? fileName.replaceFirst("(?i)\\.xls[xm]$", "") : name.trim();
         Instant now = clock.instant();
@@ -100,10 +107,22 @@ public class ReportTemplateService {
                 mapping(row.mapping()), row.updatedAt());
     }
 
-    /** @throws IllegalArgumentException a binding that cannot be written - nothing is saved then */
+    /**
+     * @throws IllegalArgumentException a binding that cannot be written, or a sheet larger than the page shows (asked
+     *                                  for, 2026-11-13: what the page cannot show cannot be checked there) - nothing is
+     *                                  saved then
+     */
     public Detail saveMapping(String id, TemplateMapping mapping) {
         ReportTemplateRepository.Row row = require(id);
         TemplateMapping clean = mapping == null ? TemplateMapping.EMPTY : mapping;
+        List<TemplateWorkbook.SheetView> sheets = TemplateWorkbook.read(row.content());
+        List<String> tooLarge = sheets.stream().filter(TemplateWorkbook.SheetView::truncated)
+                .map(s -> "'" + s.name() + "' (" + s.usedRows() + " rows x " + s.usedCols() + " columns)").toList();
+        if (!tooLarge.isEmpty()) {
+            throw new IllegalArgumentException("larger than " + TemplateWorkbook.MAX_ROWS + " rows x "
+                    + TemplateWorkbook.MAX_COLS + " columns, so bindings cannot be saved: " + String.join(", ", tooLarge)
+                    + " - delete what is past the report in Excel and upload the template again");
+        }
         try (XSSFWorkbook wb = TemplateWorkbook.open(row.content())) {
             validate(clean, wb);
         } catch (IOException e) {
@@ -111,7 +130,7 @@ public class ReportTemplateService {
         }
         Instant now = clock.instant();
         repository.updateMapping(id, json.writeValueAsString(clean), now);
-        return new Detail(row.id(), row.name(), row.fileName(), TemplateWorkbook.read(row.content()), clean, now);
+        return new Detail(row.id(), row.name(), row.fileName(), sheets, clean, now);
     }
 
     public void delete(String id) {

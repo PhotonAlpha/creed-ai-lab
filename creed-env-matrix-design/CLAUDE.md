@@ -241,6 +241,10 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   点选单元格：所在行可设为 SCA / SAST / SCA 统计 / SAST 统计数据行（导出时按条数向下重复，统计每个报告一行，下方内容下移），该行单元格绑定数据集字段；其他单元格绑定汇总字段 → 保存映射
   （后端校验，错误指出单元格）→ Veracode 页面「按模版导出」：重新分析并由后端写入 JXLS 占位符后填充。
   「按模版导出」是主要导出：按 antd「Gradient Button」示例：大号渐变主按钮与右侧只有箭头的按钮左右拼在一起（`Space.Compact`），两者共用一条渐变（宽度 = 整组宽度，左按钮画开头、箭头画结尾；画在 `::after` 上，因为 antd 在拼接主按钮的第二个的 `::before` 上画分隔线），悬停整组淡出（CSS module `gradientButton.module.css`，项目没有 antd-style），位于 SCA「漏洞」卡片内容区第一行最左（导出组：按模版导出 / 导出 Excel / 导出到 Confluence；同一行右侧是创建 / 加 label 按钮，第二行是状态、application、搜索过滤 —— 卡片标题栏不再放按钮）；渐变按钮直接用上次用过的模版（存 localStorage，按钮上显示模版名），右侧箭头选择模版 / 管理模版。模版和映射存在后端 H2 文件库（`postgres` profile 用 PostgreSQL）。
+- 模版上传时全屏 loading 并显示进度（Server-Sent Events：`Accept: text/event-stream` 时上传接口边读边推送 `progress` 事件，
+  最后 `done` 返回模版或 `error`）：先是上传字节数，再是后端读取工作簿（第几个 sheet、第几行），最后保存。
+  任一 sheet 超出显示范围（500 行 × 60 列）时，描述区域显示红色 alert 列出这些 sheet 及其实际行列数，「保存绑定」不可用（后端同样拒绝）；
+  内容下方只有结果为空的公式 / 空白文本时显示黄色提示（导出时跳过它们，建议在 Excel 中删除）。
 - 支持导出 Excel（Severity 按等级填充背景色；*SCA summary* 工作表与页面的 SCA 统计一致；*SAST flaws* / *SAST summary* 两个工作表对应 SAST 部分）。
 - 统计卡片（漏洞总数 / 已在 Jira / 缺失 / 已创建）按状态用不同背景色（主题 token）；表格分页受控，默认每页 50 条（20 / 50 / 100 / 200）。
 - 刷新页面不丢数据：分析结果、所选 Jira 版本、字段取值、过滤条件、每页条数存 sessionStorage（随标签页关闭清除）；

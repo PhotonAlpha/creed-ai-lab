@@ -1,4 +1,4 @@
-import { parseError, requestAt } from './client';
+import { ApiError, parseError, requestAt } from './client';
 
 /**
  * creed-resource-veracode (`com.creed.resource.veracode.api.dto`). A separate service from env-matrix,
@@ -712,7 +712,19 @@ export interface TemplateSheet {
    * the whole sheet. The export leaves them out, but every open of the workbook still reads them. Absent when none.
    */
   hidden?: { cells: number; lastRow: number; example: string } | null;
+  /** What shows, uncut: `truncated` = more than 500 × 60, and then bindings cannot be saved. */
+  usedRows: number;
+  usedCols: number;
 }
+
+/**
+ * A template upload's progress: the bytes sent (`upload`), then the server reading the workbook - `parse` (POI reading
+ * the file, no finer step), `sheet` (`row` of `rows` scanned in sheet `index` of `sheets`), `store`.
+ */
+export type TemplateUploadProgress =
+  | { phase: 'upload'; loaded: number; total: number }
+  | { phase: 'parse' | 'store' }
+  | { phase: 'sheet'; sheet: string; index: number; sheets: number; row: number; rows: number };
 
 /** 0-based rows and columns, as POI counts them. */
 export interface TemplateMapping {
@@ -760,6 +772,61 @@ export const reportTemplateApi = {
   list: () => read<ReportTemplateSummary[]>(TEMPLATES),
   fields: () => read<Record<TemplateDataset, TemplateField[]>>(`${TEMPLATES}/fields`),
   get: (id: string) => read<ReportTemplateDetail>(`${TEMPLATES}/${encodeURIComponent(id)}`),
+  /**
+   * The upload with its progress: XMLHttpRequest for the bytes sent (fetch has none), and the answer as Server-Sent
+   * Events (`Accept: text/event-stream`) read as it streams in - `progress` events while the server reads the workbook,
+   * then `done` (the template) or `error` (`{error, message}`). A refusal before the stream starts (a file over the
+   * size limit) is the usual JSON error.
+   */
+  uploadWithProgress: (file: File, onProgress: (p: TemplateUploadProgress) => void, name?: string) =>
+    new Promise<ReportTemplateDetail>((resolve, reject) => {
+      const form = new FormData();
+      form.append('file', file);
+      if (name?.trim()) form.append('name', name.trim());
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${BASE}${TEMPLATES}`);
+      xhr.setRequestHeader('Accept', 'text/event-stream');
+      xhr.upload.onprogress = (e) => onProgress({ phase: 'upload', loaded: e.loaded, total: e.lengthComputable ? e.total : file.size });
+      let read = 0;
+      let settled = false;
+      const settle = (fn: () => void) => {
+        if (!settled) {
+          settled = true;
+          fn();
+        }
+      };
+      // frames are "event: x\ndata: {...}\n\n"; responseText grows as the stream arrives, a frame may be cut anywhere
+      const frames = () => {
+        if (xhr.status !== 200) return;
+        let end = xhr.responseText.indexOf('\n\n', read);
+        while (end >= 0) {
+          const frame = xhr.responseText.slice(read, end);
+          read = end + 2;
+          const event = /^event:\s*(.*)$/m.exec(frame)?.[1]?.trim();
+          const data = frame.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
+          if (data) {
+            const body = JSON.parse(data);
+            if (event === 'progress') onProgress(body as TemplateUploadProgress);
+            else if (event === 'done') settle(() => resolve(body as ReportTemplateDetail));
+            else if (event === 'error') settle(() => reject(new ApiError(400, body.message ?? 'upload failed', body)));
+          }
+          end = xhr.responseText.indexOf('\n\n', read);
+        }
+      };
+      xhr.onprogress = frames;
+      xhr.onload = () => {
+        if (xhr.status < 200 || xhr.status >= 300) {
+          const response = new Response(xhr.responseText, { status: xhr.status, statusText: xhr.statusText });
+          void parseError(response).then((e) => settle(() => reject(e)), (e) => settle(() => reject(e)));
+          return;
+        }
+        frames();
+        settle(() => reject(new Error('the upload ended without an answer')));
+      };
+      xhr.onerror = () => settle(() => reject(new Error(`upload failed: ${BASE} not reachable`)));
+      xhr.send(form);
+    }),
+
   /** Multipart: `headers: {}` keeps `requestAt` from claiming JSON, so the browser writes the boundary. */
   upload: (file: File, name?: string) => {
     const form = new FormData();

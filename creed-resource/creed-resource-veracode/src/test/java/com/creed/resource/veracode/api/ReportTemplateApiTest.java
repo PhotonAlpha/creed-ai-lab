@@ -35,7 +35,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -243,6 +245,71 @@ class ReportTemplateApiTest {
             assertThat(wb.getWorkbookType()).isEqualTo(XSSFWorkbookType.XLSM);
             assertThat(wb.getSheet("Report").getRow(0).getCell(1).getStringCellValue()).isEqualTo("CREED");
         }
+    }
+
+    /** {@code Accept: text/event-stream}: the reading's progress, then the template - the page's full-screen progress. */
+    @Test
+    void anUploadCanReportItsProgress() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file", "公司模版.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", companyTemplate());
+        org.springframework.test.web.servlet.MvcResult started = mvc.perform(multipart("/api/veracode/report-templates")
+                        .file(file).accept(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        String stream = mvc.perform(asyncDispatch(started))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+
+        List<String> events = stream.lines().filter(l -> l.startsWith("event:")).toList();
+        assertThat(events.getFirst()).isEqualTo("event:progress");
+        assertThat(events.getLast()).isEqualTo("event:done");
+        assertThat(stream).contains("\"phase\":\"parse\"").contains("\"phase\":\"store\"")
+                .contains("\"phase\":\"sheet\",\"sheet\":\"SCA components\",\"index\":1,\"sheets\":3");
+        String done = stream.lines().dropWhile(l -> !l.equals("event:done")).skip(1).findFirst().orElseThrow();
+        assertThat(JsonPath.<String>read(done.substring("data:".length()), "$.name")).isEqualTo("公司模版");
+    }
+
+    @Test
+    void aFileThatIsNoWorkbookEndsTheStreamWithAnError() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file", "report.xlsx", "application/octet-stream",
+                "not a workbook".getBytes());
+        org.springframework.test.web.servlet.MvcResult started = mvc.perform(multipart("/api/veracode/report-templates")
+                        .file(file).accept(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        String stream = mvc.perform(asyncDispatch(started)).andReturn().getResponse().getContentAsString();
+
+        assertThat(stream).contains("event:error").contains("\"error\":\"bad_request\"")
+                .contains("not an Excel workbook").doesNotContain("event:done");
+    }
+
+    /** What the page cannot show cannot be checked there: a sheet past 500 x 60 blocks saving bindings. */
+    @Test
+    void bindingsOfATemplateLargerThanShownAreRefused() throws Exception {
+        byte[] large;
+        try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            wb.createSheet("Cover").createRow(0).createCell(0).setCellValue("cover");
+            Sheet sheet = wb.createSheet("SCA list");
+            for (int r = 0; r < 650; r++) {
+                sheet.createRow(r).createCell(0).setCellValue("row " + r);
+            }
+            wb.write(out);
+            large = out.toByteArray();
+        }
+        String body = mvc.perform(multipart("/api/veracode/report-templates")
+                        .file(new MockMultipartFile("file", "large.xlsx", "application/octet-stream", large)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sheets[1].truncated").value(true))
+                .andExpect(jsonPath("$.sheets[1].usedRows").value(650))
+                .andExpect(jsonPath("$.sheets[0].truncated").value(false))
+                .andReturn().getResponse().getContentAsString();
+
+        mvc.perform(put("/api/veracode/report-templates/" + JsonPath.read(body, "$.id") + "/mapping")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sheets\":[{\"sheet\":\"Cover\",\"lists\":[],\"values\":[{\"row\":1,\"col\":1,\"field\":\"projectKey\"}]}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("larger than 500 rows x 60 columns, so bindings cannot be saved: "
+                        + "'SCA list' (650 rows x 1 columns) - delete what is past the report in Excel and upload the template again"));
     }
 
     @Test

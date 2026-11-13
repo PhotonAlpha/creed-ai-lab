@@ -74,9 +74,22 @@ public final class TemplateWorkbook {
      * @param truncated the sheet is bigger than what is sent
      * @param widths    column widths in pixels, {@code cols} of them
      * @param hidden    cells below what shows that show nothing themselves; {@code null} when there are none
+     * @param usedRows  what shows, uncut: {@code truncated} = more than {@link #MAX_ROWS} x {@link #MAX_COLS}
      */
     public record SheetView(String name, int rows, int cols, boolean truncated, List<RowView> data, List<Merge> merges,
-                            List<Integer> widths, HiddenCells hidden) {
+                            List<Integer> widths, HiddenCells hidden, int usedRows, int usedCols) {
+    }
+
+    /**
+     * How far an upload's reading got, for the page's progress (asked for, 2026-11-13: a big workbook took long
+     * with nothing to show). {@code phase}: {@code parse} (POI reading the file - no finer step), {@code sheet} (its
+     * rows scanned: {@code row} of {@code rows}, sheet {@code index} of {@code sheets}, from 1), {@code store}.
+     */
+    public record Progress(String phase, String sheet, int index, int sheets, int row, int rows) {
+
+        public static Progress of(String phase) {
+            return new Progress(phase, null, 0, 0, 0, 0);
+        }
     }
 
     /**
@@ -103,13 +116,30 @@ public final class TemplateWorkbook {
     }
 
     public static List<SheetView> read(byte[] xlsx) {
+        return read(xlsx, p -> { });
+    }
+
+    /** @param progress told the phases and, per sheet, the rows scanned - at most once per whole percent */
+    public static List<SheetView> read(byte[] xlsx, java.util.function.Consumer<Progress> progress) {
+        progress.accept(Progress.of("parse"));
         try (XSSFWorkbook wb = open(xlsx)) {
             DataFormatter formatter = new DataFormatter();
             // what Excel last showed, not a re-evaluation (external links, functions POI lacks)
             formatter.setUseCachedValuesForFormulaCells(true);
             List<SheetView> sheets = new ArrayList<>();
+            int count = wb.getNumberOfSheets();
             for (Sheet sheet : wb) {
-                sheets.add(read(wb, sheet, formatter));
+                int index = sheets.size() + 1;
+                int rows = sheet.getLastRowNum() + 1;
+                int[] reported = {-1};
+                java.util.function.IntConsumer scanned = row -> {
+                    int percent = rows == 0 ? 100 : (int) ((row + 1L) * 100 / rows);
+                    if (percent != reported[0]) {
+                        reported[0] = percent;
+                        progress.accept(new Progress("sheet", sheet.getSheetName(), index, count, row + 1, rows));
+                    }
+                };
+                sheets.add(read(wb, sheet, formatter, scanned));
             }
             return sheets;
         } catch (IOException e) {
@@ -117,8 +147,9 @@ public final class TemplateWorkbook {
         }
     }
 
-    private static SheetView read(XSSFWorkbook wb, Sheet sheet, DataFormatter formatter) {
-        CellAddress extent = extent(sheet, true);
+    private static SheetView read(XSSFWorkbook wb, Sheet sheet, DataFormatter formatter,
+                                  java.util.function.IntConsumer scanned) {
+        CellAddress extent = extent(sheet, true, scanned);
         int usedRows = extent.getRow() + 1;
         int usedCols = extent.getColumn() + 1;
         int rows = Math.min(usedRows, MAX_ROWS);
@@ -157,7 +188,7 @@ public final class TemplateWorkbook {
             widths.add(Math.round(sheet.getColumnWidthInPixels(c)));
         }
         return new SheetView(sheet.getSheetName(), rows, cols, usedRows > rows || usedCols > cols, data, merges,
-                widths, hidden(sheet, extent.getRow()));
+                widths, hidden(sheet, extent.getRow()), usedRows, Math.max(usedCols, 0));
     }
 
     private static HiddenCells hidden(Sheet sheet, int lastShown) {
@@ -189,9 +220,15 @@ public final class TemplateWorkbook {
      * row, which is how an export once took longer than any request timeout (2026-11-13).
      */
     static CellAddress extent(Sheet sheet, boolean fills) {
+        return extent(sheet, fills, row -> { });
+    }
+
+    /** @param scanned told each row's index as it is scanned - the long part of reading a big sheet */
+    private static CellAddress extent(Sheet sheet, boolean fills, java.util.function.IntConsumer scanned) {
         int lastRow = -1;
         int lastCol = -1;
         for (Row row : sheet) {
+            scanned.accept(row.getRowNum());
             for (Cell cell : row) {
                 if (shows(cell, fills)) {
                     lastRow = Math.max(lastRow, cell.getRowIndex());

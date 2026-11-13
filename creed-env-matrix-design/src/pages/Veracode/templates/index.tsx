@@ -10,6 +10,7 @@ import {
 import { reportTemplateApi, saveBlob } from '../../../api/veracode';
 import type {
   ListDataset, ReportTemplateDetail, ReportTemplateSummary, TemplateDataset, TemplateField, TemplateMapping,
+  TemplateUploadProgress,
 } from '../../../api/veracode';
 import { useI18n } from '../../../locales';
 import type { MessageKey } from '../../../locales';
@@ -41,6 +42,8 @@ export function ReportTemplatesPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  /** The upload under way: the full-screen progress (the server reads a big workbook for a while). */
+  const [progress, setProgress] = useState<{ name: string; step: TemplateUploadProgress } | null>(null);
   const [tab, setTab] = useState<'templates' | 'aliases'>('templates');
 
   const dirty = !!detail && JSON.stringify(detail.mapping) !== JSON.stringify(draft);
@@ -82,8 +85,9 @@ export function ReportTemplatesPage() {
 
   const upload = async (file: File) => {
     setUploading(true);
+    setProgress({ name: file.name, step: { phase: 'upload', loaded: 0, total: file.size } });
     try {
-      const created = await reportTemplateApi.upload(file);
+      const created = await reportTemplateApi.uploadWithProgress(file, (step) => setProgress({ name: file.name, step }));
       message.success(t('veracode.tpl.uploaded', { name: created.name }));
       await refresh();
       setDetail(created);
@@ -94,9 +98,16 @@ export function ReportTemplatesPage() {
       message.error((e as Error).message);
     } finally {
       setUploading(false);
+      setProgress(null);
     }
     return false;
   };
+
+  /**
+   * A sheet larger than the grid shows (500 × 60) cannot be checked here, so its bindings cannot be saved (asked for,
+   * 2026-11-13) - the backend refuses them too.
+   */
+  const tooLarge = useMemo(() => detail?.sheets.filter((s) => s.truncated) ?? [], [detail]);
 
   const save = async () => {
     if (!detail) return;
@@ -245,9 +256,17 @@ export function ReportTemplatesPage() {
                       <Button icon={<UndoOutlined />} disabled={!dirty} onClick={() => setDraft(detail.mapping)}>
                         {t('veracode.tpl.revert')}
                       </Button>
-                      <Button type="primary" icon={<SaveOutlined />} disabled={!dirty} loading={saving} onClick={() => void save()}>
-                        {t('veracode.tpl.save')}
-                      </Button>
+                      <Tooltip title={tooLarge.length > 0 ? t('veracode.tpl.tooLargeSave') : undefined}>
+                        <Button
+                          type="primary"
+                          icon={<SaveOutlined />}
+                          disabled={!dirty || tooLarge.length > 0}
+                          loading={saving}
+                          onClick={() => void save()}
+                        >
+                          {t('veracode.tpl.save')}
+                        </Button>
+                      </Tooltip>
                     </Space>
                   )}
                 >
@@ -260,6 +279,19 @@ export function ReportTemplatesPage() {
                     <Tag color={DATASET_COLOR.summary}>{t('veracode.tpl.summary')}</Tag>
                     {t('veracode.tpl.counts', counts)}
                   </Paragraph>
+                  {tooLarge.length > 0 && (
+                    <Alert
+                      type="error"
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                      message={t('veracode.tpl.tooLarge', {
+                        sheets: tooLarge.map((s) => t('veracode.tpl.tooLargeSheet', {
+                          sheet: s.name, rows: s.usedRows.toLocaleString(), cols: s.usedCols.toLocaleString(),
+                        })).join(t('veracode.tpl.listSeparator')),
+                      })}
+                      description={t('veracode.tpl.tooLargeHint')}
+                    />
+                  )}
                   <Row gutter={16}>
                     <Col xs={24} xl={17}>
                       <Tabs
@@ -273,10 +305,15 @@ export function ReportTemplatesPage() {
                           const n = bound.lists.length + bound.values.length;
                           return {
                             key: s.name,
-                            label: n > 0 ? <Space size={4}>{s.name}<Tag style={{ marginInlineEnd: 0 }}>{n}</Tag></Space> : s.name,
+                            label: (
+                              <Space size={4}>
+                                {s.truncated ? <Text type="danger">{s.name}</Text> : s.name}
+                                {n > 0 && <Tag style={{ marginInlineEnd: 0 }}>{n}</Tag>}
+                              </Space>
+                            ),
                             children: (
                               <>
-                                {s.truncated && <Alert type="info" showIcon style={{ marginBottom: 8 }} message={t('veracode.tpl.truncated')} />}
+                                {s.truncated && <Alert type="error" showIcon style={{ marginBottom: 8 }} message={t('veracode.tpl.truncated')} />}
                                 {s.hidden && (
                                   <Alert
                                     type="warning"
@@ -357,6 +394,47 @@ export function ReportTemplatesPage() {
           </Col>
         </Row>
       </div>
+      <Spin
+        fullscreen
+        spinning={progress != null}
+        percent={progress ? progressPercent(progress.step) : undefined}
+        tip={progress ? progressText(progress.name, progress.step, t) : undefined}
+      />
     </PageContainer>
   );
 }
+
+/** Bytes while uploading, then rows across all sheets; none while POI reads the file; all read once storing. */
+function progressPercent(step: TemplateUploadProgress): number | undefined {
+  if (step.phase === 'store') {
+    return 100;
+  }
+  if (step.phase === 'upload') {
+    return step.total > 0 ? Math.min(99, Math.floor((step.loaded / step.total) * 100)) : undefined;
+  }
+  if (step.phase === 'sheet') {
+    const sheetDone = step.rows > 0 ? step.row / step.rows : 1;
+    return Math.min(99, Math.floor(((step.index - 1 + sheetDone) / step.sheets) * 100));
+  }
+  return undefined;
+}
+
+function progressText(name: string, step: TemplateUploadProgress, t: ReturnType<typeof useI18n>['t']): string {
+  switch (step.phase) {
+    case 'upload':
+      return step.loaded < step.total
+        ? t('veracode.tpl.progress.upload', { name, loaded: kb(step.loaded), total: kb(step.total) })
+        : t('veracode.tpl.progress.parse', { name });
+    case 'parse':
+      return t('veracode.tpl.progress.parse', { name });
+    case 'sheet':
+      return t('veracode.tpl.progress.sheet', {
+        index: step.index, sheets: step.sheets, sheet: step.sheet,
+        row: step.row.toLocaleString(), rows: step.rows.toLocaleString(),
+      });
+    default:
+      return t('veracode.tpl.progress.store', { name });
+  }
+}
+
+const kb = (bytes: number) => `${Math.max(1, Math.round(bytes / 1024)).toLocaleString()} KB`;
