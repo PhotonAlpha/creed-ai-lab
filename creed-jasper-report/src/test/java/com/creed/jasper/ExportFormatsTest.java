@@ -51,6 +51,27 @@ class ExportFormatsTest {
         assertThat(text(render(ExportFormat.HTML))).contains("<table").contains("Bulk MEPS");
     }
 
+    /**
+     * Status is an HTML cell, each status in its colour (asked for, 2026-11-13): the HTML export shows the colours,
+     * the CSV gets the bare text - markup in an extract would be stray characters in every row.
+     */
+    @Test
+    void eachStatusPrintsInItsOwnColourAndTheCsvGetsItsText() {
+        assertThat(ApprovalStatusRenderer.statusHtml("Approved")).isEqualTo("<font color=\"#1E7B34\">Approved</font>");
+        assertThat(ApprovalStatusRenderer.statusHtml(" REJECTED ")).contains("#C62828");
+        assertThat(ApprovalStatusRenderer.statusHtml("<b>Rejected</b>"))
+                .isEqualTo("<font color=\"#C62828\"><b>Rejected</b></font>");
+        // not in the palette: the accent, as every status was before
+        assertThat(ApprovalStatusRenderer.statusHtml("On hold")).contains("#005CB9");
+        assertThat(ApprovalStatusRenderer.plain("<b>Tom &amp; Jerry</b>")).isEqualTo("Tom & Jerry");
+
+        String html = text(render(ExportFormat.HTML)).toLowerCase(java.util.Locale.ROOT);
+        assertThat(html).contains("#1e7b34").contains("#c62828").contains("#005cb9")
+                .doesNotContain("&lt;font");
+        String csv = text(render(ExportFormat.CSV));
+        assertThat(csv).contains("Approved").contains("Rejected").contains("Processing").doesNotContain("<font");
+    }
+
     @Test
     void theCsvCarriesAByteOrderMarkAndTheRowsOnly() {
         byte[] csv = render(ExportFormat.CSV);

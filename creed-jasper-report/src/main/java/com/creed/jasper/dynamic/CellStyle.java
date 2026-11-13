@@ -45,9 +45,13 @@ import java.util.Objects;
  * @param bottomRule  the colour of the rule under the cell, or {@code null} for none
  * @param vAlign      where the text sits when the cell is taller than the text
  * @param lineSpacing proportional line spacing for a multi-line cell, or {@code null} for single
+ * @param html        the value is JasperReports' HTML markup ({@code <font color>}, {@code <b>}, {@code <i>},
+ *                    {@code <u>}, {@code <br>} ...), not plain text: the PDF, XLSX and HTML exports draw it styled,
+ *                    the CSV gets its text. A literal {@code <} or {@code &} in such a value must then be escaped
  */
 public record CellStyle(String fontName, float fontSize, boolean bold, Color forecolor, Color backcolor,
-                        Padding padding, Color topRule, Color bottomRule, VAlign vAlign, Float lineSpacing) {
+                        Padding padding, Color topRule, Color bottomRule, VAlign vAlign, Float lineSpacing,
+                        boolean html) {
 
     /** Where the text sits in a cell that is taller than it is. */
     public enum VAlign {
@@ -78,7 +82,7 @@ public record CellStyle(String fontName, float fontSize, boolean bold, Color for
     /** A plain cell in the given face and size: no colours, no padding, no rules. */
     public static CellStyle of(String fontName, float fontSize) {
         return new CellStyle(fontName, fontSize, false, null, null, Padding.NONE, null, null,
-                VAlign.MIDDLE, null);
+                VAlign.MIDDLE, null, false);
     }
 
     /**
@@ -87,44 +91,50 @@ public record CellStyle(String fontName, float fontSize, boolean bold, Color for
      */
     public CellStyle bold(boolean on) {
         return new CellStyle(fontName, fontSize, on, forecolor, backcolor, padding, topRule, bottomRule,
-                vAlign, lineSpacing);
+                vAlign, lineSpacing, html);
     }
 
     public CellStyle forecolor(Color color) {
         return new CellStyle(fontName, fontSize, bold, color, backcolor, padding, topRule, bottomRule,
-                vAlign, lineSpacing);
+                vAlign, lineSpacing, html);
     }
 
     public CellStyle backcolor(Color color) {
         return new CellStyle(fontName, fontSize, bold, forecolor, color, padding, topRule, bottomRule,
-                vAlign, lineSpacing);
+                vAlign, lineSpacing, html);
     }
 
     public CellStyle padding(int left, int right, int top, int bottom) {
         return new CellStyle(fontName, fontSize, bold, forecolor, backcolor,
-                new Padding(left, right, top, bottom), topRule, bottomRule, vAlign, lineSpacing);
+                new Padding(left, right, top, bottom), topRule, bottomRule, vAlign, lineSpacing, html);
     }
 
     /** The rules above and under the cell; either may be {@code null}. */
     public CellStyle rules(Color top, Color bottom) {
         return new CellStyle(fontName, fontSize, bold, forecolor, backcolor, padding, top, bottom,
-                vAlign, lineSpacing);
+                vAlign, lineSpacing, html);
     }
 
     public CellStyle vAlign(VAlign alignment) {
         return new CellStyle(fontName, fontSize, bold, forecolor, backcolor, padding, topRule, bottomRule,
-                alignment, lineSpacing);
+                alignment, lineSpacing, html);
     }
 
     /** Proportional line spacing — 1.25 means a quarter of a line of extra leading. */
     public CellStyle lineSpacing(float size) {
         return new CellStyle(fontName, fontSize, bold, forecolor, backcolor, padding, topRule, bottomRule,
-                vAlign, size);
+                vAlign, size, html);
+    }
+
+    /** Whether the value is HTML markup rather than plain text (see the record's {@code html}). */
+    public CellStyle html(boolean on) {
+        return new CellStyle(fontName, fontSize, bold, forecolor, backcolor, padding, topRule, bottomRule,
+                vAlign, lineSpacing, on);
     }
 
     /** The same style at another size, for a cell that has to hold more in the same width. */
     public CellStyle fontSize(float size) {
         return new CellStyle(fontName, size, bold, forecolor, backcolor, padding, topRule, bottomRule,
-                vAlign, lineSpacing);
+                vAlign, lineSpacing, html);
     }
 }

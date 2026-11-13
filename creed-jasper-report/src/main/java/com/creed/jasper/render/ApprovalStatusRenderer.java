@@ -127,8 +127,24 @@ public final class ApprovalStatusRenderer extends JasperTableRenderer {
      */
     private static final CellStyle ACCOUNT_CELL = CELL.vAlign(CellStyle.VAlign.TOP).lineSpacing(1.25f);
 
-    /** The status column, in the accent colour like the sample's. */
-    private static final CellStyle STATUS_CELL = CELL.forecolor(ACCENT);
+    /**
+     * Each status in its own colour — green done, red refused, the sample's accent blue for one still moving — keyed
+     * by the status text without its markup, any case. A status not listed keeps the accent.
+     */
+    private static final Map<String, Color> STATUS_COLORS = Map.of(
+            "approved", Color.decode("#1E7B34"),
+            "rejected", Color.decode("#C62828"),
+            "processing", ACCENT);
+
+    /**
+     * The status column: HTML markup, not plain text (asked for, 2026-11-13). The fill wraps each status in a
+     * {@code <font color>} of its colour ({@link #statusHtml}); a status carrying markup of its own keeps it. The
+     * element's forecolor is the accent, what a status with no colour of its own prints in.
+     */
+    private static final CellStyle STATUS_CELL = CELL.forecolor(ACCENT).html(true);
+
+    /** A tag, for the status's plain text: what the colour is chosen by and the width fit measures. */
+    private static final java.util.regex.Pattern TAG = java.util.regex.Pattern.compile("<[^>]*>");
 
     /**
      * The listing's eight columns — the <b>shape</b> of the table, supplied to the generator instead
@@ -232,7 +248,7 @@ public final class ApprovalStatusRenderer extends JasperTableRenderer {
 
     @Override
     protected TableData data(List<TableColumn> columns, ExportRequest request) {
-        return TableData.source(rows(report));
+        return TableData.source(FieldDataSource.of(report.rows(), printed()));
     }
 
     /**
@@ -251,7 +267,9 @@ public final class ApprovalStatusRenderer extends JasperTableRenderer {
             for (TableColumn column : columns) {
                 Function<ApprovalStatusReport.Row, Object> accessor = fields.get(column.property());
                 Object value = accessor == null ? null : accessor.apply(row);
-                cells.add(value == null ? "" : String.valueOf(value));
+                // an HTML cell is measured by its text: its tags take no width on the page
+                String cell = value == null ? "" : String.valueOf(value);
+                cells.add(column.cellStyle() != null && column.cellStyle().html() ? plain(cell) : cell);
             }
             text.add(cells);
         }
@@ -287,17 +305,43 @@ public final class ApprovalStatusRenderer extends JasperTableRenderer {
     }
 
     /**
-     * The listing's rows. The account block arrives already newline-joined
-     * ({@link ApprovalStatusReport.Row#accountText()}) because the cell is one stretching text
-     * field; the breaks are the payload's, not the engine's guess about where they belong.
+     * What the fill prints: {@link #fields()}, the status as its {@link #statusHtml markup}. The account block
+     * arrives already newline-joined ({@link ApprovalStatusReport.Row#accountText()}) because the cell is one
+     * stretching text field; the breaks are the payload's, not the engine's guess about where they belong.
      */
-    private static FieldDataSource<ApprovalStatusReport.Row> rows(ApprovalStatusReport report) {
-        return FieldDataSource.of(report.rows(), fields());
+    private static Map<String, Function<ApprovalStatusReport.Row, Object>> printed() {
+        Map<String, Function<ApprovalStatusReport.Row, Object>> printed = fields();
+        printed.put("status", row -> statusHtml(row.status()));
+        return printed;
+    }
+
+    /**
+     * A status as the status cell's HTML: in its {@link #STATUS_COLORS colour}, chosen by its text without markup.
+     * The payload's own markup is kept ({@code <b>Rejected</b>} prints bold and red) - the cell is HTML, so a
+     * literal {@code <} or {@code &} in a status has to arrive escaped.
+     */
+    public static String statusHtml(String status) {
+        if (status == null || status.isBlank()) {
+            return "";
+        }
+        Color color = STATUS_COLORS.getOrDefault(plain(status).trim().toLowerCase(java.util.Locale.ROOT), ACCENT);
+        return "<font color=\"" + hex(color) + "\">" + status + "</font>";
+    }
+
+    /** A status's text: its tags dropped, the entities a status is likely to carry read. */
+    public static String plain(String html) {
+        return TAG.matcher(html).replaceAll("").replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">")
+                .replace("&quot;", "\"").replace("&amp;", "&");
+    }
+
+    private static String hex(Color color) {
+        return String.format("#%02X%02X%02X", color.getRed(), color.getGreen(), color.getBlue());
     }
 
     /**
      * The one field-name-to-accessor map, used by both the fill's data source and the fit's
-     * measurement — so a column can never be measured off one value and printed from another.
+     * measurement — so a column can never be measured off one value and printed from another. The
+     * fill's copy ({@link #printed()}) differs only in the status's markup, which takes no width.
      */
     private static Map<String, Function<ApprovalStatusReport.Row, Object>> fields() {
         Map<String, Function<ApprovalStatusReport.Row, Object>> fields = new LinkedHashMap<>();

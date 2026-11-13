@@ -303,6 +303,14 @@ through it would leave the fill an exhausted source. And fitted widths are part 
 key, so a report served over changing data compiles per distinct layout. That is the reason `fixed`
 is not deprecated: it is the mode that does not need the data.
 
+## Status colours (2026-11-13, asked for)
+
+The status cell is an HTML text field (`CellStyle.html(true)` → `setMarkup("html")` in `TableDesigner.apply`). The
+renderer wraps each status in `<font color>` at fill time (`ApprovalStatusRenderer.statusHtml`, palette
+`STATUS_COLORS`: approved green, rejected red, processing / unknown accent blue) — the payload, shared byte-for-byte
+with creed-report, is unchanged. The width fit measures the status's **plain** text (`plain()`): tags take no width.
+creed-report's HTML twin still prints every status in the accent blue.
+
 ## Landmines
 
 - **A text element shorter than its FACE's line height prints NOTHING.** No warning, no clipped

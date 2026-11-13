@@ -100,6 +100,12 @@ table quietly rendered at the wrong size in cells measured for another. `TableHe
 still takes effect on the next request (`cache-templates=false`) but that no longer covers the
 table's look, only its chrome.
 
+`CellStyle.html(true)` makes a cell JasperReports' HTML markup (`setMarkup("html")`). The status column is one
+(2026-11-13, asked for): `ApprovalStatusRenderer.statusHtml` wraps each status in a `<font color>` from
+`STATUS_COLORS` **at fill time** — the payload stays creed-report's byte for byte — and `rowText` measures it through
+`plain()`, because a fit that measured the tags would widen the column for characters that never print. The CSV
+exporter writes an HTML cell's text, not its markup (`ExportFormatsTest` pins it). The twin does not colour statuses.
+
 Two things stay out of `CellStyle`: the table's outer left/right rule (`TableDesign.edgeColor`),
 which belongs to *being the first or last column* — something a per-element style cannot know — and
 Identity-H + embedding, written onto every cell because without them the CJK and Thai glyphs never

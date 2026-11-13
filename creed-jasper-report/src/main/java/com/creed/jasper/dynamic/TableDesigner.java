@@ -4,6 +4,7 @@ import net.sf.jasperreports.components.table.DesignCell;
 import net.sf.jasperreports.components.table.StandardColumn;
 import net.sf.jasperreports.components.table.StandardTable;
 import net.sf.jasperreports.engine.JRDataset;
+import net.sf.jasperreports.engine.JRCommonText;
 import net.sf.jasperreports.engine.JRLineBox;
 import net.sf.jasperreports.engine.JRElement;
 import net.sf.jasperreports.engine.JRException;
@@ -271,6 +272,8 @@ public final class TableDesigner {
         if (style.lineSpacing() != null) {
             element.getParagraph().setLineSpacing(LineSpacingEnum.PROPORTIONAL);
             element.getParagraph().setLineSpacingSize(style.lineSpacing());
+        }        if (style.html()) {
+            element.setMarkup(JRCommonText.MARKUP_HTML);
         }
     }
 

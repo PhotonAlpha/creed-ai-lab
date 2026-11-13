@@ -82,6 +82,11 @@ Eight, in this order. `columns` picks a subset **and reorders it**, in the calle
 curl -o listing.pdf "$B/approval-status/export?columns=type,bankReference,status"
 ```
 
+**Status is HTML, in a colour per status**: *Approved* green `#1E7B34`, *Rejected* red `#C62828`, *Processing* — and
+any status not in that list — the accent blue `#005CB9`, matched by the text without markup, any case. The cell's
+markup is JasperReports' `html` (`<b>`, `<i>`, `<u>`, `<font color>`, `<br>`), so a status may carry its own; a literal
+`<` or `&` in one has to arrive escaped. PDF, XLSX and HTML show the colours; the CSV gets the bare text.
+
 **`columns` is honoured for the PDF and ignored for every extract.** An extract is expected to carry
 every column whatever a screen happens to be showing; the parameter is accepted rather than refused
 there, so `format` can be flipped without rewriting the URL.
