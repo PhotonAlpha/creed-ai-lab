@@ -73,6 +73,8 @@ default 50MB), 502 `jira_error`.
 (`[traceId-spanId]`, blank outside a request), sampling 1.0 (`CREED_VERACODE_TRACE_SAMPLING`), no exporter. Jira /
 Confluence calls are client spans and send `traceparent`. `Concurrently` carries the context onto its virtual threads
 (`ContextSnapshot`), so the parallel searches' Logbook lines keep the request's traceId (`ConcurrentlyTest`).
+Every response carries **`X-Trace-Id`** (`web/TraceIdResponseFilter`, `veracode.trace.response-header` /
+`CREED_VERACODE_TRACE_HEADER`, blank = off), error bodies included - the id to grep the console for.
 
 2026-11-13 (latest, asked for, nine items): **export with template hung** - the JXLS area spanned POI's used range,
 i.e. every formatted blank cell (whole-row formatting = out to XFD, 16384 cells copied per data row; reproduced at

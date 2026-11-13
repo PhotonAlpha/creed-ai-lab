@@ -33,6 +33,11 @@ spring:
     locations: classpath:db/migration,classpath:db/defaults
 
 veracode:
+  trace:
+    # Every response carries its traceId (web/TraceIdResponseFilter) - the id the console prints as [traceId-spanId] on
+    # every line of that request. Blank = no header.
+    response-header: ${CREED_VERACODE_TRACE_HEADER:X-Trace-Id}
+
   # In-process stand-in for Jira under /mock/jira (MockJiraStore) and the sample report
   # (POST /api/veracode/analysis/sample). The Jira URLs below point at the mock by default; set
   # CREED_VERACODE_MOCK=false together with the real URL.
