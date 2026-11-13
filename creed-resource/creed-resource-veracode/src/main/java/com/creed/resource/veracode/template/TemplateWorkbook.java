@@ -48,7 +48,11 @@ import java.util.Map;
  * </ul>
  * A comment the cell already had is kept, the commands appended (JXLS reads only the {@code jx:} lines).
  */
+@lombok.extern.slf4j.Slf4j
 public final class TemplateWorkbook {
+
+    /** An area reaching this far below the last bound row is logged with the cell that makes it so. */
+    private static final int FAR_BELOW = 10_000;
 
     /** What the page is sent of a sheet; a bigger one is cut, and says so. */
     static final int MAX_ROWS = 500;
@@ -69,9 +73,21 @@ public final class TemplateWorkbook {
      * @param cols      columns sent (at most {@link #MAX_COLS})
      * @param truncated the sheet is bigger than what is sent
      * @param widths    column widths in pixels, {@code cols} of them
+     * @param hidden    cells below what shows that show nothing themselves; {@code null} when there are none
      */
     public record SheetView(String name, int rows, int cols, boolean truncated, List<RowView> data, List<Merge> merges,
-                            List<Integer> widths) {
+                            List<Integer> widths, HiddenCells hidden) {
+    }
+
+    /**
+     * Formulas with an empty result, whitespace: invisible, but each one read on every open and every export - a
+     * helper column filled down the sheet is a million of them. The export leaves them out; the page says they are
+     * there, so the template can be cleaned in Excel (2026-11-13).
+     *
+     * @param lastRow 1-based, the lowest of them
+     * @param example the first, as {@code L5: =IF(E5="","",E5*2)}
+     */
+    public record HiddenCells(int cells, int lastRow, String example) {
     }
 
     private TemplateWorkbook() {
@@ -141,7 +157,29 @@ public final class TemplateWorkbook {
             widths.add(Math.round(sheet.getColumnWidthInPixels(c)));
         }
         return new SheetView(sheet.getSheetName(), rows, cols, usedRows > rows || usedCols > cols, data, merges,
-                widths);
+                widths, hidden(sheet, extent.getRow()));
+    }
+
+    private static HiddenCells hidden(Sheet sheet, int lastShown) {
+        int cells = 0;
+        int lastRow = -1;
+        String example = null;
+        for (Row row : sheet) {
+            if (row.getRowNum() <= lastShown) {
+                continue;
+            }
+            for (Cell cell : row) {
+                if (cell.getCellType() != org.apache.poi.ss.usermodel.CellType.BLANK) {
+                    cells++;
+                    lastRow = row.getRowNum();
+                    if (example == null) {
+                        example = cell.getAddress() + ": " + (cell.getCellType() == org.apache.poi.ss.usermodel.CellType.FORMULA
+                                ? "=" + cell.getCellFormula() : "'" + cell.getStringCellValue() + "'");
+                    }
+                }
+            }
+        }
+        return cells == 0 ? null : new HiddenCells(cells, lastRow + 1, example);
     }
 
     /**
@@ -168,12 +206,36 @@ public final class TemplateWorkbook {
         return new CellAddress(lastRow, lastCol);
     }
 
+    /**
+     * Whether a cell shows anything. Whitespace-only text does not, nor does a formula whose cached result is empty
+     * text - a helper column like {@code =IF(E5="","",...)} filled down the whole sheet made the JXLS area a million rows
+     * tall (lastCell L1047958; 2026-11-13, the export never came back: JXLS walks every row of its area). Such cells
+     * below the area are left where they are by JXLS; the ones inside it are copied like any other.
+     */
     private static boolean shows(Cell cell, boolean fills) {
+        boolean filled = fills && fill((XSSFCellStyle) cell.getCellStyle()) != null;
         return switch (cell.getCellType()) {
-            case BLANK -> fills && fill((XSSFCellStyle) cell.getCellStyle()) != null;
-            case STRING -> !cell.getStringCellValue().isEmpty() || fills && fill((XSSFCellStyle) cell.getCellStyle()) != null;
+            case BLANK -> filled;
+            case STRING -> !cell.getStringCellValue().isBlank() || filled;
+            case FORMULA -> cell.getCachedFormulaResultType() != org.apache.poi.ss.usermodel.CellType.STRING
+                    || !cell.getStringCellValue().isBlank() || filled;
             default -> true;
         };
+    }
+
+    /** The lowest cell that shows something - what an area that tall reaches for. */
+    private static Cell lowest(Sheet sheet) {
+        for (int r = sheet.getLastRowNum(); r >= 0; r--) {
+            Row row = sheet.getRow(r);
+            if (row != null) {
+                for (Cell cell : row) {
+                    if (shows(cell, false)) {
+                        return cell;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private static String fill(XSSFCellStyle style) {
@@ -212,8 +274,9 @@ public final class TemplateWorkbook {
     private static byte[] markup(byte[] xlsx, TemplateMapping mapping, Map<String, List<String>> detach) {
         try (XSSFWorkbook wb = open(xlsx); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             for (TemplateMapping.SheetMapping sm : mapping.sheets()) {
-                if (!sm.isEmpty()) {
-                    mark(wb, wb.getSheet(sm.sheet()), sm);
+                int areaLastRow = sm.isEmpty() ? -1 : mark(wb, wb.getSheet(sm.sheet()), sm);
+                if (detach != null && areaLastRow >= 0) {
+                    leaveOutInvisibleBelow(wb.getSheet(sm.sheet()), areaLastRow);
                 }
                 if (detach != null && !sm.lists().isEmpty()) {
                     CTWorksheet ws = wb.getSheet(sm.sheet()).getCTWorksheet();
@@ -305,7 +368,48 @@ public final class TemplateWorkbook {
         }
     }
 
-    private static void mark(XSSFWorkbook wb, Sheet sheet, TemplateMapping.SheetMapping sm) {
+    /**
+     * For the fill only: cells below the area that show nothing - a formula with an empty result, whitespace - are left
+     * out, and rows left with no cell. A helper column like {@code =IF(E5="","",...)} filled down the whole sheet is a
+     * million formula cells JXLS would read one by one, outside its area or not (one such sheet: 64 s of JXLS, plus
+     * POI reading it each time the workbook is opened - 2026-11-13). Nothing visible goes: formatted cells stay, and
+     * JXLS would have left these where they are. Removed top-down: POI finds a row's position by the rows before it.
+     */
+    private static void leaveOutInvisibleBelow(Sheet sheet, int areaLastRow) {
+        List<Integer> rows = new ArrayList<>();
+        for (Row row : sheet) {
+            if (row.getRowNum() > areaLastRow) {
+                rows.add(row.getRowNum());
+            }
+        }
+        int cells = 0;
+        int lastRow = -1;
+        for (int r : rows) {
+            Row row = sheet.getRow(r);
+            List<Cell> invisible = new ArrayList<>();
+            for (Cell cell : row) {
+                if (!shows(cell, false) && cell.getCellType() != org.apache.poi.ss.usermodel.CellType.BLANK) {
+                    invisible.add(cell);
+                }
+            }
+            invisible.forEach(row::removeCell);
+            cells += invisible.size();
+            if (!invisible.isEmpty()) {
+                lastRow = r;
+            }
+            if (row.getPhysicalNumberOfCells() == 0 && !row.isFormatted() && row.getZeroHeight() == false
+                    && !((org.apache.poi.xssf.usermodel.XSSFRow) row).getCTRow().isSetHt()) {
+                sheet.removeRow(row);
+            }
+        }
+        if (cells > 0) {
+            log.info("sheet '{}': {} cell(s) showing nothing below the report (down to row {}) left out of the export",
+                    sheet.getSheetName(), cells, lastRow + 1);
+        }
+    }
+
+    /** @return the area's last row */
+    private static int mark(XSSFWorkbook wb, Sheet sheet, TemplateMapping.SheetMapping sm) {
         // what shows, not the used range: an area out to every formatted blank cell is what made exports hang
         CellAddress extent = extent(sheet, false);
         int lastRow = Math.max(extent.getRow(), 0);
@@ -321,6 +425,16 @@ public final class TemplateWorkbook {
         }
         for (TemplateMapping.CellBinding value : sm.values()) {
             lastCol = Math.max(lastCol, value.col());
+        }
+        int lastBound = java.util.stream.Stream.concat(sm.lists().stream().map(TemplateMapping.ListBinding::row),
+                sm.values().stream().map(TemplateMapping.CellBinding::row)).mapToInt(Integer::intValue).max().orElse(0);
+        if (lastRow - lastBound > FAR_BELOW) {
+            Cell far = lowest(sheet);
+            log.warn("sheet '{}': JXLS area down to row {} ({} rows below the last bound row) because {} shows {} - "
+                    + "every row of the area is filled, clear that cell in the template if it is not needed",
+                    sheet.getSheetName(), lastRow + 1, lastRow - lastBound, far == null ? "?" : far.getAddress(),
+                    far == null ? "?" : far.getCellType() == org.apache.poi.ss.usermodel.CellType.FORMULA
+                            ? "=" + far.getCellFormula() : "'" + new DataFormatter().formatCellValue(far) + "'");
         }
 
         // commands by cell, in the order JXLS needs them: the area first
@@ -357,6 +471,7 @@ public final class TemplateWorkbook {
             comment.setString(factory.createRichTextString(text));
             cell.setCellComment(comment);
         });
+        return lastRow;
     }
 
     /**

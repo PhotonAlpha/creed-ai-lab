@@ -68,6 +68,13 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-13 (asked: generated template had `jx:area(lastCell="L1047958")` / `"L1046388"`): one area per mapped sheet, but
+both reached the bottom of the sheet - cells far down that show nothing (a formula column with an empty result filled
+down the sheet). Those no longer count for the area, and the export leaves them out below it: measured on a million-row
+helper column, JXLS 64 s -> 0.2 s, the whole fill ~90 s -> ~50 s (POI still has to parse and drop them). The template
+page now warns ("N cells below the content show nothing, down to row R", with the first one) so the template can be
+cleaned in Excel - that is what makes it fast.
+
 2026-11-13 (asked: "does another workbook's sheet names break it?"): no - sheets are found by the name the uploaded
 workbook gives them (stored in the mapping, checked on save); every name Excel allows exports correctly
 (`TemplateMarkupTest`). Found on the way: a bound cell holding a formula kept it (POI's `setCellValue` on a formula cell

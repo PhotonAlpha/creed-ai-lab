@@ -52,6 +52,59 @@ class TemplateMarkupTest {
         assertThat(column).startsWith("DT", "", "", "", "High", "Low", "High");
     }
 
+    /**
+     * A helper column filled down the sheet (=IF(..,"",..) - the case seen: jx:area lastCell L1047958) neither stretches
+     * the area nor reaches JXLS; a formatted cell below the report and a real value far down stay.
+     */
+    @Test
+    void cellsShowingNothingBelowTheReportStayOutOfTheArea() throws Exception {
+        byte[] template;
+        try (XSSFWorkbook wb = new XSSFWorkbook(new ByteArrayInputStream(workbook("SCA", false)));
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Sheet sheet = wb.getSheet("SCA");
+            for (int r = 3; r < 5000; r++) {
+                Row row = sheet.getRow(r) != null ? sheet.getRow(r) : sheet.createRow(r);
+                org.apache.poi.xssf.usermodel.XSSFCell helper = (org.apache.poi.xssf.usermodel.XSSFCell) row.createCell(11);
+                helper.setCellFormula("IF(E" + (r + 1) + "=\"\",\"\",E" + (r + 1) + "*2)");
+                // Excel's cached result: empty text
+                helper.getCTCell().setT(org.openxmlformats.schemas.spreadsheetml.x2006.main.STCellType.STR);
+                helper.getCTCell().setV("");
+            }
+            sheet.getRow(20).createCell(13).setCellValue("   ");
+            org.apache.poi.ss.usermodel.CellStyle bordered = wb.createCellStyle();
+            bordered.setBorderBottom(org.apache.poi.ss.usermodel.BorderStyle.THIN);
+            sheet.getRow(30).createCell(3).setCellStyle(bordered);
+            wb.write(out);
+            template = out.toByteArray();
+        }
+        TemplateMapping mapping = mapping("SCA");
+
+        // the page says they are there, so the template can be cleaned in Excel
+        TemplateWorkbook.SheetView view = TemplateWorkbook.read(template).stream()
+                .filter(v -> v.name().equals("SCA")).findFirst().orElseThrow();
+        assertThat(view.rows()).isEqualTo(6);
+        assertThat(view.hidden()).isEqualTo(new TemplateWorkbook.HiddenCells(4995, 5000, "L7: =IF(E7=\"\",\"\",E7*2)"));
+        assertThat(TemplateWorkbook.read(workbook("SCA", false)).get(1).hidden()).isNull();
+
+        try (XSSFWorkbook marked = new XSSFWorkbook(new ByteArrayInputStream(TemplateWorkbook.withJxlsMarkup(template, mapping)))) {
+            assertThat(marked.getSheet("SCA").getRow(0).getCell(0).getCellComment().getString().getString())
+                    .startsWith("jx:area(lastCell=\"C6\")");
+        }
+        TemplateWorkbook.ForFill forFill = TemplateWorkbook.forFill(template, mapping);
+        try (XSSFWorkbook toFill = new XSSFWorkbook(new ByteArrayInputStream(forFill.workbook()))) {
+            Sheet sheet = toFill.getSheet("SCA");
+            // the helpers below the area are gone (a row left empty with them), the one inside it stays; the formatted
+            // cell stays, its row with it
+            assertThat(sheet.getRow(4999)).isNull();
+            assertThat(sheet.getRow(20)).isNull();
+            assertThat(sheet.getRow(30).getCell(11)).isNull();
+            assertThat(sheet.getRow(4).getCell(11).getCellFormula()).isEqualTo("IF(E5=\"\",\"\",E5*2)");
+            assertThat(sheet.getRow(30).getCell(3).getCellStyle().getBorderBottom())
+                    .isEqualTo(org.apache.poi.ss.usermodel.BorderStyle.THIN);
+        }
+        assertThat(column(fill(template, mapping), "SCA", 1)).startsWith("DT", "", "", "", "High", "Low", "High");
+    }
+
     @Test
     void aCellOfAnArrayFormulaCannotBeBound() throws Exception {
         byte[] template;

@@ -277,6 +277,18 @@ export function ReportTemplatesPage() {
                             children: (
                               <>
                                 {s.truncated && <Alert type="info" showIcon style={{ marginBottom: 8 }} message={t('veracode.tpl.truncated')} />}
+                                {s.hidden && (
+                                  <Alert
+                                    type="warning"
+                                    showIcon
+                                    style={{ marginBottom: 8 }}
+                                    message={t('veracode.tpl.hidden', {
+                                      cells: s.hidden.cells.toLocaleString(),
+                                      lastRow: s.hidden.lastRow.toLocaleString(),
+                                    })}
+                                    description={t('veracode.tpl.hiddenHint', { example: s.hidden.example })}
+                                  />
+                                )}
                                 <TemplateGrid
                                   sheet={s}
                                   mapping={bound}

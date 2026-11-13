@@ -31,6 +31,14 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 
 ## Rules that are easy to break
 
+- **Cells that show nothing never stretch the area, and never reach JXLS below it** (2026-11-13, a template's areas
+  ended at L1047958 / L1046388: a helper column `=IF(E5="","",...)` filled to the bottom of two sheets, then rows
+  deleted). `shows()`: whitespace text and a formula whose *cached* result is empty text do not show. `forFill` also
+  removes such cells below the area (`leaveOutInvisibleBelow`, rows left empty with them; formatted cells stay) - JXLS
+  reads every cell of the workbook, inside its area or not: one such sheet was 64 s of JXLS, now 0.2 s (the POI
+  parse + removal remain, ~50 s for a million rows: the real fix is the template). Remove top-down: POI locates a row
+  by the rows before it. The page shows `SheetView.hidden` (count, last row, first cell) as a warning; an area still
+  >10k rows below the bound rows is logged with the cell that makes it so.
 - **Sheets are found by the name the workbook gives them, nothing else** (2026-11-13, asked): the mapping stores the
   name of the sheet it was bound on (`SheetMapping.sheet`, from `TemplateWorkbook.read`), save checks it exists, no
   name is ever fixed in code. Any name Excel allows works through markup + JXLS + the conditional formatting

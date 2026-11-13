@@ -707,6 +707,11 @@ export interface TemplateSheet {
   merges: { firstRow: number; lastRow: number; firstCol: number; lastCol: number }[];
   /** Column widths in pixels. */
   widths: number[];
+  /**
+   * Cells below the content that show nothing (a formula with an empty result, whitespace) - a helper column filled down
+   * the whole sheet. The export leaves them out, but every open of the workbook still reads them. Absent when none.
+   */
+  hidden?: { cells: number; lastRow: number; example: string } | null;
 }
 
 /** 0-based rows and columns, as POI counts them. */

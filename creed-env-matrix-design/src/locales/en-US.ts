@@ -673,6 +673,8 @@ const enUS = {
   'veracode.tpl.summary': 'Summary',
   'veracode.tpl.counts': '- {lists} data row(s), {cells} bound cell(s)',
   'veracode.tpl.truncated': 'This sheet is larger than shown (500 rows × 60 columns): only that part can be bound here',
+  'veracode.tpl.hidden': '{cells} cells below the content show nothing, down to row {lastRow}',
+  'veracode.tpl.hiddenHint': 'Formulas with an empty result or blank text (first: {example}) - usually a column filled down the whole sheet. The export leaves them out, but reading them still makes every export and this page slow: delete those rows in Excel and upload the template again.',
   'veracode.tpl.cell': 'Cell',
   'veracode.tpl.clickCell': 'Click a cell in the sheet to bind it',
   'veracode.tpl.text': 'Template text',

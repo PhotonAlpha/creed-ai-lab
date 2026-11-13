@@ -665,6 +665,8 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'veracode.tpl.summary': '汇总',
   'veracode.tpl.counts': '—— 共 {lists} 个数据行，{cells} 个已绑定单元格',
   'veracode.tpl.truncated': '该 sheet 超出显示范围（500 行 × 60 列），这里只能绑定显示的部分',
+  'veracode.tpl.hidden': '内容下方还有 {cells} 个不显示任何内容的单元格，一直到第 {lastRow} 行',
+  'veracode.tpl.hiddenHint': '这些是结果为空的公式或只有空格的文本（第一个：{example}），通常是整列向下填充到表底造成的。导出时会跳过它们，但读取它们本身仍会让每次导出和本页面变慢：请在 Excel 中删除这些行后重新上传模版。',
   'veracode.tpl.cell': '单元格',
   'veracode.tpl.clickCell': '点击左侧表格中的单元格进行绑定',
   'veracode.tpl.text': '模版原文',
