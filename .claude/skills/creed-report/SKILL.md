@@ -88,7 +88,11 @@ Standalone **Spring MVC + Thymeleaf** reporting/visualization app. Plain HTTP `9
   and a table whose **account cell is a list of lines**
   (one `<p>` each: the breaks are data, not the renderer's guess). Both are why it is not a
   `DynamicTable` with different data — a rectangle of strings can express neither. Rendered under
-  Creed's own logo and seal, never the sample bank's. `ApprovalStatusPdfTest` renders the
+  Creed's own logo and seal, never the sample bank's. **Status colours** (2026-11-13): the cell gets
+  `status-<key>` (`Row.statusKey()`: lower-cased, non-alphanumerics → `-`) and `report-pdf.css` colours
+  `approved` green / `rejected` red, anything else the accent blue — the same palette as
+  creed-jasper-report's `STATUS_COLORS`, so change both. Plain text here (`th:text`); only the Jasper twin
+  treats a status as HTML markup. `ApprovalStatusPdfTest` renders the
   controller's own payload, not a copy, and dumps one PDF per country × language under
   `-Dpdf.sample.dir` so the editions can be compared side by side.
   **The same document is rendered a second time by [[creed-jasper-report]]**, from a JasperReports

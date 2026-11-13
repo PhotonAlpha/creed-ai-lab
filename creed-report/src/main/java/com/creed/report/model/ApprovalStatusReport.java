@@ -53,5 +53,15 @@ public record ApprovalStatusReport(String title, List<Criterion> criteria, Strin
         public Row {
             account = account == null ? List.of() : List.copyOf(account);
         }
+
+        /**
+         * The status as a CSS class name - {@code Approved} -> {@code approved}, {@code On Hold} -> {@code on-hold} - so
+         * the template can print {@code status-<key>} and the stylesheet colour each status (asked for, 2026-11-13,
+         * matching creed-jasper-report's colours). Empty for no status.
+         */
+        public String statusKey() {
+            return status == null ? "" : status.trim().toLowerCase(java.util.Locale.ROOT)
+                    .replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+        }
     }
 }

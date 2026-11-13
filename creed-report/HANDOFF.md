@@ -259,6 +259,11 @@ every page, half-empty ones included, and carries its own centred page counter. 
   an in-process fake SMTP server. Password comes from **`CREED_MAIL_PASSWORD`** (QQ authorization
   code) — unset means `MailAuthenticationException` in each `results[].error`, not a 500.
 
+**Approval-status status colours** (2026-11-13, asked for): `Row.statusKey()` → `status-<key>` on the status cell,
+`report-pdf.css` colours `status-approved` `#1e7b34` and `status-rejected` `#c62828`, everything else keeps the accent
+`#005cb9`. Same palette as creed-jasper-report (`ApprovalStatusRenderer.STATUS_COLORS`) — change both.
+`ApprovalStatusPdfTest.eachStatusCarriesItsClassAndTheStylesheetItsColour` pins the classes and rules.
+
 ## Landmines
 
 - **What CSS the PDF renderer supports is written down** — `.claude/skills/creed-report/flying-saucer-css.md`

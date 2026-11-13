@@ -309,7 +309,7 @@ The status cell is an HTML text field (`CellStyle.html(true)` → `setMarkup("ht
 renderer wraps each status in `<font color>` at fill time (`ApprovalStatusRenderer.statusHtml`, palette
 `STATUS_COLORS`: approved green, rejected red, processing / unknown accent blue) — the payload, shared byte-for-byte
 with creed-report, is unchanged. The width fit measures the status's **plain** text (`plain()`): tags take no width.
-creed-report's HTML twin still prints every status in the accent blue.
+creed-report's HTML twin prints the same three colours (`status-<key>` classes, `report-pdf.css`) - change both.
 
 ## Landmines
 

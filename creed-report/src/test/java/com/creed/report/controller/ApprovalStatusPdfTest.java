@@ -148,6 +148,19 @@ class ApprovalStatusPdfTest {
                 .contains(".criteria-value { font-family: 'Noto Sans', 'Noto Sans SC', Helvetica, sans-serif; }");
     }
 
+    /** Each status in its colour (asked for, 2026-11-13; the same three as creed-jasper-report). */
+    @Test
+    void eachStatusCarriesItsClassAndTheStylesheetItsColour() {
+        String markup = markup(ReportCountry.GLOBAL, Locale.ENGLISH);
+        assertThat(markup).contains("class=\"status-cell status-processing\">Processing")
+                .contains("class=\"status-cell status-approved\">Approved")
+                .contains("class=\"status-cell status-rejected\">Rejected")
+                .contains("td.status-cell.status-approved { color: #1e7b34; }")
+                .contains("td.status-cell.status-rejected { color: #c62828; }");
+        assertThat(new ApprovalStatusReport.Row(null, null, null, " On  Hold! ").statusKey()).isEqualTo("on-hold");
+        assertThat(new ApprovalStatusReport.Row(null, null, null, null).statusKey()).isEmpty();
+    }
+
     @Test
     void theCriteriaFontRulesComeBeforeTheStylesheetsTheyShareTheirSelectorsWith() {
         // The cascade this document is built on runs least- to most-specific: message-key CSS,

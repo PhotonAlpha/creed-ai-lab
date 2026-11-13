@@ -143,7 +143,9 @@
                 <p class="account-line" th:each="line : ${row.account()}"
                    th:text="${line}">VASA COMPANY 3 WITH ACCOUNT</p>
             </td>
-            <td class="status-cell" th:text="${row.status()}">Processing</td>
+            <!-- status-<key>: the colour per status is report-pdf.css's (creed-jasper-report prints the same three) -->
+            <td class="status-cell" th:classappend="${row.statusKey().isEmpty() ? '' : 'status-' + row.statusKey()}"
+                th:text="${row.status()}">Processing</td>
         </tr>
         </tbody>
     </table>

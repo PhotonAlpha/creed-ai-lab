@@ -323,8 +323,12 @@ table.statement-criteria td {
  * tight stack. The lines come from the payload, so nothing here decides where they break. */
 .account-cell .account-line { margin: 0; line-height: 1.35; }
 
-/* The status column, printed in the accent colour like the sample's. */
+/* The status column: each status in its own colour - green done, red refused - and the sample's accent blue for one
+ * still moving or not listed here (class status-<key>, ApprovalStatusReport.Row.statusKey). The same three colours as
+ * creed-jasper-report's ApprovalStatusRenderer.STATUS_COLORS: change one, change the other. */
 table.statement-table tbody td.status-cell { color: #005cb9; }
+table.statement-table tbody td.status-cell.status-approved { color: #1e7b34; }
+table.statement-table tbody td.status-cell.status-rejected { color: #c62828; }
 
 /* The running footer: BOTH storeys, drawn inside the @page's @bottom-center margin box.
  *

@@ -104,7 +104,7 @@ table's look, only its chrome.
 (2026-11-13, asked for): `ApprovalStatusRenderer.statusHtml` wraps each status in a `<font color>` from
 `STATUS_COLORS` **at fill time** — the payload stays creed-report's byte for byte — and `rowText` measures it through
 `plain()`, because a fit that measured the tags would widen the column for characters that never print. The CSV
-exporter writes an HTML cell's text, not its markup (`ExportFormatsTest` pins it). The twin does not colour statuses.
+exporter writes an HTML cell's text, not its markup (`ExportFormatsTest` pins it). The twin colours the same three through CSS classes (`status-<key>`); change the palette on both sides.
 
 Two things stay out of `CellStyle`: the table's outer left/right rule (`TableDesign.edgeColor`),
 which belongs to *being the first or last column* — something a per-element style cannot know — and
