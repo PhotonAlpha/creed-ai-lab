@@ -9,22 +9,31 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 
+import io.micrometer.context.ContextSnapshotFactory;
+
 /**
  * Jira calls that do not depend on each other, side by side on virtual threads: an analysis' wall time is then its
  * slowest search, not the sum of them. Each caller bounds its own fan-out; the Jira pool ({@code max-connections})
  * bounds them all - a call past it waits for a connection, up to the read timeout.
  *
  * <p>A failure is thrown as the call threw it (an {@link UpstreamException} stays one), so callers handle it as they
- * did when the calls ran in a row. MDC is not carried over: the calls themselves do not log.
+ * did when the calls ran in a row.
+ *
+ * <p>Each call runs in the caller's context ({@link #inContext}): the current Observation, hence the Brave span and
+ * the traceId / spanId MDC. Logbook logs every Jira exchange on the thread that makes it, and a bare virtual thread
+ * would print those lines with an empty traceId and start each Jira client span as a new trace.
  */
 final class Concurrently {
+
+    /** Every registered ThreadLocalAccessor (micrometer-observation registers its own through the ServiceLoader). */
+    private static final ContextSnapshotFactory CONTEXT = ContextSnapshotFactory.builder().build();
 
     private Concurrently() {
     }
 
     /** {@code call} started on its own virtual thread; {@link #join} it. */
     static <T> Future<T> start(String name, Callable<T> call) {
-        FutureTask<T> task = new FutureTask<>(call);
+        FutureTask<T> task = new FutureTask<>(inContext(call));
         Thread.ofVirtual().name(name).start(task);
         return task;
     }
@@ -55,7 +64,7 @@ final class Concurrently {
         ExecutorService executor = Executors.newFixedThreadPool(Math.min(parallelism, calls.size()),
                 Thread.ofVirtual().name(name + "-", 0).factory());
         try {
-            List<Future<T>> futures = calls.stream().map(executor::submit).toList();
+            List<Future<T>> futures = calls.stream().map(Concurrently::inContext).map(executor::submit).toList();
             List<T> results = new ArrayList<>(futures.size());
             for (Future<T> future : futures) {
                 results.add(join(future));
@@ -64,6 +73,11 @@ final class Concurrently {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    /** {@code call} as captured now, on the caller's thread - restored around it on whichever thread runs it. */
+    private static <T> Callable<T> inContext(Callable<T> call) {
+        return CONTEXT.captureAll().wrap(call);
     }
 
     private static <T> T callDirectly(Callable<T> call) {

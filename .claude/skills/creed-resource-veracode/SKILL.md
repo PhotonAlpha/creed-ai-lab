@@ -80,6 +80,12 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   base URL** (`withinBase`: origin + path prefix) — Cloud redirects to its media service, which must not get it. The
   mock's media endpoint lives outside `/mock/confluence` and 403s a token, so the test catches a leak.
 
+- **Tracing = Brave, printed by Boot's default correlation pattern** (2026-11-13, asked for): Boot 4 needs both
+  `spring-boot-micrometer-tracing-brave` (the auto-configuration) and `micrometer-tracing-bridge-brave` (optional in it);
+  one alone = no Tracer, empty MDC. No exporter on purpose. Don't set `logging.pattern.correlation` (`[%X{traceId}...]`
+  prints `[,]` on every non-request line; Boot's pads blank). **Every background thread must take the context along**:
+  `Concurrently.inContext` = `ContextSnapshotFactory.captureAll().wrap(call)` - Logbook logs the Jira exchange on the
+  thread that makes it. `ConcurrentlyTest` pins it with a registered ThreadLocal (no tracer needed).
 - **Page reads are shared while in flight** (2026-11-13, Jira answered 429): StrictMode's dev double mount sent every
   load effect twice (connection test, settings, restore-analysis, Confluence lists). `api/veracode.ts` `read()` /
   `shared()` hands an identical request in flight (method + path + headers + body) the first one's promise; the entry

@@ -170,8 +170,16 @@ logbook:
 logging:
   level:
     org.zalando.logbook.Logbook: ${CREED_VERACODE_LOGBOOK_LEVEL:TRACE}
+  # traceId / spanId: no logging.pattern.correlation here on purpose - with tracing on the classpath Boot's default
+  # (LogCorrelationEnvironmentPostProcessor) prints [traceId-spanId] on every line of a request, Logbook's Jira exchanges
+  # on the search threads included (Concurrently), and pads it blank outside one (startup), keeping the columns aligned.
 
 management:
+  tracing:
+    sampling:
+      # Boot's default is 0.1. The MDC is filled sampled or not; 1.0 makes every request's spans (HTTP server, Jira
+      # client) real ones - there is no exporter, so nothing leaves the process.
+      probability: ${CREED_VERACODE_TRACE_SAMPLING:1.0}
   endpoint:
     configprops:
       show-values: always

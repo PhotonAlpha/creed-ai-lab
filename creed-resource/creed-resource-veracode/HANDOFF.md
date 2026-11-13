@@ -68,6 +68,12 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-13 (asked for): **traceId / spanId on every console line** - Micrometer Tracing on Brave
+(`spring-boot-micrometer-tracing-brave` + `micrometer-tracing-bridge-brave`), Boot's default correlation pattern
+(`[traceId-spanId]`, blank outside a request), sampling 1.0 (`CREED_VERACODE_TRACE_SAMPLING`), no exporter. Jira /
+Confluence calls are client spans and send `traceparent`. `Concurrently` carries the context onto its virtual threads
+(`ContextSnapshot`), so the parallel searches' Logbook lines keep the request's traceId (`ConcurrentlyTest`).
+
 2026-11-13 (latest, asked for, nine items): **export with template hung** - the JXLS area spanned POI's used range,
 i.e. every formatted blank cell (whole-row formatting = out to XFD, 16384 cells copied per data row; reproduced at
 >10 min). `TemplateWorkbook.extent` now bounds the area (and the page's grid) by what shows. **`.xlsm` templates**
@@ -197,6 +203,9 @@ it was not checked in a browser (the browser extension could not attach to any p
 
 ## Landmines
 
+- **A thread `Concurrently` did not start loses the traceId.** A new fan-out (executor, `CompletableFuture`, a bare
+  `Thread`) must wrap its tasks the way `Concurrently.inContext` does, or its Logbook lines print a blank traceId and
+  its Jira calls start traces of their own.
 - **An upload lives in this process's memory** (`UploadedReportStore`, `veracode.upload.ttl` 2h,
   `max-entries` 50, oldest dropped). Restart or a second instance → `upload_expired`; the page tells the
   user to upload again. The parsed rows are kept, and the files as received **gzipped** (for the Confluence export's
