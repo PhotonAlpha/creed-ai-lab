@@ -40,7 +40,7 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   (`reportTemplateApi.uploadWithProgress`: upload bytes + `responseText` frames) - not EventSource, which cannot POST.
   Test it with `asyncStarted()` + `asyncDispatch`. Vite's proxy streams it unbuffered (measured).
 - **A sheet larger than the page shows blocks saving bindings** (2026-11-13, asked for): `saveMapping` refuses when any
-  `SheetView.truncated` (500 x 60; `usedRows`/`usedCols` are the real size) - what the grid cannot show cannot be
+  `SheetView.truncated` (`MAX_ROWS` 100 x 60 since 2026-11-14, asked for - the page's `TEMPLATE_MAX_ROWS` must match; `usedRows`/`usedCols` are the real size) - what the grid cannot show cannot be
   checked; the page disables Save and lists them in a red alert.
 - **Cells that show nothing never stretch the area, and never reach JXLS below it** (2026-11-13, a template's areas
   ended at L1047958 / L1046388: a helper column `=IF(E5="","",...)` filled to the bottom of two sheets, then rows

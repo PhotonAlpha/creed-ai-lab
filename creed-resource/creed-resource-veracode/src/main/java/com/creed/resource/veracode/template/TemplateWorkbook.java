@@ -55,7 +55,9 @@ public final class TemplateWorkbook {
     private static final int FAR_BELOW = 10_000;
 
     /** What the page is sent of a sheet; a bigger one is cut, and says so. */
-    static final int MAX_ROWS = 500;
+    // 100 rows (asked for, 2026-11-14): a report template is a page of headers, data rows and totals; past that the
+    // page cannot show it and saving bindings is refused. Keep TEMPLATE_MAX_ROWS in the page's api/veracode.ts in step.
+    static final int MAX_ROWS = 100;
     static final int MAX_COLS = 60;
 
     /** @param fill {@code #RRGGBB} of a solid fill, {@code null} without one */

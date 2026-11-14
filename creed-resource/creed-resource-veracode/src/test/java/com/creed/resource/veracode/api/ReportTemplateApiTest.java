@@ -283,14 +283,14 @@ class ReportTemplateApiTest {
                 .contains("not an Excel workbook").doesNotContain("event:done");
     }
 
-    /** What the page cannot show cannot be checked there: a sheet past 500 x 60 blocks saving bindings. */
+    /** What the page cannot show cannot be checked there: a sheet past 100 x 60 blocks saving bindings. */
     @Test
     void bindingsOfATemplateLargerThanShownAreRefused() throws Exception {
         byte[] large;
         try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             wb.createSheet("Cover").createRow(0).createCell(0).setCellValue("cover");
             Sheet sheet = wb.createSheet("SCA list");
-            for (int r = 0; r < 650; r++) {
+            for (int r = 0; r < 150; r++) {
                 sheet.createRow(r).createCell(0).setCellValue("row " + r);
             }
             wb.write(out);
@@ -300,7 +300,7 @@ class ReportTemplateApiTest {
                         .file(new MockMultipartFile("file", "large.xlsx", "application/octet-stream", large)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sheets[1].truncated").value(true))
-                .andExpect(jsonPath("$.sheets[1].usedRows").value(650))
+                .andExpect(jsonPath("$.sheets[1].usedRows").value(150))
                 .andExpect(jsonPath("$.sheets[0].truncated").value(false))
                 .andReturn().getResponse().getContentAsString();
 
@@ -308,8 +308,8 @@ class ReportTemplateApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"sheets\":[{\"sheet\":\"Cover\",\"lists\":[],\"values\":[{\"row\":1,\"col\":1,\"field\":\"projectKey\"}]}]}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("larger than 500 rows x 60 columns, so bindings cannot be saved: "
-                        + "'SCA list' (650 rows x 1 columns) - delete what is past the report in Excel and upload the template again"));
+                .andExpect(jsonPath("$.message").value("larger than 100 rows x 60 columns, so bindings cannot be saved: "
+                        + "'SCA list' (150 rows x 1 columns) - delete what is past the report in Excel and upload the template again"));
     }
 
     @Test

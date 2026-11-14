@@ -697,9 +697,13 @@ export interface TemplateCell {
   fill: string | null;
 }
 
+/** The backend's `TemplateWorkbook.MAX_ROWS` / `MAX_COLS` - keep in step: a sheet past them cannot be bound. */
+export const TEMPLATE_MAX_ROWS = 100;
+export const TEMPLATE_MAX_COLS = 60;
+
 export interface TemplateSheet {
   name: string;
-  /** Rows / columns sent: the used range, cut at 500 × 60 (`truncated`). */
+  /** Rows / columns sent: the used range, cut at TEMPLATE_MAX_ROWS × TEMPLATE_MAX_COLS (`truncated`). */
   rows: number;
   cols: number;
   truncated: boolean;
@@ -712,7 +716,7 @@ export interface TemplateSheet {
    * the whole sheet. The export leaves them out, but every open of the workbook still reads them. Absent when none.
    */
   hidden?: { cells: number; lastRow: number; example: string } | null;
-  /** What shows, uncut: `truncated` = more than 500 × 60, and then bindings cannot be saved. */
+  /** What shows, uncut: `truncated` = more than TEMPLATE_MAX_ROWS × TEMPLATE_MAX_COLS: bindings cannot be saved. */
   usedRows: number;
   usedCols: number;
 }

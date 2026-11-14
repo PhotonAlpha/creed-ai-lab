@@ -7,7 +7,7 @@ import {
 import {
   DeleteOutlined, FileExcelOutlined, FileSearchOutlined, SaveOutlined, UndoOutlined, UploadOutlined,
 } from '@ant-design/icons';
-import { reportTemplateApi, saveBlob } from '../../../api/veracode';
+import { TEMPLATE_MAX_COLS, TEMPLATE_MAX_ROWS, reportTemplateApi, saveBlob } from '../../../api/veracode';
 import type {
   ListDataset, ReportTemplateDetail, ReportTemplateSummary, TemplateDataset, TemplateField, TemplateMapping,
   TemplateUploadProgress,
@@ -104,7 +104,7 @@ export function ReportTemplatesPage() {
   };
 
   /**
-   * A sheet larger than the grid shows (500 × 60) cannot be checked here, so its bindings cannot be saved (asked for,
+   * A sheet larger than the grid shows (TEMPLATE_MAX_ROWS × TEMPLATE_MAX_COLS) cannot be checked here, so its bindings cannot be saved (asked for,
    * 2026-11-13) - the backend refuses them too.
    */
   const tooLarge = useMemo(() => detail?.sheets.filter((s) => s.truncated) ?? [], [detail]);
@@ -285,6 +285,8 @@ export function ReportTemplatesPage() {
                       showIcon
                       style={{ marginBottom: 16 }}
                       message={t('veracode.tpl.tooLarge', {
+                        maxRows: TEMPLATE_MAX_ROWS,
+                        maxCols: TEMPLATE_MAX_COLS,
                         sheets: tooLarge.map((s) => t('veracode.tpl.tooLargeSheet', {
                           sheet: s.name, rows: s.usedRows.toLocaleString(), cols: s.usedCols.toLocaleString(),
                         })).join(t('veracode.tpl.listSeparator')),
@@ -313,7 +315,7 @@ export function ReportTemplatesPage() {
                             ),
                             children: (
                               <>
-                                {s.truncated && <Alert type="error" showIcon style={{ marginBottom: 8 }} message={t('veracode.tpl.truncated')} />}
+                                {s.truncated && <Alert type="error" showIcon style={{ marginBottom: 8 }} message={t('veracode.tpl.truncated', { maxRows: TEMPLATE_MAX_ROWS, maxCols: TEMPLATE_MAX_COLS })} />}
                                 {s.hidden && (
                                   <Alert
                                     type="warning"
