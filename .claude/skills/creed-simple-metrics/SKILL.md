@@ -336,8 +336,15 @@ maxHttpHeaderSize") → HTTP 500 with a 5-byte body, after the request was proce
 asked for; env `CREED_SIMPLE_MAX_{REQUEST,RESPONSE}_HEADER_SIZE`). Raising only the request one turns clean 400s into
 500s (measured). Keep response ≥ request + 2KB (`HttpHeaderSizeCheck` WARNs at startup; `HttpHeaderSizeTest` runs a
 real Tomcat with an echoing servlet, no PKI/Camel). Repro against a running node: `docs/scripts/header-size-repro.sh`.
-Not fixed (needs a decision - changes every API's response headers): the echo itself, i.e. a `HeaderFilterStrategy`
-on the servlet component / `removeHeaders` at the end of the REST routes.
+**The echo is filtered since 2026-11-14 (asked for): `config/RestHeaderFilterStrategy`** on the servlet component
+(`camel.component.servlet.header-filter-strategy: "#restHeaderFilterStrategy"`, lists `creed.camel.rest.headers.*`).
+Out = **allowlist** (`Cache-Control, Content-Disposition, Location, Retry-After, ETag, Last-Modified`; Content-Type is
+set by the binding apart from the headers) - a listed name bypasses Camel's own outbound list (`cache-control`, `date`
+... would otherwise be dropped), so never list Content-Length/Transfer-Encoding. In = **denylist** (Authorization,
+Proxy-Authorization, hop-by-hop): query parameters go through the same `applyFilterToExternalHeaders`, an allowlist
+would drop them; `Cookie` must stay (payment sticky), `X-Channel` too (API-7). `Camel*` blocked both ways (base class).
+`RestHeaderFilterStrategyTest` drives Camel's real `DefaultHttpBinding` with Spring's mock request/response. An API
+that must return a header of its own: add it to `outbound-allowed`.
 
 ## SSL / mTLS
 

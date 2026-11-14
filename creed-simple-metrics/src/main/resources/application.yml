@@ -87,6 +87,11 @@ camel:
     # collector — otherwise it scans the default classpath:camel/* dirs for route files (and would need
     # camel-xml-io-dsl, which we dropped in favour of camel-spring-xml).
     routes-collector-enabled: false
+  component:
+    servlet:
+      # The REST consumer's header filter (RestHeaderFilterStrategy, lists under creed.camel.rest.headers): without it
+      # every request header - Cookie, Authorization - and every internal route header came back as a response header.
+      header-filter-strategy: "#restHeaderFilterStrategy"
   servlet:
     mapping:
       # CamelHttpTransportServlet mount point, relative to server.servlet.context-path above; APIs live
@@ -167,6 +172,17 @@ creed:
   # 一个变量同时驱动上面的 camel.servlet.mapping.enabled，别单独改其中一个。
   camel:
     enabled: ${CREED_CAMEL_ENABLED:true}
+    # What crosses the REST consumer's boundary (RestHeaderFilterStrategy; names, any case). Camel* never crosses.
+    rest:
+      headers:
+        # Request headers kept OUT of the exchange. A denylist on purpose: query parameters pass the same filter, and
+        # the routes read many of them. Hop-by-hop headers, and credentials no route uses (Cookie stays: payment's
+        # sticky routing reads it). A query parameter with one of these names is dropped too.
+        inbound-denied: ${CREED_REST_INBOUND_DENIED:Authorization,Proxy-Authorization,Connection,Keep-Alive,Proxy-Connection,TE,Trailer,Transfer-Encoding,Upgrade}
+        # Exchange headers written back as RESPONSE headers - nothing else: not the request's echo, not the routes'
+        # internal headers, not a downstream's own response headers. Content-Type needs no listing (set by the binding).
+        # A listed name goes out even where Camel's own list would stop it - never list Content-Length/Transfer-Encoding.
+        outbound-allowed: ${CREED_REST_OUTBOUND_ALLOWED:Cache-Control,Content-Disposition,Location,Retry-After,ETag,Last-Modified}
     # camel-http pool (CamelConfig.camelHttpConnectionManager + camelHttpPoolEvictor); same
     # HttpPoolProperties shape and lifecycle rules as creed.partner.http below. Unset keys take
     # HttpPoolProperties' defaults. No keep-alive key: the component uses HttpClient's

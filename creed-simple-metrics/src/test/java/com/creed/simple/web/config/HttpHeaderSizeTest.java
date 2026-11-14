@@ -25,7 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The module's header limits, as {@code application.yml} sets them, on a real Tomcat - without the PKI or Camel: the
- * servlet below echoes every request header into the response the way Camel's servlet binding does.
+ * servlet below echoes every request header into the response, as Camel's servlet binding did before
+ * {@code RestHeaderFilterStrategy} (the limits stay a margin should headers reach the response again).
  */
 @SpringBootTest(classes = HttpHeaderSizeTest.App.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class HttpHeaderSizeTest {

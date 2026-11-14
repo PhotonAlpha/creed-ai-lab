@@ -54,8 +54,18 @@ server:
 TLS 加在 Boot 自己的那个 connector 上（`TomcatHttpsConfiguration` 只设置 `Ssl`），所以这两个属性对 HTTPS 生效；
 如果以后加了 `addAdditionalConnectors` 的额外 connector，要在那个 connector 上单独设置。
 
-## 根本原因还在：回显请求头
+## 根本修复：REST 头过滤（`RestHeaderFilterStrategy`，2026-11-14）
 
-调大上限只是让回显不会撑爆缓冲区。回显本身会把 `Cookie`、`Authorization` 等凭据原样写进响应
-（会进入代理、浏览器、日志）。彻底的修复是在 servlet 组件上用 `HeaderFilterStrategy` 过滤出站头，
-或在 REST 路由末尾 `removeHeaders`——这会改变所有 API 的响应头，需要单独确认。
+servlet 组件挂上了自己的 `HeaderFilterStrategy`（`camel.component.servlet.header-filter-strategy: "#restHeaderFilterStrategy"`，
+名单在 `creed.camel.rest.headers.*`）：
+
+- **出站（写回响应）：白名单** `Cache-Control, Content-Disposition, Location, Retry-After, ETag, Last-Modified`；
+  `Content-Type` 由 binding 单独写，不用列。请求头的回显、路由内部头（`source`、`lane`、`branchError`…）、下游自己的
+  响应头（含 `Set-Cookie: JSESSIONID`）都不再出去。列出的名字即使在 Camel 自带的出站黑名单里（`cache-control` 等）也照发，
+  所以不要把 `Content-Length` / `Transfer-Encoding` 加进白名单。
+- **入站（进入 exchange）：黑名单** `Authorization, Proxy-Authorization` 和 hop-by-hop 头。必须是黑名单：query 参数和头
+  走同一个过滤器，路由要读很多 query 参数。`Cookie` 保留（payment 的 sticky 路由要读 `stickyId`）。`Camel*` 两个方向都不能过。
+
+实测（响应上限故意设回 8 KB）：带 `Cookie` / `Authorization` / `X-Api-Key` 的请求，响应头只剩 `traceId`、`Content-Type`、
+`Content-Length`、`Date`；8,000 / 8,040 B 的 `X-Trace-Note` 都是 200（响应头 153 B）。上面的上限配置保留，作为余量
+（白名单变长、或者过滤器被拿掉时）。`RestHeaderFilterStrategyTest` 用 Camel 自己的 `DefaultHttpBinding` 锁住两个方向。

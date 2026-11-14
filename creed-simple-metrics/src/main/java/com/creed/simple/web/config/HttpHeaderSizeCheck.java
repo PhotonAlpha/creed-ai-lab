@@ -10,8 +10,10 @@ import java.util.Optional;
 /**
  * Warns at startup when the response header limit leaves no room for what the request may bring in.
  *
- * <p>Camel's servlet binding writes the exchange's headers back into the HTTP response, so every request header
- * comes back (plus whatever a downstream answered). A request Tomcat accepts under
+ * <p>Camel's servlet binding writes the exchange's headers back into the HTTP response - until 2026-11-14 every
+ * request header came back that way (plus whatever a downstream answered); {@code RestHeaderFilterStrategy} now lets
+ * only {@code creed.camel.rest.headers.outbound-allowed} through, so this is the margin for a list that grows, or a
+ * filter taken off. A request Tomcat accepts under
  * {@code server.max-http-request-header-size} then fails while its response is written:
  * {@code HeadersTooLargeException: ... than there was room available in the buffer. Increase maxHttpHeaderSize ...}
  * - an HTTP 500 with a 5-byte body, the request already processed. The message names Tomcat's legacy
@@ -36,8 +38,9 @@ public class HttpHeaderSizeCheck {
             return Optional.empty();
         }
         return Optional.of("server.tomcat.max-http-response-header-size (" + response + ") leaves less than " + HEADROOM
-                + " above server.max-http-request-header-size (" + request + "): the Camel REST routes echo request "
-                + "headers into the response, so an accepted request can fail with HeadersTooLargeException (HTTP 500, "
-                + "'no room available in the buffer') - raise the response limit with the request limit (2x)");
+                + " above server.max-http-request-header-size (" + request + "): should request headers reach the "
+                + "response (creed.camel.rest.headers.outbound-allowed, or the servlet header filter taken off), an "
+                + "accepted request fails with HeadersTooLargeException (HTTP 500, 'no room available in the buffer') - "
+                + "raise the response limit with the request limit (2x)");
     }
 }
