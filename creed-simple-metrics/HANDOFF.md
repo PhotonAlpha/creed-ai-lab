@@ -20,6 +20,12 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Current state
 
+- 2026-11-14: **HTTP header limits** — reproduced Tomcat's `HeadersTooLargeException` ("no room available in the
+  buffer"): the Camel REST routes echo request headers into the response, so an 8,000 B request header passed the 8KB
+  request limit and overflowed the 8KB response limit → 500. Now `server.max-http-request-header-size` 8KB and
+  `server.tomcat.max-http-response-header-size` 16KB (env `CREED_SIMPLE_MAX_{REQUEST,RESPONSE}_HEADER_SIZE`),
+  `HttpHeaderSizeCheck` warns when response < request + 2KB, `HttpHeaderSizeTest`, repro script
+  `docs/scripts/header-size-repro.sh`, write-up `docs/http-header-size.md`.
 - 2026-11-11: **per-endpoint camel-http pools** — `creed.camel.http-components.<name>` registers a named component
   (`NamedHttpComponentRegistrar`: `<name>`, `<name>ConnectionManager`, `<name>PoolEvictor`, `<name>PoolMetrics`), all
   components built by one factory `CamelHttpComponents` (the default `http`/`https` too); routes opt in with
@@ -202,6 +208,10 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Open items
 
+- **The REST routes echo request headers into responses — credentials included** (found 2026-11-14: `Cookie`,
+  `Authorization`, `Proxy-Authorization`, `X-Api-Key` come back verbatim). Root cause of the header-size 500s too; the
+  bigger response limit only hides that part. Fix = an outbound `HeaderFilterStrategy` on the servlet component (or
+  `removeHeaders` at the end of the REST routes) - changes every API's response headers, so not done without a decision.
 - **Repro leftovers from 2026-10-02, still in the tree — decide what to keep:**
   `camel-context.xml` has `spoolEnabled="true"` (originally absent; this module does not need spooling —
   JSON is unmarshalled into memory anyway and Logbook already buffers it), and `PaymentStickyProcessor`

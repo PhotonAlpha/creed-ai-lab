@@ -6,7 +6,17 @@ server:
     # under it: /simple/camel/api/*, /simple/admin/*, /simple/actuator/* (monitoring/prometheus.yml
     # scrapes /simple/actuator/prometheus).
     context-path: ${CREED_SIMPLE_CONTEXT_PATH:/simple}
+  # HTTP header size limits (Tomcat: maxHttpRequestHeaderSize / maxHttpResponseHeaderSize). Tomcat's error text says
+  # "Increase maxHttpHeaderSize", but that is the legacy name of BOTH - in Boot 4 they are two properties, and raising
+  # only the request one makes it worse. Camel's REST routes write the exchange's headers back into the response,
+  # i.e. echo every request header (measured: X-Trace-Note of 8,000 B -> 200 in, then HeadersTooLargeException "no
+  # room available in the buffer" -> HTTP 500 out). So the response limit must stay above the request limit plus the
+  # response's own headers (~200 B here, more when a downstream's headers come back too): twice the request limit.
+  # HttpHeaderSizeCheck warns at startup when it does not. Repro: docs/scripts/header-size-repro.sh,
+  # write-up: docs/http-header-size.md.
+  max-http-request-header-size: ${CREED_SIMPLE_MAX_REQUEST_HEADER_SIZE:8KB}
   tomcat:
+    max-http-response-header-size: ${CREED_SIMPLE_MAX_RESPONSE_HEADER_SIZE:16KB}
     mbeanregistry:
       enabled: true
     threads:

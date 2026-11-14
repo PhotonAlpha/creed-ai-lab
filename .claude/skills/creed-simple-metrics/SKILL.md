@@ -326,6 +326,19 @@ parameters that differ from httpd's defaults (so a short packet is not a missing
 New httpd server cert: `.support/httpd/issue-cert.sh` signs `creed-httpd` with the EXISTING CA —
 never rerun `CA-Generation.sh` just for it (that mints a new CA and breaks every other keystore).
 
+## HTTP header size limits (`HttpHeaderSizeCheck`, `docs/http-header-size.md`)
+
+**The Camel REST routes echo every request header into the response** (servlet binding writes the exchange's headers;
+measured: `Cookie`, `Authorization`, `Proxy-Authorization`, `X-Api-Key` all come back). So a request just inside the
+request limit overflows the response limit → `HeadersTooLargeException` ("no room available in the buffer. Increase
+maxHttpHeaderSize") → HTTP 500 with a 5-byte body, after the request was processed. Boot 4 has **two** properties:
+`server.max-http-request-header-size` (8KB) and `server.tomcat.max-http-response-header-size` (16KB here, 2026-11-14,
+asked for; env `CREED_SIMPLE_MAX_{REQUEST,RESPONSE}_HEADER_SIZE`). Raising only the request one turns clean 400s into
+500s (measured). Keep response ≥ request + 2KB (`HttpHeaderSizeCheck` WARNs at startup; `HttpHeaderSizeTest` runs a
+real Tomcat with an echoing servlet, no PKI/Camel). Repro against a running node: `docs/scripts/header-size-repro.sh`.
+Not fixed (needs a decision - changes every API's response headers): the echo itself, i.e. a `HeaderFilterStrategy`
+on the servlet component / `removeHeaders` at the end of the REST routes.
+
 ## SSL / mTLS
 
 Same two-bundle pattern as `creed-gateway-partner` (inbound `creed-partner-server` strict/fail-fast,
