@@ -428,6 +428,18 @@ in `public.splunk_audit` across once and leaves that table alone — drop it by 
 A code is spent the moment it is verified, so after a replay or a Splunk failure the page clears the
 input and says to wait for the next code.
 
+**Served by `creed-gateway-proxy`** (API: `creed-gateway-proxy/docs/splunk-api.md`), the page also:
+- shows the selected target's own block windows (`targets[].block`; daily windows and date ranges such
+  as `2026-11-16 20:00:00 - 2026-11-20 00:00:00`), tags currently unavailable targets in the dropdown,
+  and puts the date on "available again at" when that is not today;
+- when a target is outside its allowed windows (`reason = not_available`), says so and when it opens —
+  **never the allowed windows themselves**. They are changed only through the token-guarded admin API;
+  the page has no entry point for it;
+- shows "Your machine" under the target: the IP the server sees and its reverse-DNS name; the audit
+  table's Client column shows the host name too.
+
+The Node BFF and the mock send none of these fields; the page then behaves as before.
+
 ### AES encryption (`/aes`)
 
 Encrypts or decrypts configuration values and keeps the ciphertext **per server**, so a real config

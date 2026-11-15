@@ -192,17 +192,29 @@ export function SplunkPage() {
 
   // The block window is the server's decision; the page only asks again when the server said it flips
   // (`changesAtMillis`, on the server's clock), so a page left open unlocks at 09:00 by itself.
-  const block = info?.block;
+  // Each target has its own windows; `info.block` is the broker-wide default (and all an older broker sends).
+  const block = target?.block ?? info?.block;
   const blocked = Boolean(block?.blocked);
   const blockFlipped = block?.changesAtMillis != null && serverNow >= block.changesAtMillis;
   useEffect(() => {
     if (blockFlipped) refreshInfo();
   }, [blockFlipped, refreshInfo]);
-  /** HH:mm of the flip in the block's own zone — the same wall clock the windows are written in. */
-  const blockUntil = block?.changesAtMillis != null
-    ? new Intl.DateTimeFormat(lang, { timeZone: block.zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-      .format(block.changesAtMillis)
-    : null;
+  /**
+   * The flip in the block's own zone — the same wall clock the windows are written in. HH:mm when it is
+   * today there; with the date when it is not (a date-range window can end days later).
+   */
+  const blockUntil = (() => {
+    if (block?.changesAtMillis == null) return null;
+    const day = (ms: number) => new Intl.DateTimeFormat('en-CA', { timeZone: block.zone }).format(ms);
+    const sameDay = day(block.changesAtMillis) === day(serverNow);
+    return new Intl.DateTimeFormat(lang, {
+      timeZone: block.zone,
+      ...(sameDay ? {} : { year: 'numeric', month: '2-digit', day: '2-digit' }),
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).format(block.changesAtMillis);
+  })();
 
   // A new target starts from its own defaults — another target's cookie names or tunnel are meaningless here.
   useEffect(() => {
@@ -338,10 +350,17 @@ export function SplunkPage() {
     {
       title: t('splunk.audit.client'),
       dataIndex: 'clientIp',
-      width: 150,
+      width: 200,
       render: (value: string | null, row) => (
         <Tooltip title={[row.forwardedFor && `X-Forwarded-For: ${row.forwardedFor}`, row.userAgent].filter(Boolean).join('\n')}>
-          <Text>{value ?? '—'}</Text>
+          {row.clientHost ? (
+            <Space direction="vertical" size={0}>
+              <Text>{row.clientHost}</Text>
+              <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>{value ?? '—'}</Text>
+            </Space>
+          ) : (
+            <Text>{value ?? '—'}</Text>
+          )}
         </Tooltip>
       ),
     },
@@ -403,9 +422,13 @@ export function SplunkPage() {
           <Alert
             type="warning"
             showIcon
-            message={blockUntil
-              ? t('splunk.block.active', { windows: block.windows.join(', '), zone: block.zone, until: blockUntil })
-              : t('splunk.block.activeForever', { windows: block.windows.join(', '), zone: block.zone })}
+            message={block.reason === 'not_available'
+              ? (blockUntil
+                ? t('splunk.block.notAvailable', { zone: block.zone, until: blockUntil })
+                : t('splunk.block.notAvailableForever'))
+              : blockUntil
+                ? t('splunk.block.active', { windows: block.windows.join(', '), zone: block.zone, until: blockUntil })
+                : t('splunk.block.activeForever', { windows: block.windows.join(', '), zone: block.zone })}
           />
         )}
 
@@ -491,6 +514,7 @@ export function SplunkPage() {
                           <Space size="small">
                             <Text>{option.label}</Text>
                             {item && !item.configured && <Tag color="warning" bordered={false}>{t('splunk.session.unset')}</Tag>}
+                            {item?.block?.blocked && <Tag color="error" bordered={false}>{t('splunk.block.blockedTag')}</Tag>}
                           </Space>
                           {item?.loginUrl && <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>{item.loginUrl}</Text>}
                         </Space>
@@ -509,6 +533,16 @@ export function SplunkPage() {
                     </Descriptions.Item>
                     {/* Password, session cookie and script cookie are not shown (by request). The cookie
                         names still go with the request: they are preset from the target above. */}
+                    {info?.client && (
+                      <Descriptions.Item label={<Tooltip title={t('splunk.client.hint')}>{t('splunk.client.label')}</Tooltip>}>
+                        <Space wrap size="small">
+                          {info.client.host
+                            ? <Text code>{info.client.host}</Text>
+                            : <Text type="secondary">{t('splunk.client.noHost')}</Text>}
+                          <Text type="secondary">{info.client.ip ?? '—'}</Text>
+                        </Space>
+                      </Descriptions.Item>
+                    )}
                     {target.tunnel && (
                       <Descriptions.Item label={t('splunk.session.tunnel')}>
                         <Space direction="vertical" size={0}>
@@ -640,7 +674,7 @@ export function SplunkPage() {
             dataSource={audit}
             loading={auditLoading}
             pagination={{ pageSize: 10, hideOnSinglePage: true }}
-            scroll={{ x: 1300 }}
+            scroll={{ x: 1350 }}
             locale={{ emptyText: <Empty description={t('splunk.audit.empty')} /> }}
           />
         </ProCard>

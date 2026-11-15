@@ -272,8 +272,19 @@ export interface TotpInfo {
   /** The target the dropdown starts on, and the one used when a request names none. */
   defaultTarget: string;
   scriptCookieName: string;
-  /** Times of day no session is issued (creed-gateway-proxy); absent from older brokers. */
+  /**
+   * Times of day no session is issued (creed-gateway-proxy); absent from older brokers. The broker-wide
+   * default — what applies to a target is its own `SplunkTarget.block`.
+   */
   block?: SplunkBlock;
+  /** The caller as the server sees it (creed-gateway-proxy only). */
+  client?: SplunkClient;
+}
+
+/** The TCP peer's IP (a proxy in front shows as the proxy) and its forward-confirmed reverse-DNS name. */
+export interface SplunkClient {
+  ip: string | null;
+  host: string | null;
 }
 
 /** `creed.splunk.block` — windows like `22:00-09:00`, read on `zone`. */
@@ -284,6 +295,11 @@ export interface SplunkBlock {
   blocked: boolean;
   /** Server epoch ms at which `blocked` flips — when the page asks again; null when it never does. */
   changesAtMillis: number | null;
+  /**
+   * Why `blocked`: `blocked` = inside one of `windows`; `not_available` = outside the target's allowed
+   * windows, which are set through the admin API and never sent to the page. Null when not blocked.
+   */
+  reason?: 'blocked' | 'not_available' | null;
 }
 
 /** One Splunk instance the broker can log into. The password never leaves the server. */
@@ -304,6 +320,11 @@ export interface SplunkTarget {
   tunnel: string | null;
   /** Whether a login goes through the tunnel when the request does not say. */
   tunnelDefault: boolean;
+  /**
+   * The block windows that apply to this target: its own `targets[].block`, else the broker-wide one
+   * (creed-gateway-proxy only).
+   */
+  block?: SplunkBlock;
 }
 
 /** This login's overrides of the target's settings; anything omitted takes the target's. */
@@ -350,6 +371,8 @@ export interface SplunkAuditRow {
   reason: string | null;
   detail: string | null;
   clientIp: string | null;
+  /** Reverse-DNS name of `clientIp` at the time (creed-gateway-proxy only); null when none. */
+  clientHost?: string | null;
   forwardedFor: string | null;
   userAgent: string | null;
   serverStep: number | null;
