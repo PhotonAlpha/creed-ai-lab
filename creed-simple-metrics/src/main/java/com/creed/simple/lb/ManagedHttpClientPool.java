@@ -7,14 +7,13 @@ import org.apache.hc.client5.http.ConnectionKeepAliveStrategy;
 import org.apache.hc.client5.http.impl.IdleConnectionEvictor;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.core5.util.Timeout;
-import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpRequestFactory;
 
 import java.io.Closeable;
 
 /**
  * One self-contained, self-managing HTTP client "stack": an mTLS {@link PoolingHttpClientConnectionManager}
- * plus the {@link BufferingClientHttpRequestFactory buffering request factory} built on it, its idle-connection
+ * plus the (unbuffered, streaming) request factory built on it, its idle-connection
  * evictor, and its pool meter binding — the plumbing beans that every downstream client used to declare separately (with
  * hand-written {@code @Qualifier} cross-wiring, the main copy-paste hazard).
  *
@@ -61,7 +60,11 @@ public final class ManagedHttpClientPool implements MeterBinder, Closeable {
         return keepAliveStrategy;
     }
 
-    /** The buffering {@link ClientHttpRequestFactory} to hand to a {@code RestClient}/{@code RestTemplate}. */
+    /**
+     * The {@link ClientHttpRequestFactory} to hand to a {@code RestClient}/{@code RestTemplate}. Unbuffered: an
+     * interceptor that has to read the response body must wrap it in {@code BufferingClientHttpRequestFactory}
+     * itself.
+     */
     public ClientHttpRequestFactory requestFactory() {
         return requestFactory;
     }

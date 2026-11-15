@@ -12,8 +12,7 @@ import java.util.List;
 /**
  * {@link RestTemplate} equivalent of {@link LoadBalancedRestClientConfiguration}'s two clients
  * ({@code clusterRestClient} / {@code healthCheckRestClient}). Reuses the very same beans — the two mTLS
- * {@link ManagedHttpClientPool}s ({@code clusterPool} / {@code healthCheckPool}, whose request factories
- * are already wrapped in {@code BufferingClientHttpRequestFactory}) and the
+ * {@link ManagedHttpClientPool}s ({@code clusterPool} / {@code healthCheckPool}) and the
  * {@link LoadBalancerAuditInterceptor} — so only the client objects differ.
  *
  * <p>Three things that are <em>not</em> a 1:1 copy of the RestClient version, because RestTemplate works

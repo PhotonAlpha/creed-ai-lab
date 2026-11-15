@@ -23,7 +23,6 @@ import org.springframework.boot.ssl.NoSuchSslBundleException;
 import org.springframework.boot.ssl.SslBundle;
 import org.springframework.boot.ssl.SslBundles;
 import org.springframework.boot.ssl.SslStoreBundle;
-import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 
 import javax.net.ssl.SSLContext;
@@ -39,7 +38,7 @@ public final class RestClientSuppliers {
     private static final Logger log = LoggerFactory.getLogger(RestClientSuppliers.class);
 
     /**
-     * Builds a complete {@link ManagedHttpClientPool} (pool + buffering request factory + idle evictor +
+     * Builds a complete {@link ManagedHttpClientPool} (pool + request factory + idle evictor +
      * pool metrics) from a {@link HttpPoolProperties} block and the shared mTLS bundle name. This is the
      * single-call template that collapses the former connection-manager / request-factory / meter-binder
      * bean trio into one self-managing bean. The evictor is started here and stopped by
@@ -50,9 +49,11 @@ public final class RestClientSuppliers {
         PoolingHttpClientConnectionManager connectionManager =
                 connectionManagerFrom(resolveClientBundleOrNull(sslBundles, bundleName), props);
         ConnectionKeepAliveStrategy keepAliveStrategy = keepAliveStrategy(props.keepAlive());
-        var requestFactory = new BufferingClientHttpRequestFactory(
-                requestFactoryFrom(connectionManager, keepAliveStrategy,
-                        props.connectionRequestTimeout(), props.responseTimeout()));
+        // Not wrapped in BufferingClientHttpRequestFactory: nothing reads a response body twice (the audit
+        // interceptor reads status and URI only, callers read the body once), and the request body is already
+        // a byte[] by the time the interceptor chain runs. Buffering only held whole responses in memory.
+        var requestFactory = requestFactoryFrom(connectionManager, keepAliveStrategy,
+                props.connectionRequestTimeout(), props.responseTimeout());
         IdleConnectionEvictor evictor = evictorFor(connectionManager, props);
         evictor.start();
         return new ManagedHttpClientPool(connectionManager, requestFactory, keepAliveStrategy, evictor, metricsName);

@@ -24,7 +24,7 @@ import static org.mockito.Mockito.when;
  * Unit tests for {@link LoadBalancedRestClientConfiguration}'s bean factory methods and the
  * {@link ManagedHttpClientPool} template they build on: the mTLS pool from a resolved SSL bundle, the
  * graceful non-mTLS fallback when the bundle is missing ({@code resolveClientBundleOrNull}), the pool
- * meter binding, the buffering request factory, and the assembled {@link RestClient}s.
+ * meter binding, the request factory, and the assembled {@link RestClient}s.
  */
 @ExtendWith(MockitoExtension.class)
 class LoadBalancedRestClientConfigurationTest {

@@ -24,7 +24,7 @@ import org.springframework.web.client.RestClient;
  *
  * <p><strong>The two HTTP client stacks are built from a single template.</strong> Each downstream
  * client (business/cluster and health-check) is one {@link ManagedHttpClientPool} bean — pool +
- * buffering request factory + pool metrics in one self-managing object (see
+ * request factory + pool metrics in one self-managing object (see
  * {@link RestClientSuppliers#pool}). Tunables come from the type-safe {@link PartnerProps} binding, so
  * adding another client stack is one {@code pool(...)} call instead of four hand-wired beans with
  * {@code @Qualifier} strings — or, for more of the same kind, one {@code creed.partner.rest-clients.<name>}
@@ -43,14 +43,14 @@ import org.springframework.web.client.RestClient;
         defaultConfiguration = PartnerLoadBalancerConfiguration.class)
 public class LoadBalancedRestClientConfiguration {
 
-    /** Business/cluster stack: the larger pool + buffering factory + {@code loadBalancedPool} metrics. */
+    /** Business/cluster stack: the larger pool + request factory + {@code loadBalancedPool} metrics. */
     @Bean(destroyMethod = "close")
     ManagedHttpClientPool clusterPool(SslBundles sslBundles, PartnerProps props) {
         return RestClientSuppliers.pool(sslBundles, props.clientBundle(), props.http(),
                 PoolMetricNames.of(PoolMetricNames.LOAD_BALANCED));
     }
 
-    /** Health-check stack: the smaller/tighter pool + buffering factory + {@code healthCheckPool} metrics. */
+    /** Health-check stack: the smaller/tighter pool + request factory + {@code healthCheckPool} metrics. */
     @Bean(destroyMethod = "close")
     ManagedHttpClientPool healthCheckPool(SslBundles sslBundles, PartnerProps props) {
         return RestClientSuppliers.pool(
