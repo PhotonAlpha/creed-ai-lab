@@ -126,13 +126,7 @@ public final class CamelHttpComponents {
      * record's defaults): a named pool states only what differs from the default one.
      */
     public static HttpPoolProperties named(Environment environment, String name) {
-        List<ConfigurationPropertySource> sources = new ArrayList<>();
-        Iterable<ConfigurationPropertySource> all = ConfigurationPropertySources.get(environment);
-        // first source holding a key wins: the named block, then the default block
-        all.forEach(s -> sources.add(s.withPrefix(NAMED + "." + name)));
-        all.forEach(s -> sources.add(s.withPrefix(DEFAULTS)));
-        return new Binder(sources).bindOrCreate(ConfigurationPropertyName.EMPTY,
-                Bindable.of(HttpPoolProperties.class), BindHandler.DEFAULT);
+        return HttpPoolProperties.layered(environment, NAMED + "." + name, DEFAULTS);
     }
 
     /** The names declared under {@code creed.camel.http-components}, validated as URI schemes. */

@@ -2,6 +2,7 @@ package com.creed.simple.config;
 
 import com.creed.simple.lb.HttpPoolProperties;
 import com.creed.simple.lb.LoadBalancerRoutePlanner;
+import com.creed.simple.lb.PoolMetricNames;
 import com.creed.simple.lb.RestClientSuppliers;
 import io.micrometer.context.ContextExecutorService;
 import io.micrometer.context.ContextSnapshotFactory;
@@ -120,7 +121,7 @@ public class CamelConfig {
     @Bean
     MeterBinder camelHttpPoolMetrics(
             @Qualifier("camelHttpConnectionManager") PoolingHttpClientConnectionManager camelHttpConnectionManager) {
-        return new ConnectionPoolMetrics(camelHttpConnectionManager, "camelHttpPool");
+        return new ConnectionPoolMetrics(camelHttpConnectionManager, PoolMetricNames.of(PoolMetricNames.CAMEL_HTTP));
     }
 
     /**

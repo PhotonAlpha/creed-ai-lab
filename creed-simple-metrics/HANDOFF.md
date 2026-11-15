@@ -20,6 +20,14 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Current state
 
+- 2026-11-15: **Pool metric names by rule + batch load-balanced RestClients** — `PoolMetricNames` names every
+  pool (`<base>` for a default pool, `<base>-<name>` for a batch-declared one); the three base names are unchanged,
+  so dashboards are too. `creed.partner.rest-clients.<name>` registers `<name>Pool` + `<name>RestClient`
+  (`NamedRestClientRegistrar`, metrics `loadBalancedPool-<name>`); `clusterRestClient` now clones the shared
+  `@LoadBalanced` builder. `HttpPoolProperties.layered` is the named-over-defaults binding both registrars use.
+  Docs: `docs/lb-rest-client-named-pools.md`, and a source walkthrough of `NamedHttpComponentRegistrar` in
+  `docs/camel-http-per-endpoint-pools.md` §10. Verified by `NamedRestClientRegistrarTest`; no `rest-clients` is
+  declared in `application.yml`, so a running app is unchanged.
 - 2026-11-14: **REST header filter** — `RestHeaderFilterStrategy` on the servlet component: response headers only
   from `creed.camel.rest.headers.outbound-allowed` (+ Content-Type), request headers in
   `inbound-denied` (Authorization, Proxy-Authorization, hop-by-hop) never enter the exchange. Before, every request

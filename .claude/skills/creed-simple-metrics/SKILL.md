@@ -61,6 +61,20 @@ Endpoint URI is `<name>:https://<service-id>/...`: TLS is `uri.startsWith("https
 plain HTTP — `ExplicitProtocolHttpComponent` refuses it. The `name:https://` form is source behaviour, not documented:
 `CamelHttpComponentsTest` locks it. Comparison: `docs/camel-http-per-endpoint-pools.md`.
 
+## Pool metric names and batch-declared pools
+
+Every pool's `httpclient` tag comes from `lb/PoolMetricNames` — never a string at the call site: a family's
+base name for its default pool (`loadBalancedPool`, `healthCheckPool`, `camelHttpPool` — what the dashboards
+filter on), `<base>-<name>` for a pool declared in a batch block. Two batch blocks, same shape: a
+`static @Bean` `BeanDefinitionRegistryPostProcessor` reads the names off the `Environment`, binds each block over
+its defaults (`HttpPoolProperties.layered`), resolves collaborators lazily in suppliers.
+- `creed.camel.http-components.<name>` → `NamedHttpComponentRegistrar` (camel component `<name>`, pool, evictor,
+  metrics). Usage + source walkthrough: `docs/camel-http-per-endpoint-pools.md` §6–§10.
+- `creed.partner.rest-clients.<name>` → `NamedRestClientRegistrar` (`<name>Pool` + `<name>RestClient`, a clone of
+  the `@LoadBalanced` `clusterRestClientBuilder` with the audit interceptor innermost). Doc:
+  `docs/lb-rest-client-named-pools.md`. **Always `clone()` that builder** — `clusterRestClient` used to append the
+  audit interceptor to the shared instance, which would hand every cloned client a second one.
+
 ## HttpClient pool lifecycle (`HttpPoolProperties`, all three pools)
 
 `loadBalancedPool`, `healthCheckPool` (`creed.partner[.health-check].http.*`) and `camelHttpPool`

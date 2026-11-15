@@ -1,7 +1,7 @@
 # camel-http：按接口隔离连接池
 
 > 2026-11-11。相关代码：`config/CamelHttpComponents.java`（统一工厂）、`config/NamedHttpComponentRegistrar.java`
-> （按配置注册）、`config/CamelConfig.java`（默认 `http` / `https` 组件）。测试：`CamelHttpComponentsTest`、
+> （按配置注册，源码说明见 §10）、`config/CamelConfig.java`（默认 `http` / `https` 组件）。测试：`CamelHttpComponentsTest`、
 > `NamedHttpComponentRegistrarTest`。源码依据：camel-http **4.23.0**、httpclient5 **5.6.4**。
 
 ## 1. 问题
@@ -138,7 +138,7 @@ creed:
 | `catalog-bulk` | `HttpComponent`（`ExplicitProtocolHttpComponent`），由工厂生成 | Camel 管 |
 | `catalog-bulkConnectionManager` | 该组件的 mTLS 连接池（同一个 `creed.partner.client-bundle`） | `destroyMethod=""`，由组件 `doStop()` 关闭 |
 | `catalog-bulkPoolEvictor` | 空闲 / 过期连接清理（`setConnectionManagerShared(true)` 时 HttpClient 不会自己清理） | `start` / `shutdown` |
-| `catalog-bulkPoolMetrics` | 连接池指标，名字 `camelHttpPool-catalog-bulk` | Boot 自动绑定 |
+| `catalog-bulkPoolMetrics` | 连接池指标，名字 `camelHttpPool-catalog-bulk`（`PoolMetricNames` 按规则生成） | Boot 自动绑定 |
 
 注册方式与 creed-gateway-partner 的 `ClusterClientBeanRegistrar` 相同：`static @Bean` 的
 `BeanDefinitionRegistryPostProcessor`，配置直接从 `Environment` 用 `Binder` 读，协作 bean 在实例化时从
@@ -170,3 +170,89 @@ creed:
   （`fetch-catalog-bulk` / `fetch-order-bulk`）走的是 `RemoteClusterProcessor` 的 `@LoadBalanced` RestClient，
   不经过 camel-http。要隔离哪个接口，配置一个名字并把那个 `<to>` 改成 `<name>:https://...` 即可。
 - 没有按 service-id 自动选池（3.1）。
+
+## 10. 源码说明：`NamedHttpComponentRegistrar`
+
+文件：`src/main/java/com/creed/simple/config/NamedHttpComponentRegistrar.java`（约 120 行），由
+`CamelConfig.namedHttpComponentRegistrar()` 注册。和它配套的是 `CamelHttpComponents`（名字校验、属性绑定、组件工厂）。
+RestClient 那一侧的同构实现是 `lb/NamedRestClientRegistrar`，见 `docs/lb-rest-client-named-pools.md`。
+
+### 10.1 为什么是 `BeanDefinitionRegistryPostProcessor`
+
+bean 的个数和名字取决于配置（`creed.camel.http-components` 下有几个键就注册几组），没法写成固定的 `@Bean` 方法。
+`BeanDefinitionRegistryPostProcessor` 在**所有 bean 实例化之前**运行，能往 registry 里加 bean 定义。之后这些 bean
+和手写的 `@Bean` 没有区别：能被注入、被 Camel 的 Spring registry 按名字查到、被 Boot 的 `MeterBinder` 收集。
+
+两个由此带来的约束：
+
+- **`static @Bean`**（`CamelConfig` 里）。post-processor 必须很早实例化；如果是非静态方法，Spring 得先创建
+  `CamelConfig` 实例，它的 `@Value` / 注入还没就绪，启动日志会出现 "is not eligible for getting processed by all
+  BeanPostProcessors"。
+- **不能注入任何 bean。** 它运行时其他 bean 都还没创建，所以只实现 `EnvironmentAware`（读配置）和
+  `BeanFactoryAware`（之后取 bean），协作对象一律放进 supplier，**到 bean 被实例化时才取**（10.3）。
+
+### 10.2 `postProcessBeanDefinitionRegistry`：读名字、校验、注册
+
+```java
+for (String name : CamelHttpComponents.names(environment)) {        // ① 名字
+    if (registry.containsBeanDefinition(name)) throw …;               // ② 防重名
+    register(registry, name);                                         // ③ 注册四个 bean
+}
+```
+
+1. `CamelHttpComponents.names` 用 `Binder` 把 `creed.camel.http-components` 绑成 `Map<String, Object>`，只取键。
+   此时 `@ConfigurationProperties` 还没生效，只能直接读 `Environment`。每个名字经 `requireValidName` 校验：
+   必须是合法 URI scheme（`[a-z][a-z0-9+.-]*`），不能是 `http` / `https`；不合法就启动失败，消息里带配置键。
+2. 名字就是组件的 bean 名（Camel 按 scheme 找组件 = 按 bean 名找），所以撞上已有 bean 直接失败，而不是悄悄覆盖。
+3. `postProcessBeanFactory` 什么也不做，所有注册都在上一步完成。
+
+### 10.3 `register`：四个 bean 和它们的依赖
+
+```java
+HttpPoolProperties props = CamelHttpComponents.named(environment, name);   // 具名块 > creed.camel.http > 默认值
+String pool = name + "ConnectionManager";
+
+define(pool,                 PoolingHttpClientConnectionManager, () -> connectionManagerFrom(bundle, props), null, "");
+define(name + "PoolEvictor", IdleConnectionEvictor,             () -> evictorFor(bean(pool), props), "start", "shutdown");
+define(name + "PoolMetrics", MeterBinder,                       () -> new ConnectionPoolMetrics(bean(pool),
+                                                                       PoolMetricNames.of(CAMEL_HTTP, name)), null, null);
+define(name,                 HttpComponent,                     () -> createNamed(name, bean(pool), props, shared), null, null);
+```
+
+- **属性在注册时就绑好**（`props` 是普通值），一个键写错，启动时就失败，而不是等到第一次调用。
+  `named()` 现在调用 `HttpPoolProperties.layered(env, 具名前缀, 默认前缀)`：两组 `ConfigurationPropertySource`
+  按顺序叠在一起，先找到的键生效，所以具名块只需写和默认池不同的键。
+- **协作 bean 在 supplier 里取**（`beanFactory.getBean(SslBundles.class)`、`LoadBalancerRoutePlanner`、
+  `ObservationRegistry`、`Logbook`），因为注册时它们还不存在。bean 之间用名字串起来（`bean(pool)`），
+  Spring 按依赖顺序创建：组件、evictor、指标都会先把同名的池建出来。
+- **连接池 `destroyMethod=""`**：池交给组件后，`HttpComponent.doStop()` 会关闭它。如果 Spring 也去关，
+  销毁顺序不定，可能先关掉还在用的池。空字符串的意思是"不要推断 close 方法"。默认组件的池也是这样。
+- **evictor `start` / `shutdown`**：所有池都 `setConnectionManagerShared(true)`，HttpClient 自带的空闲清理
+  对共享池无效，所以单独起一个 `IdleConnectionEvictor`。池先被组件关掉也没关系，清理一个已关闭的池什么也不做。
+- **指标名不是手写的**：`PoolMetricNames.of(CAMEL_HTTP, name)` = `camelHttpPool-<name>`，默认池是
+  `PoolMetricNames.of(CAMEL_HTTP)` = `camelHttpPool`。所有池（camel、负载均衡 RestClient、健康检查）的命名规则
+  都在 `PoolMetricNames` 一处。
+- **`Shared`**：route planner、observation、Logbook、`creed.audit.pool-stats.*` 这些是所有组件共用的设置，
+  打包传给 `CamelHttpComponents.createNamed`，它和默认组件走同一个 `configure()`，所以每个具名组件都有完全相同的
+  exec chain（Logbook → observation → lbAudit）、route planner 和超时。
+  pool-stats 两个值用 `Binder` 而不是 `Environment.getProperty` 读，因为 `"1s"` 要靠 Boot 的转换才能变成 `Duration`。
+
+### 10.4 `define`：没有反射的 bean 定义
+
+`BeanDefinitionBuilder.genericBeanDefinition(type, supplier)` 用 supplier 创建实例，不走构造器反射，
+类型信息也是准的（`getBeanNamesForType(MeterBinder.class)` 能找到 `…PoolMetrics`）。`initMethod` / `destroyMethod`
+直接写在定义上，效果等同于 `@Bean(initMethod=…, destroyMethod=…)`。
+
+### 10.5 `createNamed` 与 `ExplicitProtocolHttpComponent`
+
+具名组件是 `HttpComponent` 的子类，只重写 `createEndpoint`：URI 剩余部分必须以 `https:` / `http:` 开头。
+camel-http 判断走不走 TLS，只看 `uri.startsWith("https")`（`HttpHelper.isSecureConnection`），所以
+`catalog-bulk://catalog-resource/...` 会以明文发给 mTLS 下游。这里在创建端点时直接拒绝。
+
+### 10.6 加一个具名组件时会发生什么
+
+1. 在 yml 里加 `creed.camel.http-components.<name>` 块，只写不同的键。
+2. 启动：名字校验、属性绑定、四个 bean 注册。日志里能看到池和 evictor 创建；Prometheus 出现
+   `httpclient="camelHttpPool-<name>"` 的序列。
+3. 把要隔离的 `<to>` 改成 `<name>:https://<service-id>/...`。不改路由，新组件就不会被用到，只是多一个空池。
+

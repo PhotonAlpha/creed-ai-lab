@@ -27,7 +27,9 @@ import org.springframework.web.client.RestClient;
  * buffering request factory + pool metrics in one self-managing object (see
  * {@link RestClientSuppliers#pool}). Tunables come from the type-safe {@link PartnerProps} binding, so
  * adding another client stack is one {@code pool(...)} call instead of four hand-wired beans with
- * {@code @Qualifier} strings. The pools carry the mTLS material (client cert + CA truststore) from the
+ * {@code @Qualifier} strings — or, for more of the same kind, one {@code creed.partner.rest-clients.<name>}
+ * block ({@link NamedRestClientRegistrar}). Metric names are never typed here: {@link PoolMetricNames}.
+ * The pools carry the mTLS material (client cert + CA truststore) from the
  * SSL bundle {@code creed.partner.client-bundle}, so the resource servers' self-signed HTTPS is accepted.
  */
 @Configuration(proxyBeanMethods = false)
@@ -44,14 +46,16 @@ public class LoadBalancedRestClientConfiguration {
     /** Business/cluster stack: the larger pool + buffering factory + {@code loadBalancedPool} metrics. */
     @Bean(destroyMethod = "close")
     ManagedHttpClientPool clusterPool(SslBundles sslBundles, PartnerProps props) {
-        return RestClientSuppliers.pool(sslBundles, props.clientBundle(), props.http(), "loadBalancedPool");
+        return RestClientSuppliers.pool(sslBundles, props.clientBundle(), props.http(),
+                PoolMetricNames.of(PoolMetricNames.LOAD_BALANCED));
     }
 
     /** Health-check stack: the smaller/tighter pool + buffering factory + {@code healthCheckPool} metrics. */
     @Bean(destroyMethod = "close")
     ManagedHttpClientPool healthCheckPool(SslBundles sslBundles, PartnerProps props) {
         return RestClientSuppliers.pool(
-                sslBundles, props.clientBundle(), props.healthCheck().http(), "healthCheckPool");
+                sslBundles, props.clientBundle(), props.healthCheck().http(),
+                PoolMetricNames.of(PoolMetricNames.HEALTH_CHECK));
     }
 
     /**
@@ -78,9 +82,17 @@ public class LoadBalancedRestClientConfiguration {
     RestClient clusterRestClient(
             @LoadBalanced RestClient.Builder clusterRestClientBuilder,
             LoadBalancerAuditInterceptor auditInterceptor) {
-        return clusterRestClientBuilder
+        // clone(): NamedRestClientRegistrar clones this builder too — appending to the shared instance would
+        // hand every named client a second audit interceptor
+        return clusterRestClientBuilder.clone()
                 .requestInterceptor(auditInterceptor)
                 .build();
+    }
+
+    /** {@code creed.partner.rest-clients.<name>}: one more pool + RestClient each, metrics named by rule. */
+    @Bean
+    static NamedRestClientRegistrar namedRestClientRegistrar() {
+        return new NamedRestClientRegistrar();
     }
 
     @Bean

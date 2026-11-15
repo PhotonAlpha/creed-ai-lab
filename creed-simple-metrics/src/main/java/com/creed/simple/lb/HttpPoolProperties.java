@@ -1,8 +1,17 @@
 package com.creed.simple.lb;
 
+import org.springframework.boot.context.properties.bind.BindHandler;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.DefaultValue;
+import org.springframework.boot.context.properties.source.ConfigurationPropertyName;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySource;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
+import org.springframework.core.env.Environment;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * The full set of tunables for one HTTP client "stack" (pool + request factory): pool sizing, the four
@@ -41,6 +50,21 @@ public record HttpPoolProperties(
         @DefaultValue("30s") Duration keepAlive,
         @DefaultValue("30s") Duration maxIdleTime,
         @DefaultValue("5s") Duration evictionInterval) {
+
+    /**
+     * One named pool's properties: every key under {@code namedPrefix} wins, every key it leaves out comes from
+     * {@code defaultsPrefix}, and what neither sets takes the {@link DefaultValue defaults}. The batch blocks
+     * ({@code creed.camel.http-components.<name>}, {@code creed.partner.rest-clients.<name>}) are bound this way.
+     */
+    public static HttpPoolProperties layered(Environment environment, String namedPrefix, String defaultsPrefix) {
+        List<ConfigurationPropertySource> sources = new ArrayList<>();
+        Iterable<ConfigurationPropertySource> all = ConfigurationPropertySources.get(environment);
+        // first source holding a key wins: the named block, then the default block
+        all.forEach(s -> sources.add(s.withPrefix(namedPrefix)));
+        all.forEach(s -> sources.add(s.withPrefix(defaultsPrefix)));
+        return new Binder(sources).bindOrCreate(ConfigurationPropertyName.EMPTY,
+                Bindable.of(HttpPoolProperties.class), BindHandler.DEFAULT);
+    }
 
     /** Pool sizing + timeouts only; the lifecycle knobs take their {@link DefaultValue defaults}. */
     public static HttpPoolProperties of(int maxTotal, int maxPerRoute, Duration connectTimeout,

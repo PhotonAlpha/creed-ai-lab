@@ -3,6 +3,7 @@ package com.creed.simple.config;
 import com.creed.metrics.ConnectionPoolMetrics;
 import com.creed.simple.lb.HttpPoolProperties;
 import com.creed.simple.lb.LoadBalancerRoutePlanner;
+import com.creed.simple.lb.PoolMetricNames;
 import com.creed.simple.lb.RestClientSuppliers;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.observation.ObservationRegistry;
@@ -88,7 +89,7 @@ public class NamedHttpComponentRegistrar
         define(registry, name + "PoolEvictor", IdleConnectionEvictor.class,
                 () -> RestClientSuppliers.evictorFor(bean(pool), props), "start", "shutdown");
         define(registry, name + "PoolMetrics", MeterBinder.class,
-                () -> new ConnectionPoolMetrics(bean(pool), "camelHttpPool-" + name), null, null);
+                () -> new ConnectionPoolMetrics(bean(pool), PoolMetricNames.of(PoolMetricNames.CAMEL_HTTP, name)), null, null);
         // Binder, not Environment.getProperty: "1s" -> Duration needs Boot's conversion
         Binder binder = Binder.get(environment);
         define(registry, name, HttpComponent.class, () -> CamelHttpComponents.createNamed(name, bean(pool), props,
