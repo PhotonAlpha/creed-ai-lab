@@ -16,13 +16,19 @@ final class SplunkTestSupport {
     }
 
     static SplunkProperties.Target target(String id, String loginUrl, String tunnel, String password) {
-        return new SplunkProperties.Target(id, id + " label", loginUrl, "admin", null, null, null, tunnel, false, password);
+        return target(id, loginUrl, tunnel, password, null);
+    }
+
+    static SplunkProperties.Target target(String id, String loginUrl, String tunnel, String password,
+                                          SplunkProperties.TargetBlock block) {
+        return new SplunkProperties.Target(id, id + " label", loginUrl, "admin", null, null, null, tunnel, false, password,
+                block, null);
     }
 
     static SplunkProperties splunk(boolean enabled, boolean tlsInsecure, String caFile, String blockWindows,
                                    List<SplunkProperties.Target> targets) {
         return new SplunkProperties(enabled, null, null, null, true, Duration.ofSeconds(2), Duration.ofSeconds(3),
                 tlsInsecure, caFile, null, targets, new SplunkProperties.Block(blockWindows, "Asia/Shanghai"),
-                new SplunkProperties.Audit(null, null, null, null));
+                new SplunkProperties.Audit(null, null, null, null), null);
     }
 }

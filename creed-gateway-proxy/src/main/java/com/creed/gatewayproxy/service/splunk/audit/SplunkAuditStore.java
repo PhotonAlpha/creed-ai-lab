@@ -13,8 +13,13 @@ public interface SplunkAuditStore extends AutoCloseable {
 
     void save(SplunkAuditRow row);
 
-    /** Newest first. */
+    /**
+     * Newest first, for the page: rows whose event type starts with {@link #ADMIN_PREFIX} (the admin API)
+     * are left out — they stay in the store, readable in the database.
+     */
     List<SplunkAuditRow> list(int limit);
+
+    String ADMIN_PREFIX = "ADMIN_";
 
     @Override
     default void close() {

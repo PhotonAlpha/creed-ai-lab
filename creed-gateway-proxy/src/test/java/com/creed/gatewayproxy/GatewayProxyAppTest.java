@@ -53,7 +53,9 @@ class GatewayProxyAppTest {
                 .jsonPath("$.targets[0].passwordSet").isEqualTo(false)
                 .jsonPath("$.targets[0].configured").isEqualTo(true)
                 .jsonPath("$.block.blocked").isEqualTo(false)
-                .jsonPath("$.block.windows.length()").isEqualTo(0);
+                .jsonPath("$.block.windows.length()").isEqualTo(0)
+                .jsonPath("$.targets[0].block.windows.length()").isEqualTo(0)
+                .jsonPath("$.client.ip").isNotEmpty();
     }
 
     @Test

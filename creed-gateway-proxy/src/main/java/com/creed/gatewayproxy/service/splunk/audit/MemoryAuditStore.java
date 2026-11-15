@@ -25,6 +25,11 @@ public class MemoryAuditStore implements SplunkAuditStore {
 
     @Override
     public synchronized List<SplunkAuditRow> list(int limit) {
-        return rows.stream().limit(limit).toList();
+        return rows.stream().filter(r -> !r.eventType().startsWith(ADMIN_PREFIX)).limit(limit).toList();
+    }
+
+    /** Every row, the admin API's included (the page never gets these). */
+    public synchronized List<SplunkAuditRow> listAll() {
+        return List.copyOf(rows);
     }
 }

@@ -48,6 +48,29 @@ The Env Matrix front door, replacing the Node BFF. User docs are in `README.md`.
 **Not verified:** a real Splunk; the mysql store (no MySQL here; the same code path as pg except
 DDL and `created_at`).
 
+- **New by request (2026-11-15):**
+  - per-target block windows (`targets[].block.windows` / `.zone`, inheriting what is left out);
+    the target is now resolved before the block check;
+  - date-range windows (`yyyy-MM-dd HH:mm[:ss] - yyyy-MM-dd HH:mm[:ss]`), mixable with daily ones;
+    `nextChange` walks window edges instead of stepping minutes over one day;
+  - the caller's forward-confirmed reverse-DNS name on the page and in the audit (`client_host`).
+  Verified against the running app (mock Splunk): SIT blocked by its own date range (403,
+  `Retry-After` to 11-17 08:30, code not spent), UAT took the same code; `127.0.0.1` → `localhost`
+  in `/totp` and the audit. **Not verified:** the page in a browser (Chrome automation timed out),
+  the `alter table` on a real pg / mysql audit table.
+- **New by request (2026-11-15): allowed windows + admin API.** `targets[].allow.windows` = the only
+  times a target issues sessions (`403 not_available`, windows never sent to the page);
+  `/api/env-matrix/splunk/admin/targets[/{id}/availability]` GET/PUT/DELETE with `Bearer SPLUNK_ADMIN_TOKEN`
+  replaces them at runtime (memory only). `SplunkAdmin` (token hash, constant-time compare, 5 wrong / 5 min
+  per IP → 429), `Availability` (block + allowed, `nextChange` over both). Error handlers moved to
+  `SplunkApiErrors` (shared by both controllers). Verified over HTTP: 401 without/with a wrong token,
+  PUT → SIT 403 `not_available` "available again at 2026-11-16 20:00", `/totp` does not contain the
+  windows, a window covering now → login works, DELETE → back to config, the page's audit list has no
+  ADMIN rows. **Not verified:** a restart wiping the API's change (by design), the page in a browser.
+- `GatewayProxyAppTest.totpInfoHasSixtySecondStepsTargetsAndBlock` fails, and did before 2026-11-15:
+  the committed yml defaults the TOTP period to 30 s and lists UAT/SIT, the test expects 60 s and a
+  `default` target.
+
 ## Open items
 
 - Retire the Node BFF's broker (or port the block window to it) once the jar is deployed.
@@ -74,5 +97,13 @@ DDL and `created_at`).
 - **No spring-jdbc on purpose.** With it, `DataSourceAutoConfiguration` demands a URL even for the
   memory store. The JDBC store builds its own Hikari pool.
 - **The broker blocks** (JDBC, the login) and runs on `boundedElastic`. Never call it from a Netty thread.
+  The same goes for building `SplunkBroker.Client` in `SplunkController`: it does the reverse lookup,
+  so `GET /totp` runs on `boundedElastic` too.
+- **Admin rows are hidden by event type.** `SplunkAuditStore.list` drops `ADMIN_*` (the page's list);
+  a new admin event must keep that prefix or it shows up on the page. The Node BFF reads the same pg
+  table without that filter.
+- **`client_host` is not in the Node BFF's DDL.** Both JDBC stores add it at startup (pg: `add column
+  if not exists`; MySQL has no such clause — checked in `information_schema`). The one-time copy from
+  `public.splunk_audit` uses `SplunkAuditRow.LEGACY_COLUMNS`, which lack it.
 - `X-Forwarded-*` needs `trusted-proxies`, which also trusts the client's own headers. Off.
 - Building a jar needs `package spring-boot:repackage` (repo-wide).

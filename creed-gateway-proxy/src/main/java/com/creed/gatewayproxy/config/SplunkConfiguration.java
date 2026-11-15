@@ -11,6 +11,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
 import com.creed.gatewayproxy.service.splunk.BlockWindows;
+import com.creed.gatewayproxy.service.splunk.ClientHostResolver;
+import com.creed.gatewayproxy.service.splunk.SplunkAdmin;
 import com.creed.gatewayproxy.service.splunk.SplunkBroker;
 import com.creed.gatewayproxy.service.splunk.SplunkLoginClient;
 import com.creed.gatewayproxy.service.splunk.SplunkSecrets;
@@ -82,13 +84,32 @@ public class SplunkConfiguration {
         return new BlockWindows(splunk.block().windows(), ZoneId.of(splunk.block().zone()));
     }
 
+    @Bean(destroyMethod = "close")
+    ClientHostResolver clientHostResolver(SplunkProperties splunk, Clock clock) {
+        return new ClientHostResolver(splunk.clientHost(), clock);
+    }
+
     @Bean
     SplunkBroker splunkBroker(Totp totp, SplunkLoginClient loginClient, SplunkProperties splunk, SplunkSecrets secrets,
                               SplunkAuditStore store, BlockWindows block, Clock clock) {
-        log.info("Splunk broker: mode={}, targets={}, default={}, audit={}, block={} ({}), totp period={}s",
-                loginClient.mode(), splunk.targets().stream().map(t -> t.id() + (secrets.password(t) != null ? "" : "(no password)")).toList(),
-                splunk.defaultTarget(), splunk.audit().store(), block.windows().isEmpty() ? "none" : block, block.zone(),
-                totp.config().periodSeconds());
-        return new SplunkBroker(totp, loginClient, splunk, secrets, store, block, clock);
+        SplunkBroker broker = new SplunkBroker(totp, loginClient, splunk, secrets, store, block, clock);
+        log.info("Splunk broker: mode={}, targets={}, default={}, audit={}, totp period={}s",
+                loginClient.mode(), splunk.targets().stream().map(t -> t.id() + (secrets.password(t) != null ? "" : "(no password)")
+                        + " block=" + describe(broker.blockOf(t)) + (t.block() == null ? "" : " (own)")
+                        + (t.allow() == null ? "" : " allow=" + t.allow().windows())).toList(),
+                splunk.defaultTarget(), splunk.audit().store(), totp.config().periodSeconds());
+        return broker;
+    }
+
+    @Bean
+    SplunkAdmin splunkAdmin(SplunkBroker broker, SplunkProperties splunk, SplunkSecrets secrets, Clock clock) {
+        SplunkAdmin admin = new SplunkAdmin(broker, splunk, secrets.adminToken(), clock);
+        log.info("Splunk admin API (/api/env-matrix/splunk/admin/**): {}", admin.enabled() ? "on"
+                : "off — " + SplunkSecrets.ADMIN_TOKEN_VARIABLE + " not supplied");
+        return admin;
+    }
+
+    private static String describe(BlockWindows block) {
+        return (block.windows().isEmpty() ? "none" : block.toString()) + " " + block.zone();
     }
 }

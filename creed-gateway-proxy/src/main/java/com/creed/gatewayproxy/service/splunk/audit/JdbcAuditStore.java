@@ -90,6 +90,8 @@ public class JdbcAuditStore implements SplunkAuditStore {
                         duration_ms        bigint,
                         created_at         timestamptz  not null default now()
                     )""".formatted(table));
+            // Not in the Node BFF's DDL: a table it created gets the column here.
+            st.execute("alter table " + table + " add column if not exists client_host varchar(255)");
             st.execute("create index if not exists ix_splunk_audit_created_at on " + table + " (created_at desc)");
             st.execute("create index if not exists ix_splunk_audit_correlation on " + table + " (correlation_id)");
             boolean legacy;
@@ -100,7 +102,7 @@ public class JdbcAuditStore implements SplunkAuditStore {
                 empty = rs.getBoolean(2);
             }
             if (legacy && empty) {
-                String cols = "id, " + String.join(", ", SplunkAuditRow.COLUMNS) + ", created_at";
+                String cols = "id, " + String.join(", ", SplunkAuditRow.LEGACY_COLUMNS) + ", created_at";
                 int copied = st.executeUpdate("insert into " + table + " (" + cols + ") select " + cols + " from public.splunk_audit order by id");
                 // Ids were copied verbatim, so the sequence has to move past them.
                 st.execute("select setval(pg_get_serial_sequence('" + table + "', 'id'), coalesce(max(id), 0) + 1, false) from " + table);
@@ -136,6 +138,14 @@ public class JdbcAuditStore implements SplunkAuditStore {
                         index ix_splunk_audit_created_at (created_at),
                         index ix_splunk_audit_correlation (correlation_id)
                     ) engine = InnoDB default charset = utf8mb4""");
+            // MySQL has no "add column if not exists"; a table the Node BFF created lacks it.
+            boolean missing;
+            try (ResultSet rs = st.executeQuery("select count(*) from information_schema.columns where table_schema = database()"
+                    + " and table_name = 'splunk_audit' and column_name = 'client_host'")) {
+                rs.next();
+                missing = rs.getInt(1) == 0;
+            }
+            if (missing) st.execute("alter table splunk_audit add column client_host varchar(255)");
         }
     }
 
@@ -159,7 +169,8 @@ public class JdbcAuditStore implements SplunkAuditStore {
 
     @Override
     public List<SplunkAuditRow> list(int limit) {
-        String sql = "select id, " + String.join(", ", SplunkAuditRow.COLUMNS) + ", created_at from " + table + " order by id desc limit ?";
+        String sql = "select id, " + String.join(", ", SplunkAuditRow.COLUMNS) + ", created_at from " + table
+                + " where event_type not like '" + ADMIN_PREFIX + "%' order by id desc limit ?";
         try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setInt(1, limit);
             List<SplunkAuditRow> out = new ArrayList<>();
@@ -167,7 +178,7 @@ public class JdbcAuditStore implements SplunkAuditStore {
                 while (rs.next()) {
                     out.add(new SplunkAuditRow(rs.getLong("id"), rs.getString("correlation_id"), rs.getString("event_type"),
                             rs.getString("outcome"), rs.getString("reason"), rs.getString("detail"), rs.getString("client_ip"),
-                            rs.getString("forwarded_for"), rs.getString("user_agent"), longOrNull(rs, "server_step"),
+                            rs.getString("client_host"), rs.getString("forwarded_for"), rs.getString("user_agent"), longOrNull(rs, "server_step"),
                             longOrNull(rs, "matched_step"), rs.getString("splunk_mode"), intOrNull(rs, "http_status"),
                             rs.getString("cookie_fingerprint"), longOrNull(rs, "duration_ms"), createdAt(rs), null));
                 }

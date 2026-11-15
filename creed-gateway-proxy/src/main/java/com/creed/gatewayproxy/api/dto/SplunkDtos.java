@@ -11,21 +11,45 @@ public final class SplunkDtos {
     /** {@code GET /splunk/totp}. */
     public record TotpInfo(boolean configured, int periodSeconds, int digits, int allowedDriftSteps, long serverTimeMillis,
                            boolean codeVisible, String splunkMode, boolean splunkConfigured, List<PublicTarget> targets,
-                           String defaultTarget, String scriptCookieName, BlockInfo block) {
+                           String defaultTarget, String scriptCookieName, BlockInfo block, ClientInfo client) {
+    }
+
+    /**
+     * The caller as this server sees it: the TCP peer (a proxy in front shows as the proxy) and its
+     * forward-confirmed reverse-DNS name, null when there is none.
+     */
+    public record ClientInfo(String ip, String host) {
     }
 
     /** What the page may know about a target — never the password, only whether one is set. */
     public record PublicTarget(String id, String label, String loginUrl, String username, boolean passwordSet,
                                boolean configured, String sessionCookie, String scriptCookieName, String scriptCookiePath,
-                               String tunnel, boolean tunnelDefault) {
+                               String tunnel, boolean tunnelDefault, BlockInfo block) {
     }
 
     /**
-     * The block windows and whether one is in force.
+     * The block windows and whether one is in force — broker-wide in {@code TotpInfo.block}, and the
+     * ones that actually apply in each {@code PublicTarget.block}. A target's {@code blocked} also covers
+     * being outside its allowed windows ({@code reason = not_available}); those windows are not listed.
      *
      * @param changesAtMillis server epoch millis at which {@code blocked} flips; null when it never does
      */
-    public record BlockInfo(List<String> windows, String zone, boolean blocked, Long changesAtMillis) {
+    public record BlockInfo(List<String> windows, String zone, boolean blocked, Long changesAtMillis, String reason) {
+    }
+
+    /**
+     * Admin API: a target's allowed windows ({@code /admin/targets/{id}/availability}). Never sent to the page.
+     *
+     * @param windows   the spec as stored ({@code ""}: unrestricted)
+     * @param source    {@code config} or {@code api}
+     * @param available whether the target issues a session right now (allowed and not blocked)
+     */
+    public record Availability(String target, String windows, String zone, String source, String updatedAt,
+                               String updatedBy, boolean available, String reason, Long changesAtMillis) {
+    }
+
+    /** Admin API: {@code PUT …/availability} body. */
+    public record AvailabilityUpdate(String windows) {
     }
 
     /** {@code GET /splunk/totp/current}. */

@@ -142,6 +142,40 @@ class SplunkBrokerTest {
     }
 
     @Test
+    void eachTargetIsBlockedByItsOwnWindows() {
+        // UAT: the broker-wide 22:00-09:00. SIT: its own 12:00-13:00, zone inherited. DEV: never blocked.
+        SplunkProperties splunk = SplunkTestSupport.splunk(false, true, null, "22:00-09:00", List.of(
+                SplunkTestSupport.target("UAT", "https://splunk.uat:8000/", null),
+                SplunkTestSupport.target("SIT", "https://splunk.sit:8000/", null, null, new SplunkProperties.TargetBlock("12:00-13:00", null)),
+                SplunkTestSupport.target("DEV", "https://splunk.dev:8000/", null, null, new SplunkProperties.TargetBlock("", null))));
+        SplunkBroker broker = broker(NOON, splunk, new SplunkLoginClient(splunk), new MockEnvironment());
+
+        assertThatThrownBy(() -> broker.issue(req(code(broker), "SIT", null), CLIENT))
+                .isInstanceOfSatisfying(BrokerException.class, e -> {
+                    assertThat(e.error()).isEqualTo("blocked");
+                    assertThat(e.getMessage()).contains("SIT label", "12:00-13:00", "Asia/Shanghai", "13:00");
+                    assertThat(e.headers()).containsEntry("Retry-After", String.valueOf(3600));
+                });
+        assertThat(store.list(1).getFirst().detail()).startsWith("target SIT: inside block window 12:00-13:00");
+        // the code was not spent on SIT, and noon is outside UAT's windows
+        assertThat(broker.issue(req(code(broker), "UAT", null), CLIENT).target()).isEqualTo("UAT");
+
+        assertThat(broker.info().block().windows()).as("broker-wide").containsExactly("22:00-09:00");
+        assertThat(broker.info().targets()).extracting(t -> t.id() + "=" + t.block().windows() + "/" + t.block().blocked())
+                .containsExactly("UAT=[22:00-09:00]/false", "SIT=[12:00-13:00]/true", "DEV=[]/false");
+    }
+
+    @Test
+    void theClientsHostIsAuditedAndEchoed() {
+        SplunkBroker broker = mockBroker(NOON, "https://splunk.uat:8000/");
+        SplunkBroker.Client client = new SplunkBroker.Client("10.0.0.7", "pc-0042.corp.example", null, "junit");
+        broker.issue(req(code(broker), null, null), client);
+        assertThat(store.list(10)).extracting(SplunkAuditRow::clientHost).containsOnly("pc-0042.corp.example");
+        assertThat(broker.info(client).client()).isEqualTo(new SplunkDtos.ClientInfo("10.0.0.7", "pc-0042.corp.example"));
+        assertThat(broker.info().client()).isNull();
+    }
+
+    @Test
     void refusalsBeforeTheOtpLeaveTheCodeUsable() {
         SplunkBroker broker = mockBroker(NOON, "https://splunk.uat:8000/");
         String code = code(broker);

@@ -6,14 +6,13 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.format.DateTimeFormatter;
+import java.time.ZoneId;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -47,7 +46,14 @@ public class SplunkBroker {
     private final SplunkProperties splunk;
     private final SplunkSecrets secrets;
     private final SplunkAuditStore store;
+    /** The broker-wide windows, and every target's own where it sets them (id → windows). */
     private final BlockWindows block;
+    private final Map<String, BlockWindows> blocks;
+    /**
+     * id → the windows outside which the target issues nothing. Starts from {@code targets[].allow}; the
+     * admin API replaces it. Memory only: a restart goes back to the configuration.
+     */
+    private final Map<String, Allowed> allowed = new ConcurrentHashMap<>();
     private final Clock clock;
     /** client ip → times of recent failed verifications. In-process: per instance, lost on restart. */
     private final Map<String, Deque<Long>> failures = new ConcurrentHashMap<>();
@@ -74,20 +80,118 @@ public class SplunkBroker {
         this.secrets = secrets;
         this.store = store;
         this.block = block;
+        Map<String, BlockWindows> own = new LinkedHashMap<>();
+        for (SplunkProperties.Target t : splunk.targets()) {
+            SplunkProperties.Block b = splunk.blockOf(t);
+            own.put(t.id(), t.block() == null ? block : new BlockWindows(b.windows(), ZoneId.of(b.zone())));
+        }
+        this.blocks = Map.copyOf(own);
         this.clock = clock;
+        for (SplunkProperties.Target t : splunk.targets()) {
+            String spec = t.allow() == null ? "" : t.allow().windows();
+            allowed.put(t.id(), new Allowed(new BlockWindows(spec, blockOf(t).zone()), "config", null, null));
+        }
     }
 
-    /** Who asked — recorded, never trusted. */
-    public record Client(String ip, String forwardedFor, String userAgent) {
+    /**
+     * A target's allowed windows and where they came from.
+     *
+     * @param source    {@code config} ({@code targets[].allow}) or {@code api}
+     * @param updatedBy the caller's IP (and host) for an API change
+     */
+    public record Allowed(BlockWindows windows, String source, Instant updatedAt, String updatedBy) {
+    }
+
+    /**
+     * Who asked — recorded, never trusted.
+     *
+     * @param host the reverse lookup of {@code ip} (ClientHostResolver), null when there is none
+     */
+    public record Client(String ip, String host, String forwardedFor, String userAgent) {
+
+        public Client(String ip, String forwardedFor, String userAgent) {
+            this(ip, null, forwardedFor, userAgent);
+        }
+    }
+
+    /** The block windows that apply to a target. */
+    public BlockWindows blockOf(SplunkProperties.Target t) {
+        return blocks.getOrDefault(t.id(), block);
+    }
+
+    /** Block and allowed windows together: what decides whether {@code t} issues a session. */
+    public Availability availabilityOf(SplunkProperties.Target t) {
+        return new Availability(blockOf(t), allowed.get(t.id()).windows());
+    }
+
+    // --- Admin (SplunkAdmin checks the token before any of these) -----------------------------------
+
+    public Allowed allowedOf(String targetId) {
+        return allowed.get(adminTarget(targetId).id());
+    }
+
+    /**
+     * Replaces a target's allowed windows, at once, for every later request. Blank = no restriction.
+     *
+     * @throws BrokerException 404 for an unknown target, 400 for windows that do not parse
+     */
+    public Allowed setAllowed(String targetId, String spec, Client client) {
+        SplunkProperties.Target t = adminTarget(targetId);
+        BlockWindows windows;
+        try {
+            windows = new BlockWindows(spec == null ? "" : spec.strip(), blockOf(t).zone());
+        } catch (IllegalArgumentException e) {
+            throw new BrokerException(400, "validation_failed", e.getMessage().replace("creed.splunk.block.windows", "windows"));
+        }
+        return replaceAllowed(t, new Allowed(windows, "api", clock.instant(), who(client)), client);
+    }
+
+    /** Back to {@code targets[].allow}. */
+    public Allowed resetAllowed(String targetId, Client client) {
+        SplunkProperties.Target t = adminTarget(targetId);
+        String spec = t.allow() == null ? "" : t.allow().windows();
+        return replaceAllowed(t, new Allowed(new BlockWindows(spec, blockOf(t).zone()), "config", clock.instant(), who(client)), client);
+    }
+
+    private Allowed replaceAllowed(SplunkProperties.Target t, Allowed next, Client client) {
+        Allowed previous = allowed.put(t.id(), next);
+        String was = previous.windows().windows().isEmpty() ? "unrestricted" : previous.windows().toString();
+        String now = next.windows().windows().isEmpty() ? "unrestricted" : next.windows().toString();
+        store.save(row(UUID.randomUUID().toString(), ADMIN_EVENT, client).outcome("SUCCESS")
+                .detail(truncate("target " + t.id() + " allowed: " + now + " (" + next.source() + "; was " + was + ")", 512)).build());
+        log.info("allowed windows of {} set by {}: {} ({}; was {})", t.id(), who(client), now, next.source(), was);
+        return next;
+    }
+
+    /** Audit rows of the admin API: written like any other, left out of what the page reads. */
+    public static final String ADMIN_EVENT = SplunkAuditStore.ADMIN_PREFIX + "ALLOW";
+
+    void auditAdminRefusal(Client client, String reason, String detail) {
+        store.save(fail(row(UUID.randomUUID().toString(), ADMIN_EVENT, client), reason, detail));
+    }
+
+    private SplunkProperties.Target adminTarget(String id) {
+        return splunk.targets().stream().filter(t -> t.id().equals(id)).findFirst()
+                .orElseThrow(() -> new BrokerException(404, "unknown_target", "no Splunk login target '" + id + "'"));
+    }
+
+    private static String who(Client client) {
+        return client.ip() + (client.host() == null ? "" : " (" + client.host() + ")");
     }
 
     public SplunkDtos.TotpInfo info() {
+        return info(null);
+    }
+
+    /** @param client the caller, echoed back so the page can show its address; null leaves it out */
+    public SplunkDtos.TotpInfo info(Client client) {
         long now = clock.millis();
+        Instant at = Instant.ofEpochMilli(now);
         return new SplunkDtos.TotpInfo(totp.configured(), totp.config().periodSeconds(), totp.config().digits(),
                 totp.config().allowedDriftSteps(), now, totp.config().exposeCurrentCode() && totp.configured(),
                 loginClient.mode(), splunk.targets().stream().anyMatch(this::configured),
-                splunk.targets().stream().map(this::publicTarget).toList(), splunk.defaultTarget(), splunk.scriptCookieName(),
-                blockInfo(Instant.ofEpochMilli(now)));
+                splunk.targets().stream().map(t -> publicTarget(t, at)).toList(), splunk.defaultTarget(), splunk.scriptCookieName(),
+                blockInfo(block, at), client == null ? null : new SplunkDtos.ClientInfo(client.ip(), client.host()));
     }
 
     public SplunkDtos.TotpCode currentCode() {
@@ -99,6 +203,7 @@ public class SplunkBroker {
                 totp.config().periodSeconds(), clock.millis());
     }
 
+    /** The page's audit list — without the admin API's rows (SplunkAuditStore.list leaves them out). */
     public List<SplunkAuditRow> audit(int limit) {
         List<SplunkAuditRow> rows = store.list(Math.min(Math.max(limit, 1), 500));
         synchronized (held) {
@@ -173,18 +278,26 @@ public class SplunkBroker {
         Instant now = clock.instant();
 
         // --- 0. Everything that can refuse without spending the code ---------------------------
-        BlockWindows.Window window = block.blockedAt(now);
-        if (window != null) {
-            store.save(fail(row(correlationId, "SPLUNK_LOGIN", client).splunkMode(loginClient.mode()), "blocked",
-                    "inside block window " + window + " (" + block.zone() + ")"));
-            Instant next = block.nextChange(now);
-            String until = next == null ? "" : " — allowed again at " + DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
-                    .format(next.atZone(block.zone()));
-            throw new BrokerException(403, "blocked", "Splunk sessions are not issued during " + window + " (" + block.zone()
-                    + ")" + until + " — the code was not used",
-                    Map.of("Retry-After", String.valueOf(block.secondsUntilChange(now))));
-        }
+        // The target first: the block windows are the target's.
         SplunkProperties.Target target = resolveTarget(request.target());
+        Availability availability = availabilityOf(target);
+        Availability.Refusal refusal = availability.refusalAt(now);
+        if (refusal != null) {
+            BlockWindows targetBlock = availability.block();
+            Instant next = availability.nextChange(now);
+            String until = next == null ? "" : " — available again at " + targetBlock.describeChange(now, next);
+            // The allowed windows are the admin's: neither the message nor the page-visible audit detail names them.
+            String during = refusal.reason() == Availability.Reason.BLOCKED
+                    ? "during " + refusal.window() + " (" + targetBlock.zone() + ")" : "at this time";
+            String error = refusal.reason() == Availability.Reason.BLOCKED ? "blocked" : "not_available";
+            store.save(fail(row(correlationId, "SPLUNK_LOGIN", client).splunkMode(loginClient.mode()), error,
+                    "target " + target.id() + ": " + (refusal.reason() == Availability.Reason.BLOCKED
+                            ? "inside block window " + refusal.window() + " (" + targetBlock.zone() + ")"
+                            : "outside its allowed windows")));
+            throw new BrokerException(403, error, "Splunk sessions for '" + target.label() + "' are not issued " + during
+                    + until + " — the code was not used",
+                    Map.of("Retry-After", String.valueOf(availability.secondsUntilChange(now))));
+        }
         validateCookie("sessionCookie", request.sessionCookie());
         validateCookie("scriptCookieName", request.scriptCookieName());
         boolean viaTunnel = request.viaTunnel() != null ? request.viaTunnel() : target.tunnelDefault();
@@ -317,16 +430,28 @@ public class SplunkBroker {
         return !splunk.enabled() || (t.loginUrl() != null && t.username() != null && secrets.password(t) != null);
     }
 
-    private SplunkDtos.PublicTarget publicTarget(SplunkProperties.Target t) {
+    private SplunkDtos.PublicTarget publicTarget(SplunkProperties.Target t, Instant now) {
         return new SplunkDtos.PublicTarget(t.id(), t.label(), t.loginUrl(), t.username(), secrets.password(t) != null,
                 configured(t), splunk.sessionCookieOf(t), splunk.scriptCookieNameOf(t), splunk.scriptCookiePathOf(t),
-                t.tunnel() == null ? null : t.tunnelAddress().toString(), t.tunnelDefault());
+                t.tunnel() == null ? null : t.tunnelAddress().toString(), t.tunnelDefault(), blockInfo(availabilityOf(t), now));
     }
 
-    private SplunkDtos.BlockInfo blockInfo(Instant now) {
+    /** The broker-wide block windows. */
+    private static SplunkDtos.BlockInfo blockInfo(BlockWindows block, Instant now) {
         Instant next = block.nextChange(now);
         return new SplunkDtos.BlockInfo(block.windows().stream().map(BlockWindows.Window::toString).toList(),
-                block.zone().getId(), block.blockedAt(now) != null, next == null ? null : next.toEpochMilli());
+                block.zone().getId(), block.blockedAt(now) != null, next == null ? null : next.toEpochMilli(),
+                block.blockedAt(now) != null ? "blocked" : null);
+    }
+
+    /** A target's: its block windows, and whether it is refused now for either reason — never its allowed windows. */
+    private static SplunkDtos.BlockInfo blockInfo(Availability availability, Instant now) {
+        Availability.Refusal refusal = availability.refusalAt(now);
+        Instant next = availability.nextChange(now);
+        BlockWindows block = availability.block();
+        return new SplunkDtos.BlockInfo(block.windows().stream().map(BlockWindows.Window::toString).toList(),
+                block.zone().getId(), refusal != null, next == null ? null : next.toEpochMilli(),
+                refusal == null ? null : refusal.reason() == Availability.Reason.BLOCKED ? "blocked" : "not_available");
     }
 
     private SplunkProperties.Target resolveTarget(String id) {
@@ -355,7 +480,7 @@ public class SplunkBroker {
 
     private static SplunkAuditRow.SplunkAuditRowBuilder row(String correlationId, String eventType, Client client) {
         return SplunkAuditRow.builder().correlationId(correlationId).eventType(eventType)
-                .clientIp(truncate(client.ip(), 64)).forwardedFor(truncate(client.forwardedFor(), 256))
+                .clientIp(truncate(client.ip(), 64)).clientHost(truncate(client.host(), 255)).forwardedFor(truncate(client.forwardedFor(), 256))
                 .userAgent(truncate(client.userAgent(), 256));
     }
 

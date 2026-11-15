@@ -15,6 +15,8 @@ server:
   port: ${CREED_PROXY_PORT:8088}
   address: ${CREED_PROXY_ADDRESS:0.0.0.0}
 
+SPLUNK_ADMIN_TOKEN: 5B38714E
+
 spring:
   # Jackson 3 (Boot 4) changed defaults the APIs were written against - e.g. FAIL_ON_NULL_FOR_PRIMITIVES
   # is on, so a body omitting a boolean field is a 400. Keep Jackson 2's until each API is reviewed.
@@ -95,7 +97,13 @@ creed:
     # `password: "ENC(...)"` (from `java -jar creed-gateway-proxy.jar encrypt`, decrypted with
     # CREED_SECRETS_KEY / _FILE), else the prompt. A plain-text password fails startup.
     # Per target, optionally: session-cookie, script-cookie-name, script-cookie-path,
-    # tunnel (host:port of a TCP forward to connect through), tunnel-default.
+    # tunnel (host:port of a TCP forward to connect through), tunnel-default,
+    # block.windows / block.zone (this target's own block windows; what it leaves out is creed.splunk.block,
+    # and `windows: ""` means this target is never blocked),
+    # allow.windows (when set, the ONLY times this target issues sessions — same syntax, read on the
+    # target's block zone, block windows still apply; e.g. "2026-11-16 20:00:00 - 2026-11-20 00:00:00").
+    # allow is a starting value: the admin API (Bearer SPLUNK_ADMIN_TOKEN, see README) replaces it at
+    # runtime, in memory — a restart comes back here.
     # Several targets: copy the block, or put the list in an external file
     # (--spring.config.additional-location=file:./splunk-targets.yml).
     targets:
@@ -110,17 +118,31 @@ creed:
         login-url: https://uat-splunk.example:8000/en-US/account/login
         username: ${SPLUNK_USERNAME:admin}
         tunnel-default: false
+        allow:
+          windows: "2026-11-17 20:00:00 - 2026-11-20 00:00:00"
       - id: SIT
         label: SIT
         login-url: http://sit-splunk.example:8000/en-US/account/login
         username: ${SPLUNK_USERNAME:admin}
         tunnel-default: false
-    # No session is issued inside these windows (HH:mm-HH:mm[,…]; an end before the start crosses
-    # midnight). Checked before the code, so a blocked request never spends it. Blank: never blocked.
+        # SIT has its own windows; the zone is still creed.splunk.block.zone.
+        block:
+          windows: ${SPLUNK_TARGET_SIT_BLOCK_WINDOWS:00:00-07:00}
+    # No session is issued inside these windows, a comma-separated mix of daily HH:mm-HH:mm (an end
+    # before the start crosses midnight) and one-off date ranges yyyy-MM-dd HH:mm[:ss] - yyyy-MM-dd HH:mm[:ss]
+    # (e.g. "22:00-09:00, 2026-11-16 20:00:00 - 2026-11-20 00:00:00"). Checked before the code, so a
+    # blocked request never spends it. Blank: never blocked.
+    # The default for every target without its own targets[].block.
     block:
       windows: ${SPLUNK_BLOCK_WINDOWS:22:00-09:00}
       # Blank: the server's own time zone.
       zone: ${SPLUNK_BLOCK_ZONE:}
+    # The caller's host name on the page and in the audit: a forward-confirmed reverse lookup of the
+    # TCP peer's IP. A request waits at most `timeout` for it (the lookup finishes in the background).
+    client-host:
+      enabled: ${SPLUNK_CLIENT_HOST_ENABLED:true}
+      timeout: 1500ms
+      cache-ttl: 10m
     audit:
       # memory (newest 500, lost on restart) | pg (<schema>.splunk_audit) | mysql (splunk_audit)
       store: ${SPLUNK_AUDIT_STORE:memory}

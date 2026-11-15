@@ -98,14 +98,56 @@ key file can still decrypt it.
 
 ## Splunk broker
 
+Full API reference — the page's endpoints and the token-guarded admin API, with status codes and
+curl examples: [`docs/splunk-api.md`](docs/splunk-api.md).
+
 Same contract as the Node BFF had, so the page needs no change. Additions:
 
-- **Block window.** `SPLUNK_BLOCK_WINDOWS` (default `22:00-09:00`; `HH:mm-HH:mm[,…]`, where an end
-  before the start crosses midnight; blank means never blocked) is read on `SPLUNK_BLOCK_ZONE` (default:
-  the server's zone). Inside a window the session API answers
+- **Block window.** `SPLUNK_BLOCK_WINDOWS` (default `22:00-09:00`; blank means never blocked) is read
+  on `SPLUNK_BLOCK_ZONE` (default: the server's zone). A comma-separated list mixing two kinds:
+  - daily `HH:mm-HH:mm` — an end before the start crosses midnight;
+  - a date range `yyyy-MM-dd HH:mm[:ss] - yyyy-MM-dd HH:mm[:ss]` (e.g.
+    `2026-11-16 20:00:00 - 2026-11-20 00:00:00`), once; the end must be after the start.
+
+  Start inclusive, end exclusive. Inside a window the session API answers
   `403 blocked` with `Retry-After`, **before** the code is checked, so the code is not used. The
   attempt is audited (`SPLUNK_LOGIN / blocked`). The page shows the window, disables the button,
-  and unlocks by itself when the window ends.
+  and unlocks by itself when the window ends ("available again at" carries the date when that is not today).
+- **Per-target block window.** `creed.splunk.targets[].block.windows` / `.zone` replace the
+  broker-wide ones for that target only; what a target leaves out is inherited (`windows: ""` = this
+  target is never blocked). The target is resolved first, so its own windows decide. `GET /totp`
+  carries each target's effective windows in `targets[].block` (`block` at the top is the broker-wide
+  default); the page follows the selected target and tags blocked ones in the dropdown.
+- **Allowed windows (availability).** `creed.splunk.targets[].allow.windows` — same syntax — makes a
+  target issue sessions **only** inside those windows (block windows still apply on top), e.g. SIT only
+  `2026-11-16 20:00:00 - 2026-11-20 00:00:00`. Outside them: `403 not_available` with `Retry-After`,
+  before the code, which is not used. The page is told that the target is unavailable and when that
+  changes (`targets[].block.reason = not_available`, `changesAtMillis`) — **never the windows themselves**.
+- **Admin API — runtime changes, not on the page.** Needs `SPLUNK_ADMIN_TOKEN` (or `SPLUNK_ADMIN_TOKEN_FILE`;
+  ≥ 24 characters, e.g. `openssl rand -hex 32`; never in yml, never prompted). Without it the paths are 404.
+
+  ```bash
+  AUTH="Authorization: Bearer $(cat admin-token)"
+  curl -H "$AUTH" https://host:8088/api/env-matrix/splunk/admin/targets                      # all targets
+  curl -H "$AUTH" -X PUT -H 'Content-Type: application/json' \
+       -d '{"windows":"2026-11-16 20:00:00 - 2026-11-20 00:00:00"}' \
+       https://host:8088/api/env-matrix/splunk/admin/targets/SIT/availability               # at once; "" = unrestricted
+  curl -H "$AUTH" -X DELETE https://host:8088/api/env-matrix/splunk/admin/targets/SIT/availability  # back to yml
+  ```
+
+  The answer says whether the target is available now, why not, and when that changes. 401 for a missing
+  or wrong token, 429 after 5 wrong tokens from one IP in 5 minutes (the right one too, until it passes),
+  400 for windows that do not parse. Changes are **in memory**: a restart returns to `targets[].allow`.
+  Every change and refusal is audited as `ADMIN_ALLOW` (who, new and old windows) — kept in the store,
+  left out of the page's audit list. Port 8088 is plain HTTP unless fronted by TLS: the token crosses
+  the wire in clear there.
+- **Client host.** The caller's IP (the TCP peer — `X-Forwarded-For` is recorded, never trusted) is
+  reverse-resolved and **forward-confirmed** (`InetAddress.getCanonicalHostName`: a PTR name that does
+  not resolve back to the IP is not shown). Shown on the page under the target ("Your machine",
+  `GET /totp` → `client`) and stored in every audit row (`client_host`, added to an existing table by
+  `alter table` at startup). A request waits at most `creed.splunk.client-host.timeout` (1.5 s); a slow
+  lookup finishes in the background and is cached (`cache-ttl`, 10 min). `SPLUNK_CLIENT_HOST_ENABLED=false`
+  turns it off. Behind a proxy every caller shows as the proxy.
 - **Revoke.** `POST /api/env-matrix/splunk/session/{correlationId}/revoke` (the page: a Revoke
   button on each successful login in the audit trail, and under a freshly issued session) calls
   Splunk Web's logout — `<login-url with /account/login → /account/logout>` — presenting every

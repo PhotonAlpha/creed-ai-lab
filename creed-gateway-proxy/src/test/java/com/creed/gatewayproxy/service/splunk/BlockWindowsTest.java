@@ -54,7 +54,39 @@ class BlockWindowsTest {
     }
 
     @Test
+    void aDateRangeBlocksOnceFromStartToEnd() {
+        BlockWindows block = new BlockWindows("2026-11-16 20:00:00 - 2026-11-20 00:00:00", SHANGHAI);
+        Instant start = ZonedDateTime.of(2026, 11, 16, 20, 0, 0, 0, SHANGHAI).toInstant();
+        Instant end = ZonedDateTime.of(2026, 11, 20, 0, 0, 0, 0, SHANGHAI).toInstant();
+        assertThat(block.blockedAt(start.minusSeconds(1))).isNull();
+        assertThat(block.blockedAt(start)).hasToString("2026-11-16 20:00 - 2026-11-20 00:00");
+        assertThat(block.blockedAt(end.minusSeconds(1))).isNotNull();
+        assertThat(block.blockedAt(end)).isNull();
+        assertThat(block.nextChange(at(12, 0))).isEqualTo(start);       // weeks before: its start
+        assertThat(block.nextChange(start.plusSeconds(3600))).isEqualTo(end);
+        assertThat(block.nextChange(end)).as("over: never again").isNull();
+        assertThat(block.describeChange(start.plusSeconds(3600), end)).isEqualTo("2026-11-20 00:00");
+        assertThat(block.describeChange(at(8, 0), at(9, 0))).isEqualTo("09:00");
+    }
+
+    @Test
+    void dailyWindowsInsideARangeFlipAtTheRangesEndOrLater() {
+        // Blocked every night, and for a whole stretch that ends at 23:30 — still night, so allowed at 09:00.
+        BlockWindows block = new BlockWindows("22:00-09:00, 2026-10-10 12:00 - 2026-10-12T23:30", SHANGHAI);
+        Instant inRange = ZonedDateTime.of(2026, 10, 11, 15, 0, 0, 0, SHANGHAI).toInstant();
+        assertThat(block.blockedAt(inRange)).isInstanceOf(BlockWindows.Range.class);
+        assertThat(block.nextChange(inRange)).isEqualTo(ZonedDateTime.of(2026, 10, 13, 9, 0, 0, 0, SHANGHAI).toInstant());
+        // seconds are honoured
+        BlockWindows precise = new BlockWindows("2026-10-09 12:00:30 - 2026-10-09 12:01:00", SHANGHAI);
+        assertThat(precise.nextChange(at(12, 0))).isEqualTo(at(12, 0).plusSeconds(30));
+        assertThat(precise.secondsUntilChange(at(12, 0).plusSeconds(30))).isEqualTo(30);
+    }
+
+    @Test
     void typosFail() {
+        assertThatThrownBy(() -> BlockWindows.parse("2026-11-20 00:00 - 2026-11-16 20:00")).hasMessageContaining("ends before it starts");
+        assertThatThrownBy(() -> BlockWindows.parse("2026-02-30 00:00 - 2026-03-01 00:00")).hasMessageContaining("not a valid time range");
+        assertThatThrownBy(() -> BlockWindows.parse("2026-11-16 - 2026-11-20")).hasMessageContaining("yyyy-MM-dd HH:mm[:ss]");
         assertThatThrownBy(() -> BlockWindows.parse("22-09")).hasMessageContaining("HH:mm-HH:mm");
         assertThatThrownBy(() -> BlockWindows.parse("25:00-09:00")).hasMessageContaining("not a valid time range");
         assertThat(BlockWindows.parse("9:00-9:30")).hasSize(1);

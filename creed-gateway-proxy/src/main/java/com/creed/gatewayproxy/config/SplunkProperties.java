@@ -27,11 +27,14 @@ import com.creed.gatewayproxy.service.splunk.SecretCipher;
  * @param tlsInsecure      on by request: Splunk's certificate is not verified (chain nor host name),
  *                         scoped to the login client alone
  * @param defaultTarget    the dropdown's initial choice; the first target when blank
+ * @param block            the block windows of every target that sets none of its own
+ * @param clientHost       the reverse lookup of the caller's IP shown on the page and audited
  */
 @ConfigurationProperties("creed.splunk")
 public record SplunkProperties(Boolean enabled, String sessionCookie, String scriptCookieName, String scriptCookiePath,
                                Boolean prefetchCval, Duration connectTimeout, Duration readTimeout, Boolean tlsInsecure,
-                               String caFile, String defaultTarget, List<Target> targets, Block block, Audit audit) {
+                               String caFile, String defaultTarget, List<Target> targets, Block block, Audit audit,
+                               ClientHost clientHost) {
 
     /** An RFC 6265 cookie-name token, narrowed: it is interpolated into a {@code document.cookie} script. */
     public static final Pattern COOKIE_NAME = Pattern.compile("^[A-Za-z0-9_.-]{1,64}$");
@@ -65,6 +68,17 @@ public record SplunkProperties(Boolean enabled, String sessionCookie, String scr
         }
         block = block == null ? new Block(null, null) : block;
         audit = audit == null ? new Audit(null, null, null, null) : audit;
+        clientHost = clientHost == null ? new ClientHost(null, null, null) : clientHost;
+    }
+
+    /**
+     * The block windows that apply to {@code t}: its own {@code block.windows} when it sets them, else the
+     * broker-wide ones; its own {@code block.zone} when set, else the broker-wide zone.
+     */
+    public Block blockOf(Target t) {
+        if (t.block() == null) return block;
+        return new Block(t.block().windows() != null ? t.block().windows() : block.windows(),
+                t.block().zone() != null ? t.block().zone() : block.zone());
     }
 
     /** A target's own cookie settings, or the broker-wide default. */
@@ -97,10 +111,14 @@ public record SplunkProperties(Boolean enabled, String sessionCookie, String scr
      * @param tunnel        {@code host:port} of a TCP forward the login may connect through (curl
      *                      {@code --connect-to}: the socket moves, the URL, Host header and SNI stay the target's)
      * @param tunnelDefault whether a login goes through the tunnel when the request does not say
+     * @param block         this target's own block windows / zone; whatever it leaves out is the broker-wide
+     *                      {@code creed.splunk.block}
+     * @param allow         when set, the only times this target issues sessions (block windows still apply);
+     *                      the starting value — the admin API replaces it at runtime
      */
     public record Target(String id, String label, String loginUrl, String username, String sessionCookie,
                          String scriptCookieName, String scriptCookiePath, String tunnel, Boolean tunnelDefault,
-                         String password) {
+                         String password, TargetBlock block, TargetAllow allow) {
 
         private static final Pattern HOST_PORT = Pattern.compile("^(?:\\[([0-9a-fA-F:.]+)]|([A-Za-z0-9.-]+)):(\\d{1,5})$");
 
@@ -123,13 +141,15 @@ public record SplunkProperties(Boolean enabled, String sessionCookie, String scr
                 throw new IllegalArgumentException("creed.splunk.targets[" + id + "].password must be ENC(...) — "
                         + "plain-text passwords are not accepted; encrypt it with `java -jar creed-gateway-proxy.jar encrypt`");
             }
+            if (block != null && block.windows() == null && block.zone() == null) block = null;
+            if (allow != null && allow.windows().isEmpty()) allow = null;
         }
 
         /** Records print every component; keep even the ciphertext out of logs and error messages. */
         @Override
         public String toString() {
             return "Target[id=" + id + ", loginUrl=" + loginUrl + ", username=" + username + ", tunnel=" + tunnel
-                    + ", password=" + (password == null ? "none" : "ENC(***)") + "]";
+                    + ", block=" + block + ", allow=" + allow + ", password=" + (password == null ? "none" : "ENC(***)") + "]";
         }
 
         /** The environment variable (or {@code _FILE}) holding this target's password. */
@@ -161,6 +181,32 @@ public record SplunkProperties(Boolean enabled, String sessionCookie, String scr
         }
     }
 
+    /**
+     * {@code targets[].block}. Unlike {@link Block}, an absent value is kept as null — it means "the
+     * broker-wide one" — so an empty {@code windows} (never blocked) can still be told from a missing one.
+     */
+    public record TargetBlock(String windows, String zone) {
+
+        public TargetBlock {
+            windows = windows == null ? null : windows.strip();
+            zone = StringUtils.hasText(zone) ? zone.strip() : null;
+            if (zone != null) ZoneId.of(zone); // fail at startup on a typo
+            BlockWindows.parse(windows);
+        }
+    }
+
+    /**
+     * {@code targets[].allow}: the windows (same syntax as the block windows, read on the target's block
+     * zone) outside which the target issues no session. Blank: no restriction.
+     */
+    public record TargetAllow(String windows) {
+
+        public TargetAllow {
+            windows = windows == null ? "" : windows.strip();
+            BlockWindows.parse(windows);
+        }
+    }
+
     public record HostPort(String host, int port) {
         @Override
         public String toString() {
@@ -182,6 +228,25 @@ public record SplunkProperties(Boolean enabled, String sessionCookie, String scr
             zone = StringUtils.hasText(zone) ? zone.strip() : ZoneId.systemDefault().getId();
             ZoneId.of(zone); // fail at startup on a typo
             BlockWindows.parse(windows);
+        }
+    }
+
+    /**
+     * The reverse lookup of the caller's IP (the TCP peer, never {@code X-Forwarded-For}). Forward-confirmed:
+     * a PTR name whose own lookup does not lead back to the IP is not shown. A lookup can hang for as long
+     * as the resolver does, so the request waits at most {@code timeout}; the lookup itself carries on and
+     * fills the cache for the next request.
+     *
+     * @param enabled  off: no lookup, the page shows the IP alone
+     * @param timeout  how long a request waits for a lookup that is not cached yet
+     * @param cacheTtl how long a name — or the absence of one — is reused
+     */
+    public record ClientHost(Boolean enabled, Duration timeout, Duration cacheTtl) {
+
+        public ClientHost {
+            enabled = enabled == null || enabled;
+            timeout = timeout == null ? Duration.ofMillis(1500) : timeout;
+            cacheTtl = cacheTtl == null ? Duration.ofMinutes(10) : cacheTtl;
         }
     }
 

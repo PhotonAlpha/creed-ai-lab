@@ -31,7 +31,9 @@ import com.creed.gatewayproxy.config.SplunkProperties;
  *
  * {@code NAME} is {@code SPLUNK_TARGET_<ID>_PASSWORD} per target (only when the real call is on —
  * the mock needs none), {@code SPLUNK_DB_PASSWORD} for the pg/mysql audit store, and
- * {@code ENV_MATRIX_TOTP_SECRET}. A missing Splunk password leaves that target "not configured" (503
+ * {@code ENV_MATRIX_TOTP_SECRET}. {@code SPLUNK_ADMIN_TOKEN} (the admin API's bearer token) is read from
+ * the first two only — never prompted for, never in a configuration file — and leaving it out turns the
+ * admin API off. A missing Splunk password leaves that target "not configured" (503
  * on login, the code unused); a missing TOTP secret gets a random one for this run. An {@code ENC(…)}
  * password that cannot be decrypted — no key, wrong key — fails startup: the configuration said a
  * password exists, so a silently unconfigured target would only surface at the first login. Values are
@@ -44,6 +46,7 @@ public class SplunkSecrets {
     private final String totpSecret;
     private final boolean totpGenerated;
     private final String dbPassword;
+    private final String adminToken;
     /** Created on the first ENC(…) password, so the master key is only asked for when one exists. */
     private SecretCipher cipher;
 
@@ -74,6 +77,19 @@ public class SplunkSecrets {
         }
         dbPassword = "memory".equals(splunk.audit().store()) ? null
                 : resolve(env, "SPLUNK_DB_PASSWORD", prompt, "Audit database password for " + splunk.audit().username());
+        adminToken = lookup(env, ADMIN_TOKEN_VARIABLE);
+        if (adminToken != null && adminToken.length() < ADMIN_TOKEN_MIN_LENGTH) {
+            throw new IllegalStateException(ADMIN_TOKEN_VARIABLE + " must be at least " + ADMIN_TOKEN_MIN_LENGTH
+                    + " characters (e.g. `openssl rand -hex 32`)");
+        }
+    }
+
+    public static final String ADMIN_TOKEN_VARIABLE = "SPLUNK_ADMIN_TOKEN";
+    static final int ADMIN_TOKEN_MIN_LENGTH = 24;
+
+    /** The admin API's bearer token; null when not supplied (the API is then off). */
+    public String adminToken() {
+        return adminToken;
     }
 
     public String password(SplunkProperties.Target target) {
