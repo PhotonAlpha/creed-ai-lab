@@ -99,7 +99,11 @@ other service keeps `PartnerLoadBalancerConfiguration` as `defaultConfiguration`
 discovery→health-check→cache chain, filtering the alive list by `metadata.stickyId` (registered per
 instance in `application.yml`). Contract: no cookie → full alive list; match → pinned instance(s); no
 match (unknown id, or the pinned instance just failed health check) → WARN + fall back to the full alive
-list (availability beats stickiness).
+list (availability beats stickiness). **A partial alive list breaks this too** (2026-11-14): the health check's default
+`update-results-list: true` + the cache under the sticky layer can hand it a list without the pinned (healthy) instance →
+fallback. Per-cluster `spring.cloud.loadbalancer.clients.payment-resource.health-check.update-results-list: false` fixes it
+for payment, but that block does not inherit the global `interval` (1m) - repeat it. `HealthCheckPartialListTest`,
+`PerClusterHealthCheckPropertiesTest`, `docs/lb-health-check-partial-list.md`.
 
 ## ProducerTemplate results: the body dies with `send()`'s UnitOfWork
 

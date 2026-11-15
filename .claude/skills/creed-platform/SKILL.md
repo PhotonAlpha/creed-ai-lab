@@ -76,7 +76,7 @@ Since JDK 23 javac does **not** auto-run annotation processors found only on the
 
 ## Spring Cloud LoadBalancer (servlet) — the `lb://` scheme leak
 
-Runtime version is **4.3.2** (BOM-pinned; ignore stray 5.0.1 jars in the repo). Static registry via `spring.cloud.discovery.client.simple.instances.<service>: [{uri: https://host:port}]`.
+Runtime version is **5.0.3** (Spring Cloud 2025.1.3; `spring-cloud-loadbalancer` + `spring-cloud-commons`). Static registry via `spring.cloud.discovery.client.simple.instances.<service>: [{uri: https://host:port}]`.
 
 **The trap**: `@LoadBalanced` + `lb://service-id` throws `invalid URI scheme lb`. Root cause: commons 4.3.2 `DefaultServiceInstance.getScheme()` is always `null` (no scheme field), so `LoadBalancerUriTools.reconstructURI` falls back to `computeScheme`, which only knows http/https/ws/wss and keeps the original `lb` scheme.
 
@@ -88,6 +88,18 @@ Runtime version is **4.3.2** (BOM-pinned; ignore stray 5.0.1 jars in the repo). 
 **Servlet supplier with health checks** (`ServiceInstanceListSupplier.builder()`): use the BLOCKING variants — `.withBlockingDiscoveryClient().withBlockingHealthChecks(restClient|restTemplate).withCaching().build(ctx)`. The non-`Blocking` ones need WebClient/reactive. Register via `@LoadBalancerClients(defaultConfiguration = X.class)`; class `X` must have **no** `@Configuration`/`@Component` stereotype (it's imported into each LB child context — a stereotype would leak it into the main scan).
 
 **Health check props**: `spring.cloud.loadbalancer.health-check.{path.<svc>, interval, initial-delay}`. First request batch may all hit one instance until the first health-check cycle confirms the others.
+
+**Healthy instances missing from `get()`** (2026-11-14, `creed-simple-metrics/docs/lb-health-check-partial-list.md`):
+- `health-check.update-results-list` defaults to `true`: each round restarts from an empty list and re-emits after every
+  instance that answers, so until a round has heard from all of them `get()` returns part of the list - every `interval`.
+- `.withCaching()` on top caches `delegate.get().take(1)` - the FIRST emission, often one instance - for the TTL (35 s).
+  Spring's docs say not to cache over a health check. A sticky filter above it then falls back off a healthy pinned instance.
+- `interval` is also the per-probe timeout, but a **blocking** probe (`withBlockingHealthChecks`, or any `Mono.defer` around
+  a sync call) blocks at subscription: the timeout never fires and probes run **serially** on a Reactor `parallel` thread.
+  The HTTP client's own timeout is the real bound - keep instances × timeout < `interval`.
+- **`spring.cloud.loadbalancer.clients.<id>.*` does NOT inherit the global block** (despite the comment in
+  `LoadBalancerClientFactory.getProperties`): a client listed there gets the LIBRARY default for every key it omits
+  (interval 25 s, retry, hint, sticky-session...). Repeat every global setting the cluster needs.
 
 **Logging the health probe**: the stock blocking alive-probe (`ServiceInstanceListSupplierBuilder#blockingHealthCheckServiceInstanceListSupplier`) wraps the call in `Mono.defer` and **swallows everything** in `catch (Exception ignored) { return Mono.just(false) }` — a down instance is silently dropped. To observe it, don't call `.withBlockingHealthChecks(...)`; instead `.with((ctx, delegate) -> new <Subclass>(delegate, ctx.getBean(LoadBalancerClientFactory.class), aliveFn))`, where the subclass `extends HealthCheckServiceInstanceListSupplier` and overrides `protected Mono<Boolean> isAlive(ServiceInstance)` to log the full `ServiceInstance` then `super.isAlive(...).doOnNext(...)`. Supply your own `aliveFn` (a faithful copy of the framework lambda) to log the HTTP status/latency and the otherwise-ignored exception. `isAlive` short-circuits to `Mono.just(true)` (no HTTP) when a service's health-check path is empty. Reference impl: `creed-gateway-partner` `PartnerLoadBalancerConfiguration`.
 

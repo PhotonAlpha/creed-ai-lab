@@ -214,6 +214,13 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Open items
 
+- **LB health check hands out partial lists** (2026-11-14, `docs/lb-health-check-partial-list.md`): default
+  `update-results-list: true` + `.withCaching()` in `PartnerLoadBalancerConfiguration.healthCheckedSupplier` → `get()`
+  misses healthy instances (cache: up to 35 s), and payment's sticky filter falls back off a healthy pinned instance.
+  Not fixed yet: set `update-results-list: false` (per cluster under `spring.cloud.loadbalancer.clients.<id>` must repeat
+  `interval: 1m` - that block does not inherit), drop the cache, `subscribeOn(boundedElastic())` on the blocking probe.
+  `HealthCheckPartialListTest` pins the CURRENT (broken) behaviour - flip it with the fix.
+
 - **Repro leftovers from 2026-10-02, still in the tree — decide what to keep:**
   `camel-context.xml` has `spoolEnabled="true"` (originally absent; this module does not need spooling —
   JSON is unmarshalled into memory anyway and Logbook already buffers it), and `PaymentStickyProcessor`

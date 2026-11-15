@@ -61,6 +61,12 @@ only the scheduling stays under `spring.cloud.loadbalancer.health-check`.
 
 ## Open items
 
+- **Same LB partial-list problem as creed-simple-metrics** (health check → `.withCaching()`, default
+  `update-results-list: true`): healthy instances missing from the load balancer's list, up to 35 s when cached. Write-up
+  and tests: `creed-simple-metrics/docs/lb-health-check-partial-list.md`. A per-cluster
+  `spring.cloud.loadbalancer.clients.<service-id>` block must repeat `initial-delay: 0s` and `interval: 10s` - it does
+  not inherit the global block.
+
 - `creed-simple-metrics` has since factored the same idea into a reusable `ManagedHttpClientPool`
   (one `@Bean` that is both `Closeable` and `MeterBinder`); this module still registers the
   pool/factory/binder trio separately per cluster. Worth converging.
