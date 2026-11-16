@@ -594,7 +594,7 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   on the left and the create / label buttons on the right, row two the status / application / search filters.
 - **Token dialogs** (Jira / Confluence): a *No token yet?* box says where to create one and links to that page in a new
   tab; create it there, come back and paste.
-- **Cards**: the three cards on top cast a shadow on hover; *Reports* folds and unfolds.
+- **Cards**: the three cards on top cast a shadow on hover; *Reports* folds and unfolds. Those three and the SCA *Findings* and SAST Jira table cards carry a beam of light running along their border (Border Beam: the theme's primary colour into purple, staggered per card; off when the system asks for reduced motion).
   - *SAST statistics* under the SCA ones: rating, score, the report's stated total / not-mitigated counts, then
     flaws listed / open / mitigated / fixed / open affecting policy, and open flaws per severity (*Total* row with
     several reports).
