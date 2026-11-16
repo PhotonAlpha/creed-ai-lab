@@ -239,7 +239,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   合并了原「未关闭漏洞」列；Jira 标题本身不变（仍按标题查找），新建的 SAST Jira 在描述开头写同样的三行（按 application）。
 - **报告模版**（`/veracode-templates`，`pages/Veracode/templates/`）：上传公司 Excel 模版（.xlsx / .xlsm，导出保留宏与扩展名）→ 后端解析成 JSON → 页面按 Excel 样子渲染（列字母、行号、合并、列宽、粗体、填充色）→
   点选单元格：所在行可设为 SCA / SAST / SCA 统计 / SAST 统计数据行（导出时按条数向下重复，统计每个报告一行，下方内容下移），该行单元格绑定数据集字段；其他单元格绑定汇总字段 → 保存映射
-  （后端校验，错误指出单元格）→ Veracode 页面「按模版导出」：重新分析并由后端写入 JXLS 占位符后填充。一行匹配到多个 Jira 时，导出前弹框（`TemplateIssuePickModal.tsx`）让用户为每行选一个（相同 Jira 集合的行一组，默认上次的选择 / 最早的未关闭 Jira，规则与后端 `TemplateFields.pick` 一致），随 `POST /report-templates/{id}/export` 发送；Jira 单元格只写编号，不写链接（原「Jira 链接」字段已并入「Jira 编号」）。
+  （后端校验，错误指出单元格）→ Veracode 页面「按模版导出」：重新分析并由后端写入 JXLS 占位符后填充。一行匹配到多个 Jira 时，导出前弹框（`TemplateIssuePickModal.tsx`）让用户为每行选一个（相同 Jira 集合的行一组，默认上次的选择 / 最早的未关闭 Jira，规则与后端 `TemplateFields.pick` 一致），随 `POST /report-templates/{id}/export` 发送；Jira 单元格只写编号，不写链接（原「Jira 链接」字段已并入「Jira 编号」）。位于跨行合并单元格内的行不能设为数据行（页面禁用并提示合并范围，后端同样拒绝）；竖排的一格一值表格绑定汇总字段里的统计合计（`scaStats*` / `sastStats*`，全部报告相加，标签由 `veracode.tpl.statsTotal` 拼出）。
   「按模版导出」是主要导出：按 antd「Gradient Button」示例：大号渐变主按钮与右侧只有箭头的按钮左右拼在一起（`Space.Compact`），两者共用一条渐变（宽度 = 整组宽度，左按钮画开头、箭头画结尾；画在 `::after` 上，因为 antd 在拼接主按钮的第二个的 `::before` 上画分隔线），悬停整组淡出（CSS module `gradientButton.module.css`，项目没有 antd-style），位于 SCA「漏洞」卡片内容区第一行最左（导出组：按模版导出 / 导出 Excel / 导出到 Confluence；同一行右侧是创建 / 加 label 按钮，第二行是状态、application、搜索过滤 —— 卡片标题栏不再放按钮）；渐变按钮直接用上次用过的模版（存 localStorage，按钮上显示模版名），右侧箭头选择模版 / 管理模版。模版和映射存在后端 H2 文件库（`postgres` profile 用 PostgreSQL）。
 - 模版上传时全屏 loading 并显示进度（Server-Sent Events：`Accept: text/event-stream` 时上传接口边读边推送 `progress` 事件，
   最后 `done` 返回模版或 `error`）：先是上传字节数，再是后端读取工作簿（第几个 sheet、第几行），最后保存。

@@ -31,6 +31,12 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
 
 ## Rules that are easy to break
 
+- **Statistics totals are summary fields** (2026-11-16, asked for: a vertical table beside a label merged across rows):
+  `TemplateFields.totalKey` = `scaStats`/`sastStats` + the capitalised stats field, for the `TOTALLED` counts only;
+  values summed from the stats rows themselves (`putTotals`, `maxCvss` = max, none stated = `""`, never 0). `TOTALLED`
+  sits above `CATALOG` on purpose - static init order. The page labels them from the stats field's own label
+  (`veracode.tpl.statsTotal`), so a new stats field needs no new locale key. A data row inside a merge spanning rows
+  stays refused (`mergeAcrossRows` names it) - JXLS would tear the merge.
 - **A template row shows one Jira issue** (2026-11-16, asked for): `TemplateFields.pick` - the page's choice (`Picks`,
   `POST /report-templates/{id}/export` body, keyed by `FindingView.id` / `SastIssueView.id`), else the first issue not
   in `closed-statuses` by key number; a choice not among the row's issues (Jira is re-read at export) falls back to that.

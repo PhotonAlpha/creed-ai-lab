@@ -705,6 +705,8 @@ const enUS = {
   'veracode.tpl.dataset.sastStats': 'SAST statistics',
   'veracode.tpl.dataRowHint': 'The whole row repeats at export, its unbound cells included.',
   'veracode.tpl.plainRowHint': 'A cell here shows one summary value.',
+  'veracode.tpl.verticalMerge': 'Inside {merge}, merged across rows: not a data row (repeating would tear the merge). For one value per cell, bind summary fields such as "SCA statistics, all reports: Very High".',
+  'veracode.tpl.statsTotal': '{dataset}, all reports: {field}',
   'veracode.tpl.columnField': '{dataset} field of this column',
   'veracode.tpl.summaryField': 'Summary field',
   'veracode.tpl.chooseField': 'Choose a field (clear = unbound)',

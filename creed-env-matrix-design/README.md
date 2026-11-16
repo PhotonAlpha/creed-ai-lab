@@ -584,6 +584,10 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   shows (*Choose one Jira issue per row*: rows that matched the same issues share one choice; preselected with the last
   choice for this upload, else the oldest issue that is not closed) - a row never gets all of them. Jira cells hold the
   issue key (ID), not its link.
+  A vertical table - one value per cell next to a label merged across rows (e.g. `数量` down A2:A5 beside Very High /
+  High / Medium / Low) - cannot be a data row (the page disables it there and says why): bind its cells to the summary
+  fields *SCA statistics, all reports: …* / *SAST statistics, all reports: …* - each report's statistics added up
+  (Highest CVSS: the highest). *SCA Very High* etc. count the analysis' findings instead.
 - **The Jira version to create under** is the first field of the *Jira fields* bar (required), apart from the lookup's
   *Jira versions*, which are optional and may name several or none. One lookup version is carried over.
 - **The findings card's toolbar** sits under its title, not in it: row one the exports (template, Excel, Confluence)

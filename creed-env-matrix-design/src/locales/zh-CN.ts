@@ -697,6 +697,8 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'veracode.tpl.dataset.sastStats': 'SAST 统计',
   'veracode.tpl.dataRowHint': '导出时整行重复，未绑定的单元格也会原样复制。',
   'veracode.tpl.plainRowHint': '该行的单元格只能显示一个汇总值。',
+  'veracode.tpl.verticalMerge': '该行在跨行合并 {merge} 内，不能设为数据行（重复会拆散合并）。一格一个值的竖排表格，请绑定汇总字段，如「SCA 统计（全部报告）：Very High」。',
+  'veracode.tpl.statsTotal': '{dataset}（全部报告）：{field}',
   'veracode.tpl.columnField': '这一列显示的 {dataset} 字段',
   'veracode.tpl.summaryField': '汇总字段',
   'veracode.tpl.chooseField': '选择字段（清空 = 不绑定）',

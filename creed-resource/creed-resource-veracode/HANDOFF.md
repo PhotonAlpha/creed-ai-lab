@@ -69,6 +69,15 @@ default 50MB), 502 `jira_error`.
 
 ## Current state
 
+2026-11-16 (asked for): **vertical statistics tables.** A template like `数量` merged down A2:A5 next to Very High / High /
+Medium / Low with one value per cell cannot be a data row (repeating it would tear the merge - still refused, the message
+now names the merge and the way out). Summary fields now include the **statistics totals over all reports**
+(`scaStats<Field>` / `sastStats<Field>`, e.g. `scaStatsVeryHigh`, `scaStatsVulnerabilities`, `scaStatsMaxCvss` = the
+highest): the counts summed from the scaStats / sastStats rows, `""` when no report states one. Not totalled: which
+report, `violatesPolicy`, `rating`, `score`. They are Veracode's own counts - unlike `scaVeryHigh`, which counts the
+grouped findings. The template page disables the data-row choices for a row inside a vertical merge and says why.
+**124 tests pass.**
+
 2026-11-16 (asked for): **template export = one Jira issue per row, Jira IDs not links.** The *Jira links* field
 (`jiraUrls`) is gone from the catalog; a saved mapping naming it reads as `jiraKeys` (`TemplateFields.current`, applied
 in `TemplateMapping.FieldCell` / `CellBinding`, so the next save stores the new name). A row whose finding / SAST issue

@@ -544,11 +544,16 @@ public final class TemplateWorkbook {
 
     /** Whether a merged region covers more than one row there: a data row inside it would be torn. */
     static boolean mergedAcrossRows(Sheet sheet, int row) {
+        return mergeAcrossRows(sheet, row) != null;
+    }
+
+    /** The first merge spanning rows that {@code row} is in, as {@code A2:A5}; {@code null} for none. */
+    static String mergeAcrossRows(Sheet sheet, int row) {
         for (CellRangeAddress m : sheet.getMergedRegions()) {
             if (m.getFirstRow() <= row && row <= m.getLastRow() && m.getFirstRow() != m.getLastRow()) {
-                return true;
+                return m.formatAsString();
             }
         }
-        return false;
+        return null;
     }
 }

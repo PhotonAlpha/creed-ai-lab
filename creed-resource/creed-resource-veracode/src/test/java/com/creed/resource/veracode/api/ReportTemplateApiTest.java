@@ -270,6 +270,81 @@ class ReportTemplateApiTest {
                 .andExpect(status().isBadRequest());
     }
 
+    /**
+     * A vertical statistics table (asked for, 2026-11-16): "数量" merged down A2:A5, the severities in B, one value per
+     * cell in C. A data row there is refused, naming the merge; the cells bound to the statistics totals (summary
+     * fields) fill, the merge and the labels kept.
+     */
+    @Test
+    void aVerticalStatisticsTableBindsTheTotalsAsSummaryCells() throws Exception {
+        byte[] template;
+        try (Workbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Sheet sheet = wb.createSheet("统计");
+            Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("SCA 级别");
+            header.createCell(1).setCellValue("serverty");
+            header.createCell(2).setCellValue("total");
+            String[] levels = {"very high", "high", "medium", "low"};
+            for (int i = 0; i < levels.length; i++) {
+                Row row = sheet.createRow(1 + i);
+                row.createCell(0).setCellValue(i == 0 ? "数量" : "");
+                row.createCell(1).setCellValue(levels[i]);
+            }
+            sheet.addMergedRegion(new CellRangeAddress(1, 4, 0, 0));
+            wb.write(out);
+            template = out.toByteArray();
+        }
+        String id = JsonPath.read(mvc.perform(multipart("/api/veracode/report-templates").file(new MockMultipartFile(
+                        "file", "vertical.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        template)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.id");
+
+        mvc.perform(put("/api/veracode/report-templates/" + id + "/mapping").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sheets":[{"sheet":"统计","lists":[{"dataset":"scaStats","row":1,"cells":[{"col":2,"field":"veryHigh"}]}]}]}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("A2:A5")))
+                .andExpect(jsonPath("$.message").value(containsString("summary fields")));
+
+        mvc.perform(get("/api/veracode/report-templates/fields"))
+                .andExpect(jsonPath("$.summary[?(@.key == 'scaStatsVeryHigh')].label")
+                        .value(org.hamcrest.Matchers.contains("SCA statistics, all reports: Very High")))
+                .andExpect(jsonPath("$.summary[?(@.key == 'scaStatsRating')]").isEmpty());
+        mvc.perform(put("/api/veracode/report-templates/" + id + "/mapping").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sheets":[{"sheet":"统计","values":[
+                                  {"row":1,"col":2,"field":"scaStatsVeryHigh"},{"row":2,"col":2,"field":"scaStatsHigh"},
+                                  {"row":3,"col":2,"field":"scaStatsMedium"},{"row":4,"col":2,"field":"scaStatsLow"},
+                                  {"row":5,"col":2,"field":"scaStatsVulnerabilities"},{"row":6,"col":2,"field":"scaStatsMaxCvss"}]}]}
+                                """))
+                .andExpect(status().isOk());
+
+        String analysis = mvc.perform(multipart("/api/veracode/analysis/upload")
+                        .file(new MockMultipartFile("file", "detailedreport.xml", "application/xml",
+                                new ClassPathResource(VeracodeController.SAMPLE).getContentAsByteArray())))
+                .andReturn().getResponse().getContentAsString();
+        String uploadId = JsonPath.read(analysis, "$.uploadId");
+        byte[] filled = mvc.perform(get("/api/veracode/report-templates/" + id + "/export").param("uploadId", uploadId))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(filled))) {
+            Sheet sheet = wb.getSheet("统计");
+            String[] levels = {"Very High", "High", "Medium", "Low"};
+            for (int i = 0; i < levels.length; i++) {
+                List<Integer> stated = JsonPath.read(analysis,
+                        "$.reports[0].sca.bySeverity[?(@.severity == '" + levels[i] + "')].count");
+                assertThat(sheet.getRow(1 + i).getCell(2).getNumericCellValue()).as(levels[i])
+                        .isEqualTo(stated.getFirst().doubleValue());
+            }
+            int vulnerabilities = JsonPath.read(analysis, "$.reports[0].sca.vulnerabilities");
+            assertThat(sheet.getRow(5).getCell(2).getNumericCellValue()).isEqualTo(vulnerabilities);
+            assertThat(sheet.getRow(6).getCell(2).getNumericCellValue()).isEqualTo(10.0);
+            assertThat(sheet.getRow(1).getCell(1).getStringCellValue()).isEqualTo("very high");
+            assertThat(sheet.getRow(1).getCell(0).getStringCellValue()).isEqualTo("数量");
+            assertThat(sheet.getMergedRegions()).extracting(CellRangeAddress::formatAsString).contains("A2:A5");
+        }
+    }
+
     /** The Log4Shell row's Jira key and status cells. */
     private static List<String> log4shellJira(byte[] xlsx) throws Exception {
         try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {

@@ -46,6 +46,15 @@ public final class TemplateFields {
     public record Field(String key, String label) {
     }
 
+    /**
+     * The statistics fields with a total over all reports - the counts; {@code maxCvss} the highest. Not: which report,
+     * {@code violatesPolicy} (yes / no), {@code rating} / {@code score} (a grade per scan).
+     */
+    private static final java.util.Set<String> TOTALLED = java.util.Set.of(
+            "thirdPartyComponents", "componentsViolatedPolicy", "blacklistedComponents", "vulnerableComponents",
+            "vulnerabilities", "mitigated", "totalFlaws", "flawsNotMitigated", "flaws", "open", "fixed", "affectsPolicy",
+            "veryHigh", "high", "medium", "low", "veryLow", "informational", "unknownSeverity", "maxCvss");
+
     /** Every dataset's fields, in the order the page offers them. */
     public static final Map<String, List<Field>> CATALOG = catalog();
 
@@ -105,7 +114,7 @@ public final class TemplateFields {
                 new Field("mitigated", "Mitigated"),
                 new Field("fixed", "Fixed"),
                 new Field("affectsPolicy", "Open, affecting policy")), List.of()));
-        catalog.put(SUMMARY, List.of(
+        List<Field> summary = new ArrayList<>(List.of(
                 new Field("projectKey", "Jira project"),
                 new Field("jiraVersions", "Jira versions searched"),
                 new Field("countries", "Countries searched"),
@@ -124,7 +133,21 @@ public final class TemplateFields {
                 new Field("sastTotal", "SAST issues"),
                 new Field("sastExists", "SAST in Jira"),
                 new Field("sastMissing", "SAST missing")));
+        // the statistics as single cells, over all reports: a vertical table (Very High / High / ... down a column next
+        // to a label merged across those rows) cannot be a data row (asked for, 2026-11-16)
+        for (String dataset : List.of(SCA_STATS, SAST_STATS)) {
+            String name = SCA_STATS.equals(dataset) ? "SCA statistics" : "SAST statistics";
+            catalog.get(dataset).stream().filter(f -> TOTALLED.contains(f.key()))
+                    .forEach(f -> summary.add(new Field(totalKey(dataset, f.key()),
+                            name + ", all reports: " + f.label())));
+        }
+        catalog.put(SUMMARY, List.copyOf(summary));
         return java.util.Collections.unmodifiableMap(catalog);
+    }
+
+    /** {@code scaStats} + {@code veryHigh} -> {@code scaStatsVeryHigh}: a summary field. */
+    static String totalKey(String dataset, String field) {
+        return dataset + Character.toUpperCase(field.charAt(0)) + field.substring(1);
     }
 
     /** A statistics row: which report, its own fields, the six severity counts, then {@code tail}. */
@@ -230,10 +253,41 @@ public final class TemplateFields {
         List<SastIssueView> sastIssues = a.sast() == null ? List.of() : a.sast().issues();
         data.put(SAST, numbered(sastIssues.stream()
                 .map(i -> sast(i, pick(i.issues(), picks.sast().get(i.id()), closed), apps)).toList()));
-        data.put(SCA_STATS, numbered(a.reports().stream().map(r -> scaStats(r, apps)).toList()));
-        data.put(SAST_STATS, numbered(a.reports().stream().map(r -> sastStats(r, apps)).toList()));
-        data.put(SUMMARY, summary(a, sastIssues, apps, now, zone));
+        List<Map<String, Object>> scaStats = numbered(a.reports().stream().map(r -> scaStats(r, apps)).toList());
+        List<Map<String, Object>> sastStats = numbered(a.reports().stream().map(r -> sastStats(r, apps)).toList());
+        data.put(SCA_STATS, scaStats);
+        data.put(SAST_STATS, sastStats);
+        Map<String, Object> summary = summary(a, sastIssues, apps, now, zone);
+        putTotals(summary, SCA_STATS, scaStats);
+        putTotals(summary, SAST_STATS, sastStats);
+        data.put(SUMMARY, summary);
         return data;
+    }
+
+    /**
+     * The statistics totals, from the rows themselves (so a total is what the rows add up to): the sum over the reports
+     * that state the value, {@code maxCvss} the highest; {@code ""} when no report states it - not 0, which would claim
+     * the scan found nothing.
+     */
+    private static void putTotals(Map<String, Object> summary, String dataset, List<Map<String, Object>> rows) {
+        for (Field f : CATALOG.get(dataset)) {
+            if (!TOTALLED.contains(f.key())) {
+                continue;
+            }
+            List<Number> values = rows.stream().map(r -> r.get(f.key())).filter(Number.class::isInstance)
+                    .map(Number.class::cast).toList();
+            Object total;
+            if (values.isEmpty()) {
+                total = "";
+            } else if ("maxCvss".equals(f.key())) {
+                total = values.stream().mapToDouble(Number::doubleValue).max().orElseThrow();
+            } else if (values.stream().allMatch(v -> v instanceof Integer || v instanceof Long)) {
+                total = values.stream().mapToLong(Number::longValue).sum();
+            } else {
+                total = values.stream().mapToDouble(Number::doubleValue).sum();
+            }
+            summary.put(totalKey(dataset, f.key()), total);
+        }
     }
 
     /** {@code no}: the row's position, from 1 - a template's "No." column. */

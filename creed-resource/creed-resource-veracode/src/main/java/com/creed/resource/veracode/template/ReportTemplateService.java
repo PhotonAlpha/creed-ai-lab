@@ -221,8 +221,13 @@ public class ReportTemplateService {
                 if (!listRows.add(list.row())) {
                     throw new IllegalArgumentException(where + ": two data rows on one row");
                 }
-                if (TemplateWorkbook.mergedAcrossRows(sheet, list.row())) {
-                    throw new IllegalArgumentException(where + ": a data row cannot be inside a merge that spans rows");
+                String merge = TemplateWorkbook.mergeAcrossRows(sheet, list.row());
+                if (merge != null) {
+                    // a vertical table (one value per cell next to a merged label) is summary cells, not a data row
+                    throw new IllegalArgumentException(where + ": a data row cannot be inside a merge that spans rows ("
+                            + merge + ") - it repeats per item and would tear the merge. For one value per cell, make "
+                            + "it a plain row and bind the cells to summary fields (e.g. the statistics totals over all "
+                            + "reports)");
                 }
                 if (list.cells().isEmpty()) {
                     throw new IllegalArgumentException(where + ": a data row needs at least one bound cell");
