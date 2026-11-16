@@ -70,6 +70,12 @@ Boot 4 broke the monolithic starters apart; what used to arrive transitively mus
   (`.support/scripts/pki/creed-gateway-CLI-*.p12`, alias `creed-gateway-cli`) as `--spring.ssl.bundle.jks.creed-jks-client.*` arguments.
 - **A reactive module cannot use the servlet HTTPS customizer.** `creed-gateway` is WebFlux/Netty and had a copy of the servlet modules' `TomcatHttpsConfiguration`; typed on `TomcatServletWebServerFactory` it never matched, so its SSL bundle was silently never applied. It is now `ReactiveHttpsConfiguration`, typed on `ConfigurableReactiveWebServerFactory`.
 
+## Never name a source package `target`
+
+`.gitignore` has `**/target`, which matches any directory called `target` - including a Java package such as
+`com.creed.x.target`. The build and the tests pass locally, but `git add` silently skips the package. Use another name
+(creed-resource-lb-health uses `upstream`); `git check-ignore -v <file>` confirms.
+
 ## Lombok on JDK 23+
 
 Since JDK 23 javac does **not** auto-run annotation processors found only on the classpath. Lombok is declared in the root pom's `maven-compiler-plugin` `<annotationProcessorPaths>` (version `${lombok.version}`). Symptom if missing: `cannot find symbol: variable log` for `@Slf4j`. Don't remove that block.
@@ -97,6 +103,11 @@ Runtime version is **5.0.3** (Spring Cloud 2025.1.3; `spring-cloud-loadbalancer`
 - `interval` is also the per-probe timeout, but a **blocking** probe (`withBlockingHealthChecks`, or any `Mono.defer` around
   a sync call) blocks at subscription: the timeout never fires and probes run **serially** on a Reactor `parallel` thread.
   The HTTP client's own timeout is the real bound - keep instances × timeout < `interval`.
+- **`refetch-instances` + `switchMap`** (2026-11-16, [[creed-resource-lb-health]] README): each refetch cancels the running
+  health-check stream, its `interval` timer included. Hence `interval` < `refetch-instances-interval`, and the worst-case
+  round (blocking: instances × probe timeout, serial) < `refetch-instances-interval`, or no round ever completes and
+  `get()` stays on the last completed list. Reference set-up, virtual-time tests and a start-up validator:
+  `creed-resource/creed-resource-lb-health`.
 - **`spring.cloud.loadbalancer.clients.<id>.*` does NOT inherit the global block** (despite the comment in
   `LoadBalancerClientFactory.getProperties`): a client listed there gets the LIBRARY default for every key it omits
   (interval 25 s, retry, hint, sticky-session...). Repeat every global setting the cluster needs.

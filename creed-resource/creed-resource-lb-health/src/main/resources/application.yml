@@ -1,0 +1,71 @@
+server:
+  port: ${CREED_LB_HEALTH_PORT:18099}
+  servlet:
+    context-path: /api/lb-health
+
+spring:
+  application:
+    name: creed-resource-lb-health
+  # Jackson 3 (Boot 4) changed defaults the APIs were written against - keep Jackson 2's (repo convention).
+  jackson:
+    use-jackson2-defaults: true
+  cloud:
+    discovery:
+      client:
+        simple:
+          # 10 instances. On localhost they are this app's own extra connectors (TargetConnectorsConfiguration);
+          # point them at real hosts and set creed.lb-health.target.embedded=false to test a real service.
+          instances:
+            lb-health-target:
+              - { instance-id: i00, uri: "http://localhost:18100" }
+              - { instance-id: i01, uri: "http://localhost:18101" }
+              - { instance-id: i02, uri: "http://localhost:18102" }
+              - { instance-id: i03, uri: "http://localhost:18103" }
+              - { instance-id: i04, uri: "http://localhost:18104" }
+              - { instance-id: i05, uri: "http://localhost:18105" }
+              - { instance-id: i06, uri: "http://localhost:18106" }
+              - { instance-id: i07, uri: "http://localhost:18107" }
+              - { instance-id: i08, uri: "http://localhost:18108" }
+              - { instance-id: i09, uri: "http://localhost:18109" }
+    loadbalancer:
+      # Without this the supplier is created lazily by the first request, which then waits for a whole round.
+      # Listed here, LoadBalancerEagerContextInitializer builds it on ApplicationReadyEvent and the first round
+      # runs before traffic needs it.
+      eager-load:
+        clients:
+          - lb-health-target
+      health-check:
+        # REQUIRED false. true (the default) re-emits a growing list after every answering instance - [1], [1,2]
+        # ... - and get() (replay(1)) returns that partial list until the round ends, every round.
+        update-results-list: ${CREED_LB_HC_UPDATE_RESULTS_LIST:false}
+        # 0: start the first round as soon as the supplier exists; any delay is added to the first request's wait.
+        initial-delay: ${CREED_LB_HC_INITIAL_DELAY:0}
+        # Pause between the END of one round and the start of the next (repeatWhen), and also the per-probe
+        # timeout Spring applies - which only works for non-blocking probes (webclient mode).
+        interval: ${CREED_LB_HC_INTERVAL:30s}
+        # REQUIRED true: the blocking DiscoveryClient emits once and completes; only refetching sees scaling.
+        refetch-instances: ${CREED_LB_HC_REFETCH:true}
+        # MUST be > interval, and > the worst-case round (blocking: instances × (connect + read) = 10 × 5s = 50s).
+        # Each refetch replaces the running health-check stream (switchMap): it cancels the interval timer and any
+        # round still in flight. refetch <= interval → the interval never fires; round >= refetch → no round ever
+        # completes and get() stays on the last completed list.
+        refetch-instances-interval: ${CREED_LB_HC_REFETCH_INTERVAL:120s}
+        path:
+          lb-health-target: /api/lb-health/target/health
+      # NOTE: do not add a spring.cloud.loadbalancer.clients.lb-health-target block for one tweak: it does NOT
+      # inherit the global block above; every key it omits falls back to the library default (interval 25s,
+      # update-results-list true, refetch false ...). HealthCheckConfigValidator checks the effective values.
+
+creed:
+  lb-health:
+    health-check:
+      # blocking  = withBlockingHealthChecks(RestTemplate): probes run serially on one Reactor thread.
+      # webclient = withHealthChecks(WebClient): probes run concurrently; Spring's timeout(interval) applies.
+      mode: ${CREED_LB_HC_MODE:blocking}
+      connect-timeout: ${CREED_LB_HC_CONNECT_TIMEOUT:2s}
+      read-timeout: ${CREED_LB_HC_READ_TIMEOUT:3s}
+    debug:
+      # [REFETCH] / [HC] / [HC-STREAM] / [HC-RESULT] logs.
+      enabled: ${CREED_LB_DEBUG:false}
+    target:
+      embedded: ${CREED_LB_TARGET_EMBEDDED:true}
