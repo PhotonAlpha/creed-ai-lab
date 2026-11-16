@@ -50,9 +50,18 @@ public record TemplateMapping(List<SheetMapping> sheets) {
         }
     }
 
+    /** {@code field} as {@link TemplateFields#current}: a field no longer offered reads as its replacement. */
     public record FieldCell(int col, String field) {
+
+        public FieldCell {
+            field = TemplateFields.current(field);
+        }
     }
 
     public record CellBinding(int row, int col, String field) {
+
+        public CellBinding {
+            field = TemplateFields.current(field);
+        }
     }
 }

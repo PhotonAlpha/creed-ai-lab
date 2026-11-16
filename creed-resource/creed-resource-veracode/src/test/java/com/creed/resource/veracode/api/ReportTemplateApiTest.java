@@ -34,6 +34,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -211,6 +212,76 @@ class ReportTemplateApiTest {
         mvc.perform(delete("/api/veracode/report-templates/" + id)).andExpect(status().isNoContent());
         mvc.perform(get("/api/veracode/report-templates/" + id)).andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("template_not_found"));
+    }
+
+    /**
+     * A row whose finding matched several Jira issues shows one (asked for, 2026-11-16): the page's choice, else the
+     * oldest open one - never all of them in one cell. A mapping saved with "Jira links" ({@code jiraUrls}) now shows
+     * the key, not the URL.
+     */
+    @Test
+    void aRowThatMatchedSeveralIssuesShowsTheChosenOne() throws Exception {
+        String duplicate = jira.create("creed - CVE-2021-44228|CWE-502 - log4j-core-2.14.1.jar", null, List.of("2.3.0"),
+                List.of("Security"), "Production", List.of("veracode"), null, "Bug", "Singapore").key();
+        String id = upload();
+        mvc.perform(put("/api/veracode/report-templates/" + id + "/mapping").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sheets":[{"sheet":"SCA components","lists":[{"dataset":"sca","row":4,"cells":[
+                                  {"col":0,"field":"cveId"},{"col":1,"field":"jiraUrls"},{"col":2,"field":"jiraStatuses"}]}]}]}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mapping.sheets[0].lists[0].cells[1].field").value("jiraKeys"));
+        String analysis = mvc.perform(multipart("/api/veracode/analysis/upload")
+                        .file(new MockMultipartFile("file", "detailedreport.xml", "application/xml",
+                                new ClassPathResource(VeracodeController.SAMPLE).getContentAsByteArray()))
+                        .param("jiraVersions", "2.3.0"))
+                .andReturn().getResponse().getContentAsString();
+        String uploadId = JsonPath.read(analysis, "$.uploadId");
+        List<String> findingIds = JsonPath.read(analysis, "$.findings[?(@.cveId == 'CVE-2021-44228')].id");
+        List<List<String>> keys = JsonPath.read(analysis, "$.findings[?(@.cveId == 'CVE-2021-44228')].issues[*].key");
+        assertThat(findingIds).hasSize(1);
+        assertThat(JsonPath.<List<String>>read(analysis, "$.closedStatuses")).contains("Done");
+        assertThat(keys.toString()).contains("CREED-101").contains(duplicate);
+
+        // nothing chosen (the GET): the oldest open issue, alone
+        byte[] plain = mvc.perform(get("/api/veracode/report-templates/" + id + "/export")
+                        .param("uploadId", uploadId).param("jiraVersions", "2.3.0"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        assertThat(log4shellJira(plain)).containsExactly("CREED-101", "In Progress");
+
+        // the page's choice
+        byte[] chosen = mvc.perform(post("/api/veracode/report-templates/" + id + "/export")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"jiraVersions\":[\"2.3.0\"],\"sca\":{\""
+                                + findingIds.getFirst() + "\":\"" + duplicate + "\"}}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        assertThat(log4shellJira(chosen)).containsExactly(duplicate, "To Do");
+
+        // a choice that is not one of the row's issues is the default's
+        byte[] stale = mvc.perform(post("/api/veracode/report-templates/" + id + "/export")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"" + uploadId + "\",\"jiraVersions\":[\"2.3.0\"],\"sca\":{\""
+                                + findingIds.getFirst() + "\":\"CREED-999\"}}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        assertThat(log4shellJira(stale)).containsExactly("CREED-101", "In Progress");
+
+        mvc.perform(post("/api/veracode/report-templates/" + id + "/export").contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    /** The Log4Shell row's Jira key and status cells. */
+    private static List<String> log4shellJira(byte[] xlsx) throws Exception {
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
+            Sheet sca = wb.getSheet("SCA components");
+            for (int r = 4; r <= sca.getLastRowNum(); r++) {
+                Row row = sca.getRow(r);
+                if (row != null && row.getCell(0) != null && "CVE-2021-44228".equals(row.getCell(0).getStringCellValue())) {
+                    return List.of(row.getCell(1).getStringCellValue(), row.getCell(2).getStringCellValue());
+                }
+            }
+            throw new AssertionError("no CVE-2021-44228 row");
+        }
     }
 
     /** A macro-enabled workbook (asked for, 2026-11-13) comes back as one: its type, name and content type kept. */

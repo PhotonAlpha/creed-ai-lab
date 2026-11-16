@@ -580,6 +580,10 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   `Space.Compact`), first in the findings card's toolbar; the gradient one exports with the template used last (named
   on it), the arrow picks a template (the backend
   writes JXLS markup and fills it; unbound sheets stay as uploaded).
+  When a finding (or SAST issue) matched more than one Jira issue, the export first asks which one each such row
+  shows (*Choose one Jira issue per row*: rows that matched the same issues share one choice; preselected with the last
+  choice for this upload, else the oldest issue that is not closed) - a row never gets all of them. Jira cells hold the
+  issue key (ID), not its link.
 - **The Jira version to create under** is the first field of the *Jira fields* bar (required), apart from the lookup's
   *Jira versions*, which are optional and may name several or none. One lookup version is carried over.
 - **The findings card's toolbar** sits under its title, not in it: row one the exports (template, Excel, Confluence)

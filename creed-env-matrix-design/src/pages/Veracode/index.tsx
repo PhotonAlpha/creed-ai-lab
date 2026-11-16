@@ -41,7 +41,7 @@ import {
 import { jiraAuthComplete, reportTemplateApi, saveBlob, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
 import type {
   Analysis, ApplicationView, ConfluenceAuth, CreateField, CreateFieldValues, CreateResult, Finding, FindingStatus, IssueRef, JiraAuth,
-  JiraConnection, ReportTemplateSummary, ReportView, ScaSummary, VeracodeSettings,
+  JiraConnection, ReportTemplateSummary, ReportView, ScaSummary, TemplateIssuePicks, VeracodeSettings,
 } from '../../api/veracode';
 import { ConfluenceSource } from './ConfluenceSource';
 import { useConfluenceToken } from './useConfluenceToken';
@@ -54,6 +54,7 @@ import gradient from './gradientButton.module.css';
 import { JiraFieldsBar } from './JiraFieldsBar';
 import { SastJiraPanel } from './SastJiraPanel';
 import { ConfluenceExportModal } from './ConfluenceExportModal';
+import { TemplateIssuePickModal, ambiguousGroups } from './TemplateIssuePickModal';
 import { SEVERITY_COLOR, severityRank } from './severity';
 import { RECREATE_BUTTON, confirmRecreate } from './recreateClosed';
 import { ApiError } from '../../api/client';
@@ -587,15 +588,30 @@ export function VeracodePage() {
     gradientObserver.current = new ResizeObserver(sync);
     gradientObserver.current.observe(group);
   }, []);
-  const exportWithTemplate = async (templateId: string) => {
+  /**
+   * A row that matched several Jira issues is exported with one (asked for, 2026-11-16): the template waiting for that
+   * choice, and the choices made for this upload (kept while the page is, preselected next time).
+   */
+  const [pickTemplateId, setPickTemplateId] = useState<string | null>(null);
+  const [issuePicks, setIssuePicks] = useState<{ uploadId: string; picks: TemplateIssuePicks } | null>(null);
+  const exportWithTemplate = async (templateId: string, picks?: TemplateIssuePicks) => {
     if (!analysis) return;
     if (!hasToken) {
       setTokenOpen(true);
       return;
     }
+    if (!picks && ambiguousGroups(analysis).length > 0) {
+      setPickTemplateId(templateId);
+      return;
+    }
     setTemplateExporting(true);
     try {
-      saveBlob(await reportTemplateApi.exportWith(templateId, analysis.uploadId, auth, jiraVersions, countries));
+      saveBlob(await reportTemplateApi.exportWith(templateId, analysis.uploadId, auth, jiraVersions, countries,
+        picks ?? { sca: {}, sast: {} }));
+      if (picks) {
+        setIssuePicks({ uploadId: analysis.uploadId, picks });
+        setPickTemplateId(null);
+      }
       setLastTemplateId(templateId);
       try {
         localStorage.setItem(LAST_TEMPLATE_KEY, templateId);
@@ -1442,6 +1458,16 @@ export function VeracodePage() {
           jiraVersions={jiraVersions}
           countries={countries}
           onClose={() => setConfluenceExportOpen(false)}
+        />
+      )}
+      {analysis && (
+        <TemplateIssuePickModal
+          open={pickTemplateId !== null}
+          analysis={analysis}
+          previous={issuePicks?.uploadId === analysis.uploadId ? issuePicks.picks : undefined}
+          exporting={templateExporting}
+          onCancel={() => setPickTemplateId(null)}
+          onExport={(picks) => pickTemplateId && void exportWithTemplate(pickTemplateId, picks)}
         />
       )}
       {confluenceToken.modal}

@@ -8,6 +8,8 @@ import com.creed.resource.veracode.template.TemplateFields;
 import com.creed.resource.veracode.template.TemplateMapping;
 import com.creed.resource.veracode.template.TemplateWorkbook;
 import io.micrometer.context.ContextSnapshotFactory;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -186,6 +188,27 @@ public class ReportTemplateController {
                                   JiraToken token) {
         AnalysisResponse result = analysis.analyze(uploadId, false, Map.of(), jiraVersions, countries, token);
         return xlsx(templates.fill(id, result));
+    }
+
+    /**
+     * The page's export: as {@code GET}, plus which Jira issue each row that matched several shows (asked for,
+     * 2026-11-16: one per row, chosen on the page). Rows the page did not choose for get {@code TemplateFields.pick}'s
+     * default, never all of their issues.
+     */
+    @PostMapping("/{id}/export")
+    ResponseEntity<byte[]> export(@PathVariable String id, @Valid @RequestBody TemplateExportRequest request,
+                                  JiraToken token) {
+        AnalysisResponse result = analysis.analyze(request.uploadId(), false, Map.of(), request.jiraVersions(),
+                request.countries(), token);
+        return xlsx(templates.fill(id, result, new TemplateFields.Picks(request.sca(), request.sast())));
+    }
+
+    /**
+     * @param sca  finding id -> the Jira key its row shows
+     * @param sast SAST issue id -> the Jira key its row shows
+     */
+    record TemplateExportRequest(@NotBlank String uploadId, List<String> jiraVersions, List<String> countries,
+                                 Map<String, String> sca, Map<String, String> sast) {
     }
 
     static final MediaType XLSM = MediaType.parseMediaType("application/vnd.ms-excel.sheet.macroEnabled.12");

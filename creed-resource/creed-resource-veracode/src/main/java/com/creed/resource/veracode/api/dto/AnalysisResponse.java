@@ -24,6 +24,8 @@ import java.util.List;
  * @param sast         the open flaws as SAST Jira issues (one per CWE + category) in the SAST project; {@code null}
  *                     when the request said {@code skipSast}
  * @param applications the reports' Veracode applications under their aliases and repository links
+ * @param closedStatuses {@code veracode.jira.closed-statuses}: the page's template export prefers an issue not in one
+ *                       when a row matched several (as {@code TemplateFields.pick} does)
  */
 public record AnalysisResponse(String uploadId, List<ReportView> reports, String projectKey, List<String> jiraVersions,
                                List<String> selectedVersions, String createVersion,
@@ -31,7 +33,7 @@ public record AnalysisResponse(String uploadId, List<ReportView> reports, String
                                List<CreateField> createFields,
                                List<FindingView> findings, List<String> warnings, Counts counts,
                                List<SastFlaw> sastFlaws, SastJira sast, List<Application> applications,
-                               Instant analyzedAt) {
+                               Instant analyzedAt, List<String> closedStatuses) {
 
     /**
      * A Veracode application as the page shows it (application aliases).

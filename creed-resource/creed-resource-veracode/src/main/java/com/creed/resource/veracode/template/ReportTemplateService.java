@@ -148,6 +148,11 @@ public class ReportTemplateService {
 
     /** The analysis written into the template. Sheets without bindings come out as uploaded. */
     public Filled fill(String id, AnalysisResponse analysis) {
+        return fill(id, analysis, TemplateFields.Picks.NONE);
+    }
+
+    /** @param picks the Jira issue each row that matched several shows (one per row; none chosen = the default) */
+    public Filled fill(String id, AnalysisResponse analysis, TemplateFields.Picks picks) {
         ReportTemplateRepository.Row row = require(id);
         TemplateMapping mapping = mapping(row.mapping());
         if (mapping.isEmpty()) {
@@ -158,7 +163,7 @@ public class ReportTemplateService {
         long started = System.nanoTime();
         // conditional formatting off while JXLS fills (it copies it cell by cell: quadratic), back on afterwards
         TemplateWorkbook.ForFill template = TemplateWorkbook.forFill(row.content(), mapping);
-        Map<String, Object> data = TemplateFields.data(analysis, apps, now, confluence.exportZone());
+        Map<String, Object> data = TemplateFields.data(analysis, picks, apps, now, confluence.exportZone());
         Map<String, Integer> items = new java.util.LinkedHashMap<>();
         data.forEach((dataset, value) -> {
             if (value instanceof java.util.Collection<?> c) {

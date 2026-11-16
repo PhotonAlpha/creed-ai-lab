@@ -72,8 +72,7 @@ public final class TemplateFields {
                 new Field("jiraSummary", "Jira summary"),
                 new Field("jiraKeys", "Jira keys"),
                 new Field("jiraStatuses", "Jira statuses"),
-                new Field("jiraAssignees", "Jira assignees"),
-                new Field("jiraUrls", "Jira links")));
+                new Field("jiraAssignees", "Jira assignees")));
         catalog.put(SAST, List.of(
                 new Field("no", "No. (1, 2, ...)"),
                 new Field("summary", "Jira summary"),
@@ -87,8 +86,7 @@ public final class TemplateFields {
                 new Field("applications", "Veracode applications"),
                 new Field("status", "Status"),
                 new Field("jiraKeys", "Jira keys"),
-                new Field("jiraStatuses", "Jira statuses"),
-                new Field("jiraUrls", "Jira links")));
+                new Field("jiraStatuses", "Jira statuses")));
         catalog.put(SCA_STATS, statsFields(List.of(
                 new Field("thirdPartyComponents", "Third-party components"),
                 new Field("violatesPolicy", "Violates policy"),
@@ -152,6 +150,63 @@ public final class TemplateFields {
         return Character.toLowerCase(camel.charAt(0)) + camel.substring(1);
     }
 
+    /**
+     * Fields no longer offered, read as the one that replaced them - saved mappings name them. {@code jiraUrls} (Jira
+     * links) wrote the browse URLs; asked for (2026-11-16): the issue key, which {@code jiraKeys} already is.
+     */
+    private static final Map<String, String> REPLACED = Map.of("jiraUrls", "jiraKeys");
+
+    /** {@code field}, or what replaced it ({@link TemplateMapping} reads every stored field through this). */
+    public static String current(String field) {
+        return field == null ? null : REPLACED.getOrDefault(field, field);
+    }
+
+    /**
+     * Which Jira issue a row shows when it matched several (asked for, 2026-11-16: one per row, chosen on the page,
+     * not all of them in one cell) - keyed by {@code FindingView.id} / {@code SastIssueView.id}, the issue key as value.
+     * A row without a choice, or whose chosen issue is no longer among its matches (the export reads Jira afresh),
+     * gets {@link #pick}'s default.
+     */
+    public record Picks(Map<String, String> sca, Map<String, String> sast) {
+
+        public static final Picks NONE = new Picks(Map.of(), Map.of());
+
+        public Picks {
+            sca = sca == null ? Map.of() : Map.copyOf(sca);
+            sast = sast == null ? Map.of() : Map.copyOf(sast);
+        }
+    }
+
+    /**
+     * The one issue of {@code issues} a row shows: {@code chosen} when it is one of them, else the first issue not in a
+     * closed status, else the first - "first" by key number (the oldest: a later one is usually its duplicate). The page
+     * preselects the same ({@code defaultPick} in the Veracode page).
+     */
+    static List<IssueRef> pick(List<IssueRef> issues, String chosen, List<String> closedStatuses) {
+        if (issues.size() <= 1) {
+            return issues;
+        }
+        if (chosen != null) {
+            for (IssueRef i : issues) {
+                if (chosen.equalsIgnoreCase(i.key())) {
+                    return List.of(i);
+                }
+            }
+        }
+        List<String> closed = closedStatuses == null ? List.of() : closedStatuses;
+        return List.of(issues.stream().min(Comparator
+                .comparing((IssueRef i) -> i.status() != null
+                        && closed.stream().anyMatch(c -> c.trim().equalsIgnoreCase(i.status().trim())))
+                .thenComparing(i -> projectOf(i.key()))
+                .thenComparingLong(i -> number(i.key().substring(i.key().lastIndexOf('-') + 1)))
+                .thenComparing(IssueRef::key)).orElseThrow());
+    }
+
+    private static String projectOf(String key) {
+        int dash = key.lastIndexOf('-');
+        return dash < 0 ? "" : key.substring(0, dash);
+    }
+
     public static boolean known(String dataset, String field) {
         return CATALOG.getOrDefault(dataset, List.of()).stream().anyMatch(f -> f.key().equals(field));
     }
@@ -162,10 +217,19 @@ public final class TemplateFields {
      * empty value is an empty cell, not the expression left in it).
      */
     public static Map<String, Object> data(AnalysisResponse a, ApplicationAliases apps, Instant now, ZoneId zone) {
+        return data(a, Picks.NONE, apps, now, zone);
+    }
+
+    /** @param picks the issue each row with several shows; the Jira fields of a row describe that one issue only */
+    public static Map<String, Object> data(AnalysisResponse a, Picks picks, ApplicationAliases apps, Instant now,
+                                           ZoneId zone) {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put(SCA, numbered(a.findings().stream().map(f -> sca(f, apps)).toList()));
+        List<String> closed = a.closedStatuses();
+        data.put(SCA, numbered(a.findings().stream()
+                .map(f -> sca(f, pick(f.issues(), picks.sca().get(f.id()), closed), apps)).toList()));
         List<SastIssueView> sastIssues = a.sast() == null ? List.of() : a.sast().issues();
-        data.put(SAST, numbered(sastIssues.stream().map(i -> sast(i, apps)).toList()));
+        data.put(SAST, numbered(sastIssues.stream()
+                .map(i -> sast(i, pick(i.issues(), picks.sast().get(i.id()), closed), apps)).toList()));
         data.put(SCA_STATS, numbered(a.reports().stream().map(r -> scaStats(r, apps)).toList()));
         data.put(SAST_STATS, numbered(a.reports().stream().map(r -> sastStats(r, apps)).toList()));
         data.put(SUMMARY, summary(a, sastIssues, apps, now, zone));
@@ -184,7 +248,7 @@ public final class TemplateFields {
         return out;
     }
 
-    private static Map<String, Object> sca(FindingView f, ApplicationAliases apps) {
+    private static Map<String, Object> sca(FindingView f, List<IssueRef> issues, ApplicationAliases apps) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("application", text(f.application() == null ? null : apps.name(f.application())));
         row.put("title", text(f.title()));
@@ -198,11 +262,11 @@ public final class TemplateFields {
         row.put("description", text(f.description()));
         row.put("status", f.status() == null ? "" : f.status().name());
         row.put("jiraSummary", text(f.summary()));
-        putIssues(row, f.issues(), true);
+        putIssues(row, issues, true);
         return row;
     }
 
-    private static Map<String, Object> sast(SastIssueView i, ApplicationAliases apps) {
+    private static Map<String, Object> sast(SastIssueView i, List<IssueRef> issues, ApplicationAliases apps) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("summary", text(i.summary()));
         // the page's "Jira summary" column: three lines per application, a blank line between applications
@@ -220,7 +284,7 @@ public final class TemplateFields {
         row.put("applications", i.applications().stream().map(apps::name).filter(Objects::nonNull)
                 .collect(Collectors.joining(", ")));
         row.put("status", i.status() == null ? "" : i.status().name());
-        putIssues(row, i.issues(), false);
+        putIssues(row, issues, false);
         return row;
     }
 
@@ -289,8 +353,6 @@ public final class TemplateFields {
             row.put("jiraAssignees", issues.stream().map(IssueRef::assignee).filter(Objects::nonNull).distinct()
                     .collect(Collectors.joining(", ")));
         }
-        row.put("jiraUrls", issues.stream().map(IssueRef::url).filter(Objects::nonNull)
-                .collect(Collectors.joining("\n")));
     }
 
     private static Map<String, Object> summary(AnalysisResponse a, List<SastIssueView> sastIssues,
