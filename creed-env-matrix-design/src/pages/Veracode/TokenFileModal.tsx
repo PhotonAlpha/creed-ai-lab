@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, App, Checkbox, Descriptions, Input, Modal, Space, Typography, Upload } from 'antd';
+import { Alert, App, Checkbox, Descriptions, Input, Modal, Radio, Space, Tooltip, Typography, Upload } from 'antd';
 import { FileProtectOutlined, InboxOutlined } from '@ant-design/icons';
 import { saveBlob } from '../../api/veracode';
 import type { ConfluenceAuth, JiraAuth } from '../../api/veracode';
@@ -30,6 +30,8 @@ export function TokenFileModal({ mode, jira, confluence, onImport, onClose }: {
   const { t } = useI18n();
   const { message } = App.useApp();
   const secure = canEncrypt();
+  /** The user's choice (asked for, 2026-11-16); encrypting is preselected wherever the browser can. */
+  const [encrypt, setEncrypt] = useState(secure);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [file, setFile] = useState<{ name: string; text: string; encrypted: boolean; exportedAt: string } | null>(null);
@@ -39,12 +41,13 @@ export function TokenFileModal({ mode, jira, confluence, onImport, onClose }: {
 
   useEffect(() => {
     if (!mode) return;
+    setEncrypt(secure);
     setPassword('');
     setConfirm('');
     setFile(null);
     setRemember(true);
     setError(null);
-  }, [mode]);
+  }, [mode, secure]);
 
   const reason = (e: unknown) => (e instanceof TokenFileError
     ? t(`veracode.tokenFile.error.${e.reason}` as MessageKey)
@@ -62,7 +65,7 @@ export function TokenFileModal({ mode, jira, confluence, onImport, onClose }: {
   const doExport = async () => {
     setBusy(true);
     try {
-      const text = await writeTokenFile({ jira, confluence }, password);
+      const text = await writeTokenFile({ jira, confluence }, encrypt ? password : '');
       const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       saveBlob({ blob: new Blob([text], { type: 'application/json' }), filename: `veracode-tokens-${stamp}.json` });
       message.success(t('veracode.tokenFile.exported'));
@@ -98,9 +101,9 @@ export function TokenFileModal({ mode, jira, confluence, onImport, onClose }: {
     }
   };
 
-  const mismatch = mode === 'export' && !!password && password !== confirm;
+  const mismatch = mode === 'export' && encrypt && !!confirm && password !== confirm;
   const okDisabled = mode === 'export'
-    ? (!jira && !confluence) || mismatch
+    ? (!jira && !confluence) || (encrypt && (!password || password !== confirm))
     : !file || (file.encrypted && !password);
 
   return (
@@ -120,19 +123,25 @@ export function TokenFileModal({ mode, jira, confluence, onImport, onClose }: {
             { key: 'jira', label: 'Jira', children: describe('jira', jira) },
             { key: 'confluence', label: 'Confluence', children: describe('confluence', confluence) },
           ]} />
-          {secure ? (
+          <Radio.Group value={encrypt} onChange={(e) => { setEncrypt(e.target.value as boolean); setError(null); }}>
+            <Tooltip title={secure ? undefined : t('veracode.tokenFile.insecurePlain')}>
+              <Radio value disabled={!secure}>{t('veracode.tokenFile.encrypt')}</Radio>
+            </Tooltip>
+            <Radio value={false}>{t('veracode.tokenFile.noEncrypt')}</Radio>
+          </Radio.Group>
+          {encrypt ? (
             <Space direction="vertical" style={{ width: '100%' }} size={8}>
-              <Input.Password placeholder={t('veracode.tokenFile.password')} value={password} autoComplete="new-password"
+              <Input.Password placeholder={t('veracode.tokenFile.passwordRequired')} value={password} autoComplete="new-password" autoFocus
                               onChange={(e) => { setPassword(e.target.value); setError(null); }} />
               <Input.Password placeholder={t('veracode.tokenFile.confirm')} value={confirm} autoComplete="new-password"
-                              status={mismatch && confirm ? 'error' : undefined} disabled={!password}
+                              status={mismatch ? 'error' : undefined} disabled={!password}
                               onChange={(e) => setConfirm(e.target.value)} />
-              {password
-                ? <Alert type="info" showIcon message={t('veracode.tokenFile.encryptedHint')} />
-                : <Alert type="warning" showIcon message={t('veracode.tokenFile.plainWarning')} />}
+              {mismatch && <Text type="danger">{t('veracode.tokenFile.mismatch')}</Text>}
+              <Alert type="info" showIcon message={t('veracode.tokenFile.encryptedHint')} />
             </Space>
           ) : (
-            <Alert type="warning" showIcon message={t('veracode.tokenFile.insecurePlain')} />
+            <Alert type="warning" showIcon
+                   message={t(secure ? 'veracode.tokenFile.plainWarning' : 'veracode.tokenFile.insecurePlain')} />
           )}
         </Space>
       ) : (
@@ -166,7 +175,7 @@ export function TokenFileModal({ mode, jira, confluence, onImport, onClose }: {
             )}
           </Upload.Dragger>
           {file?.encrypted && (
-            <Input.Password placeholder={t('veracode.tokenFile.password')} value={password} autoFocus
+            <Input.Password placeholder={t('veracode.tokenFile.passwordRequired')} value={password} autoFocus
                             onChange={(e) => { setPassword(e.target.value); setError(null); }}
                             onPressEnter={() => void doImport()} />
           )}

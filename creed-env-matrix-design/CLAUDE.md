@@ -235,7 +235,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   三张卡片鼠标悬停时有阴影（`hoverable`，光标保持默认，因为卡片本身不可点击）。
   这三张卡片与 SCA「漏洞」、SAST Jira 两张 ProCard 外包一层 `components/BorderBeam.tsx`（Magic UI 的 Border Beam，纯 CSS：`offset-path: rect()` + mask，颜色取主题 token，`delay` 错开；包在卡片外而不是放进卡片，因为「报告概要」收起时隐藏 body；`radius` 要与卡片一致：Card = `borderRadiusLG`（默认），ProCard = `borderRadius`；`prefers-reduced-motion` 或浏览器不支持 `offset-path: rect()` 时不显示）。
 - 漫游引导（antd `Tour`，`useVeracodeTour.tsx`）：首次访问播放 `intro`（报告来源 / Jira 令牌 / 查询条件 / Jira 字段 / 引导按钮），首次出现分析结果播放 `results`（报告概要 / 按模版导出 / 创建 / 过滤 / SAST 标签）；关闭时记入 localStorage `veracode.tour`（中途刷新会重播），页头「使用引导」重播全部。步骤按 `data-tour` 属性定位，目标不在页面上的步骤跳过；分析中或有对话框打开时不自动开始。新增步骤：加 `data-tour`、`STEPS` 和 `veracode.tour.<id>.title/description` 中英文案。
-- 令牌配置文件（页头「令牌配置」下拉，`tokenFile.ts` + `TokenFileModal.tsx`）：导出 Jira / Confluence 令牌为 JSON（`type: creed-veracode-tokens`，`version: 1`）；设密码时用 WebCrypto 加密（PBKDF2-SHA256 60 万次 → AES-256-GCM，`encrypted` 字段），否则明文 `content` 并警告；非安全上下文（非 HTTPS / localhost）不能加密也不能解密。导入只取页面保存的字段（`clean`），按「记住」写入 localStorage / sessionStorage，并像在令牌对话框中保存一样立即测试。「请先配置 Jira 令牌」提示也提供导入按钮。文件不经过后端。
+- 令牌配置文件（页头「令牌配置」下拉，`tokenFile.ts` + `TokenFileModal.tsx`）：导出 Jira / Confluence 令牌为 JSON（`type: creed-veracode-tokens`，`version: 1`）；用户在导出对话框中选择加密（默认，需两次输入相同密码；WebCrypto：PBKDF2-SHA256 60 万次 → AES-256-GCM，`encrypted` 字段）或不加密（明文 `content`，显示警告）；非安全上下文（非 HTTPS / localhost）不能加密也不能解密。导入只取页面保存的字段（`clean`），按「记住」写入 localStorage / sessionStorage，并像在令牌对话框中保存一样立即测试。「请先配置 Jira 令牌」提示也提供导入按钮。文件不经过后端。
 - 上传 / 从 Confluence 分析时全屏 loading（`Spin fullscreen`，上传阶段显示百分比）。
 - 新建 Jira 描述的 Source：上传的文件加为 Jira 附件；从 Confluence 下载的给出附件地址和所在页面的链接（`on page [标题|页面地址]`）。
 - SAST 标签页「Jira 标题」列按 application 显示三行（`<名称>: <SAST project-name> - <类别>` / `CWE 117 <名称>` / `CWE 117 (Flaw IDs: …)`），
