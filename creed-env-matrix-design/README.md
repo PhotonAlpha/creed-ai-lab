@@ -580,13 +580,23 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
   `Space.Compact`), first in the findings card's toolbar; the gradient one exports with the template used last (named
   on it), the arrow picks a template (the backend
   writes JXLS markup and fills it; unbound sheets stay as uploaded).
+  When a finding (or SAST issue) matched more than one Jira issue, the export first asks which one each such row
+  shows (*Choose one Jira issue per row*: rows that matched the same issues share one choice; preselected with the last
+  choice for this upload, else the oldest issue that is not closed) - a row never gets all of them. Jira cells hold the
+  issue key (ID), not its link.
+  A vertical table - one value per cell next to a label merged across rows (e.g. `数量` down A2:A5 beside Very High /
+  High / Medium / Low) - cannot be a data row (the page disables it there and says why): bind its cells to the summary
+  fields *SCA statistics, all reports: …* / *SAST statistics, all reports: …* - each report's statistics added up
+  (Highest CVSS: the highest). *SCA Very High* etc. count the analysis' findings instead.
 - **The Jira version to create under** is the first field of the *Jira fields* bar (required), apart from the lookup's
   *Jira versions*, which are optional and may name several or none. One lookup version is carried over.
 - **The findings card's toolbar** sits under its title, not in it: row one the exports (template, Excel, Confluence)
   on the left and the create / label buttons on the right, row two the status / application / search filters.
 - **Token dialogs** (Jira / Confluence): a *No token yet?* box says where to create one and links to that page in a new
   tab; create it there, come back and paste.
-- **Cards**: the three cards on top cast a shadow on hover; *Reports* folds and unfolds.
+- **Cards**: the three cards on top cast a shadow on hover; *Reports* folds and unfolds. Those three and the SCA *Findings* and SAST Jira table cards carry a beam of light running along their border (Border Beam: the theme's primary colour into purple, staggered per card; off when the system asks for reduced motion).
+- **Guided tour**: the first visit to the Veracode page plays a tour (report source → Jira token → lookup conditions → create fields); the first analysis plays a second one over the results (summary → export with template → create / label → filters → SAST). Each plays once per browser (localStorage); *Guide* at the top right replays them.
+- **Token file**: *Token file* → *Save tokens to a file* at the top right downloads the Jira and Confluence sign-ins (deployment, e-mail, token, issue type) as a JSON file - the user chooses *Encrypt with a password* (recommended, the default; the password entered twice) - encrypted in the browser with AES-256-GCM under a PBKDF2-SHA256 key - or *Do not encrypt*, plain text with a warning. After the browser data is cleared, *Import token file* (also offered in the "set up a Jira token" alert) restores and tests both. The file never reaches the server; encryption needs HTTPS or localhost.
   - *SAST statistics* under the SCA ones: rating, score, the report's stated total / not-mitigated counts, then
     flaws listed / open / mitigated / fixed / open affecting policy, and open flaws per severity (*Total* row with
     several reports).

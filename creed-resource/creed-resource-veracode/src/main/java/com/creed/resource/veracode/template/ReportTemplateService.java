@@ -148,6 +148,11 @@ public class ReportTemplateService {
 
     /** The analysis written into the template. Sheets without bindings come out as uploaded. */
     public Filled fill(String id, AnalysisResponse analysis) {
+        return fill(id, analysis, TemplateFields.Picks.NONE);
+    }
+
+    /** @param picks the Jira issue each row that matched several shows (one per row; none chosen = the default) */
+    public Filled fill(String id, AnalysisResponse analysis, TemplateFields.Picks picks) {
         ReportTemplateRepository.Row row = require(id);
         TemplateMapping mapping = mapping(row.mapping());
         if (mapping.isEmpty()) {
@@ -158,7 +163,7 @@ public class ReportTemplateService {
         long started = System.nanoTime();
         // conditional formatting off while JXLS fills (it copies it cell by cell: quadratic), back on afterwards
         TemplateWorkbook.ForFill template = TemplateWorkbook.forFill(row.content(), mapping);
-        Map<String, Object> data = TemplateFields.data(analysis, apps, now, confluence.exportZone());
+        Map<String, Object> data = TemplateFields.data(analysis, picks, apps, now, confluence.exportZone());
         Map<String, Integer> items = new java.util.LinkedHashMap<>();
         data.forEach((dataset, value) -> {
             if (value instanceof java.util.Collection<?> c) {
@@ -216,8 +221,13 @@ public class ReportTemplateService {
                 if (!listRows.add(list.row())) {
                     throw new IllegalArgumentException(where + ": two data rows on one row");
                 }
-                if (TemplateWorkbook.mergedAcrossRows(sheet, list.row())) {
-                    throw new IllegalArgumentException(where + ": a data row cannot be inside a merge that spans rows");
+                String merge = TemplateWorkbook.mergeAcrossRows(sheet, list.row());
+                if (merge != null) {
+                    // a vertical table (one value per cell next to a merged label) is summary cells, not a data row
+                    throw new IllegalArgumentException(where + ": a data row cannot be inside a merge that spans rows ("
+                            + merge + ") - it repeats per item and would tear the merge. For one value per cell, make "
+                            + "it a plain row and bind the cells to summary fields (e.g. the statistics totals over all "
+                            + "reports)");
                 }
                 if (list.cells().isEmpty()) {
                     throw new IllegalArgumentException(where + ": a data row needs at least one bound cell");

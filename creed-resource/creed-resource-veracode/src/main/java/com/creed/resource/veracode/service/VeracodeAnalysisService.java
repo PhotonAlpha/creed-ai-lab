@@ -212,7 +212,7 @@ public class VeracodeAnalysisService {
                     JiraLookupService.countries(s.meta()), s.countries().values(), s.meta().fields(), views, warnings,
                     AnalysisResponse.Counts.of(views), s.read().sastFlaws(),
                     sast == null ? null : Concurrently.join(sast),
-                    applications(s.reports()), Instant.now(clock));
+                    applications(s.reports()), Instant.now(clock), jiraProps.closedStatuses());
         } finally {
             if (sast != null) {
                 sast.cancel(true);

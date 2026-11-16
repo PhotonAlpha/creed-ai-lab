@@ -12,6 +12,7 @@ import type {
   Analysis, CreateFieldValues, CreateResult, FindingStatus, JiraAuth, SastFlaw, SastIssue, SastJira,
 } from '../../api/veracode';
 import { useI18n } from '../../locales';
+import { BorderBeam } from '../../components/BorderBeam';
 import type { MessageKey } from '../../locales';
 import { JiraFieldsBar } from './JiraFieldsBar';
 import { severityColor, severityRank } from './severity';
@@ -349,51 +350,53 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, cou
         ))}
       </Row>
 
-      <ProCard bordered title={t('veracode.sastJira.title')}>
-        <Space wrap style={{ marginBottom: 12 }}>
-          <Segmented<StatusFilter>
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={(['ALL', 'EXISTS', 'MISSING', 'CREATED'] as const).map((s) => ({
-              value: s,
-              label: s === 'ALL' ? t('veracode.filter.all') : t(`veracode.status.${s}` as MessageKey),
-            }))}
+      <BorderBeam radius={design.borderRadius} duration={12} delay={1.3}>
+        <ProCard bordered title={t('veracode.sastJira.title')}>
+          <Space wrap style={{ marginBottom: 12 }}>
+            <Segmented<StatusFilter>
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={(['ALL', 'EXISTS', 'MISSING', 'CREATED'] as const).map((s) => ({
+                value: s,
+                label: s === 'ALL' ? t('veracode.filter.all') : t(`veracode.status.${s}` as MessageKey),
+              }))}
+            />
+            {createButton(selected, t('veracode.createSelected', { count: selected.length }),
+              t('veracode.sastJira.createConfirm', { count: selected.length, project: sast.projectKey, type: sast.issueType }))}
+            {createButton(allMissing, t('veracode.createAllMissing', { count: allMissing.length }),
+              t('veracode.sastJira.createConfirm', { count: allMissing.length, project: sast.projectKey, type: sast.issueType }))}
+            <Tooltip title={canCreate ? t('veracode.sastJira.labelAllHint') : undefined}>
+              <span>
+                {createButton(allUnlabelled, t('veracode.sastJira.labelAll', { count: allUnlabelled.length }),
+                  t('veracode.sastJira.labelAllConfirm', { count: allUnlabelled.length }),
+                  { kind: LABEL_BUTTON, icon: <TagsOutlined /> })}
+              </span>
+            </Tooltip>
+            <Input.Search
+              allowClear
+              style={{ width: 280 }}
+              placeholder={t('veracode.sastJira.search')}
+              onSearch={setKeyword}
+              onChange={(e) => !e.target.value && setKeyword('')}
+            />
+          </Space>
+          <Table<SastIssue>
+            rowKey="id"
+            size="middle"
+            columns={columns}
+            dataSource={rows}
+            expandable={{ expandedRowRender: flawRows }}
+            // numeric, not 'max-content': a fixed-right column needs it (see the creed-env-matrix skill)
+            scroll={{ x: 1300 }}
+            pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: [20, 50, 100, 200] }}
+            rowSelection={{
+              selectedRowKeys: selected,
+              onChange: (keys) => setSelected(keys as string[]),
+              getCheckboxProps: (i) => ({ disabled: !actionable(i) }),
+            }}
           />
-          {createButton(selected, t('veracode.createSelected', { count: selected.length }),
-            t('veracode.sastJira.createConfirm', { count: selected.length, project: sast.projectKey, type: sast.issueType }))}
-          {createButton(allMissing, t('veracode.createAllMissing', { count: allMissing.length }),
-            t('veracode.sastJira.createConfirm', { count: allMissing.length, project: sast.projectKey, type: sast.issueType }))}
-          <Tooltip title={canCreate ? t('veracode.sastJira.labelAllHint') : undefined}>
-            <span>
-              {createButton(allUnlabelled, t('veracode.sastJira.labelAll', { count: allUnlabelled.length }),
-                t('veracode.sastJira.labelAllConfirm', { count: allUnlabelled.length }),
-                { kind: LABEL_BUTTON, icon: <TagsOutlined /> })}
-            </span>
-          </Tooltip>
-          <Input.Search
-            allowClear
-            style={{ width: 280 }}
-            placeholder={t('veracode.sastJira.search')}
-            onSearch={setKeyword}
-            onChange={(e) => !e.target.value && setKeyword('')}
-          />
-        </Space>
-        <Table<SastIssue>
-          rowKey="id"
-          size="middle"
-          columns={columns}
-          dataSource={rows}
-          expandable={{ expandedRowRender: flawRows }}
-          // numeric, not 'max-content': a fixed-right column needs it (see the creed-env-matrix skill)
-          scroll={{ x: 1300 }}
-          pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: [20, 50, 100, 200] }}
-          rowSelection={{
-            selectedRowKeys: selected,
-            onChange: (keys) => setSelected(keys as string[]),
-            getCheckboxProps: (i) => ({ disabled: !actionable(i) }),
-          }}
-        />
-      </ProCard>
+        </ProCard>
+      </BorderBeam>
     </Space>
   );
 }

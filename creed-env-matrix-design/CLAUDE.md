@@ -233,13 +233,16 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 - 页面顶部是三张独立的 antd `Card`（标题带图标，标题栏用 Card 的语义化 `styles` 填充 `colorFillAlter` 背景；antd 5 只支持对象写法）：「报告来源」（上传 / Confluence 附件标签页）、
   「Jira 设置」（Jira 版本、版本覆盖、自动创建、令牌等工具栏和 Jira 字段）、「报告概要」（有分析结果时：报告表与 SCA / SAST 统计，可点右上角收起 / 展开，状态存 sessionStorage）。
   三张卡片鼠标悬停时有阴影（`hoverable`，光标保持默认，因为卡片本身不可点击）。
+  这三张卡片与 SCA「漏洞」、SAST Jira 两张 ProCard 外包一层 `components/BorderBeam.tsx`（Magic UI 的 Border Beam，纯 CSS：`offset-path: rect()` + mask，颜色取主题 token，`delay` 错开；包在卡片外而不是放进卡片，因为「报告概要」收起时隐藏 body；`radius` 要与卡片一致：Card = `borderRadiusLG`（默认），ProCard = `borderRadius`；`prefers-reduced-motion` 或浏览器不支持 `offset-path: rect()` 时不显示）。
+- 漫游引导（antd `Tour`，`useVeracodeTour.tsx`）：首次访问播放 `intro`（报告来源 / Jira 令牌 / 查询条件 / Jira 字段 / 引导按钮），首次出现分析结果播放 `results`（报告概要 / 按模版导出 / 创建 / 过滤 / SAST 标签）；关闭时记入 localStorage `veracode.tour`（中途刷新会重播），页头「使用引导」重播全部。步骤按 `data-tour` 属性定位，目标不在页面上的步骤跳过；分析中或有对话框打开时不自动开始。新增步骤：加 `data-tour`、`STEPS` 和 `veracode.tour.<id>.title/description` 中英文案。
+- 令牌配置文件（页头「令牌配置」下拉，`tokenFile.ts` + `TokenFileModal.tsx`）：导出 Jira / Confluence 令牌为 JSON（`type: creed-veracode-tokens`，`version: 1`）；用户在导出对话框中选择加密（默认，需两次输入相同密码；WebCrypto：PBKDF2-SHA256 60 万次 → AES-256-GCM，`encrypted` 字段）或不加密（明文 `content`，显示警告）；非安全上下文（非 HTTPS / localhost）不能加密也不能解密。导入只取页面保存的字段（`clean`），按「记住」写入 localStorage / sessionStorage，并像在令牌对话框中保存一样立即测试。「请先配置 Jira 令牌」提示也提供导入按钮。文件不经过后端。
 - 上传 / 从 Confluence 分析时全屏 loading（`Spin fullscreen`，上传阶段显示百分比）。
 - 新建 Jira 描述的 Source：上传的文件加为 Jira 附件；从 Confluence 下载的给出附件地址和所在页面的链接（`on page [标题|页面地址]`）。
 - SAST 标签页「Jira 标题」列按 application 显示三行（`<名称>: <SAST project-name> - <类别>` / `CWE 117 <名称>` / `CWE 117 (Flaw IDs: …)`），
   合并了原「未关闭漏洞」列；Jira 标题本身不变（仍按标题查找），新建的 SAST Jira 在描述开头写同样的三行（按 application）。
 - **报告模版**（`/veracode-templates`，`pages/Veracode/templates/`）：上传公司 Excel 模版（.xlsx / .xlsm，导出保留宏与扩展名）→ 后端解析成 JSON → 页面按 Excel 样子渲染（列字母、行号、合并、列宽、粗体、填充色）→
   点选单元格：所在行可设为 SCA / SAST / SCA 统计 / SAST 统计数据行（导出时按条数向下重复，统计每个报告一行，下方内容下移），该行单元格绑定数据集字段；其他单元格绑定汇总字段 → 保存映射
-  （后端校验，错误指出单元格）→ Veracode 页面「按模版导出」：重新分析并由后端写入 JXLS 占位符后填充。
+  （后端校验，错误指出单元格）→ Veracode 页面「按模版导出」：重新分析并由后端写入 JXLS 占位符后填充。一行匹配到多个 Jira 时，导出前弹框（`TemplateIssuePickModal.tsx`）让用户为每行选一个（相同 Jira 集合的行一组，默认上次的选择 / 最早的未关闭 Jira，规则与后端 `TemplateFields.pick` 一致），随 `POST /report-templates/{id}/export` 发送；Jira 单元格只写编号，不写链接（原「Jira 链接」字段已并入「Jira 编号」）。位于跨行合并单元格内的行不能设为数据行（页面禁用并提示合并范围，后端同样拒绝）；竖排的一格一值表格绑定汇总字段里的统计合计（`scaStats*` / `sastStats*`，全部报告相加，标签由 `veracode.tpl.statsTotal` 拼出）。
   「按模版导出」是主要导出：按 antd「Gradient Button」示例：大号渐变主按钮与右侧只有箭头的按钮左右拼在一起（`Space.Compact`），两者共用一条渐变（宽度 = 整组宽度，左按钮画开头、箭头画结尾；画在 `::after` 上，因为 antd 在拼接主按钮的第二个的 `::before` 上画分隔线），悬停整组淡出（CSS module `gradientButton.module.css`，项目没有 antd-style），位于 SCA「漏洞」卡片内容区第一行最左（导出组：按模版导出 / 导出 Excel / 导出到 Confluence；同一行右侧是创建 / 加 label 按钮，第二行是状态、application、搜索过滤 —— 卡片标题栏不再放按钮）；渐变按钮直接用上次用过的模版（存 localStorage，按钮上显示模版名），右侧箭头选择模版 / 管理模版。模版和映射存在后端 H2 文件库（`postgres` profile 用 PostgreSQL）。
 - 模版上传时全屏 loading 并显示进度（Server-Sent Events：`Accept: text/event-stream` 时上传接口边读边推送 `progress` 事件，
   最后 `done` 返回模版或 `error`）：先是上传字节数，再是后端读取工作簿（第几个 sheet、第几行），最后保存。

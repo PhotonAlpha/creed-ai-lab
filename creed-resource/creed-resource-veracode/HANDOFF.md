@@ -48,6 +48,7 @@ External config: `application.yml` / `application-<profile>.yml` in `CREED_VERAC
 | `POST /jira/issues` `{uploadId, findingIds[], fields}` | per-id `outcome`: CREATED / ALREADY_EXISTS / NOT_IN_REPORT / VERSION_NOT_IN_JIRA / FAILED; `fields` = the create screen's other fields (`{"components":["Security"],"customfield_10100":"Production"}`) |
 | `POST /jira/connection` | `{ok, projectKey, issueType, tokenAccepted, canCreate, versions, fields, status, message}` from the create metadata — a refused token is `ok:false` + Jira's status, not an error |
 | `POST /confluence/export` `{uploadId, parentPageId, project?, version?, jiraVersions}` + both tokens | a fresh analysis as a child page of `parentPageId` (its space), the report files attached and linked from its last line: `{id, title, spaceKey, parentId, url, attachments, attachmentError}`; 404 `confluence_page_not_found` for a parent the user cannot see |
+| `POST /report-templates/{id}/export` `{uploadId, jiraVersions, countries, sca: {findingId: key}, sast: {sastId: key}}` | a fresh analysis through the template, each row that matched several Jira issues written with the one chosen (none / a stale choice = the oldest open one); `GET …/export?uploadId=` = the same with no choices |
 | `GET /analysis/export?uploadId=` | xlsx (sheets *Findings*, *SCA summary*, *SAST flaws*, *SAST summary*, *Source*) from a **fresh** analysis; *Severity* filled by level (`ExcelExporter.SEVERITY_FILL`, the page's tag hues: Very High red … Very Low blue, Informational grey) |
 
 Every endpoint but `/settings` needs the user's Jira token in `X-Jira-Token` — no fallback. Jira Cloud adds the
@@ -67,6 +68,24 @@ no `version` and no override), 404 `upload_expired`, 413 `file_too_large` (`CREE
 default 50MB), 502 `jira_error`.
 
 ## Current state
+
+2026-11-16 (asked for): **vertical statistics tables.** A template like `数量` merged down A2:A5 next to Very High / High /
+Medium / Low with one value per cell cannot be a data row (repeating it would tear the merge - still refused, the message
+now names the merge and the way out). Summary fields now include the **statistics totals over all reports**
+(`scaStats<Field>` / `sastStats<Field>`, e.g. `scaStatsVeryHigh`, `scaStatsVulnerabilities`, `scaStatsMaxCvss` = the
+highest): the counts summed from the scaStats / sastStats rows, `""` when no report states one. Not totalled: which
+report, `violatesPolicy`, `rating`, `score`. They are Veracode's own counts - unlike `scaVeryHigh`, which counts the
+grouped findings. The template page disables the data-row choices for a row inside a vertical merge and says why.
+**124 tests pass.**
+
+2026-11-16 (asked for): **template export = one Jira issue per row, Jira IDs not links.** The *Jira links* field
+(`jiraUrls`) is gone from the catalog; a saved mapping naming it reads as `jiraKeys` (`TemplateFields.current`, applied
+in `TemplateMapping.FieldCell` / `CellBinding`, so the next save stores the new name). A row whose finding / SAST issue
+matched several Jira issues used to get all of them comma-joined in every Jira cell; now `TemplateFields.pick` keeps one:
+the page's choice (`POST …/export` body), else the first not in `closed-statuses`, by key number (the oldest). The page
+asks before exporting when there are such rows (`TemplateIssuePickModal`: rows grouped by the same set of issues, one
+radio per group, preselected with the last choice for the upload or the same default - `AnalysisResponse.closedStatuses`
+feeds it). The plain *Export Excel* and the Confluence export are unchanged. **123 tests pass.**
 
 2026-11-13 (asked for): **template upload shows its progress** - the page sends `Accept: text/event-stream` and the
 upload answers as Server-Sent Events (bytes sent, then the server reading: sheet i/n, row r/rows, then storing) under a

@@ -57,9 +57,18 @@ export function ReportTemplatesPage() {
   }, [refresh, message]);
 
   /** A field's label in the page's language; a key this page does not know shows the backend's English label. */
-  const label = useCallback((dataset: TemplateDataset, key: string) => {
+  const label = useCallback((dataset: TemplateDataset, key: string): string => {
     const messageKey = `veracode.tpl.field.${key}`;
     if (messageKey in enUS) return t(messageKey as MessageKey);
+    // a statistics total over all reports (`scaStatsVeryHigh`): the statistics field's own label, translated
+    const total = dataset === 'summary' ? /^(scaStats|sastStats)([A-Z].*)$/.exec(key) : null;
+    if (total) {
+      const statsDataset = total[1] as ListDataset;
+      return t('veracode.tpl.statsTotal', {
+        dataset: t(`veracode.tpl.dataset.${statsDataset}`),
+        field: label(statsDataset, total[2].charAt(0).toLowerCase() + total[2].slice(1)),
+      });
+    }
     return fields?.[dataset].find((f) => f.key === key)?.label ?? key;
   }, [t, fields]);
 
@@ -148,6 +157,12 @@ export function ReportTemplatesPage() {
   const sm = sheetMapping(draft, sheet);
   const list = selected ? listAt(sm, selected.row) : undefined;
   const binding = selected ? bindingAt(sm, selected.row, selected.col) : undefined;
+  /**
+   * A merge spanning rows that the selected row is in (`数量` down A2:A5 next to Very High / High / ...): a data row
+   * there would tear it (the backend refuses it) - such a vertical table is summary cells, e.g. the statistics totals.
+   */
+  const verticalMerge = selected && current?.merges.find((m) => m.firstRow !== m.lastRow
+    && m.firstRow <= selected.row && selected.row <= m.lastRow);
   const selectedText = useMemo(() => {
     if (!current || !selected) return '';
     return current.data.find((r) => r.row === selected.row)?.cells.find((c) => c.col === selected.col)?.text ?? '';
@@ -360,15 +375,27 @@ export function ReportTemplatesPage() {
                                 onChange={(v) => setDraft(setDataRow(draft, sheet, selected.row, v === 'none' ? null : v))}
                                 options={[
                                   { value: 'none', label: t('veracode.tpl.plainRow') },
-                                  { value: 'sca', label: t('veracode.tpl.scaRow') },
-                                  { value: 'sast', label: t('veracode.tpl.sastRow') },
-                                  { value: 'scaStats', label: t('veracode.tpl.scaStatsRow') },
-                                  { value: 'sastStats', label: t('veracode.tpl.sastStatsRow') },
+                                  ...(['sca', 'sast', 'scaStats', 'sastStats'] as const).map((d) => ({
+                                    value: d,
+                                    label: t(`veracode.tpl.${d}Row`),
+                                    disabled: !!verticalMerge,
+                                  })),
                                 ]}
                               />
-                              <Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: token.fontSizeSM }}>
-                                {t(list ? 'veracode.tpl.dataRowHint' : 'veracode.tpl.plainRowHint')}
-                              </Text>
+                              {verticalMerge ? (
+                                <Alert
+                                  type={list ? 'error' : 'info'}
+                                  showIcon
+                                  style={{ marginTop: 8 }}
+                                  message={t('veracode.tpl.verticalMerge', {
+                                    merge: `${cellRef(verticalMerge.firstRow, verticalMerge.firstCol)}:${cellRef(verticalMerge.lastRow, verticalMerge.lastCol)}`,
+                                  })}
+                                />
+                              ) : (
+                                <Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: token.fontSizeSM }}>
+                                  {t(list ? 'veracode.tpl.dataRowHint' : 'veracode.tpl.plainRowHint')}
+                                </Text>
+                              )}
                             </div>
                             <div>
                               <Text strong>
@@ -380,6 +407,8 @@ export function ReportTemplatesPage() {
                                 optionFilterProp="label"
                                 style={{ width: '100%', marginTop: 4 }}
                                 placeholder={t('veracode.tpl.chooseField')}
+                                // long names ("SCA 统计（全部报告）：Very High") readable in the narrow side card
+                                popupMatchSelectWidth={360}
                                 value={binding?.field}
                                 onChange={(v?: string) => setDraft(setCellField(draft, sheet, selected.row, selected.col, v ?? null))}
                                 options={fieldOptions(list ? list.dataset : 'summary')}

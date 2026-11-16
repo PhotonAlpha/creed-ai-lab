@@ -269,6 +269,20 @@ export interface Analysis {
   /** The reports' applications under their mapped names and links; absent in an analysis cached before it existed. */
   applications?: ApplicationView[];
   analyzedAt: string;
+  /**
+   * `veracode.jira.closed-statuses`: the template export preselects an issue not in one when a row matched several.
+   * Absent in an analysis cached before it existed.
+   */
+  closedStatuses?: string[];
+}
+
+/**
+ * The Jira issue each template row that matched several shows (row id -> issue key): `sca` by `Finding.id`, `sast` by
+ * `SastIssue.id`. A row left out gets the backend's default (the oldest open issue), never all of them.
+ */
+export interface TemplateIssuePicks {
+  sca: Record<string, string>;
+  sast: Record<string, string>;
 }
 
 export type CreateOutcome = 'CREATED' | 'ALREADY_EXISTS' | 'LABELED' | 'NOT_IN_REPORT' | 'FAILED';
@@ -845,12 +859,17 @@ export const reportTemplateApi = {
   /** The workbook with its JXLS markup (jx: comments, `${...}` cells), as export fills it. */
   jxls: async (id: string) =>
     download(await fetch(`${BASE}${TEMPLATES}/${encodeURIComponent(id)}/jxls`), 'template-jxls.xlsx'),
-  /** A fresh analysis written into the template, with the page's lookup conditions. */
-  exportWith: async (id: string, uploadId: string, auth: JiraAuth, jiraVersions: string[], countries: string[]) => {
-    const query = withVersions(new URLSearchParams({ uploadId }), jiraVersions, countries);
-    return download(await fetch(`${BASE}${TEMPLATES}/${encodeURIComponent(id)}/export?${query}`,
-      { headers: tokenHeader(auth) }), 'report.xlsx');
-  },
+  /**
+   * A fresh analysis written into the template, with the page's lookup conditions and the issue chosen for each row
+   * that matched several (a POST: the choices are a body, not a query).
+   */
+  exportWith: async (id: string, uploadId: string, auth: JiraAuth, jiraVersions: string[], countries: string[],
+    picks: TemplateIssuePicks) =>
+    download(await fetch(`${BASE}${TEMPLATES}/${encodeURIComponent(id)}/export`, {
+      method: 'POST',
+      headers: { ...tokenHeader(auth), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uploadId, jiraVersions, countries, ...picks }),
+    }), 'report.xlsx'),
 };
 
 /**

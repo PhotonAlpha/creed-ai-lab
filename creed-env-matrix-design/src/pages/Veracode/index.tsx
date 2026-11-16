@@ -36,14 +36,16 @@ import {
 import type { TableColumnsType } from 'antd';
 import {
   CloudDownloadOutlined, CloudUploadOutlined, DownOutlined, ExperimentOutlined, FileExcelOutlined, FileTextOutlined, FilterOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined,
-  SettingOutlined, TagOutlined, TagsOutlined, UpOutlined,
+  SettingOutlined, TagOutlined, TagsOutlined, UpOutlined, DownloadOutlined, FileProtectOutlined, ImportOutlined,
 } from '@ant-design/icons';
 import { jiraAuthComplete, reportTemplateApi, saveBlob, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
 import type {
   Analysis, ApplicationView, ConfluenceAuth, CreateField, CreateFieldValues, CreateResult, Finding, FindingStatus, IssueRef, JiraAuth,
-  JiraConnection, ReportTemplateSummary, ReportView, ScaSummary, VeracodeSettings,
+  JiraConnection, ReportTemplateSummary, ReportView, ScaSummary, TemplateIssuePicks, VeracodeSettings,
 } from '../../api/veracode';
 import { ConfluenceSource } from './ConfluenceSource';
+import { useVeracodeTour } from './useVeracodeTour';
+import { TokenFileModal } from './TokenFileModal';
 import { useConfluenceToken } from './useConfluenceToken';
 import { ApplicationName, applicationLabel } from './applicationName';
 import { JiraTokenModal } from './JiraTokenModal';
@@ -54,10 +56,12 @@ import gradient from './gradientButton.module.css';
 import { JiraFieldsBar } from './JiraFieldsBar';
 import { SastJiraPanel } from './SastJiraPanel';
 import { ConfluenceExportModal } from './ConfluenceExportModal';
+import { TemplateIssuePickModal, ambiguousGroups } from './TemplateIssuePickModal';
 import { SEVERITY_COLOR, severityRank } from './severity';
 import { RECREATE_BUTTON, confirmRecreate } from './recreateClosed';
 import { ApiError } from '../../api/client';
 import { useI18n } from '../../locales';
+import { BorderBeam } from '../../components/BorderBeam';
 import type { MessageKey } from '../../locales';
 
 const { Text, Paragraph } = Typography;
@@ -587,15 +591,30 @@ export function VeracodePage() {
     gradientObserver.current = new ResizeObserver(sync);
     gradientObserver.current.observe(group);
   }, []);
-  const exportWithTemplate = async (templateId: string) => {
+  /**
+   * A row that matched several Jira issues is exported with one (asked for, 2026-11-16): the template waiting for that
+   * choice, and the choices made for this upload (kept while the page is, preselected next time).
+   */
+  const [pickTemplateId, setPickTemplateId] = useState<string | null>(null);
+  const [issuePicks, setIssuePicks] = useState<{ uploadId: string; picks: TemplateIssuePicks } | null>(null);
+  const exportWithTemplate = async (templateId: string, picks?: TemplateIssuePicks) => {
     if (!analysis) return;
     if (!hasToken) {
       setTokenOpen(true);
       return;
     }
+    if (!picks && ambiguousGroups(analysis).length > 0) {
+      setPickTemplateId(templateId);
+      return;
+    }
     setTemplateExporting(true);
     try {
-      saveBlob(await reportTemplateApi.exportWith(templateId, analysis.uploadId, auth, jiraVersions, countries));
+      saveBlob(await reportTemplateApi.exportWith(templateId, analysis.uploadId, auth, jiraVersions, countries,
+        picks ?? { sca: {}, sast: {} }));
+      if (picks) {
+        setIssuePicks({ uploadId: analysis.uploadId, picks });
+        setPickTemplateId(null);
+      }
       setLastTemplateId(templateId);
       try {
         localStorage.setItem(LAST_TEMPLATE_KEY, templateId);
@@ -842,289 +861,350 @@ export function VeracodePage() {
     <Space size={8}><span style={{ color: design.colorPrimary }}>{icon}</span>{label}</Space>
   );
 
+  /**
+   * Both tokens to a file and back (asked for, 2026-11-16: cleared browser data loses them). An import is saved and
+   * tested as if typed in the token dialogs.
+   */
+  const [tokenFileMode, setTokenFileMode] = useState<'export' | 'import' | null>(null);
+  const jiraStored = jiraToken.auth ? { auth: jiraToken.auth, remember: jiraToken.remember } : null;
+  const tokenFileMenu = (
+    <Dropdown
+      trigger={['click']}
+      menu={{
+        items: [
+          { key: 'export', icon: <DownloadOutlined />, label: t('veracode.tokenFile.exportMenu'), disabled: !jiraStored && !confluenceToken.stored },
+          { key: 'import', icon: <ImportOutlined />, label: t('veracode.tokenFile.importMenu') },
+        ],
+        onClick: ({ key }) => setTokenFileMode(key as 'export' | 'import'),
+      }}
+    >
+      <Tooltip title={t('veracode.tokenFile.menuHint')} placement="left">
+        <Button icon={<FileProtectOutlined />} data-tour="tokenFile">
+          {t('veracode.tokenFile.menu')} <DownOutlined />
+        </Button>
+      </Tooltip>
+    </Dropdown>
+  );
+
+  const tour = useVeracodeTour({
+    ready: !!settings,
+    hasAnalysis: !!analysis,
+    busy: loading || !!upload || tokenOpen || confluenceExportOpen || pickTemplateId !== null || tokenFileMode !== null,
+  });
+
   return (
-    <PageContainer title={t('veracode.title')} subTitle={t('veracode.subtitle')}>
+    <PageContainer title={t('veracode.title')} subTitle={t('veracode.subtitle')} extra={<Space>{tokenFileMenu}{tour.button}</Space>}>
+      {tour.element}
+      <TokenFileModal
+        mode={tokenFileMode}
+        jira={jiraStored}
+        confluence={confluenceToken.stored}
+        onImport={(content) => {
+          if (content.jira) saveToken(content.jira.auth, content.jira.remember, null);
+          if (content.confluence) confluenceToken.apply(content.confluence.auth, content.confluence.remember);
+        }}
+        onClose={() => setTokenFileMode(null)}
+      />
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         {/* three sections: where the reports come from, how Jira is used, what was read */}
-        <Card
-          // the Confluence token beside the title (asked for), as the Jira one is - on the Confluence tab only
-          title={(
-            <Space size={12} wrap>
-              {sectionTitle(<CloudUploadOutlined />, t('veracode.section.source'))}
-              {settings?.confluenceBaseUrl && source === 'confluence' && confluenceToken.button}
-            </Space>
-          )}
-          // the bundled sample is a third source (mock only), beside the upload and the Confluence tabs
-          extra={settings?.mock && (
-            <Tooltip title={t('veracode.sampleHint')}>
-              <Button size="small" icon={<ExperimentOutlined />} loading={loading} onClick={analyzeSample}>
-                {t('veracode.sample')}
-              </Button>
-            </Tooltip>
-          )}
-          hoverable
-          style={{ cursor: 'default' }}
-          styles={sectionStyles}
-        >
-          {(() => {
-            const dragger = (
-              <Upload.Dragger
-                accept={UPLOAD_ACCEPT}
-                multiple
-                showUploadList={false}
-                beforeUpload={beforeUpload}
-                disabled={loading}
-              >
-                <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-                <p className="ant-upload-text">{t('veracode.upload.title')}</p>
-                <p className="ant-upload-hint">{t('veracode.upload.hint')}</p>
-              </Upload.Dragger>
-            );
-            // no Confluence configured: the upload alone, as before
-            if (!settings?.confluenceBaseUrl) return dragger;
-            return (
-              <Tabs
-                activeKey={source}
-                onChange={(key) => setSource(key as 'upload' | 'confluence')}
-                items={[
-                  { key: 'upload', label: t('veracode.source.upload'), children: dragger },
-                  {
-                    key: 'confluence',
-                    label: t('veracode.source.confluence'),
-                    children: (
-                      <ConfluenceSource
-                        auth={confluenceToken.auth}
-                        hasToken={confluenceToken.hasToken}
-                        connection={confluenceToken.connection}
-                        onNeedToken={confluenceToken.openDialog}
-                        mock={settings.mock}
-                        parentPageId={settings.confluenceParentPageId}
-                        busy={loading}
-                        pageId={confluencePageId}
-                        onPageIdChange={setConfluencePageId}
-                        onAnalyze={analyzeConfluence}
-                      />
-                    ),
-                  },
-                ]}
-              />
-            );
-          })()}
-          {upload && <UploadProgressBar {...upload} autoCreate={options().autoCreate} />}
-        </Card>
-        <Card
-          // the token is what every Jira call runs as: in the header right after the title (asked for), apart from
-          // the lookup options and actions
-          title={(
-            <Space size={12} wrap>
-              {sectionTitle(<SettingOutlined />, t('veracode.section.jira'))}
-              <Tooltip title={connection?.message ?? t('veracode.token.buttonHint')}>
-                <Button size="small" icon={<KeyOutlined />} onClick={() => setTokenOpen(true)}>
-                  {t('veracode.token.button')}
-                  {!hasToken
-                    ? <Tag color="default" style={{ marginInlineEnd: 0 }}>{t('veracode.token.unset')}</Tag>
-                    : connection?.ok
-                      ? <Tag color="success" style={{ marginInlineEnd: 0 }}>{t('veracode.token.valid')}</Tag>
-                      : connection && !connection.tokenAccepted
-                        ? <Tag color="error" style={{ marginInlineEnd: 0 }}>{t('veracode.token.bad')}</Tag>
-                        : connection
-                          // the token is fine; the issue type or the project is not (the dialog says what)
-                          ? <Tag color="warning" style={{ marginInlineEnd: 0 }}>{t('veracode.token.attention')}</Tag>
-                          : <Tag color="processing" style={{ marginInlineEnd: 0 }}>{t('veracode.token.set')}</Tag>}
-                </Button>
-              </Tooltip>
-            </Space>
-          )}
-          extra={settings?.mock && (
-            <Tooltip title={t('veracode.mockHint')}><Tag color="purple" style={{ marginInlineEnd: 0 }}>{t('veracode.mock')}</Tag></Tooltip>
-          )}
-          hoverable
-          style={{ cursor: 'default' }}
-          styles={sectionStyles}
-        >
-          {/* nothing in this card works without a usable token: say so first, with the way to fix it */}
-          {(!hasToken || (connection && !connection.ok)) && (
-            <Alert
-              type={!hasToken || connection?.tokenAccepted ? 'warning' : 'error'}
-              showIcon
-              style={{ marginBottom: design.margin }}
-              message={!hasToken ? t('veracode.token.needed')
-                : connection?.tokenAccepted ? t('veracode.token.attentionHint') : t('veracode.token.rejectedHint')}
-              description={hasToken ? connection?.message : undefined}
-              action={(
-                <Button size="small" type={!hasToken ? 'primary' : 'default'} icon={<KeyOutlined />} onClick={() => setTokenOpen(true)}>
-                  {t(!hasToken ? 'veracode.token.setUp' : 'veracode.token.check')}
-                </Button>
-              )}
-            />
-          )}
-          {/*
-            the lookup conditions in a panel of their own, each with a visible label (asked for: two bare selects in a
-            row of buttons were easy to miss); everything else - display override, auto-create, actions - below it
-          */}
-          <div
-            style={{
-              background: design.colorFillAlter,
-              border: `1px solid ${design.colorBorderSecondary}`,
-              borderRadius: design.borderRadiusLG,
-              padding: `${design.paddingSM}px ${design.padding}px`,
-              marginBottom: design.margin,
-            }}
-          >
-            <Space size={8} style={{ marginBottom: design.marginXS }}>
-              <FilterOutlined style={{ color: design.colorPrimary }} />
-              <Text strong>{t('veracode.query.title')}</Text>
-              <Text type="secondary">{t('veracode.query.hint')}</Text>
-            </Space>
-            <Form layout="inline" component="div" style={{ rowGap: design.marginXS }}>
-              <Form.Item label={t('veracode.query.versions')} tooltip={t('veracode.jiraVersion.hint')}>
-                <Select
-                  mode="multiple"
-                  allowClear
-                  showSearch
-                  // a long list stays one line: the tags collapse into "+N", the options scroll in the dropdown
-                  maxTagCount="responsive"
-                  value={jiraVersions}
-                  onChange={chooseVersions}
-                  onOpenChange={selectOpened('versions')}
-                  options={versionList.map((v) => ({ value: v, label: v }))}
-                  placeholder={t('veracode.jiraVersion.placeholder')}
-                  notFoundContent={t('veracode.jiraVersion.none')}
-                  disabled={loading}
-                  style={{ width: 300 }}
-                />
-              </Form.Item>
-              {/* always there: without options it is disabled and says why, rather than missing from the panel */}
-              <Form.Item label={t('veracode.query.country')} tooltip={t('veracode.country.hint')}>
-                <Select
-                  mode="multiple"
-                  allowClear
-                  showSearch
-                  maxTagCount="responsive"
-                  value={countries}
-                  onChange={chooseCountries}
-                  onOpenChange={selectOpened('countries')}
-                  options={countryList.map((c) => ({ value: c, label: c }))}
-                  placeholder={countryList.length > 0 ? t('veracode.country.placeholder')
-                    : t(analysis || connection ? 'veracode.country.noField' : 'veracode.country.notRead')}
-                  disabled={loading || countryList.length === 0}
-                  style={{ width: 260 }}
-                />
-              </Form.Item>
-            </Form>
-          </div>
-          <Space wrap align="center">
-            <Tooltip title={t('veracode.versionOverrideHint')}>
-              <Input
-                value={versionOverride}
-                onChange={(e) => setVersionOverride(e.target.value)}
-                placeholder={t('veracode.versionOverride')}
-                style={{ width: 220 }}
-                allowClear
-              />
-            </Tooltip>
-            <Tooltip title={createBlocked}>
-              <Checkbox checked={autoCreate && canCreate} disabled={!canCreate} onChange={(e) => toggleAutoCreate(e.target.checked)}>
-                {t('veracode.autoCreate')}
-              </Checkbox>
-            </Tooltip>
-            {autoCreate && canCreate && (
-              <Tag color="warning" style={{ marginInlineEnd: 0 }}>{t('veracode.autoCreateWarn.on')}</Tag>
-            )}
-            {analysis && (
-              <Tooltip title={t('veracode.reanalyzeHint')}>
-                <Button icon={<ReloadOutlined />} loading={loading} onClick={() => analyze(analysis.uploadId, false)}>
-                  {t('veracode.reanalyze')}
-                </Button>
-              </Tooltip>
-            )}
-          </Space>
-          {(createFields.length > 0 || versionList.length > 0) && (
-            <JiraFieldsBar
-              fields={createFields}
-              values={fieldValues}
-              onChange={setFieldValues}
-              versions={versionList}
-              version={createVersion}
-              onVersionChange={setCreateVersion}
-            />
-          )}
-        </Card>
-        {analysis && (
+        <BorderBeam>
           <Card
-            title={sectionTitle(<FileTextOutlined />, t('veracode.section.reports'))}
-            extra={(
-              <Button
-                type="text"
-                size="small"
-                icon={reportsFolded ? <DownOutlined /> : <UpOutlined />}
-                aria-expanded={!reportsFolded}
-                onClick={() => foldReports(!reportsFolded)}
-              >
-                {t(reportsFolded ? 'veracode.section.expand' : 'veracode.section.collapse')}
-              </Button>
+            data-tour="source"
+            // the Confluence token beside the title (asked for), as the Jira one is - on the Confluence tab only
+            title={(
+              <Space size={12} wrap>
+                {sectionTitle(<CloudUploadOutlined />, t('veracode.section.source'))}
+                {settings?.confluenceBaseUrl && source === 'confluence' && confluenceToken.button}
+              </Space>
+            )}
+            // the bundled sample is a third source (mock only), beside the upload and the Confluence tabs
+            extra={settings?.mock && (
+              <Tooltip title={t('veracode.sampleHint')}>
+                <Button size="small" icon={<ExperimentOutlined />} loading={loading} onClick={analyzeSample}>
+                  {t('veracode.sample')}
+                </Button>
+              </Tooltip>
             )}
             hoverable
             style={{ cursor: 'default' }}
-            // folded = the header alone: the body is hidden, not unmounted, so the tables keep their state
-            styles={{ ...sectionStyles, body: reportsFolded ? { display: 'none' } : undefined }}
+            styles={sectionStyles}
           >
-            <Descriptions size="small" column={{ xs: 1, md: 2, xl: 4 }}>
-              <Descriptions.Item label={t('veracode.project')}>{analysis.projectKey}</Descriptions.Item>
-              <Descriptions.Item label={t('veracode.jiraVersions')}>
-                {/* one line however many: the full list is in the tooltip and the version dropdown */}
-                <Text ellipsis={{ tooltip: analysis.selectedVersions.join(', ') }} style={{ maxWidth: 260 }}>
-                  {analysis.selectedVersions.length === 0
-                    ? t('veracode.jiraVersion.any', { count: analysis.jiraVersions.length })
-                    : analysis.selectedVersions.join(', ')}
-                </Text>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('veracode.analyzedAt')}>
-                {new Date(analysis.analyzedAt).toLocaleString()}
-              </Descriptions.Item>
-            </Descriptions>
-            {/* one line per uploaded report: its Veracode application, version and policy */}
-            <Table<ReportView>
-              size="small"
-              rowKey="fileName"
-              pagination={false}
-              dataSource={analysis.reports}
-              columns={[
-                { title: t('veracode.file'), dataIndex: 'fileName' },
-                { title: t('veracode.app'), dataIndex: 'appName', render: (v: string | null) => <ApplicationName app={v} apps={analysis.applications} /> },
-                {
-                  title: t('veracode.affectedVersion'),
-                  dataIndex: 'affectedVersion',
-                  render: (v: string | null, r) => (
-                    <Space size={4}>
-                      {v ?? '—'}
-                      {r.versionOverridden && (
-                        <Tooltip title={t('veracode.scanVersion', { version: r.scanVersion ?? '—' })}>
-                          <Tag color="warning">{t('veracode.overridden')}</Tag>
-                        </Tooltip>
-                      )}
-                    </Space>
-                  ),
-                },
-                {
-                  title: t('veracode.policy'),
-                  dataIndex: 'policyName',
-                  render: (v: string | null, r) => (
-                    <Space size={4}>
-                      {v ?? '—'}
-                      {r.policyCompliance && (
-                        <Tag color={/^pass/i.test(r.policyCompliance) ? 'success' : 'error'}>{r.policyCompliance}</Tag>
-                      )}
-                    </Space>
-                  ),
-                },
-                { title: t('veracode.generatedAt'), dataIndex: 'generatedAt', render: (v: string | null) => v ?? '—' },
-              ]}
-              style={{ marginTop: 8 }}
-            />
-            <ScaSummaryTable reports={analysis.reports} apps={analysis.applications} />
-            <SastSummaryTable reports={analysis.reports} apps={analysis.applications} />
+            {(() => {
+              const dragger = (
+                <Upload.Dragger
+                  accept={UPLOAD_ACCEPT}
+                  multiple
+                  showUploadList={false}
+                  beforeUpload={beforeUpload}
+                  disabled={loading}
+                >
+                  <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+                  <p className="ant-upload-text">{t('veracode.upload.title')}</p>
+                  <p className="ant-upload-hint">{t('veracode.upload.hint')}</p>
+                </Upload.Dragger>
+              );
+              // no Confluence configured: the upload alone, as before
+              if (!settings?.confluenceBaseUrl) return dragger;
+              return (
+                <Tabs
+                  activeKey={source}
+                  onChange={(key) => setSource(key as 'upload' | 'confluence')}
+                  items={[
+                    { key: 'upload', label: t('veracode.source.upload'), children: dragger },
+                    {
+                      key: 'confluence',
+                      label: t('veracode.source.confluence'),
+                      children: (
+                        <ConfluenceSource
+                          auth={confluenceToken.auth}
+                          hasToken={confluenceToken.hasToken}
+                          connection={confluenceToken.connection}
+                          onNeedToken={confluenceToken.openDialog}
+                          mock={settings.mock}
+                          parentPageId={settings.confluenceParentPageId}
+                          busy={loading}
+                          pageId={confluencePageId}
+                          onPageIdChange={setConfluencePageId}
+                          onAnalyze={analyzeConfluence}
+                        />
+                      ),
+                    },
+                  ]}
+                />
+              );
+            })()}
+            {upload && <UploadProgressBar {...upload} autoCreate={options().autoCreate} />}
           </Card>
+        </BorderBeam>
+        <BorderBeam delay={2.7}>
+          <Card
+            // the token is what every Jira call runs as: in the header right after the title (asked for), apart from
+            // the lookup options and actions
+            title={(
+              <Space size={12} wrap>
+                {sectionTitle(<SettingOutlined />, t('veracode.section.jira'))}
+                <Tooltip title={connection?.message ?? t('veracode.token.buttonHint')}>
+                  <Button size="small" icon={<KeyOutlined />} data-tour="jiraToken" onClick={() => setTokenOpen(true)}>
+                    {t('veracode.token.button')}
+                    {!hasToken
+                      ? <Tag color="default" style={{ marginInlineEnd: 0 }}>{t('veracode.token.unset')}</Tag>
+                      : connection?.ok
+                        ? <Tag color="success" style={{ marginInlineEnd: 0 }}>{t('veracode.token.valid')}</Tag>
+                        : connection && !connection.tokenAccepted
+                          ? <Tag color="error" style={{ marginInlineEnd: 0 }}>{t('veracode.token.bad')}</Tag>
+                          : connection
+                            // the token is fine; the issue type or the project is not (the dialog says what)
+                            ? <Tag color="warning" style={{ marginInlineEnd: 0 }}>{t('veracode.token.attention')}</Tag>
+                            : <Tag color="processing" style={{ marginInlineEnd: 0 }}>{t('veracode.token.set')}</Tag>}
+                  </Button>
+                </Tooltip>
+              </Space>
+            )}
+            extra={settings?.mock && (
+              <Tooltip title={t('veracode.mockHint')}><Tag color="purple" style={{ marginInlineEnd: 0 }}>{t('veracode.mock')}</Tag></Tooltip>
+            )}
+            hoverable
+            style={{ cursor: 'default' }}
+            styles={sectionStyles}
+          >
+            {/* nothing in this card works without a usable token: say so first, with the way to fix it */}
+            {(!hasToken || (connection && !connection.ok)) && (
+              <Alert
+                type={!hasToken || connection?.tokenAccepted ? 'warning' : 'error'}
+                showIcon
+                style={{ marginBottom: design.margin }}
+                message={!hasToken ? t('veracode.token.needed')
+                  : connection?.tokenAccepted ? t('veracode.token.attentionHint') : t('veracode.token.rejectedHint')}
+                description={hasToken ? connection?.message : undefined}
+                action={(
+                  // a cleared browser lost the token: the token file brings it (and Confluence's) back
+                  <Space size={8}>
+                    {!hasToken && (
+                      <Button size="small" icon={<ImportOutlined />} onClick={() => setTokenFileMode('import')}>
+                        {t('veracode.tokenFile.importMenu')}
+                      </Button>
+                    )}
+                    <Button size="small" type={!hasToken ? 'primary' : 'default'} icon={<KeyOutlined />} onClick={() => setTokenOpen(true)}>
+                      {t(!hasToken ? 'veracode.token.setUp' : 'veracode.token.check')}
+                    </Button>
+                  </Space>
+                )}
+              />
+            )}
+            {/*
+              the lookup conditions in a panel of their own, each with a visible label (asked for: two bare selects in a
+              row of buttons were easy to miss); everything else - display override, auto-create, actions - below it
+            */}
+            <div
+              data-tour="query"
+              style={{
+                background: design.colorFillAlter,
+                border: `1px solid ${design.colorBorderSecondary}`,
+                borderRadius: design.borderRadiusLG,
+                padding: `${design.paddingSM}px ${design.padding}px`,
+                marginBottom: design.margin,
+              }}
+            >
+              <Space size={8} style={{ marginBottom: design.marginXS }}>
+                <FilterOutlined style={{ color: design.colorPrimary }} />
+                <Text strong>{t('veracode.query.title')}</Text>
+                <Text type="secondary">{t('veracode.query.hint')}</Text>
+              </Space>
+              <Form layout="inline" component="div" style={{ rowGap: design.marginXS }}>
+                <Form.Item label={t('veracode.query.versions')} tooltip={t('veracode.jiraVersion.hint')}>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    // a long list stays one line: the tags collapse into "+N", the options scroll in the dropdown
+                    maxTagCount="responsive"
+                    value={jiraVersions}
+                    onChange={chooseVersions}
+                    onOpenChange={selectOpened('versions')}
+                    options={versionList.map((v) => ({ value: v, label: v }))}
+                    placeholder={t('veracode.jiraVersion.placeholder')}
+                    notFoundContent={t('veracode.jiraVersion.none')}
+                    disabled={loading}
+                    style={{ width: 300 }}
+                  />
+                </Form.Item>
+                {/* always there: without options it is disabled and says why, rather than missing from the panel */}
+                <Form.Item label={t('veracode.query.country')} tooltip={t('veracode.country.hint')}>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    maxTagCount="responsive"
+                    value={countries}
+                    onChange={chooseCountries}
+                    onOpenChange={selectOpened('countries')}
+                    options={countryList.map((c) => ({ value: c, label: c }))}
+                    placeholder={countryList.length > 0 ? t('veracode.country.placeholder')
+                      : t(analysis || connection ? 'veracode.country.noField' : 'veracode.country.notRead')}
+                    disabled={loading || countryList.length === 0}
+                    style={{ width: 260 }}
+                  />
+                </Form.Item>
+              </Form>
+            </div>
+            <Space wrap align="center">
+              <Tooltip title={t('veracode.versionOverrideHint')}>
+                <Input
+                  value={versionOverride}
+                  onChange={(e) => setVersionOverride(e.target.value)}
+                  placeholder={t('veracode.versionOverride')}
+                  style={{ width: 220 }}
+                  allowClear
+                />
+              </Tooltip>
+              <Tooltip title={createBlocked}>
+                <Checkbox checked={autoCreate && canCreate} disabled={!canCreate} onChange={(e) => toggleAutoCreate(e.target.checked)}>
+                  {t('veracode.autoCreate')}
+                </Checkbox>
+              </Tooltip>
+              {autoCreate && canCreate && (
+                <Tag color="warning" style={{ marginInlineEnd: 0 }}>{t('veracode.autoCreateWarn.on')}</Tag>
+              )}
+              {analysis && (
+                <Tooltip title={t('veracode.reanalyzeHint')}>
+                  <Button icon={<ReloadOutlined />} loading={loading} onClick={() => analyze(analysis.uploadId, false)}>
+                    {t('veracode.reanalyze')}
+                  </Button>
+                </Tooltip>
+              )}
+            </Space>
+            {(createFields.length > 0 || versionList.length > 0) && (
+              <div data-tour="jiraFields">
+                <JiraFieldsBar
+                  fields={createFields}
+                  values={fieldValues}
+                  onChange={setFieldValues}
+                  versions={versionList}
+                  version={createVersion}
+                  onVersionChange={setCreateVersion}
+                />
+              </div>
+            )}
+          </Card>
+        </BorderBeam>
+        {analysis && (
+          <BorderBeam delay={5.3}>
+            <Card
+              data-tour="reports"
+              title={sectionTitle(<FileTextOutlined />, t('veracode.section.reports'))}
+              extra={(
+                <Button
+                  type="text"
+                  size="small"
+                  icon={reportsFolded ? <DownOutlined /> : <UpOutlined />}
+                  aria-expanded={!reportsFolded}
+                  onClick={() => foldReports(!reportsFolded)}
+                >
+                  {t(reportsFolded ? 'veracode.section.expand' : 'veracode.section.collapse')}
+                </Button>
+              )}
+              hoverable
+              style={{ cursor: 'default' }}
+              // folded = the header alone: the body is hidden, not unmounted, so the tables keep their state
+              styles={{ ...sectionStyles, body: reportsFolded ? { display: 'none' } : undefined }}
+            >
+              <Descriptions size="small" column={{ xs: 1, md: 2, xl: 4 }}>
+                <Descriptions.Item label={t('veracode.project')}>{analysis.projectKey}</Descriptions.Item>
+                <Descriptions.Item label={t('veracode.jiraVersions')}>
+                  {/* one line however many: the full list is in the tooltip and the version dropdown */}
+                  <Text ellipsis={{ tooltip: analysis.selectedVersions.join(', ') }} style={{ maxWidth: 260 }}>
+                    {analysis.selectedVersions.length === 0
+                      ? t('veracode.jiraVersion.any', { count: analysis.jiraVersions.length })
+                      : analysis.selectedVersions.join(', ')}
+                  </Text>
+                </Descriptions.Item>
+                <Descriptions.Item label={t('veracode.analyzedAt')}>
+                  {new Date(analysis.analyzedAt).toLocaleString()}
+                </Descriptions.Item>
+              </Descriptions>
+              {/* one line per uploaded report: its Veracode application, version and policy */}
+              <Table<ReportView>
+                size="small"
+                rowKey="fileName"
+                pagination={false}
+                dataSource={analysis.reports}
+                columns={[
+                  { title: t('veracode.file'), dataIndex: 'fileName' },
+                  { title: t('veracode.app'), dataIndex: 'appName', render: (v: string | null) => <ApplicationName app={v} apps={analysis.applications} /> },
+                  {
+                    title: t('veracode.affectedVersion'),
+                    dataIndex: 'affectedVersion',
+                    render: (v: string | null, r) => (
+                      <Space size={4}>
+                        {v ?? '—'}
+                        {r.versionOverridden && (
+                          <Tooltip title={t('veracode.scanVersion', { version: r.scanVersion ?? '—' })}>
+                            <Tag color="warning">{t('veracode.overridden')}</Tag>
+                          </Tooltip>
+                        )}
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: t('veracode.policy'),
+                    dataIndex: 'policyName',
+                    render: (v: string | null, r) => (
+                      <Space size={4}>
+                        {v ?? '—'}
+                        {r.policyCompliance && (
+                          <Tag color={/^pass/i.test(r.policyCompliance) ? 'success' : 'error'}>{r.policyCompliance}</Tag>
+                        )}
+                      </Space>
+                    ),
+                  },
+                  { title: t('veracode.generatedAt'), dataIndex: 'generatedAt', render: (v: string | null) => v ?? '—' },
+                ]}
+                style={{ marginTop: 8 }}
+              />
+              <ScaSummaryTable reports={analysis.reports} apps={analysis.applications} />
+              <SastSummaryTable reports={analysis.reports} apps={analysis.applications} />
+            </Card>
+          </BorderBeam>
         )}
 
         {error && <Alert type="error" showIcon message={t('veracode.failed')} description={error} />}
@@ -1192,220 +1272,222 @@ export function VeracodePage() {
                 </Row>
               )}
 
-              <ProCard
-                bordered
-                title={t('veracode.findings')}
-              >
-                {/*
-                  the toolbar under the title, not in it (asked for: the title bar was crowded) - row one the actions:
-                  the exports, the main one first (asked for), and the create / label buttons; row two the filters
-                */}
-                <Flex wrap justify="space-between" align="center" gap="small" style={{ marginBottom: 12 }}>
-                  <Space wrap>
-                    {/*
-                      the analysis through a company template bound on /veracode-templates - antd's "Gradient Button":
-                      a large gradient primary button (the last template) joined to a large gradient arrow (pick a
-                      template), one gradient across both (gradientButton.module.css)
-                    */}
-                    <span ref={gradientGroup} className={gradient.group}>
-                      <Space.Compact>
-                        <Tooltip title={lastTemplate ? t('veracode.tpl.exportLastHint', { name: lastTemplate.name }) : t('veracode.tpl.exportHint')}>
-                          <Button
-                            type="primary"
-                            size="large"
-                            className={`${gradient.gradient} ${gradient.start}`}
-                            icon={<FileExcelOutlined />}
-                            loading={templateExporting}
+              <BorderBeam radius={design.borderRadius} duration={12} delay={1.3}>
+                <ProCard
+                  bordered
+                  title={t('veracode.findings')}
+                >
+                  {/*
+                    the toolbar under the title, not in it (asked for: the title bar was crowded) - row one the actions:
+                    the exports, the main one first (asked for), and the create / label buttons; row two the filters
+                  */}
+                  <Flex wrap justify="space-between" align="center" gap="small" style={{ marginBottom: 12 }}>
+                    <Space wrap>
+                      {/*
+                        the analysis through a company template bound on /veracode-templates - antd's "Gradient Button":
+                        a large gradient primary button (the last template) joined to a large gradient arrow (pick a
+                        template), one gradient across both (gradientButton.module.css)
+                      */}
+                      <span ref={gradientGroup} className={gradient.group} data-tour="templateExport">
+                        <Space.Compact>
+                          <Tooltip title={lastTemplate ? t('veracode.tpl.exportLastHint', { name: lastTemplate.name }) : t('veracode.tpl.exportHint')}>
+                            <Button
+                              type="primary"
+                              size="large"
+                              className={`${gradient.gradient} ${gradient.start}`}
+                              icon={<FileExcelOutlined />}
+                              loading={templateExporting}
+                              disabled={!analysis}
+                              onClick={() => (lastTemplate ? void exportWithTemplate(lastTemplate.id) : setTemplateMenuOpen(true))}
+                            >
+                              {/* the default template named on the button; a long name is cut, the tooltip has it whole */}
+                              {lastTemplate
+                                ? `${t('veracode.tpl.export')}: ${lastTemplate.name.length > 24 ? `${lastTemplate.name.slice(0, 23)}…` : lastTemplate.name}`
+                                : t('veracode.tpl.export')}
+                            </Button>
+                          </Tooltip>
+                          <Dropdown
+                            trigger={['click']}
                             disabled={!analysis}
-                            onClick={() => (lastTemplate ? void exportWithTemplate(lastTemplate.id) : setTemplateMenuOpen(true))}
+                            open={templateMenuOpen}
+                            onOpenChange={(open) => {
+                              setTemplateMenuOpen(open);
+                              if (open) void loadTemplates();
+                            }}
+                            menu={{
+                              selectedKeys: lastTemplate ? [lastTemplate.id] : [],
+                              items: [
+                                ...boundTemplates.map((x) => ({ key: x.id, label: x.name, icon: <FileExcelOutlined /> })),
+                                ...(boundTemplates.length > 0 ? [] : [{ key: 'none', label: t('veracode.tpl.exportNone'), disabled: true }]),
+                                { type: 'divider' as const },
+                                { key: 'manage', label: t('veracode.tpl.manage') },
+                              ],
+                              onClick: ({ key }) => {
+                                setTemplateMenuOpen(false);
+                                if (key === 'manage') navigate('/veracode-templates');
+                                else void exportWithTemplate(key);
+                              },
+                            }}
                           >
-                            {/* the default template named on the button; a long name is cut, the tooltip has it whole */}
-                            {lastTemplate
-                              ? `${t('veracode.tpl.export')}: ${lastTemplate.name.length > 24 ? `${lastTemplate.name.slice(0, 23)}…` : lastTemplate.name}`
-                              : t('veracode.tpl.export')}
+                            {/* only the arrow, gradient as well: one button to the eye, the same height, no wider than needed */}
+                            <Button type="primary" size="large" className={`${gradient.gradient} ${gradient.end}`} icon={<DownOutlined />}
+                                    disabled={!analysis}
+                                    title={t('veracode.tpl.pickTemplate')} aria-label={t('veracode.tpl.pickTemplate')} />
+                          </Dropdown>
+                        </Space.Compact>
+                      </span>
+                      <Button icon={<CloudDownloadOutlined />} onClick={exportXlsx} loading={exporting} disabled={!analysis}>
+                        {t('veracode.export')}
+                      </Button>
+                      {settings?.confluenceBaseUrl && (
+                        <Tooltip title={t('veracode.confluenceExport.hint')}>
+                          <Button icon={<CloudUploadOutlined />} disabled={!analysis}
+                                  onClick={() => (hasToken ? setConfluenceExportOpen(true) : setTokenOpen(true))}>
+                            {t('veracode.confluenceExport.button')}
                           </Button>
                         </Tooltip>
-                        <Dropdown
-                          trigger={['click']}
-                          disabled={!analysis}
-                          open={templateMenuOpen}
-                          onOpenChange={(open) => {
-                            setTemplateMenuOpen(open);
-                            if (open) void loadTemplates();
-                          }}
-                          menu={{
-                            selectedKeys: lastTemplate ? [lastTemplate.id] : [],
-                            items: [
-                              ...boundTemplates.map((x) => ({ key: x.id, label: x.name, icon: <FileExcelOutlined /> })),
-                              ...(boundTemplates.length > 0 ? [] : [{ key: 'none', label: t('veracode.tpl.exportNone'), disabled: true }]),
-                              { type: 'divider' as const },
-                              { key: 'manage', label: t('veracode.tpl.manage') },
-                            ],
-                            onClick: ({ key }) => {
-                              setTemplateMenuOpen(false);
-                              if (key === 'manage') navigate('/veracode-templates');
-                              else void exportWithTemplate(key);
-                            },
-                          }}
-                        >
-                          {/* only the arrow, gradient as well: one button to the eye, the same height, no wider than needed */}
-                          <Button type="primary" size="large" className={`${gradient.gradient} ${gradient.end}`} icon={<DownOutlined />}
-                                  disabled={!analysis}
-                                  title={t('veracode.tpl.pickTemplate')} aria-label={t('veracode.tpl.pickTemplate')} />
-                        </Dropdown>
-                      </Space.Compact>
-                    </span>
-                    <Button icon={<CloudDownloadOutlined />} onClick={exportXlsx} loading={exporting} disabled={!analysis}>
-                      {t('veracode.export')}
-                    </Button>
-                    {settings?.confluenceBaseUrl && (
-                      <Tooltip title={t('veracode.confluenceExport.hint')}>
-                        <Button icon={<CloudUploadOutlined />} disabled={!analysis}
-                                onClick={() => (hasToken ? setConfluenceExportOpen(true) : setTokenOpen(true))}>
-                          {t('veracode.confluenceExport.button')}
-                        </Button>
+                      )}
+                    </Space>
+                    <Space wrap data-tour="create">
+                      <Tooltip title={createBlocked}>
+                        <span>
+                          <Popconfirm
+                            title={t('veracode.createSelectedConfirm', { count: selected.length, project: analysis?.projectKey ?? '' })}
+                            onConfirm={() => create(selected)}
+                            disabled={selected.length === 0 || !canCreate}
+                          >
+                            <Button variant="outlined" {...CREATE_BUTTON} disabled={selected.length === 0 || !canCreate} loading={creating}>
+                              {t('veracode.createSelected', { count: selected.length })}
+                            </Button>
+                          </Popconfirm>
+                        </span>
                       </Tooltip>
+                      <Tooltip title={createBlocked}>
+                        <span>
+                          <Popconfirm
+                            title={t('veracode.createSelectedConfirm', { count: allMissing.length, project: analysis?.projectKey ?? '' })}
+                            onConfirm={() => create(allMissing)}
+                            disabled={allMissing.length === 0 || !canCreate}
+                          >
+                            <Button variant="solid" {...CREATE_BUTTON} disabled={allMissing.length === 0 || !canCreate} loading={creating}>
+                              {t('veracode.createAllMissing', { count: allMissing.length })}
+                            </Button>
+                          </Popconfirm>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title={createBlocked ?? t('veracode.labelAllHint')}>
+                        <span>
+                          <Popconfirm
+                            title={t('veracode.labelAllConfirm', { count: allUnlabelled.length })}
+                            onConfirm={() => create(allUnlabelled)}
+                            disabled={allUnlabelled.length === 0 || !canCreate}
+                          >
+                            <Button variant="solid" {...LABEL_BUTTON} icon={<TagsOutlined />}
+                                    disabled={allUnlabelled.length === 0 || !canCreate} loading={creating}>
+                              {t('veracode.labelAll', { count: allUnlabelled.length })}
+                            </Button>
+                          </Popconfirm>
+                        </span>
+                      </Tooltip>
+                    </Space>
+                  </Flex>
+                  <Space wrap style={{ marginBottom: 16 }} data-tour="filters">
+                    <Segmented<StatusFilter>
+                      value={statusFilter}
+                      onChange={setStatusFilter}
+                      options={[
+                        { value: 'ALL', label: t('veracode.filter.all') },
+                        { value: 'EXISTS', label: t('veracode.status.EXISTS') },
+                        { value: 'MISSING', label: t('veracode.status.MISSING') },
+                        { value: 'CREATED', label: t('veracode.status.CREATED') },
+                      ]}
+                    />
+                    {severalApplications && (
+                      <>
+                        <Select
+                          mode="multiple"
+                          allowClear
+                          maxTagCount="responsive"
+                          placeholder={t('veracode.application.filter')}
+                          value={applications}
+                          onChange={setApplications}
+                          options={applicationList.map((a) => ({ value: a, label: applicationLabel(a, analysis?.applications) || '—' }))}
+                          style={{ width: 240 }}
+                        />
+                        <Space size={4}>
+                          <Switch size="small" checked={groupByApplication} onChange={setGroupByApplication} />
+                          <Text>{t('veracode.application.group')}</Text>
+                        </Space>
+                      </>
                     )}
+                    <Input.Search
+                      allowClear
+                      defaultValue={keyword}
+                      placeholder={t('veracode.search')}
+                      onSearch={setKeyword}
+                      onChange={(e) => !e.target.value && setKeyword('')}
+                      style={{ width: 280 }}
+                    />
                   </Space>
-                  <Space wrap>
-                    <Tooltip title={createBlocked}>
-                      <span>
-                        <Popconfirm
-                          title={t('veracode.createSelectedConfirm', { count: selected.length, project: analysis?.projectKey ?? '' })}
-                          onConfirm={() => create(selected)}
-                          disabled={selected.length === 0 || !canCreate}
-                        >
-                          <Button variant="outlined" {...CREATE_BUTTON} disabled={selected.length === 0 || !canCreate} loading={creating}>
-                            {t('veracode.createSelected', { count: selected.length })}
-                          </Button>
-                        </Popconfirm>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title={createBlocked}>
-                      <span>
-                        <Popconfirm
-                          title={t('veracode.createSelectedConfirm', { count: allMissing.length, project: analysis?.projectKey ?? '' })}
-                          onConfirm={() => create(allMissing)}
-                          disabled={allMissing.length === 0 || !canCreate}
-                        >
-                          <Button variant="solid" {...CREATE_BUTTON} disabled={allMissing.length === 0 || !canCreate} loading={creating}>
-                            {t('veracode.createAllMissing', { count: allMissing.length })}
-                          </Button>
-                        </Popconfirm>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title={createBlocked ?? t('veracode.labelAllHint')}>
-                      <span>
-                        <Popconfirm
-                          title={t('veracode.labelAllConfirm', { count: allUnlabelled.length })}
-                          onConfirm={() => create(allUnlabelled)}
-                          disabled={allUnlabelled.length === 0 || !canCreate}
-                        >
-                          <Button variant="solid" {...LABEL_BUTTON} icon={<TagsOutlined />}
-                                  disabled={allUnlabelled.length === 0 || !canCreate} loading={creating}>
-                            {t('veracode.labelAll', { count: allUnlabelled.length })}
-                          </Button>
-                        </Popconfirm>
-                      </span>
-                    </Tooltip>
-                  </Space>
-                </Flex>
-                <Space wrap style={{ marginBottom: 16 }}>
-                  <Segmented<StatusFilter>
-                    value={statusFilter}
-                    onChange={setStatusFilter}
-                    options={[
-                      { value: 'ALL', label: t('veracode.filter.all') },
-                      { value: 'EXISTS', label: t('veracode.status.EXISTS') },
-                      { value: 'MISSING', label: t('veracode.status.MISSING') },
-                      { value: 'CREATED', label: t('veracode.status.CREATED') },
-                    ]}
-                  />
-                  {severalApplications && (
-                    <>
-                      <Select
-                        mode="multiple"
-                        allowClear
-                        maxTagCount="responsive"
-                        placeholder={t('veracode.application.filter')}
-                        value={applications}
-                        onChange={setApplications}
-                        options={applicationList.map((a) => ({ value: a, label: applicationLabel(a, analysis?.applications) || '—' }))}
-                        style={{ width: 240 }}
-                      />
-                      <Space size={4}>
-                        <Switch size="small" checked={groupByApplication} onChange={setGroupByApplication} />
-                        <Text>{t('veracode.application.group')}</Text>
-                      </Space>
-                    </>
+                  {analysis && issues.length > 0 && (
+                    <Space wrap style={{ marginBottom: 16 }}>
+                      {(['status', 'priority', 'assignee', 'version'] as const).map((key) => (
+                        <Select
+                          key={key}
+                          mode="multiple"
+                          allowClear
+                          maxTagCount="responsive"
+                          placeholder={t(`veracode.jira.${key}` as MessageKey)}
+                          options={filterOptions[key]}
+                          value={jiraFilters[key]}
+                          onChange={(value: string[]) => setJiraFilters((prev) => ({ ...prev, [key]: value }))}
+                          style={{ width: 200 }}
+                        />
+                      ))}
+                      {jiraFilterCount > 0 && (
+                        <Button type="link" onClick={() => setJiraFilters(NO_JIRA_FILTERS)}>
+                          {t('veracode.jira.reset', { count: jiraFilterCount })}
+                        </Button>
+                      )}
+                      <Text type="secondary">{t('veracode.jira.filterHint')}</Text>
+                    </Space>
                   )}
-                  <Input.Search
-                    allowClear
-                    defaultValue={keyword}
-                    placeholder={t('veracode.search')}
-                    onSearch={setKeyword}
-                    onChange={(e) => !e.target.value && setKeyword('')}
-                    style={{ width: 280 }}
-                  />
-                </Space>
-                {analysis && issues.length > 0 && (
-                  <Space wrap style={{ marginBottom: 16 }}>
-                    {(['status', 'priority', 'assignee', 'version'] as const).map((key) => (
-                      <Select
-                        key={key}
-                        mode="multiple"
-                        allowClear
-                        maxTagCount="responsive"
-                        placeholder={t(`veracode.jira.${key}` as MessageKey)}
-                        options={filterOptions[key]}
-                        value={jiraFilters[key]}
-                        onChange={(value: string[]) => setJiraFilters((prev) => ({ ...prev, [key]: value }))}
-                        style={{ width: 200 }}
-                      />
-                    ))}
-                    {jiraFilterCount > 0 && (
-                      <Button type="link" onClick={() => setJiraFilters(NO_JIRA_FILTERS)}>
-                        {t('veracode.jira.reset', { count: jiraFilterCount })}
-                      </Button>
-                    )}
-                    <Text type="secondary">{t('veracode.jira.filterHint')}</Text>
-                  </Space>
-                )}
-                {analysis && severalApplications && groupByApplication ? (
-                  // one collapsible table per Veracode application; the selection spans them all
-                  <Collapse
-                    defaultActiveKey={applicationList}
-                    items={applicationList
-                      .filter((a) => applications.length === 0 || applications.includes(a))
-                      .map((a) => {
-                        const own = rows.filter((f) => (f.application ?? '') === a);
-                        return {
-                          key: a,
-                          label: (
-                            <Space>
-                              <ApplicationName app={a} apps={analysis?.applications} style={{ fontWeight: 600 }} />
-                              <Tag>{t('veracode.application.count', { count: own.length })}</Tag>
-                              {own.some((f) => f.status === 'MISSING') && (
-                                <Tag color="error">{own.filter((f) => f.status === 'MISSING').length} {t('veracode.status.MISSING')}</Tag>
-                              )}
-                            </Space>
-                          ),
-                          children: findingsTable(own, false),
-                        };
-                      })}
-                  />
-                ) : analysis || loading ? (
-                  findingsTable(rows, true)
-                ) : (
-                  <Empty description={t('veracode.empty')} />
-                )}
-              </ProCard>
+                  {analysis && severalApplications && groupByApplication ? (
+                    // one collapsible table per Veracode application; the selection spans them all
+                    <Collapse
+                      defaultActiveKey={applicationList}
+                      items={applicationList
+                        .filter((a) => applications.length === 0 || applications.includes(a))
+                        .map((a) => {
+                          const own = rows.filter((f) => (f.application ?? '') === a);
+                          return {
+                            key: a,
+                            label: (
+                              <Space>
+                                <ApplicationName app={a} apps={analysis?.applications} style={{ fontWeight: 600 }} />
+                                <Tag>{t('veracode.application.count', { count: own.length })}</Tag>
+                                {own.some((f) => f.status === 'MISSING') && (
+                                  <Tag color="error">{own.filter((f) => f.status === 'MISSING').length} {t('veracode.status.MISSING')}</Tag>
+                                )}
+                              </Space>
+                            ),
+                            children: findingsTable(own, false),
+                          };
+                        })}
+                    />
+                  ) : analysis || loading ? (
+                    findingsTable(rows, true)
+                  ) : (
+                    <Empty description={t('veracode.empty')} />
+                  )}
+                </ProCard>
+              </BorderBeam>
                 </Space>
               ),
             },
             {
               key: 'sast',
-              label: t('veracode.tab.sast', { count: analysis?.sast?.counts.total ?? 0 }),
+              label: <span data-tour="sastTab">{t('veracode.tab.sast', { count: analysis?.sast?.counts.total ?? 0 })}</span>,
               children: (
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                   {/* an analysis cached before SAST went to Jira has no `sast`: re-analyse to get it */}
@@ -1442,6 +1524,16 @@ export function VeracodePage() {
           jiraVersions={jiraVersions}
           countries={countries}
           onClose={() => setConfluenceExportOpen(false)}
+        />
+      )}
+      {analysis && (
+        <TemplateIssuePickModal
+          open={pickTemplateId !== null}
+          analysis={analysis}
+          previous={issuePicks?.uploadId === analysis.uploadId ? issuePicks.picks : undefined}
+          exporting={templateExporting}
+          onCancel={() => setPickTemplateId(null)}
+          onExport={(picks) => pickTemplateId && void exportWithTemplate(pickTemplateId, picks)}
         />
       )}
       {confluenceToken.modal}

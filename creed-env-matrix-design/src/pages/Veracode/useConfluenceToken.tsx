@@ -71,5 +71,16 @@ export function useConfluenceToken({ baseUrl, cloud, mock }: { baseUrl?: string 
     />
   );
 
-  return { auth, hasToken, connection, openDialog: () => setOpen(true), button, modal };
+  return {
+    auth,
+    hasToken,
+    connection,
+    openDialog: () => setOpen(true),
+    button,
+    modal,
+    /** What is saved, for the token file; `null` = nothing. */
+    stored: token.auth ? { auth: token.auth, remember: token.remember } : null,
+    /** A token from the token file: saved and tested as if typed in the dialog. */
+    apply: (value: ConfluenceAuth, remember: boolean) => save(value, remember, null),
+  };
 }
