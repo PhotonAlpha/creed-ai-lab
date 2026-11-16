@@ -36,7 +36,7 @@ import {
 import type { TableColumnsType } from 'antd';
 import {
   CloudDownloadOutlined, CloudUploadOutlined, DownOutlined, ExperimentOutlined, FileExcelOutlined, FileTextOutlined, FilterOutlined, InboxOutlined, KeyOutlined, PlusCircleOutlined, ReloadOutlined,
-  SettingOutlined, TagOutlined, TagsOutlined, UpOutlined,
+  SettingOutlined, TagOutlined, TagsOutlined, UpOutlined, DownloadOutlined, FileProtectOutlined, ImportOutlined,
 } from '@ant-design/icons';
 import { jiraAuthComplete, reportTemplateApi, saveBlob, UPLOAD_ACCEPT, veracodeApi } from '../../api/veracode';
 import type {
@@ -45,6 +45,7 @@ import type {
 } from '../../api/veracode';
 import { ConfluenceSource } from './ConfluenceSource';
 import { useVeracodeTour } from './useVeracodeTour';
+import { TokenFileModal } from './TokenFileModal';
 import { useConfluenceToken } from './useConfluenceToken';
 import { ApplicationName, applicationLabel } from './applicationName';
 import { JiraTokenModal } from './JiraTokenModal';
@@ -860,15 +861,50 @@ export function VeracodePage() {
     <Space size={8}><span style={{ color: design.colorPrimary }}>{icon}</span>{label}</Space>
   );
 
+  /**
+   * Both tokens to a file and back (asked for, 2026-11-16: cleared browser data loses them). An import is saved and
+   * tested as if typed in the token dialogs.
+   */
+  const [tokenFileMode, setTokenFileMode] = useState<'export' | 'import' | null>(null);
+  const jiraStored = jiraToken.auth ? { auth: jiraToken.auth, remember: jiraToken.remember } : null;
+  const tokenFileMenu = (
+    <Dropdown
+      trigger={['click']}
+      menu={{
+        items: [
+          { key: 'export', icon: <DownloadOutlined />, label: t('veracode.tokenFile.exportMenu'), disabled: !jiraStored && !confluenceToken.stored },
+          { key: 'import', icon: <ImportOutlined />, label: t('veracode.tokenFile.importMenu') },
+        ],
+        onClick: ({ key }) => setTokenFileMode(key as 'export' | 'import'),
+      }}
+    >
+      <Tooltip title={t('veracode.tokenFile.menuHint')} placement="left">
+        <Button icon={<FileProtectOutlined />} data-tour="tokenFile">
+          {t('veracode.tokenFile.menu')} <DownOutlined />
+        </Button>
+      </Tooltip>
+    </Dropdown>
+  );
+
   const tour = useVeracodeTour({
     ready: !!settings,
     hasAnalysis: !!analysis,
-    busy: loading || !!upload || tokenOpen || confluenceExportOpen || pickTemplateId !== null,
+    busy: loading || !!upload || tokenOpen || confluenceExportOpen || pickTemplateId !== null || tokenFileMode !== null,
   });
 
   return (
-    <PageContainer title={t('veracode.title')} subTitle={t('veracode.subtitle')} extra={tour.button}>
+    <PageContainer title={t('veracode.title')} subTitle={t('veracode.subtitle')} extra={<Space>{tokenFileMenu}{tour.button}</Space>}>
       {tour.element}
+      <TokenFileModal
+        mode={tokenFileMode}
+        jira={jiraStored}
+        confluence={confluenceToken.stored}
+        onImport={(content) => {
+          if (content.jira) saveToken(content.jira.auth, content.jira.remember, null);
+          if (content.confluence) confluenceToken.apply(content.confluence.auth, content.confluence.remember);
+        }}
+        onClose={() => setTokenFileMode(null)}
+      />
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         {/* three sections: where the reports come from, how Jira is used, what was read */}
         <BorderBeam>
@@ -981,9 +1017,17 @@ export function VeracodePage() {
                   : connection?.tokenAccepted ? t('veracode.token.attentionHint') : t('veracode.token.rejectedHint')}
                 description={hasToken ? connection?.message : undefined}
                 action={(
-                  <Button size="small" type={!hasToken ? 'primary' : 'default'} icon={<KeyOutlined />} onClick={() => setTokenOpen(true)}>
-                    {t(!hasToken ? 'veracode.token.setUp' : 'veracode.token.check')}
-                  </Button>
+                  // a cleared browser lost the token: the token file brings it (and Confluence's) back
+                  <Space size={8}>
+                    {!hasToken && (
+                      <Button size="small" icon={<ImportOutlined />} onClick={() => setTokenFileMode('import')}>
+                        {t('veracode.tokenFile.importMenu')}
+                      </Button>
+                    )}
+                    <Button size="small" type={!hasToken ? 'primary' : 'default'} icon={<KeyOutlined />} onClick={() => setTokenOpen(true)}>
+                      {t(!hasToken ? 'veracode.token.setUp' : 'veracode.token.check')}
+                    </Button>
+                  </Space>
                 )}
               />
             )}

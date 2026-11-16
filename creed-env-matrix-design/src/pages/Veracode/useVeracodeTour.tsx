@@ -18,7 +18,7 @@ type Part = 'intro' | 'results';
 const STORAGE_KEY = 'veracode.tour';
 
 const STEPS: Record<Part, string[]> = {
-  intro: ['source', 'jiraToken', 'query', 'jiraFields', 'help'],
+  intro: ['source', 'jiraToken', 'query', 'jiraFields', 'tokenFile', 'help'],
   results: ['reports', 'templateExport', 'create', 'filters', 'sastTab'],
 };
 
