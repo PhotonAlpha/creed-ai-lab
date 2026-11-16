@@ -44,6 +44,7 @@ import type {
   JiraConnection, ReportTemplateSummary, ReportView, ScaSummary, TemplateIssuePicks, VeracodeSettings,
 } from '../../api/veracode';
 import { ConfluenceSource } from './ConfluenceSource';
+import { useVeracodeTour } from './useVeracodeTour';
 import { useConfluenceToken } from './useConfluenceToken';
 import { ApplicationName, applicationLabel } from './applicationName';
 import { JiraTokenModal } from './JiraTokenModal';
@@ -859,12 +860,20 @@ export function VeracodePage() {
     <Space size={8}><span style={{ color: design.colorPrimary }}>{icon}</span>{label}</Space>
   );
 
+  const tour = useVeracodeTour({
+    ready: !!settings,
+    hasAnalysis: !!analysis,
+    busy: loading || !!upload || tokenOpen || confluenceExportOpen || pickTemplateId !== null,
+  });
+
   return (
-    <PageContainer title={t('veracode.title')} subTitle={t('veracode.subtitle')}>
+    <PageContainer title={t('veracode.title')} subTitle={t('veracode.subtitle')} extra={tour.button}>
+      {tour.element}
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         {/* three sections: where the reports come from, how Jira is used, what was read */}
         <BorderBeam>
           <Card
+            data-tour="source"
             // the Confluence token beside the title (asked for), as the Jira one is - on the Confluence tab only
             title={(
               <Space size={12} wrap>
@@ -939,7 +948,7 @@ export function VeracodePage() {
               <Space size={12} wrap>
                 {sectionTitle(<SettingOutlined />, t('veracode.section.jira'))}
                 <Tooltip title={connection?.message ?? t('veracode.token.buttonHint')}>
-                  <Button size="small" icon={<KeyOutlined />} onClick={() => setTokenOpen(true)}>
+                  <Button size="small" icon={<KeyOutlined />} data-tour="jiraToken" onClick={() => setTokenOpen(true)}>
                     {t('veracode.token.button')}
                     {!hasToken
                       ? <Tag color="default" style={{ marginInlineEnd: 0 }}>{t('veracode.token.unset')}</Tag>
@@ -983,6 +992,7 @@ export function VeracodePage() {
               row of buttons were easy to miss); everything else - display override, auto-create, actions - below it
             */}
             <div
+              data-tour="query"
               style={{
                 background: design.colorFillAlter,
                 border: `1px solid ${design.colorBorderSecondary}`,
@@ -1060,20 +1070,23 @@ export function VeracodePage() {
               )}
             </Space>
             {(createFields.length > 0 || versionList.length > 0) && (
-              <JiraFieldsBar
-                fields={createFields}
-                values={fieldValues}
-                onChange={setFieldValues}
-                versions={versionList}
-                version={createVersion}
-                onVersionChange={setCreateVersion}
-              />
+              <div data-tour="jiraFields">
+                <JiraFieldsBar
+                  fields={createFields}
+                  values={fieldValues}
+                  onChange={setFieldValues}
+                  versions={versionList}
+                  version={createVersion}
+                  onVersionChange={setCreateVersion}
+                />
+              </div>
             )}
           </Card>
         </BorderBeam>
         {analysis && (
           <BorderBeam delay={5.3}>
             <Card
+              data-tour="reports"
               title={sectionTitle(<FileTextOutlined />, t('veracode.section.reports'))}
               extra={(
                 <Button
@@ -1231,7 +1244,7 @@ export function VeracodePage() {
                         a large gradient primary button (the last template) joined to a large gradient arrow (pick a
                         template), one gradient across both (gradientButton.module.css)
                       */}
-                      <span ref={gradientGroup} className={gradient.group}>
+                      <span ref={gradientGroup} className={gradient.group} data-tour="templateExport">
                         <Space.Compact>
                           <Tooltip title={lastTemplate ? t('veracode.tpl.exportLastHint', { name: lastTemplate.name }) : t('veracode.tpl.exportHint')}>
                             <Button
@@ -1291,7 +1304,7 @@ export function VeracodePage() {
                         </Tooltip>
                       )}
                     </Space>
-                    <Space wrap>
+                    <Space wrap data-tour="create">
                       <Tooltip title={createBlocked}>
                         <span>
                           <Popconfirm
@@ -1334,7 +1347,7 @@ export function VeracodePage() {
                       </Tooltip>
                     </Space>
                   </Flex>
-                  <Space wrap style={{ marginBottom: 16 }}>
+                  <Space wrap style={{ marginBottom: 16 }} data-tour="filters">
                     <Segmented<StatusFilter>
                       value={statusFilter}
                       onChange={setStatusFilter}
@@ -1430,7 +1443,7 @@ export function VeracodePage() {
             },
             {
               key: 'sast',
-              label: t('veracode.tab.sast', { count: analysis?.sast?.counts.total ?? 0 }),
+              label: <span data-tour="sastTab">{t('veracode.tab.sast', { count: analysis?.sast?.counts.total ?? 0 })}</span>,
               children: (
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                   {/* an analysis cached before SAST went to Jira has no `sast`: re-analyse to get it */}

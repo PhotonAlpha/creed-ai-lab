@@ -234,6 +234,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   「Jira 设置」（Jira 版本、版本覆盖、自动创建、令牌等工具栏和 Jira 字段）、「报告概要」（有分析结果时：报告表与 SCA / SAST 统计，可点右上角收起 / 展开，状态存 sessionStorage）。
   三张卡片鼠标悬停时有阴影（`hoverable`，光标保持默认，因为卡片本身不可点击）。
   这三张卡片与 SCA「漏洞」、SAST Jira 两张 ProCard 外包一层 `components/BorderBeam.tsx`（Magic UI 的 Border Beam，纯 CSS：`offset-path: rect()` + mask，颜色取主题 token，`delay` 错开；包在卡片外而不是放进卡片，因为「报告概要」收起时隐藏 body；`radius` 要与卡片一致：Card = `borderRadiusLG`（默认），ProCard = `borderRadius`；`prefers-reduced-motion` 或浏览器不支持 `offset-path: rect()` 时不显示）。
+- 漫游引导（antd `Tour`，`useVeracodeTour.tsx`）：首次访问播放 `intro`（报告来源 / Jira 令牌 / 查询条件 / Jira 字段 / 引导按钮），首次出现分析结果播放 `results`（报告概要 / 按模版导出 / 创建 / 过滤 / SAST 标签）；关闭时记入 localStorage `veracode.tour`（中途刷新会重播），页头「使用引导」重播全部。步骤按 `data-tour` 属性定位，目标不在页面上的步骤跳过；分析中或有对话框打开时不自动开始。新增步骤：加 `data-tour`、`STEPS` 和 `veracode.tour.<id>.title/description` 中英文案。
 - 上传 / 从 Confluence 分析时全屏 loading（`Spin fullscreen`，上传阶段显示百分比）。
 - 新建 Jira 描述的 Source：上传的文件加为 Jira 附件；从 Confluence 下载的给出附件地址和所在页面的链接（`on page [标题|页面地址]`）。
 - SAST 标签页「Jira 标题」列按 application 显示三行（`<名称>: <SAST project-name> - <类别>` / `CWE 117 <名称>` / `CWE 117 (Flaw IDs: …)`），

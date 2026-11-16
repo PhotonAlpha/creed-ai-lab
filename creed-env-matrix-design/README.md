@@ -595,6 +595,7 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
 - **Token dialogs** (Jira / Confluence): a *No token yet?* box says where to create one and links to that page in a new
   tab; create it there, come back and paste.
 - **Cards**: the three cards on top cast a shadow on hover; *Reports* folds and unfolds. Those three and the SCA *Findings* and SAST Jira table cards carry a beam of light running along their border (Border Beam: the theme's primary colour into purple, staggered per card; off when the system asks for reduced motion).
+- **Guided tour**: the first visit to the Veracode page plays a tour (report source → Jira token → lookup conditions → create fields); the first analysis plays a second one over the results (summary → export with template → create / label → filters → SAST). Each plays once per browser (localStorage); *Guide* at the top right replays them.
   - *SAST statistics* under the SCA ones: rating, score, the report's stated total / not-mitigated counts, then
     flaws listed / open / mitigated / fixed / open affecting policy, and open flaws per severity (*Total* row with
     several reports).
