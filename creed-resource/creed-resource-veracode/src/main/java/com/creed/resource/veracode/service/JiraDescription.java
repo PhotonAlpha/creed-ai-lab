@@ -5,6 +5,7 @@ import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.SastFlaw;
 import com.creed.resource.veracode.domain.SastIssue;
+import com.creed.resource.veracode.domain.SastRecommendation;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -151,8 +152,8 @@ final class JiraDescription {
 
     /**
      * A SAST issue: the CWE and category, then one row per open flaw (application, severity, file:line, module, Veracode
-     * issue id, first found), the first flaw's description - Veracode words it per CWE, so the flaws share it - and
-     * the source of every report among the issue's applications.
+     * issue id, first found), the first flaw's description - Veracode words it per CWE, so the flaws share it - the
+     * category's recommendations, and the source of every report among the issue's applications.
      *
      * @param project {@code sast.project-name}: the head's {@code <name>: <project> - <category>} line
      */
@@ -184,6 +185,15 @@ final class JiraDescription {
                 .filter(t -> t != null && !t.isBlank()).findFirst().orElse(null);
         if (description != null) {
             d.append("\nh4. Description\n").append(escape(description)).append('\n');
+        }
+        // Veracode's advice for the category: a paragraph per line, its bullet items as a wiki list under it
+        List<SastRecommendation> recommendations = issue.recommendations();
+        if (!recommendations.isEmpty()) {
+            d.append("\nh4. Recommendations\n");
+            for (SastRecommendation r : recommendations) {
+                d.append(escape(r.text())).append('\n');
+                r.bullets().forEach(b -> d.append("* ").append(escape(b)).append('\n'));
+            }
         }
         // each line names its application: relabelling keeps the lines of applications the analysis does not hold
         Set<String> sources = new LinkedHashSet<>();

@@ -897,6 +897,10 @@ class VeracodeApiTest {
                     .isEqualTo("https://cwe.mitre.org/data/definitions/78.html");
             assertThat(first.getCell(8).getStringCellValue()).isEqualTo("com/creed/ops/ScriptRunner.java");
             assertThat(first.getCell(9).getNumericCellValue()).isEqualTo(42);
+            // the category's advice, last column
+            assertThat(sast.getRow(0).getCell(17).getStringCellValue()).isEqualTo("Recommendations");
+            assertThat(first.getCell(17).getStringCellValue())
+                    .isEqualTo("Do not pass user input to a shell; use a fixed command with an argument array.");
             List<String> statuses = new ArrayList<>();
             sast.forEach(row -> statuses.add(row.getCell(0).getStringCellValue()));
             assertThat(statuses).containsExactlyInAnyOrder("Status", "Open", "Open", "Mitigated", "Fixed");
@@ -1010,6 +1014,9 @@ class VeracodeApiTest {
                 .contains("<td>creed-platform-2026-10-06-Creed: creed-sast - Improper Neutralization of Special Elements"
                         + " used in an OS Command<br />CWE 78 Improper Neutralization of Special Elements used in an OS Command"
                         + " (&#39;OS Command Injection&#39;)<br />CWE 78 (Flaw IDs: 2)</td>")
+                // the category's recommendations, a paragraph each
+                .contains("<th>Recommendations</th>",
+                        "<td><p>Do not pass user input to a shell; use a fixed command with an argument array.</p></td>")
                 // the template's sample text and Thymeleaf's own markup never reach the page
                 .doesNotContain("DT-15", "th:", "<!--")
                 // the report it was made from, attached and linked by name

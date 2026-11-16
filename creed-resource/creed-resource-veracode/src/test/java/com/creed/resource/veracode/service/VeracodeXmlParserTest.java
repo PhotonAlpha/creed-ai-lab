@@ -2,10 +2,12 @@ package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.domain.ReportRow;
 import com.creed.resource.veracode.domain.SastFlaw;
+import com.creed.resource.veracode.domain.SastRecommendation;
 import com.creed.resource.veracode.service.VeracodeXmlParser.ParsedReport;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -117,6 +119,38 @@ class VeracodeXmlParserTest {
         assertThat(sast.affectsPolicy()).isEqualTo(1);
         // open flaws only
         assertThat(sast.bySeverity()).extracting(ScaSummary.SeverityCount::count).containsExactly(1, 0, 0, 0, 0, 0);
+    }
+
+    @Test
+    void givesEveryFlawItsCategorysRecommendationsButNotItsDescription() {
+        ParsedReport report = parse("""
+                <detailedreport app_name="shop" version="1"><severity level="4">
+                  <category categoryname="SQL Injection">
+                    <desc><para text="What SQL injection is."/></desc>
+                    <recommendations>
+                      <para text=" Use prepared statements. "><bulletitem text="Allow-list the sort column."/><bulletitem text=" "/></para>
+                      <para text="Validate input."/>
+                      <para text=""/>
+                    </recommendations>
+                    <cwe cweid="89" cwename="SQLi"><staticflaws>
+                      <flaw issueid="1" severity="4" cweid="89" categoryname="SQL Injection"/>
+                      <flaw issueid="2" severity="4" cweid="89" categoryname="SQL Injection"/>
+                    </staticflaws></cwe>
+                  </category>
+                  <category categoryname="Other"><cwe cweid="1"><staticflaws>
+                    <flaw issueid="3" severity="4" cweid="1" categoryname="Other"/>
+                  </staticflaws></cwe></category>
+                </severity></detailedreport>
+                """);
+        List<SastRecommendation> expected = List.of(
+                new SastRecommendation("Use prepared statements.", List.of("Allow-list the sort column.")),
+                new SastRecommendation("Validate input.", List.of()));
+        assertThat(report.sastFlaws().get(0).recommendations()).isEqualTo(expected);
+        assertThat(report.sastFlaws().get(1).recommendations()).isEqualTo(expected);
+        // a category without <recommendations> does not inherit the previous one's
+        assertThat(report.sastFlaws().get(2).recommendations()).isEmpty();
+        assertThat(SastRecommendation.plain(expected))
+                .isEqualTo("Use prepared statements.\n• Allow-list the sort column.\nValidate input.");
     }
 
     @Test

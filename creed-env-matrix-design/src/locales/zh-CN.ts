@@ -794,6 +794,7 @@ const zhCN: Record<keyof typeof enUS, string> = {
   'veracode.tpl.field.category': '类别',
   'veracode.tpl.field.flawCount': '未关闭漏洞数',
   'veracode.tpl.field.flawIds': 'Flaw IDs',
+  'veracode.tpl.field.recommendations': '修复建议',
   'veracode.tpl.field.applications': 'Veracode 应用',
   'veracode.tpl.field.projectKey': 'Jira 项目',
   'veracode.tpl.field.jiraVersions': '查询的 Jira 版本',

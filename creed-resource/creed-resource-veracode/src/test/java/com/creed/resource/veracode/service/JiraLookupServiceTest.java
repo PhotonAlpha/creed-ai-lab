@@ -376,12 +376,12 @@ class JiraLookupServiceTest {
 
     private static SastFlaw sastFlaw(String application, String cwe, String category) {
         return new SastFlaw(application, "1", "High", cwe, null, category, "a.war", "com/x/A.java", 1, null, "New",
-                "Not Mitigated", false, false, true, null, null);
+                "Not Mitigated", false, false, true, null, null, List.of());
     }
 
     private static SastIssue sastIssue(String cwe, String category) {
         SastFlaw flaw = new SastFlaw("app", "1", "High", cwe, null, category, "a.war", "com/x/A.java", 1, null, "New",
-                "Not Mitigated", false, false, true, null, null);
+                "Not Mitigated", false, false, true, null, null, List.of());
         return SastIssue.group(List.of(flaw)).getFirst();
     }
 

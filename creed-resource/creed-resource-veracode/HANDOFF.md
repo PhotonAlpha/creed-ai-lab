@@ -114,6 +114,12 @@ brings no new issue or a repeated Cloud token now ends it, with a WARN. To see w
 2026-11-13 (asked for): **Logbook prints JSON bodies only** (`JsonBodyOnlyStrategy`, `veracode.logbook.allowed-content-types`):
 a Confluence attachment download or a multipart upload is logged as method / URL / status / headers, without its bytes.
 
+2026-11-16 (asked for): **SAST recommendations parsed.** Each flaw takes its `<category>`'s
+`recommendations/para` (+ `bulletitem`) text (`SastRecommendation`); shown in the SAST Jira description
+(`h4. Recommendations`, also when an existing issue's description is rewritten on labelling), the xlsx *SAST flaws*
+sheet (new last column *Recommendations*), the report-template field `sast.recommendations` and the Confluence export's
+*SAST Issues* table (new *Recommendations* column after *Details*). The XML has no SCA fix advice (no fixed / safe version).
+
 2026-11-13 (asked for): **template export hung, two causes fixed.** (1) JXLS copies conditional formatting cell by cell,
 quadratic in rows x rules (40 rules: 400 rows 15 s, 2000 rows minutes) - it is now taken off before the fill and put back
 after it with POI's row shifter (`TemplateWorkbook.forFill` / `withConditionalFormatting`): 2000 rows ~2 s, one entry per

@@ -4,6 +4,7 @@ import com.creed.resource.veracode.api.dto.AnalysisResponse;
 import com.creed.resource.veracode.api.dto.FindingView;
 import com.creed.resource.veracode.domain.SastFlaw;
 import com.creed.resource.veracode.domain.SastIssue;
+import com.creed.resource.veracode.domain.SastRecommendation;
 import com.creed.resource.veracode.domain.Severity;
 import com.creed.resource.veracode.service.JiraLookupService.IssueRef;
 import org.apache.poi.common.usermodel.HyperlinkType;
@@ -211,8 +212,8 @@ public class ExcelExporter {
 
     private static final String[] SAST_HEADERS = {"Status", "Veracode application", "Issue ID", "Severity", "CWE",
             "CWE name", "Category", "Module", "Source file", "Line", "Remediation status", "Mitigation status",
-            "Affects policy", "First found", "Jira issue(s)", "Jira status", "Description"};
-    private static final int[] SAST_WIDTHS = {12, 28, 10, 12, 10, 40, 30, 24, 44, 8, 16, 20, 12, 22, 22, 16, 80};
+            "Affects policy", "First found", "Jira issue(s)", "Jira status", "Description", "Recommendations"};
+    private static final int[] SAST_WIDTHS = {12, 28, 10, 12, 10, 40, 30, 24, 44, 8, 16, 20, 12, 22, 22, 16, 80, 80};
     static final int SAST_SEVERITY_COLUMN = 3;
 
     /** The Jira columns are the flaw's SAST issue's (CWE + category); empty for a fixed or mitigated flaw. */
@@ -277,9 +278,12 @@ public class ExcelExporter {
                 keys.setCellStyle(link);
             }
             row.createCell(c++).setCellValue(join(issues, i -> nullToEmpty(i.status())));
-            Cell description = row.createCell(c);
+            Cell description = row.createCell(c++);
             description.setCellValue(nullToEmpty(f.description()));
             description.setCellStyle(wrap);
+            Cell recommendations = row.createCell(c);
+            recommendations.setCellValue(SastRecommendation.plain(f.recommendations()));
+            recommendations.setCellStyle(wrap);
         }
         sheet.createFreezePane(0, 1);
         sheet.setAutoFilter(new CellRangeAddress(0, Math.max(0, r - 1), 0, SAST_HEADERS.length - 1));

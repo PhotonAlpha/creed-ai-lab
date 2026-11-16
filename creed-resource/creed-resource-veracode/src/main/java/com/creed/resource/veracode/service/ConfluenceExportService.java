@@ -6,6 +6,7 @@ import com.creed.resource.veracode.api.dto.SastIssueView;
 import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.config.ConfluenceProperties;
 import com.creed.resource.veracode.domain.SastFlaw;
+import com.creed.resource.veracode.domain.SastRecommendation;
 import com.creed.resource.veracode.domain.Severity;
 import com.creed.resource.veracode.service.JiraLookupService.IssueRef;
 import com.creed.resource.veracode.service.VeracodeAnalysisService.UploadedFile;
@@ -81,8 +82,10 @@ public class ConfluenceExportService {
     /**
      * @param details the issue per application, as the page shows it ({@link SastIssueView.ApplicationBlock})
      * @param count   the issue's open flaws
+     * @param recommendations Veracode's advice for the category, a paragraph and its bullet items each
      */
-    public record SastRow(int no, List<IssueRef> issues, List<SastIssueView.ApplicationBlock> details, String severity,
+    public record SastRow(int no, List<IssueRef> issues, List<SastIssueView.ApplicationBlock> details,
+                          List<SastRecommendation> recommendations, String severity,
                           int count, List<Repository> repositories, String status) {
     }
 
@@ -200,7 +203,7 @@ public class ConfluenceExportService {
         boolean sastRead = result.sast() != null && result.sast().error() == null;
         List<SastRow> sastRows = new ArrayList<>();
         for (SastIssueView i : sastIssues) {
-            sastRows.add(new SastRow(0, i.issues(), i.byApplication(), i.severity(), i.flaws().size(),
+            sastRows.add(new SastRow(0, i.issues(), i.byApplication(), SastRecommendation.of(i.flaws()), i.severity(), i.flaws().size(),
                     repositories(i.applications()), sastRead ? status(i.issues()) : "—"));
         }
         // sorted by repository (asked for, 2026-11-10) - the first one a row names - then as before: by severity
@@ -208,7 +211,7 @@ public class ConfluenceExportService {
                 .toList(), (r, no) -> new ScaRow(no, r.issues(), r.description(), r.severity(), r.repositories(),
                 r.status()));
         sastRows = numbered(sastRows.stream().sorted(Comparator.comparing((SastRow r) -> sortKey(r.repositories())))
-                .toList(), (r, no) -> new SastRow(no, r.issues(), r.details(), r.severity(), r.count(),
+                .toList(), (r, no) -> new SastRow(no, r.issues(), r.details(), r.recommendations(), r.severity(), r.count(),
                 r.repositories(), r.status()));
 
         String source = "Jira " + result.projectKey() + " (SCA" + (result.selectedVersions().isEmpty() ? ", any version"

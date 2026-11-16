@@ -288,6 +288,12 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   uses the token's `X-Jira-Issue-Type` (that is SCA's choice). SAST Jira failures go to `sast.error`, never fail the
   analysis. Not in `autoCreate`, no application labels. The `<cwe>`'s name is tracked on the element stack (reset at
   `</cwe>`).
+- **SAST recommendations = the `<category>`'s `recommendations/para` (+ `bulletitem`)** (2026-11-16, asked for):
+  `domain/SastRecommendation`, read from the `text` attributes and handed to every flaw under that category
+  (`<recommendations>` precedes the `<cwe>`s; reset at `</category>`). Only paras whose parent is `recommendations` -
+  the category's `<desc>` has `<para>`s too. `SastRecommendation.of(flaws)` de-duplicates per issue. Written to the
+  Jira description (`h4. Recommendations`, bullets as `* `), xlsx *SAST flaws* last column, template field
+  `sast.recommendations`, Confluence *SAST Issues* column. SCA has no equivalent in the XML.
 - **SCA statistics = `ScaSummary` per report** (`ReportView.sca`, page table + xlsx *SCA summary*): stated
   attributes of `<software_composition_analysis>` are `Integer`/`Boolean`, `null` when absent — never default them
   to 0, which would claim SCA found nothing. Counted values are the report's own (mitigated excluded, before

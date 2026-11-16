@@ -1,5 +1,7 @@
 package com.creed.resource.veracode.domain;
 
+import java.util.List;
+
 /**
  * One static-analysis (SAST) flaw, as the report states it: a {@code flaw} under
  * {@code severity/category/cwe/staticflaws}. Open ones are filed in Jira grouped by CWE + category ({@link SastIssue}).
@@ -20,11 +22,18 @@ package com.creed.resource.veracode.domain;
  * @param affectsPolicy     {@code affects_policy_compliance}; {@code null} when absent
  * @param firstFound        {@code date_first_occurrence}
  * @param description       the full {@code description}
+ * @param recommendations   the enclosing {@code <category>}'s remediation advice ({@code recommendations/para}); empty
+ *                          when the report has none
  */
 public record SastFlaw(String application, String issueId, String severity, String cwe, String cweName,
                        String category, String module, String sourceFile, Integer line, String scope,
                        String remediationStatus, String mitigationStatus, boolean mitigated, boolean fixed,
-                       Boolean affectsPolicy, String firstFound, String description) {
+                       Boolean affectsPolicy, String firstFound, String description,
+                       List<SastRecommendation> recommendations) {
+
+    public SastFlaw {
+        recommendations = recommendations == null ? List.of() : List.copyOf(recommendations);
+    }
 
     /** Neither fixed nor mitigated: what still needs work. */
     public boolean open() {

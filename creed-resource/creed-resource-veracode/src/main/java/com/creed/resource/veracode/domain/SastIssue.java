@@ -25,6 +25,11 @@ public record SastIssue(String id, String cwe, String cweName, String category, 
         return cwe != null ? cwe : Finding.UNKNOWN;
     }
 
+    /** Veracode's advice for the issue's category, each paragraph once ({@link SastRecommendation#of}). */
+    public List<SastRecommendation> recommendations() {
+        return SastRecommendation.of(flaws);
+    }
+
     public String categoryText() {
         return category != null ? category : Finding.UNKNOWN;
     }

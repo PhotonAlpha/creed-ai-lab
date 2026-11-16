@@ -4,6 +4,7 @@ import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.domain.Finding;
 import com.creed.resource.veracode.domain.SastFlaw;
 import com.creed.resource.veracode.domain.SastIssue;
+import com.creed.resource.veracode.domain.SastRecommendation;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -96,7 +97,19 @@ class JiraDescriptionTest {
 
     private static SastFlaw flaw(String application, String id, String severity) {
         return new SastFlaw(application, id, severity, "CWE-89", "SQL Injection", "SQL Injection", "m.jar",
-                "Dao.java", 12, null, null, null, false, false, true, "2026-11-01", "Built from input");
+                "Dao.java", 12, null, null, null, false, false, true, "2026-11-01", "Built from input",
+                List.of(new SastRecommendation("Use prepared statements [always].", List.of("Allow-list the sort column."))));
+    }
+
+    @Test
+    void aSastDescriptionCarriesTheCategorysRecommendationsOnce() {
+        SastIssue issue = SastIssue.group(List.of(flaw("app", "1", "High"), flaw("app", "2", "Medium"))).getFirst();
+        String d = JiraDescription.ofSast(issue, List.of(), APPS, "creed");
+        assertThat(d).contains("h4. Recommendations\nUse prepared statements \\[always\\].\n* Allow-list the sort column.\n");
+        assertThat(d.indexOf("Use prepared statements")).isEqualTo(d.lastIndexOf("Use prepared statements"));
+        // relabelling rewrites the description from this analysis: the advice is there once, not twice
+        String merged = JiraDescription.mergeSast(d, issue, List.of(), APPS, "creed");
+        assertThat(merged.indexOf("h4. Recommendations")).isEqualTo(merged.lastIndexOf("h4. Recommendations"));
     }
 
     @Test

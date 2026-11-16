@@ -802,6 +802,7 @@ const enUS = {
   'veracode.tpl.field.category': 'Category',
   'veracode.tpl.field.flawCount': 'Open flaws',
   'veracode.tpl.field.flawIds': 'Flaw IDs',
+  'veracode.tpl.field.recommendations': 'Recommendations',
   'veracode.tpl.field.applications': 'Veracode applications',
   'veracode.tpl.field.projectKey': 'Jira project',
   'veracode.tpl.field.jiraVersions': 'Jira versions searched',

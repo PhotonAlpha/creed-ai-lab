@@ -5,6 +5,7 @@ import com.creed.resource.veracode.api.dto.FindingView;
 import com.creed.resource.veracode.api.dto.SastIssueView;
 import com.creed.resource.veracode.domain.ApplicationAliases;
 import com.creed.resource.veracode.domain.SastFlaw;
+import com.creed.resource.veracode.domain.SastRecommendation;
 import com.creed.resource.veracode.service.JiraLookupService.IssueRef;
 import com.creed.resource.veracode.service.ReportView;
 import com.creed.resource.veracode.service.SastSummary;
@@ -92,6 +93,7 @@ public final class TemplateFields {
                 new Field("severity", "Severity"),
                 new Field("flawCount", "Open flaws"),
                 new Field("flawIds", "Flaw IDs"),
+                new Field("recommendations", "Recommendations"),
                 new Field("applications", "Veracode applications"),
                 new Field("status", "Status"),
                 new Field("jiraKeys", "Jira keys"),
@@ -335,6 +337,7 @@ public final class TemplateFields {
         row.put("flawIds", i.flaws().stream().map(SastFlaw::issueId).filter(Objects::nonNull).distinct()
                 .sorted(Comparator.comparingLong(TemplateFields::number).thenComparing(Function.identity()))
                 .collect(Collectors.joining(", ")));
+        row.put("recommendations", SastRecommendation.plain(SastRecommendation.of(i.flaws())));
         row.put("applications", i.applications().stream().map(apps::name).filter(Objects::nonNull)
                 .collect(Collectors.joining(", ")));
         row.put("status", i.status() == null ? "" : i.status().name());

@@ -37,12 +37,13 @@
 <table>
   <tbody>
     <tr>
-      <th>S.no</th><th>JIRA</th><th>Details</th><th>Severity</th><th>Total issue Count</th><th>Repository</th><th>Status</th><th>Remarks</th>
+      <th>S.no</th><th>JIRA</th><th>Details</th><th>Recommendations</th><th>Severity</th><th>Total issue Count</th><th>Repository</th><th>Status</th><th>Remarks</th>
     </tr>
     <tr th:each="row : ${report.sast()}">
       <td style="text-align: right;" th:text="${row.no()}">1</td>
       <td><th:block th:each="issue, it : ${row.issues()}"><a th:href="${issue.url()}" th:text="${issue.key()}">DT-15</a><th:block th:unless="${it.last}">, </th:block></th:block></td>
       <td><th:block th:each="block, it : ${row.details()}"><a th:if="${block.url() != null}" th:href="${block.url()}" th:text="${block.name()}">Creed-CCS</a><th:block th:if="${block.url() == null}" th:text="${block.name()}">Creed-CCS</th:block><th:block th:text="|: ${block.heading()}|">: IDB VERACODE STSA - CRLF Injection</th:block><br /><th:block th:text="${block.cwe()}">CWE 117 Improper Output Neutralization for Logs</th:block><br /><th:block th:text="${block.flawIds()}">CWE 117 (Flaw IDs: 257, 258)</th:block><th:block th:unless="${it.last}"><br /><br /></th:block></th:block></td>
+      <td><th:block th:each="rec : ${row.recommendations()}"><p th:text="${rec.text()}">Encode or strip CR/LF from untrusted data before it is logged.</p><ul th:unless="${rec.bullets().isEmpty()}"><li th:each="bullet : ${rec.bullets()}" th:text="${bullet}">Use a logging encoder.</li></ul></th:block></td>
       <td th:text="${row.severity()}">MEDIUM</td>
       <td style="text-align: right;" th:text="${row.count()}">4</td>
       <td><th:block th:each="repository, it : ${row.repositories()}"><a th:if="${repository.url() != null}" th:href="${repository.url()}" th:text="${repository.name()}">Creed-CCS</a><th:block th:if="${repository.url() == null}" th:text="${repository.name()}">creed</th:block><br th:unless="${it.last}" /></th:block></td>

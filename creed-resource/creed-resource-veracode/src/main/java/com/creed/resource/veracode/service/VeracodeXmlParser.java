@@ -2,6 +2,7 @@ package com.creed.resource.veracode.service;
 
 import com.creed.resource.veracode.domain.ReportRow;
 import com.creed.resource.veracode.domain.SastFlaw;
+import com.creed.resource.veracode.domain.SastRecommendation;
 import com.creed.resource.veracode.domain.Severity;
 import org.springframework.stereotype.Component;
 
@@ -29,7 +30,9 @@ import java.util.Locale;
  * release ({@code "16 Oct 2026 Static"}).
  *
  * <p>Streamed with StAX, not a DOM: a detailed report can run to tens of megabytes (every static flaw carries its
- * description), and only the attributes are read - no element text, recommendations or annotations. Elements are matched by local name, so the namespace
+ * description), and only the attributes are read - no element text or annotations. A {@code <category>}'s
+ * {@code recommendations/para} (+ {@code bulletitem}) are read from their {@code text} attributes and given to every flaw
+ * under it; the category's {@code <desc>} paragraphs are not. Elements are matched by local name, so the namespace
  * (and its version) does not matter. DTDs and external entities are off - the file comes from a user.
  *
  * <p>Mitigated vulnerabilities ({@code mitigation="true"}: an approved mitigation in Veracode) are skipped
@@ -102,6 +105,11 @@ public class VeracodeXmlParser {
         Integer totalFlaws = null;
         Integer flawsNotMitigated = null;
         String cweName = null;
+        // the enclosing <category>'s advice: <recommendations> comes before its <cwe>s, so it is complete by the first flaw
+        List<SastRecommendation> recommendations = List.of();
+        List<SastRecommendation> collecting = null;
+        String paraText = null;
+        List<String> bullets = null;
         List<SastFlaw> flaws = new ArrayList<>();
         while (xml.hasNext()) {
             int event = xml.next();
@@ -112,6 +120,14 @@ public class VeracodeXmlParser {
                     filePath = null;
                 } else if ("cwe".equals(ended)) {
                     cweName = null;
+                } else if ("category".equals(ended)) {
+                    recommendations = List.of();
+                } else if ("para".equals(ended) && collecting != null && paraText != null) {
+                    collecting.add(new SastRecommendation(paraText, bullets));
+                    paraText = null;
+                } else if ("recommendations".equals(ended) && collecting != null) {
+                    recommendations = List.copyOf(collecting);
+                    collecting = null;
                 }
                 continue;
             }
@@ -139,8 +155,18 @@ public class VeracodeXmlParser {
                 score = count(xml, name, "score", warnings);
             } else if ("cwe".equals(name)) {
                 cweName = attr(xml, "cwename");
+            } else if ("recommendations".equals(name) && "category".equals(parent)) {
+                collecting = new ArrayList<>();
+            } else if ("para".equals(name) && "recommendations".equals(parent) && collecting != null) {
+                paraText = blankToNull(attr(xml, "text"));
+                bullets = new ArrayList<>();
+            } else if ("bulletitem".equals(name) && "para".equals(parent) && paraText != null) {
+                String bullet = blankToNull(attr(xml, "text"));
+                if (bullet != null) {
+                    bullets.add(bullet);
+                }
             } else if ("flaw".equals(name) && "staticflaws".equals(parent)) {
-                flaws.add(flaw(xml, application, cweName, warnings));
+                flaws.add(flaw(xml, application, cweName, recommendations, warnings));
             } else if ("software_composition_analysis".equals(name)) {
                 thirdParty = count(xml, name, "third_party_components", warnings);
                 String violate = attr(xml, "violate_policy");
@@ -215,7 +241,8 @@ public class VeracodeXmlParser {
                 cvss(xml, location, warnings), null, summary);
     }
 
-    private static SastFlaw flaw(XMLStreamReader xml, String application, String cweName, List<String> warnings) {
+    private static SastFlaw flaw(XMLStreamReader xml, String application, String cweName,
+                                 List<SastRecommendation> recommendations, List<String> warnings) {
         String cweId = attr(xml, "cweid");
         String path = attr(xml, "sourcefilepath");
         String file = attr(xml, "sourcefile");
@@ -230,7 +257,11 @@ public class VeracodeXmlParser {
                 attr(xml, "mitigation_status_desc") != null ? attr(xml, "mitigation_status_desc") : mitigation,
                 "accepted".equalsIgnoreCase(mitigation), "fixed".equalsIgnoreCase(remediation),
                 policy == null ? null : Boolean.valueOf(policy), attr(xml, "date_first_occurrence"),
-                attr(xml, "description"));
+                attr(xml, "description"), recommendations);
+    }
+
+    private static String blankToNull(String text) {
+        return text == null || text.isBlank() ? null : text.strip();
     }
 
     private static SastSummary sastSummary(String rating, Integer score, Integer totalFlaws, Integer flawsNotMitigated,
