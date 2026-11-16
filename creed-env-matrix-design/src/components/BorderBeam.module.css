@@ -1,8 +1,8 @@
 /*
  * Border Beam (the Magic UI effect, asked for 2026-11-16): a short gradient travels the frame's border. The overlay
  * covers the frame; the mask keeps only its border ring (padding-box cut out of border-box), and the beam inside it
- * runs along a rounded rect with offset-path. No Tailwind / motion here - plain CSS, colours from antd tokens
- * (custom properties set by BorderBeam.tsx).
+ * runs along a rounded rect with offset-path. No Tailwind / motion here - plain CSS, colours from the gradient
+ * stops BorderBeam.tsx sets in --beam-stops.
  */
 .frame {
   position: relative;
@@ -27,7 +27,7 @@
   position: absolute;
   width: var(--beam-size);
   aspect-ratio: 1;
-  background: linear-gradient(to left, var(--beam-from), var(--beam-to), transparent);
+  background: linear-gradient(to left, var(--beam-stops), transparent);
   offset-path: rect(0 auto auto 0 round var(--beam-size));
   animation: beam var(--beam-duration) linear infinite;
   animation-delay: var(--beam-delay);

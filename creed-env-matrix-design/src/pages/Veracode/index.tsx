@@ -907,75 +907,73 @@ export function VeracodePage() {
       />
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         {/* three sections: where the reports come from, how Jira is used, what was read */}
-        <BorderBeam>
-          <Card
-            data-tour="source"
-            // the Confluence token beside the title (asked for), as the Jira one is - on the Confluence tab only
-            title={(
-              <Space size={12} wrap>
-                {sectionTitle(<CloudUploadOutlined />, t('veracode.section.source'))}
-                {settings?.confluenceBaseUrl && source === 'confluence' && confluenceToken.button}
-              </Space>
-            )}
-            // the bundled sample is a third source (mock only), beside the upload and the Confluence tabs
-            extra={settings?.mock && (
-              <Tooltip title={t('veracode.sampleHint')}>
-                <Button size="small" icon={<ExperimentOutlined />} loading={loading} onClick={analyzeSample}>
-                  {t('veracode.sample')}
-                </Button>
-              </Tooltip>
-            )}
-            hoverable
-            style={{ cursor: 'default' }}
-            styles={sectionStyles}
-          >
-            {(() => {
-              const dragger = (
-                <Upload.Dragger
-                  accept={UPLOAD_ACCEPT}
-                  multiple
-                  showUploadList={false}
-                  beforeUpload={beforeUpload}
-                  disabled={loading}
-                >
-                  <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-                  <p className="ant-upload-text">{t('veracode.upload.title')}</p>
-                  <p className="ant-upload-hint">{t('veracode.upload.hint')}</p>
-                </Upload.Dragger>
-              );
-              // no Confluence configured: the upload alone, as before
-              if (!settings?.confluenceBaseUrl) return dragger;
-              return (
-                <Tabs
-                  activeKey={source}
-                  onChange={(key) => setSource(key as 'upload' | 'confluence')}
-                  items={[
-                    { key: 'upload', label: t('veracode.source.upload'), children: dragger },
-                    {
-                      key: 'confluence',
-                      label: t('veracode.source.confluence'),
-                      children: (
-                        <ConfluenceSource
-                          auth={confluenceToken.auth}
-                          hasToken={confluenceToken.hasToken}
-                          connection={confluenceToken.connection}
-                          onNeedToken={confluenceToken.openDialog}
-                          mock={settings.mock}
-                          parentPageId={settings.confluenceParentPageId}
-                          busy={loading}
-                          pageId={confluencePageId}
-                          onPageIdChange={setConfluencePageId}
-                          onAnalyze={analyzeConfluence}
-                        />
-                      ),
-                    },
-                  ]}
-                />
-              );
-            })()}
-            {upload && <UploadProgressBar {...upload} autoCreate={options().autoCreate} />}
-          </Card>
-        </BorderBeam>
+        <Card
+          data-tour="source"
+          // the Confluence token beside the title (asked for), as the Jira one is - on the Confluence tab only
+          title={(
+            <Space size={12} wrap>
+              {sectionTitle(<CloudUploadOutlined />, t('veracode.section.source'))}
+              {settings?.confluenceBaseUrl && source === 'confluence' && confluenceToken.button}
+            </Space>
+          )}
+          // the bundled sample is a third source (mock only), beside the upload and the Confluence tabs
+          extra={settings?.mock && (
+            <Tooltip title={t('veracode.sampleHint')}>
+              <Button size="small" icon={<ExperimentOutlined />} loading={loading} onClick={analyzeSample}>
+                {t('veracode.sample')}
+              </Button>
+            </Tooltip>
+          )}
+          hoverable
+          style={{ cursor: 'default' }}
+          styles={sectionStyles}
+        >
+          {(() => {
+            const dragger = (
+              <Upload.Dragger
+                accept={UPLOAD_ACCEPT}
+                multiple
+                showUploadList={false}
+                beforeUpload={beforeUpload}
+                disabled={loading}
+              >
+                <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+                <p className="ant-upload-text">{t('veracode.upload.title')}</p>
+                <p className="ant-upload-hint">{t('veracode.upload.hint')}</p>
+              </Upload.Dragger>
+            );
+            // no Confluence configured: the upload alone, as before
+            if (!settings?.confluenceBaseUrl) return dragger;
+            return (
+              <Tabs
+                activeKey={source}
+                onChange={(key) => setSource(key as 'upload' | 'confluence')}
+                items={[
+                  { key: 'upload', label: t('veracode.source.upload'), children: dragger },
+                  {
+                    key: 'confluence',
+                    label: t('veracode.source.confluence'),
+                    children: (
+                      <ConfluenceSource
+                        auth={confluenceToken.auth}
+                        hasToken={confluenceToken.hasToken}
+                        connection={confluenceToken.connection}
+                        onNeedToken={confluenceToken.openDialog}
+                        mock={settings.mock}
+                        parentPageId={settings.confluenceParentPageId}
+                        busy={loading}
+                        pageId={confluencePageId}
+                        onPageIdChange={setConfluencePageId}
+                        onAnalyze={analyzeConfluence}
+                      />
+                    ),
+                  },
+                ]}
+              />
+            );
+          })()}
+          {upload && <UploadProgressBar {...upload} autoCreate={options().autoCreate} />}
+        </Card>
         <BorderBeam delay={2.7}>
           <Card
             // the token is what every Jira call runs as: in the header right after the title (asked for), apart from
