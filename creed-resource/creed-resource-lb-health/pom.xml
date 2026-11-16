@@ -17,6 +17,11 @@
         The app is both the client and its own 10 target instances (extra Tomcat connectors).
     </description>
 
+    <properties>
+        <!-- not in any BOM; 4.x is the Boot 4 / Jackson 3 line (as creed-simple-metrics, creed-resource-veracode) -->
+        <logbook.version>4.2.0</logbook.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -33,6 +38,41 @@
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-webflux</artifactId>
+        </dependency>
+
+        <!-- Health-check request/response log (Splunk key=value): the starter gives the Logbook bean (logbook.*
+             config; its inbound servlet filter is off in application.yml), logbook-spring the RestTemplate
+             interceptor (blocking mode), logbook-spring-webflux the WebClient filter (webclient mode). -->
+        <dependency>
+            <groupId>org.zalando</groupId>
+            <artifactId>logbook-spring-boot-starter</artifactId>
+            <version>${logbook.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.zalando</groupId>
+            <artifactId>logbook-spring</artifactId>
+            <version>${logbook.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.zalando</groupId>
+            <artifactId>logbook-spring-webflux</artifactId>
+            <version>${logbook.version}</version>
+        </dependency>
+
+        <!-- Circuit breaker around the business RestTemplate (DownstreamCaller). The Spring Cloud starter keeps the
+             resilience4j version on the Spring Cloud BOM's (2.3.0) and brings resilience4j-spring-boot3, which binds
+             resilience4j.circuitbreaker.instances.* into a CircuitBreakerRegistry. Used directly, not through
+             Spring Cloud's CircuitBreakerFactory, whose TimeLimiter (1 s, own thread) would change the calls. -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+        </dependency>
+
+        <!-- HealthCheckMdc: carries the probe round's MDC to the threads a WebClient probe is logged on
+             (Reactor's automatic context propagation needs it on the classpath). Boot-managed. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>context-propagation</artifactId>
         </dependency>
 
         <dependency>

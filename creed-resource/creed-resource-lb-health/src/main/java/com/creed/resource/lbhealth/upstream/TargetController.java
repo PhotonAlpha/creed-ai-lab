@@ -37,9 +37,19 @@ public class TargetController {
                 .body(Map.of("port", port, "status", state.up() ? "UP" : "DOWN"));
     }
 
+    /**
+     * The business API the load-balanced client calls. Follows the instance's state like {@code /health} (asked for,
+     * 2026-11-17: a "down" server must fail its callers too, or the circuit breaker has nothing to see).
+     */
     @GetMapping("/whoami")
-    public Map<String, Object> whoami(HttpServletRequest request) {
-        return Map.of("port", request.getLocalPort());
+    public ResponseEntity<Map<String, Object>> whoami(HttpServletRequest request) throws InterruptedException {
+        int port = request.getLocalPort();
+        TargetInstanceStates.State state = states.get(port);
+        if (state.delay().isPositive()) {
+            Thread.sleep(state.delay());
+        }
+        return state.up() ? ResponseEntity.ok(Map.of("port", port))
+                : ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("port", port, "status", "DOWN"));
     }
 
     /** {@code PUT /target/instances/18103?up=false} or {@code ?delay=5s} (anything longer than the read timeout). */

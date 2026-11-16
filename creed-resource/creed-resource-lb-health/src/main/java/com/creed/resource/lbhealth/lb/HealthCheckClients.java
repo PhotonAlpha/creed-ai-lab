@@ -2,7 +2,11 @@ package com.creed.resource.lbhealth.lb;
 
 import com.creed.resource.lbhealth.config.LbHealthProperties;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.springframework.cloud.client.ServiceInstance;
+import org.zalando.logbook.Logbook;
+import org.zalando.logbook.spring.LogbookClientHttpRequestInterceptor;
+import org.zalando.logbook.spring.webflux.LogbookExchangeFilterFunction;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -15,6 +19,7 @@ import reactor.core.publisher.Mono;
 
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiFunction;
 
@@ -29,6 +34,11 @@ import java.util.function.BiFunction;
  * instantiate {@link ObservableHealthCheckServiceInstanceListSupplier} itself. They differ from the originals in
  * one way: with debug on, the exception the stock blocking lambda swallows ({@code catch (Exception ignored)}) is
  * logged.
+ *
+ * <p>Both clients carry Logbook (asked for, 2026-11-17): every probe's request and response, Splunk key=value, on the
+ * {@code org.zalando.logbook.Logbook} TRACE logger - stock or debug path alike, since the client is the same. A probe
+ * that never gets an answer (refused, timed out) logs its request only. {@code creed.lb-health.logbook.enabled=false}
+ * passes {@code null}: neither client gets Logbook then.
  */
 @Slf4j
 public final class HealthCheckClients {
@@ -39,22 +49,31 @@ public final class HealthCheckClients {
     /**
      * connect + read timeout ARE the probe timeout in blocking mode. Spring's own {@code timeout(interval)} never
      * fires there: the probe blocks inside {@code subscribe()}, before the timeout operator starts its timer.
+     *
+     * <p>Interceptors run in list order, not {@code @Order}: the debug line first (when the probe starts), then Logbook.
      */
-    public static RestTemplate restTemplate(LbHealthProperties.HealthCheck settings, boolean debug) {
+    public static RestTemplate restTemplate(LbHealthProperties.HealthCheck settings, boolean debug,
+                                            @Nullable Logbook logbook) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(settings.connectTimeout());
         factory.setReadTimeout(settings.readTimeout());
         RestTemplate restTemplate = new RestTemplate(factory);
+        List<ClientHttpRequestInterceptor> interceptors = new ArrayList<>();
         if (debug) {
-            restTemplate.setInterceptors(List.<ClientHttpRequestInterceptor>of((request, body, execution) -> {
+            interceptors.add((request, body, execution) -> {
                 log.info("[HC] {} {} thread={}", DebugLog.now(), request.getURI(), Thread.currentThread().getName());
                 return execution.execute(request, body);
-            }));
+            });
         }
+        if (logbook != null) {
+            interceptors.add(new LogbookClientHttpRequestInterceptor(logbook));
+        }
+        restTemplate.setInterceptors(interceptors);
         return restTemplate;
     }
 
-    public static WebClient webClient(LbHealthProperties.HealthCheck settings, boolean debug) {
+    public static WebClient webClient(LbHealthProperties.HealthCheck settings, boolean debug,
+                                      @Nullable Logbook logbook) {
         // HTTP/1.1: the JDK client would otherwise try an h2c upgrade on every cleartext probe.
         HttpClient httpClient = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
@@ -68,6 +87,9 @@ public final class HealthCheckClients {
                 log.info("[HC] {} {} thread={}", DebugLog.now(), request.url(), Thread.currentThread().getName());
                 return Mono.just(request);
             }));
+        }
+        if (logbook != null) {
+            builder.filter(new LogbookExchangeFilterFunction(logbook));
         }
         return builder.build();
     }

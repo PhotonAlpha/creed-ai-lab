@@ -9,6 +9,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.zalando.logbook.Logbook;
 
 /**
  * LoadBalancer child-context configuration of {@code lb-health-target}. No {@code @Configuration}: it is imported
@@ -34,8 +35,11 @@ public class TargetLoadBalancerClientConfiguration {
         LbHealthProperties properties = context.getBean(LbHealthProperties.class);
         LbHealthProperties.HealthCheck settings = properties.healthCheck();
         boolean debug = properties.debug().enabled();
-        log.info("[LB-HEALTH] health-check supplier: mode={} probe timeout={} (connect {} + read {}) debug={}",
-                settings.mode(), settings.probeTimeout(), settings.connectTimeout(), settings.readTimeout(), debug);
+        // the starter's bean, from the main context (this child context sees its parent's beans); null = no Logbook
+        Logbook logbook = properties.logbook().enabled() ? context.getBean(Logbook.class) : null;
+        log.info("[LB-HEALTH] health-check supplier: mode={} probe timeout={} (connect {} + read {}) debug={}"
+                        + " logbook={}", settings.mode(), settings.probeTimeout(), settings.connectTimeout(),
+                settings.readTimeout(), debug, logbook != null);
 
         ServiceInstanceListSupplierBuilder builder = ServiceInstanceListSupplier.builder().withBlockingDiscoveryClient();
         if (debug) {
@@ -44,7 +48,7 @@ public class TargetLoadBalancerClientConfiguration {
 
         switch (settings.mode()) {
             case BLOCKING -> {
-                RestTemplate restTemplate = HealthCheckClients.restTemplate(settings, debug);
+                RestTemplate restTemplate = HealthCheckClients.restTemplate(settings, debug, logbook);
                 if (debug) {
                     builder.with((ctx, delegate) -> new ObservableHealthCheckServiceInstanceListSupplier(delegate,
                             ctx.getBean(LoadBalancerClientFactory.class),
@@ -54,8 +58,9 @@ public class TargetLoadBalancerClientConfiguration {
                 }
             }
             case WEBCLIENT -> {
-                WebClient webClient = HealthCheckClients.webClient(settings, debug);
+                WebClient webClient = HealthCheckClients.webClient(settings, debug, logbook);
                 if (debug) {
+                    HealthCheckMdc.enableForWebClient();
                     builder.with((ctx, delegate) -> new ObservableHealthCheckServiceInstanceListSupplier(delegate,
                             ctx.getBean(LoadBalancerClientFactory.class),
                             HealthCheckClients.webClientAliveFunction(webClient)));

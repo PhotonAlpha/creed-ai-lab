@@ -1,5 +1,8 @@
 package com.creed.resource.lbhealth.lb;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.creed.resource.lbhealth.lb.ScriptedProbes.Mode;
 import com.creed.resource.lbhealth.lb.ScriptedProbes.Outcome;
 import org.junit.jupiter.api.AfterEach;
@@ -11,6 +14,7 @@ import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.loadbalancer.LoadBalancerProperties;
 import org.springframework.cloud.client.loadbalancer.reactive.ReactiveLoadBalancer;
 import org.springframework.cloud.loadbalancer.core.HealthCheckServiceInstanceListSupplier;
+import org.slf4j.LoggerFactory;
 import reactor.test.StepVerifier;
 import reactor.test.scheduler.VirtualTimeScheduler;
 
@@ -142,6 +146,41 @@ class HealthCheckRoundTest {
                 ofSeconds(80), ofSeconds(100));
         assertThat(discovery.fetches()).as("each check also re-reads discovery").hasSize(6);
         assertThat(observable.midRoundCancellations()).as("cancelled between rounds, results still land").isZero();
+    }
+
+    @Test
+    void eachRoundSaysWhetherTheRefetchOrTheIntervalStartedIt() {
+        Logger logger = (Logger) LoggerFactory.getLogger(ObservableHealthCheckServiceInstanceListSupplier.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            ObservableHealthCheckServiceInstanceListSupplier observable =
+                    startObservable(properties(false, INTERVAL, REFETCH), staggered(Mode.ASYNC));
+
+            StepVerifier.withVirtualTime(observable::get)
+                    .expectSubscription()
+                    .thenAwait(ofSeconds(126))
+                    .expectNextCount(5) // rounds end at 5, 40, 75, 110, 125 s
+                    .thenCancel()
+                    .verify();
+
+            // rounds start at 0 (the first list), 35, 70, 105 (interval 30 s after each 5 s round) and 120 s: the
+            // refetch, which also drops the timer that would have started a round at 140 s
+            assertThat(messages(appender, "[HC-ROUND]")).map(m -> m.replaceAll(".* start ", "")).containsExactly(
+                    "round=1 trigger=REFETCH", "round=2 trigger=INTERVAL", "round=3 trigger=INTERVAL",
+                    "round=4 trigger=INTERVAL", "round=5 trigger=REFETCH");
+            assertThat(messages(appender, "[HC-RESULT]")).map(m -> m.replaceAll(".*(round=\\d+ trigger=\\w+).*", "$1"))
+                    .containsExactly("round=1 trigger=REFETCH", "round=2 trigger=INTERVAL", "round=3 trigger=INTERVAL",
+                            "round=4 trigger=INTERVAL", "round=5 trigger=REFETCH");
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    private static List<String> messages(ListAppender<ILoggingEvent> appender, String prefix) {
+        return List.copyOf(appender.list).stream().map(ILoggingEvent::getFormattedMessage)
+                .filter(m -> m.startsWith(prefix)).toList();
     }
 
     // ---------------------------------------------------------------------------------- 4. round > refetch interval

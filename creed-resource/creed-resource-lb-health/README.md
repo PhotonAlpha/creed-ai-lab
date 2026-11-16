@@ -96,13 +96,39 @@ webclient 模式 10 个请求在 5ms 内全部发出，一轮 3s。两种模式�
 | `[REFETCH] 时间 size=N` | discovery 和健康检查之间的 `DelegatingServiceInstanceListSupplier`，`doOnNext` | 一次 refetch；健康检查的 `switchMap` 会在此刻换掉内层流 |
 | `[HC] 时间 URI thread=…` | 探活 RestTemplate 的拦截器 / WebClient 的 filter | 一次探活，能看出串行还是并发、在哪个线程；失败时多一行 `DOWN: 异常`（内置探活会把异常吞掉） |
 | `[HC-STREAM] start` | 子类重写 `healthCheckFlux` 的 `doOnSubscribe` | 新的内层流（启动或 refetch） |
-| `[HC-RESULT] round=N size=n/N alive=[…]` | `doOnNext` | 一轮完成 |
+| `[HC-ROUND] start round=N trigger=REFETCH\|INTERVAL` | 子类重写 `isAlive`：一轮组装时第一次调用 | 一轮开始。内层流的第一轮是 `REFETCH`（启动时第一次拿到列表也算），之后每轮都是 `INTERVAL`（`repeatWhen` 的计时器）；`healthCheckFlux` 每被 `switchMap` 调用一次就把下一轮标成 `REFETCH` |
+| `[HC-RESULT] round=N trigger=… size=n/N alive=[…]` | `doOnNext` | 这一轮完成（`update-results-list=true` 时每个存活实例一行） |
 | `[HC-STREAM] cancelled by refetch …` | `doOnCancel` | 两轮之间被取消：正常（只丢了 interval 计时器）。**MID-ROUND**（WARN）：这一轮结果被丢弃；反复出现说明一轮比 refetch 间隔长 |
 
 `HealthCheckServiceInstanceListSupplier.healthCheckFlux` / `isAlive` 在 5.0.3 里是 `protected`，可以继承重写。但
 `withBlockingHealthChecks(...)` / `withHealthChecks(...)` 总是 new 原始类，所以 debug 开启时改用
 `builder.with((ctx, delegate) -> new ObservableHealthCheckServiceInstanceListSupplier(...))`，探活函数是内置 lambda
 的拷贝（`HealthCheckClients`）。debug 关闭时走的就是原生的 builder 方法。
+
+**MDC `hcTrigger` / `hcRound`**（仅 debug）：每次探活都带着所属的轮次，`logging.pattern.level` 把它们以 Splunk
+key=value 写在级别后面，Logbook 的请求 / 响应行就成了
+`TRACE trigger=INTERVAL round=12 … origin=local type=request …`。blocking 模式下探活就在订阅它的线程上跑，MDC 只在
+订阅期间设置、随后移除；webclient 模式下 Logbook 在 JDK HttpClient 的工作线程上写日志，所以轮次也写进 Reactor
+Context，由 `HealthCheckMdc`（`context-propagation` + `Hooks.enableAutomaticContextPropagation()`，全局，只在 debug +
+webclient 时开启）恢复到那些线程上。
+
+## 熔断器：resilience4j `backendA` / `backendB`
+
+业务 `RestTemplate`（`@LoadBalanced`）外面套了 resilience4j 熔断器（`DownstreamCaller`），配置在 `application.yml` 的
+`resilience4j.circuitbreaker.instances`：`backendA` = COUNT_BASED 100 次，`backendB` = TIME_BASED 10 秒、半开 3 次。
+`/target/whoami` 跟随实例状态（`up=false` → 503），所以"服务宕机"对业务调用同样可见。
+
+| 接口 | 作用 |
+|---|---|
+| `GET /cb` | 每个熔断器的状态、窗口里的调用数 / 失败率（-1 = 未达 `minimumNumberOfCalls`）、实际生效的配置 |
+| `GET /cb/call?backend=backendB` | 走熔断器的一次负载均衡调用；被拒时 503 `{"rejected":true}` |
+| `POST /cb/load?backend=&rps=20&seconds=150` / `GET /cb/load` / `DELETE /cb/load` | 持续调用下游，按秒统计 ok / failed / noInstance / rejected（日志 `[LOAD]`） |
+| `POST /cb/{backend}/reset` | 重置熔断器 |
+
+滑动窗口每个参数的含义、两个 backend 实际生效的默认值（**`minimumNumberOfCalls` 都是 100**，backendB 因此需要
+≥ 10 次/秒才会打开），以及"interval 60 s、refetch 180 s，0 秒健康、1 秒宕机，持续调用"的完整推演：
+[`docs/resilience4j-circuit-breaker.md`](docs/resilience4j-circuit-breaker.md)。推演由 `CircuitBreakerScenarioTest`
+在虚拟时间上用真实的健康检查 supplier 和真实的 `CircuitBreaker` 跑出（`-Dscenario.print` 打印时间线）。
 
 ## 测试
 

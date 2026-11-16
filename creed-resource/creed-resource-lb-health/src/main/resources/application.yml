@@ -56,6 +56,41 @@ spring:
       # inherit the global block above; every key it omits falls back to the library default (interval 25s,
       # update-results-list true, refetch false ...). HealthCheckConfigValidator checks the effective values.
 
+# Health-check request/response log (asked for, 2026-11-17): Logbook on the two probe clients only, Splunk key=value.
+# The target instances are this app's own connectors, so the inbound filter would log every probe a second time.
+logbook:
+  filter:
+    enabled: false
+  format:
+    style: splunk
+
+logging:
+  pattern:
+    # the probe's round in Splunk key=value, after the level - " trigger=INTERVAL round=12" - on every line logged
+    # inside a probe (Logbook's request / response, [HC]); dropped where the MDC is empty. Debug only:
+    # the MDC comes from ObservableHealthCheckServiceInstanceListSupplier (CREED_LB_DEBUG=true).
+    level: "%5p%replace( trigger=%X{hcTrigger} round=%X{hcRound}){'^ trigger= round=$', ''}"
+  level:
+    # Logbook writes at TRACE; set CREED_LB_LOGBOOK_LEVEL=INFO to silence it (nothing is buffered then)
+    org.zalando.logbook.Logbook: ${CREED_LB_LOGBOOK_LEVEL:TRACE}
+
+# Circuit breakers around the business RestTemplate (DownstreamCaller, /cb/*) - as asked (2026-11-17), unchanged.
+# What every key means, the defaults that apply (minimumNumberOfCalls 100 for BOTH: the Spring binding sets it apart
+# from the window, so it is not capped at backendA's 100 / backendB's 10) and the 60 s / 180 s scenario:
+# docs/resilience4j-circuit-breaker.md.
+# registerHealthIndicator does nothing here: no actuator, and resilience4j-spring-boot3 2.3.0's indicator is built
+# against Boot 3's org.springframework.boot.actuate.health package, which Boot 4 moved.
+resilience4j.circuitbreaker:
+  instances:
+    backendA:
+      registerHealthIndicator: true
+      slidingWindowSize: 100
+    backendB:
+      registerHealthIndicator: true
+      slidingWindowSize: 10
+      permittedNumberOfCallsInHalfOpenState: 3
+      slidingWindowType: TIME_BASED
+
 creed:
   lb-health:
     health-check:
@@ -65,7 +100,10 @@ creed:
       connect-timeout: ${CREED_LB_HC_CONNECT_TIMEOUT:2s}
       read-timeout: ${CREED_LB_HC_READ_TIMEOUT:3s}
     debug:
-      # [REFETCH] / [HC] / [HC-STREAM] / [HC-RESULT] logs.
+      # [REFETCH] / [HC] / [HC-STREAM] / [HC-ROUND] / [HC-RESULT] logs, and the probe MDC (trigger=… round=…).
       enabled: ${CREED_LB_DEBUG:false}
     target:
       embedded: ${CREED_LB_TARGET_EMBEDDED:true}
+    logbook:
+      # false: the probe clients get no Logbook interceptor / filter at all. CREED_LB_LOGBOOK_LEVEL only silences it.
+      enabled: ${CREED_LB_LOGBOOK:true}

@@ -13,12 +13,14 @@ import java.time.Duration;
  * @param healthCheck the HTTP client the probes use
  * @param debug       observability switch ({@code [REFETCH]} / {@code [HC]} / {@code [HC-STREAM]} logs)
  * @param target      whether this app also serves the target instances on extra connectors
+ * @param logbook     whether the probe clients carry Logbook at all
  */
 @ConfigurationProperties("creed.lb-health")
 public record LbHealthProperties(
         @DefaultValue HealthCheck healthCheck,
         @DefaultValue Debug debug,
-        @DefaultValue Target target) {
+        @DefaultValue Target target,
+        @DefaultValue ProbeLog logbook) {
 
     /**
      * @param mode           {@code blocking} (RestTemplate, serial probes) or {@code webclient}
@@ -40,6 +42,13 @@ public record LbHealthProperties(
     public enum Mode { BLOCKING, WEBCLIENT }
 
     public record Debug(@DefaultValue("false") boolean enabled) {
+    }
+
+    /**
+     * @param enabled {@code false}: no Logbook interceptor / filter on the probe clients (asked for, 2026-11-17) -
+     *                unlike lowering the {@code org.zalando.logbook.Logbook} level, which leaves them attached but idle
+     */
+    public record ProbeLog(@DefaultValue("true") boolean enabled) {
     }
 
     /** @param embedded open one extra HTTP connector per localhost instance of the target service */
