@@ -37,9 +37,9 @@ spring:
       health-check:
         # REQUIRED false. true (the default) re-emits a growing list after every answering instance - [1], [1,2]
         # ... - and get() (replay(1)) returns that partial list until the round ends, every round.
-        update-results-list: ${CREED_LB_HC_UPDATE_RESULTS_LIST:false}
+        update-results-list: ${CREED_LB_HC_UPDATE_RESULTS_LIST:true}
         # 0: start the first round as soon as the supplier exists; any delay is added to the first request's wait.
-        initial-delay: ${CREED_LB_HC_INITIAL_DELAY:0}
+        initial-delay: ${CREED_LB_HC_INITIAL_DELAY:10s}
         # Pause between the END of one round and the start of the next (repeatWhen), and also the per-probe
         # timeout Spring applies - which only works for non-blocking probes (webclient mode).
         interval: ${CREED_LB_HC_INTERVAL:30s}
@@ -49,7 +49,7 @@ spring:
         # Each refetch replaces the running health-check stream (switchMap): it cancels the interval timer and any
         # round still in flight. refetch <= interval → the interval never fires; round >= refetch → no round ever
         # completes and get() stays on the last completed list.
-        refetch-instances-interval: ${CREED_LB_HC_REFETCH_INTERVAL:120s}
+        refetch-instances-interval: ${CREED_LB_HC_REFETCH_INTERVAL:60s}
         path:
           lb-health-target: /api/lb-health/target/health
       # NOTE: do not add a spring.cloud.loadbalancer.clients.lb-health-target block for one tweak: it does NOT
@@ -106,4 +106,4 @@ creed:
       embedded: ${CREED_LB_TARGET_EMBEDDED:true}
     logbook:
       # false: the probe clients get no Logbook interceptor / filter at all. CREED_LB_LOGBOOK_LEVEL only silences it.
-      enabled: ${CREED_LB_LOGBOOK:true}
+      enabled: ${CREED_LB_LOGBOOK:false}
