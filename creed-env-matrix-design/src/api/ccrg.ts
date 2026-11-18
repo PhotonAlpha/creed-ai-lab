@@ -11,7 +11,11 @@ import { ApiError, toQuery } from './client';
  * 0 is falsy. 200 is accepted too — the old static mock files use it.
  */
 
-const BASE = '/api/ccrg';
+/**
+ * Path prefix of every CCRG call, from `VITE_CCRG_API_BASE` (`.env`). The Vite dev proxy registers the
+ * same prefix and strips it, so changing it in `.env` moves both; a trailing `/` is dropped.
+ */
+const BASE = (import.meta.env.VITE_CCRG_API_BASE || '/api/ccrg').replace(/\/+$/, '');
 
 interface Envelope<T> {
   code?: number;
@@ -147,6 +151,21 @@ export interface BatchFormVo {
   batch: { compareAll: boolean; baseRelease: string; routes: RouteInfoVo[] }[];
 }
 
+/** `POST /prompt/generate-yaml`: one source's effective configuration as a .yml. */
+export interface EffectiveYamlVo {
+  fileName: string;
+  activeProfiles?: string;
+  propertyCount: number;
+  /** Property names whose value still holds a `${...}` nothing defines. */
+  unresolved: string[];
+  /** Header comment + the properties, nested — exactly the file the page downloads. */
+  yaml: string;
+  /** Each source in merge order (1-based index); the last one wins a key. */
+  sources: { index: number; label: string; activeProfiles?: string; propertyCount: number }[];
+  /** Keys several sources set with different values; `values[i]` is source i+1's (null = not set). */
+  conflicts: { key: string; winner: number; values: (string | null)[] }[];
+}
+
 /** instance name -> its folders, keyed by the "value" the user picks. */
 export type InstanceMatrix = Record<string, unknown>;
 
@@ -238,6 +257,10 @@ export const ccrgApi = {
     get<PageResult<ConfluenceContent>>(`/prompt/list-reports${toQuery({ pageNo: String(pageNo), pageSize: String(pageSize) })}`),
   mergeReports: (mergeIds: string[]) => post<unknown>('/prompt/merge-reports', { mergeIds }),
   deleteReports: (mergeIds: string[]) => post<unknown>('/prompt/delete-reports', { mergeIds }),
+  generateYaml: (route: RouteInfoVo) => post<EffectiveYamlVo>('/prompt/generate-yaml', route),
+  /** Several sources merged in order — the last source wins a key set by several. */
+  generateMergedYaml: (sources: RouteInfoVo[]) =>
+    post<EffectiveYamlVo>('/prompt/generate-yaml/merge', { sources }),
 
   // Batch / Crossover
   batchXlsx: (form: BatchFormVo) =>

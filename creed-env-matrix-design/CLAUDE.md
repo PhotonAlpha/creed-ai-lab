@@ -64,6 +64,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   `creed-resource-migration-risk`，明文 HTTP，后端自带示例仓库）。
 - CCRG 比较工具：`/api/ccrg` 单独代理到 `VITE_CCRG_TARGET`（`.env`：`http://localhost:8600`，
   `creed-resource/ccrg-tool-starter`，明文 HTTP），代理去掉 `/ccrg` 前缀。
+  前缀可由 `VITE_CCRG_API_BASE` 修改（默认 `/api/ccrg`），`src/api/ccrg.ts` 与 `vite.config.ts` 的代理都读取它。
 - Splunk 会话代理：Node BFF（`server/bff.js`），审计默认存内存，开关 `SPLUNK_AUDIT_STORE=pg` / `mysql` 时写入 PostgreSQL / MySQL。
 
 ## 4. 目录结构（目标）
@@ -268,6 +269,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
 
 ### 5.8 CCRG 比较工具（`/ccrg/*`）
 - 旧 Vue 应用 `ccrg-tool-ui` 的全部页面迁移到此：拉取配置 / 生成报告 / 批量导出 / 跨项目比较 / 快捷跳转 / 安全管理 / 字典管理，
+  另新增「生成 YAML」（`/ccrg/yaml`，`pages/Ccrg/Yaml`）：一个或多个来源（批量导出来源的结构，可一键复制；可增删、复制、前移/后移，最多 10 个；宽屏一行两个来源（xl 及以上），合并顺序为先左后右、再从上到下）→ `POST /api/prompt/generate-yaml/merge` → 按列表顺序合并（**后面的来源覆盖前面的**，与 Spring 多个 config location 的规则一致），取值不同的 key 以 `conflicts` 返回并在页面列出 → 生效配置 `.yml`，页面显示 + 下载；`ccrg.yaml` 本地存储由单个对象改为数组（旧格式仍可读取）；排除 ccrg-tool 自身 `classpath:` 的属性源；
   菜单为一个分组。页面布局参考 `ccrg-tool-ui/ui-current.png`：上方查询卡片，下方表格卡片 + 底部操作按钮。
 - 后端响应为 `R<T>` 信封 `{code, data, msg}`，成功 `code = 0`；报告下载成功返回文件、失败返回 JSON（HTTP 都是 200），按 content-type 区分。
 - 批量导出与跨项目比较共用 `pages/Ccrg/Comparison`（`mode`），差异见 `model.ts`。各页面保存的表单使用各自的 localStorage 键。

@@ -14,9 +14,10 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Turns this app into its own 10 target instances: one extra HTTP connector per instance of
- * {@value LbHealthConfiguration#TARGET_SERVICE_ID} registered in the simple discovery client on localhost. The
- * ports come from discovery, so the registry and the listeners cannot drift apart. Off with
+ * Turns this app into its own target instances: one extra HTTP connector per localhost instance of EVERY cluster in
+ * the simple discovery client ({@value LbHealthConfiguration#TARGET_SERVICE_ID}'s 10 and the bulkhead cluster's 3). The
+ * ports come from discovery, so the registry and the listeners cannot drift apart; a port listed by two clusters gets
+ * one connector. Off with
  * {@code creed.lb-health.target.embedded=false} when the instances are real services.
  */
 @Slf4j
@@ -30,12 +31,13 @@ public class TargetConnectorsConfiguration {
     WebServerFactoryCustomizer<TomcatServletWebServerFactory> targetInstanceConnectors(
             SimpleDiscoveryProperties discovery) {
         return factory -> {
-            List<Integer> ports = discovery.getInstances()
-                    .getOrDefault(LbHealthConfiguration.TARGET_SERVICE_ID, List.of()).stream()
+            List<Integer> ports = discovery.getInstances().values().stream()
+                    .flatMap(List::stream)
                     .filter(instance -> LOCAL_HOSTS.contains(instance.getHost()))
                     .map(instance -> instance.getPort())
                     .filter(port -> port > 0 && port != factory.getPort())
                     .distinct()
+                    .sorted()
                     .toList();
             for (int port : ports) {
                 Connector connector = new Connector();

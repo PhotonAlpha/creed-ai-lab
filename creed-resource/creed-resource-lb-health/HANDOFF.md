@@ -44,22 +44,50 @@ JDK HttpClient's threads (measured: no MDC there otherwise), so the round also g
 message, not the MDC. Tests: `HealthCheckRoundTest.eachRoundSaysWhetherTheRefetchOrTheIntervalStartedIt` (0 s REFETCH,
 35/70/105 s INTERVAL, 120 s REFETCH) and the MDC of both Logbook lines in `everyProbeIsLoggedByLogbookInSplunkStyle`.
 
-## Circuit breakers (2026-11-17, asked for)
+## Circuit breakers + bulkheads, per cluster (2026-11-17, reworked 2026-11-18)
 
-resilience4j 2.3.0 (Spring Cloud BOM, `spring-cloud-starter-circuitbreaker-resilience4j` → `resilience4j-spring-boot3`
-binds `resilience4j.circuitbreaker.instances.*` on Boot 4) around the `@LoadBalanced` RestTemplate: `downstream/DownstreamCaller`
-(breaker taken from the registry, never created; not Spring Cloud's `CircuitBreakerFactory`, whose 1 s TimeLimiter would
-change the calls), `downstream/LoadRun` (rps x seconds, per-second `[LOAD]` rows), `api/CircuitBreakerController` (`/cb/*`),
-`[CB]` state-transition log. `backendA` / `backendB` as asked. `/target/whoami` now follows the instance state (503 when
-down) - before, only `/health` failed and the breaker saw nothing. `registerHealthIndicator` has no effect (no actuator;
-the 2.3.0 indicator targets Boot 3's health package).
+resilience4j 2.3.0 (Spring Cloud BOM; `spring-cloud-starter-circuitbreaker-resilience4j` → `resilience4j-spring-boot3`
+binds `resilience4j.*` on Boot 4; `resilience4j-bulkhead` added for the `BulkheadRegistry`). The user's config is
+`circuitbreaker.configs.default` (+ `bulkhead.configs.default`); `backendA` / `backendB` are gone.
 
-Facts the doc rests on, pinned: the Spring binding uses separate setters, so `minimumNumberOfCalls` stays 100 for both
-(never capped to the window; TIME_BASED 10 s ⇒ ≥ 10 calls/s or it never opens) - `LbHealthApplicationTest`;
-the scenario numbers (A opens 3.45 s / B 5.95 s at 20/s, B never at 5/s, 1-of-10 down never opens, recovery at 90 s →
-first success 124.00 / 126.15 s, 120.00 s with "No instances available" ignored) - `CircuitBreakerScenarioTest`, virtual
-time, Spring's real health-check supplier + resilience4j's real CircuitBreaker on one clock. Write-up:
-`docs/resilience4j-circuit-breaker.md`.
+- **One breaker + one bulkhead per cluster** (= key under `spring.cloud.discovery.client.simple.instances`), named after
+  it, created in `DownstreamCaller.createGuards()` at start-up via `registry.circuitBreaker(cluster)` - which takes
+  `configs.default` because Spring registers it as the registry default. `instances.<cluster>` overrides one cluster.
+  An unknown name is a 400, never a new breaker.
+- Nesting **`Bulkhead( CircuitBreaker( call ) )`** - deliberately NOT resilience4j's annotation order. Tried the
+  annotation order on 2026-11-19 and reverted the same day (user's call): with the bulkhead inside, the 44 rejections of
+  a 100-call burst were recorded as 44 SUCCESSES (the predicate's `false`), and the bulkhead wait counted in the call
+  duration (a 60 s wait vs the 60 s slow-call threshold). Now pinned the other way:
+  `withTheBulkheadOutsideTheBreakerARejectionIsNotInTheWindow` (window = only the calls that went out), and the 9 s
+  queue of the bulkhead cluster is recorded as ~1 s. Doc §4.4 has both columns. The aspect order is inert here (no annotations).
+- `DownstreamCircuitBreakerFailurePredicate`: failure = I/O, 5xx, 408, 429, "No instances available", anything unknown;
+  `false` (= recorded as SUCCESS, not ignored - resilience4j's order is ignore → record → success) for other 4xx and
+  our own rejections.
+- Second cluster `lb-health-bulkhead` (3 instances 18110-18112, Spring's default LoadBalancer, bulkhead 10,
+  `max-wait-duration 60s` since 2026-11-19 = a full bulkhead QUEUES on the caller's thread instead of rejecting); `TargetConnectorsConfiguration` now opens a connector for every cluster's localhost ports.
+- `LoadRun` has `concurrent=true` (one virtual thread per call, open model; rows = calls that ENDED that second; keeps a
+  row per second after sending until nothing waits or is in flight, max 120 s) plus `bulkheadFull` / `waiting` /
+  `inFlight` columns. Risk R13 in the doc: a 60 s wait holds Tomcat threads. `/cb/*` takes `cluster=` (default `lb-health-target`), not `backend=`.
+- **Actuator (2026-11-19)**: `spring-boot-starter-actuator`, exposed health / info / metrics / loggers / circuitbreakers /
+  circuitbreakerevents / bulkheads / bulkheadevents under `/api/lb-health/actuator`. resilience4j 2.3.0's endpoints,
+  events and Micrometer metrics work on Boot 4; its health indicator does NOT (implements Boot 3's
+  `org.springframework.boot.actuate.health.HealthIndicator`) - `downstream/CircuitBreakersHealthIndicator` (bean
+  `circuitBreakersHealthIndicator` → component `circuitBreakers`) replaces it with the same rules
+  (`register-health-indicator`, DOWN only with `allow-health-indicator-to-fail`). Remove it when resilience4j ships a
+  Boot 4 indicator, or there will be two. Spring Cloud's discovery health indicators are off
+  (`spring.cloud.discovery.client.health-indicator.enabled: false`): with simple discovery they stay UNKNOWN forever.
+- `bulkhead.configs.default.max-concurrent-calls` = 20 (was 100; 2 × 100 = Tomcat's 200 threads, risk R8).
+- Inert key: `circuit-breaker-aspect-order` (no annotations).
+
+Pinned: the bound values + predicate + per-cluster breakers/bulkheads, 50th failure opens an empty window, the other
+cluster unaffected, automatic OPEN→HALF_OPEN, bulkhead peak 10 with 60 s queueing (40/s × 3 s at 1 s per call: all 120 succeed over 13 s,
+90 waiting at 3 s, no slow calls - the wait is outside the breaker), rejection after max-wait -
+`LbHealthApplicationTest`; scenario numbers (opens 6.95 s at 20/s / 24.80 s at 5/s, 150 downstream failures because the
+15 s wait < 60 s interval sends trials to the stale list; 1 / 2 of 10 down = 10 % / 20 %, never opens, 118 / 236
+failures; 5 down never, 6 down opens at 10.95 s and then also blocks the 4 healthy instances until 72.95 s; recovery first success 130.50 s, 120.00 s with "No instances
+available" ignored) - `CircuitBreakerScenarioTest` (automatic transition mirrored as off: it runs on a real-time
+scheduler). Write-up incl. every key, combinations and risks (R1: the business RestTemplate has NO timeout - a hung
+cluster defeats the slow-call rule and can pin HALF_OPEN forever): `docs/resilience4j-circuit-breaker.md`.
 
 Test port fix: `LbHealthApplicationTest.freePort()` binds on loopback - a wildcard `ServerSocket(0)` was handed ports
 IntelliJ holds on 127.0.0.1 (50000-50002), and those "instances" answered 503 from the first round.

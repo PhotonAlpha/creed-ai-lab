@@ -12,6 +12,10 @@ spring:
   cloud:
     discovery:
       client:
+        # Spring Cloud's discovery health indicators wait for an InstanceRegisteredEvent the simple discovery client
+        # never publishes: /actuator/health would show them as UNKNOWN "Discovery Client not initialized" forever.
+        health-indicator:
+          enabled: false
         simple:
           # 10 instances. On localhost they are this app's own extra connectors (TargetConnectorsConfiguration);
           # point them at real hosts and set creed.lb-health.target.embedded=false to test a real service.
@@ -27,6 +31,12 @@ spring:
               - { instance-id: i07, uri: "http://localhost:18107" }
               - { instance-id: i08, uri: "http://localhost:18108" }
               - { instance-id: i09, uri: "http://localhost:18109" }
+            # Second cluster, for the bulkhead (2026-11-18): 3 instances, Spring's default LoadBalancer (no health check, no
+            # @LoadBalancerClient). Slow them down with PUT /target/instances/1811x?delay=2s and run a concurrent load.
+            lb-health-bulkhead:
+              - { instance-id: b00, uri: "http://localhost:18110" }
+              - { instance-id: b01, uri: "http://localhost:18111" }
+              - { instance-id: b02, uri: "http://localhost:18112" }
     loadbalancer:
       # Without this the supplier is created lazily by the first request, which then waits for a whole round.
       # Listed here, LoadBalancerEagerContextInitializer builds it on ApplicationReadyEvent and the first round
@@ -56,6 +66,19 @@ spring:
       # inherit the global block above; every key it omits falls back to the library default (interval 25s,
       # update-results-list true, refetch false ...). HealthCheckConfigValidator checks the effective values.
 
+# Actuator (asked for, 2026-11-19): on the app port, under the context path - /api/lb-health/actuator/... (the target
+# connectors 18100-18112 serve it too; they are this same app). resilience4j-spring-boot3 2.3.0's endpoints, events and
+# Micrometer metrics work on Boot 4; its health indicator does not (Boot 3 package) - CircuitBreakersHealthIndicator
+# replaces it, honouring register-health-indicator / allow-health-indicator-to-fail.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,loggers,circuitbreakers,circuitbreakerevents,bulkheads,bulkheadevents
+  endpoint:
+    health:
+      show-details: always
+
 # Health-check request/response log (asked for, 2026-11-17): Logbook on the two probe clients only, Splunk key=value.
 # The target instances are this app's own connectors, so the inbound filter would log every probe a second time.
 logbook:
@@ -74,22 +97,43 @@ logging:
     # Logbook writes at TRACE; set CREED_LB_LOGBOOK_LEVEL=INFO to silence it (nothing is buffered then)
     org.zalando.logbook.Logbook: ${CREED_LB_LOGBOOK_LEVEL:TRACE}
 
-# Circuit breakers around the business RestTemplate (DownstreamCaller, /cb/*) - as asked (2026-11-17), unchanged.
-# What every key means, the defaults that apply (minimumNumberOfCalls 100 for BOTH: the Spring binding sets it apart
-# from the window, so it is not capped at backendA's 100 / backendB's 10) and the 60 s / 180 s scenario:
-# docs/resilience4j-circuit-breaker.md.
-# registerHealthIndicator does nothing here: no actuator, and resilience4j-spring-boot3 2.3.0's indicator is built
-# against Boot 3's org.springframework.boot.actuate.health package, which Boot 4 moved.
-resilience4j.circuitbreaker:
-  instances:
-    backendA:
-      registerHealthIndicator: true
-      slidingWindowSize: 100
-    backendB:
-      registerHealthIndicator: true
-      slidingWindowSize: 10
-      permittedNumberOfCallsInHalfOpenState: 3
-      slidingWindowType: TIME_BASED
+# Resilience around the business RestTemplate (DownstreamCaller, /cb/*): ONE circuit breaker and ONE bulkhead PER
+# CLUSTER (= per key under spring.cloud.discovery.client.simple.instances), named after it, created at start-up from
+# configs.default; resilience4j.<circuitbreaker|bulkhead>.instances.<cluster> overrides one cluster. Nesting:
+# Bulkhead(CircuitBreaker(call)) - NOT resilience4j's annotation order: a full bulkhead never reaches the breaker and
+# the bulkhead wait is not part of the call duration (docs §4.4). What every key does, how they combine, the risks: docs/resilience4j-circuit-breaker.md §4.
+# register-health-indicator works through CircuitBreakersHealthIndicator (resilience4j's own targets Boot 3's package);
+# event-consumer-buffer-size feeds /actuator/circuitbreakerevents; circuit-breaker-aspect-order is inert (no annotations).
+resilience4j:
+  bulkhead:
+    configs:
+      default:
+        max-concurrent-calls: 20
+    instances:
+      # Small on purpose, so a concurrent load run shows it. max-wait-duration 60s (2026-11-19): a full bulkhead QUEUES the call on the caller's
+      # thread for up to 60 s instead of rejecting it - those threads are held meanwhile (docs §4.4, risk R13).
+      lb-health-bulkhead:
+        max-concurrent-calls: 10
+        max-wait-duration: 60s
+  circuitbreaker:
+    circuit-breaker-aspect-order: 1
+
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 200
+        minimum-number-of-calls: 50
+        failure-rate-threshold: 60
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 10
+        automatic-transition-from-open-to-half-open-enabled: true
+
+        record-failure-predicate: com.creed.resource.lbhealth.downstream.DownstreamCircuitBreakerFailurePredicate
+        event-consumer-buffer-size: 200
+        register-health-indicator: true
+        slow-call-rate-threshold: 100
+        slow-call-duration-threshold: 60s
+
 
 creed:
   lb-health:

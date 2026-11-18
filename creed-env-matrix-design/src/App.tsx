@@ -8,6 +8,7 @@ import {
   BookOutlined,
   BranchesOutlined,
   BugOutlined,
+  CodeOutlined,
   CloudDownloadOutlined,
   DiffOutlined,
   FileExcelOutlined,
@@ -35,6 +36,7 @@ import { MigrationRiskPage } from './pages/MigrationRisk';
 import { InstallPage } from './pages/Ccrg/Install';
 import { PromptPage } from './pages/Ccrg/Prompt';
 import { ComparisonPage } from './pages/Ccrg/Comparison';
+import { YamlPage } from './pages/Ccrg/Yaml';
 import { ShortcutPage } from './pages/Ccrg/Shortcut';
 import { SecurePage } from './pages/Ccrg/Secure';
 import { DictPage } from './pages/Ccrg/Dict';
@@ -104,6 +106,7 @@ export function App() {
                 { path: '/ccrg/report', name: t('nav.ccrg.report'), icon: <FileTextOutlined /> },
                 { path: '/ccrg/batch', name: t('nav.ccrg.batch'), icon: <DiffOutlined /> },
                 { path: '/ccrg/crossover', name: t('nav.ccrg.crossover'), icon: <SwapOutlined /> },
+                { path: '/ccrg/yaml', name: t('nav.ccrg.yaml'), icon: <CodeOutlined /> },
                 { path: '/ccrg/shortcut', name: t('nav.ccrg.shortcut'), icon: <LinkOutlined /> },
                 { path: '/ccrg/secure', name: t('nav.ccrg.secure'), icon: <SafetyOutlined /> },
                 { path: '/ccrg/dict', name: t('nav.ccrg.dict'), icon: <BookOutlined /> },
@@ -135,6 +138,7 @@ export function App() {
           {/* keyed: one component, two saved forms — a shared instance would carry state across */}
           <Route path="/ccrg/batch" element={<ComparisonPage key="batch" mode="batch" />} />
           <Route path="/ccrg/crossover" element={<ComparisonPage key="crossover" mode="crossover" />} />
+          <Route path="/ccrg/yaml" element={<YamlPage />} />
           <Route path="/ccrg/shortcut" element={<ShortcutPage />} />
           <Route path="/ccrg/secure" element={<SecurePage />} />
           <Route path="/ccrg/dict" element={<DictPage />} />

@@ -689,12 +689,18 @@ The old Vue app `ccrg-tool-ui` (Element Plus), migrated page for page onto this 
 `/api/system/...`, names the catch-all `/api` entry would otherwise send to env-matrix. Every answer is the
 `R<T>` envelope `{code, data, msg}`; success is `code = 0`.
 
+The prefix itself is `VITE_CCRG_API_BASE` in `.env` (default `/api/ccrg`): `src/api/ccrg.ts` calls it and
+the dev proxy registers the same value and rewrites it to `/api`, so changing it in `.env` moves both
+(restart `npm run dev` — Vite reads `.env` at startup). In a deployed build the value is baked in at
+`npm run build`; whatever serves the page must route that prefix to ccrg-tool-starter.
+
 | Page | Route | What it does |
 |---|---|---|
 | Pull config | `/ccrg/install` | Installed releases as one tree per project; install project → release → build from Artifactory; uninstall a row, a project, or the selection |
 | GenReport | `/ccrg/report` | Compare two releases of one project / country / app, publish xlsx or HTML to Confluence (progress over SSE); list, open, delete the generated pages |
 | Batch export | `/ccrg/batch` | Combinations of two sources of the **same** project → one xlsx / HTML download |
 | Crossover | `/ccrg/crossover` | The same form, each source picking **its own** project |
+| Generate YAML | `/ccrg/yaml` | One or more sources (Batch export's source shape, or copied from it) → their effective configuration merged top to bottom into one `.yml` — a key several sources set takes the lowest source's value, and every such disagreement is listed — shown and downloadable (`POST /api/prompt/generate-yaml/merge`; one source: `/generate-yaml`) |
 | ShortcutGO | `/ccrg/shortcut` | project → branch → release → Artifactory builds; GO copies the name and opens the build |
 | Secure management | `/ccrg/secure` | Decrypt a value with its hex symmetric key |
 | Dict management | `/ccrg/dict` | The config-folder tree the cascades walk: CRUD, copy, JSON export / import, `data.sql` dump |
@@ -702,8 +708,12 @@ The old Vue app `ccrg-tool-ui` (Element Plus), migrated page for page onto this 
 - **Batch vs Crossover** is one component (`pages/Ccrg/Comparison`, `mode`); `model.ts` documents the
   difference. Within a combination, a country / app picked while both sources sit on the same release is
   copied to the other source and locked.
+- **Generate YAML** renders the *effective* view: one value per key, the highest-precedence property source
+  wins, placeholders resolved; keys sorted. Sources loaded through a `classpath:` location are dropped — that
+  classpath is ccrg-tool's own, not the inspected app's. Values with an unresolved `${...}` are listed above the
+  text. The `.yml` loads back in Spring to exactly the same properties (`PropertySourcesTranslateUtilTest`).
 - Saved forms ("Save configuration") are per page in `localStorage` (`ccrg.batch`, `ccrg.crossover`,
-  `ccrg.prompt`, `ccrg.shortcut`). The old pages shared one key between Batch and Crossover.
+  `ccrg.prompt`, `ccrg.shortcut`, `ccrg.yaml`). The old pages shared one key between Batch and Crossover.
 - "Create from template" is the form as JSON — copy out to share, paste in to replace.
 - Left as in the old UI: *Merge Confluence pages* is disabled. Made to work: *Reload release folder*
   (was a no-op), Pull config's search (client-side, was a stub), the Confluence "view" link

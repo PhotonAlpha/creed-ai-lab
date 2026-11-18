@@ -27,6 +27,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- /actuator (asked for, 2026-11-19): health, metrics, and resilience4j's circuit-breaker / bulkhead endpoints. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-loadbalancer</artifactId>
@@ -66,6 +71,13 @@
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+        </dependency>
+        <!-- One semaphore Bulkhead per cluster (DownstreamCaller). The starter brings only circuitbreaker + timelimiter;
+             with this jar resilience4j-spring-boot3 also binds resilience4j.bulkhead.* into a BulkheadRegistry.
+             Version from the Spring Cloud BOM, like the rest of resilience4j (2.3.0). -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-bulkhead</artifactId>
         </dependency>
 
         <!-- HealthCheckMdc: carries the probe round's MDC to the threads a WebClient probe is logged on

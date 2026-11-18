@@ -3,8 +3,9 @@
 验证 Spring Cloud LoadBalancer 健康检查的配置：**`ServiceInstanceListSupplier.get()` 只返回最近一轮"全部检查完成"
 的完整存活列表，不会返回 1、2、3…… 逐步增长的部分列表**。
 
-应用同时是客户端和它自己的 **10 个目标实例**：`lb-health-target` 在 simple discovery 里登记了
-`localhost:18100`～`18109`，`TargetConnectorsConfiguration` 为每个端口开一个额外的 Tomcat connector，
+应用同时是客户端和它自己的 **13 个目标实例**：`lb-health-target` 在 simple discovery 里登记了
+`localhost:18100`～`18109`，舱壁测试用的 `lb-health-bulkhead` 登记了 `18110`～`18112`，
+`TargetConnectorsConfiguration` 为每个 cluster 的每个端口开一个额外的 Tomcat connector，
 `/target/health` 按本地端口返回 UP / DOWN / 延迟响应，可以在运行时切换。
 
 版本：Spring Boot 4.1.1 / Spring Cloud 2025.1.3（`spring-cloud-loadbalancer` / `spring-cloud-commons` **5.0.3**）。
@@ -112,23 +113,37 @@ key=value 写在级别后面，Logbook 的请求 / 响应行就成了
 Context，由 `HealthCheckMdc`（`context-propagation` + `Hooks.enableAutomaticContextPropagation()`，全局，只在 debug +
 webclient 时开启）恢复到那些线程上。
 
-## 熔断器：resilience4j `backendA` / `backendB`
+## 熔断器与舱壁：每个 cluster 各一套（resilience4j）
 
-业务 `RestTemplate`（`@LoadBalanced`）外面套了 resilience4j 熔断器（`DownstreamCaller`），配置在 `application.yml` 的
-`resilience4j.circuitbreaker.instances`：`backendA` = COUNT_BASED 100 次，`backendB` = TIME_BASED 10 秒、半开 3 次。
-`/target/whoami` 跟随实例状态（`up=false` → 503），所以"服务宕机"对业务调用同样可见。
+业务 `RestTemplate`（`@LoadBalanced`）的每次调用都是 `Bulkhead( CircuitBreaker( call ) )`（`DownstreamCaller`）。舱壁在外面，和 resilience4j 注解的默认顺序相反：舱壁的拒绝和排队都不进熔断器的统计（对比和实测见文档 §4.4）。
+**cluster** 指 `spring.cloud.discovery.client.simple.instances` 下的一个键。启动时每个 cluster 各建一个熔断器和一个舱壁，
+名字就是 cluster 名，配置来自 `resilience4j.circuitbreaker.configs.default` / `resilience4j.bulkhead.configs.default`。
+`instances.<cluster>` 可以单独覆盖某一个 cluster。一个 cluster 的故障不会打开另一个 cluster 的熔断器。
+
+| cluster | 实例 | 用途 |
+|---|---|---|
+| `lb-health-target` | 10 个，18100–18109，带健康检查 | 熔断场景 |
+| `lb-health-bulkhead` | 3 个，18110–18112，Spring 默认负载均衡，舱壁上限 **10**，`max-wait-duration: 60s`（满了先排队） | 舱壁场景：`delay=2s` + 并发调用 |
+
+哪些异常算失败由 `DownstreamCircuitBreakerFailurePredicate` 决定：I/O 错误、5xx、408、429 和 `No instances available`
+算失败；其他 4xx 记为**成功**（谓词返回 false 不是"忽略"）。`/target/whoami` 跟随实例状态：`up=false` → 503，`delay` → 变慢。
 
 | 接口 | 作用 |
 |---|---|
-| `GET /cb` | 每个熔断器的状态、窗口里的调用数 / 失败率（-1 = 未达 `minimumNumberOfCalls`）、实际生效的配置 |
-| `GET /cb/call?backend=backendB` | 走熔断器的一次负载均衡调用；被拒时 503 `{"rejected":true}` |
-| `POST /cb/load?backend=&rps=20&seconds=150` / `GET /cb/load` / `DELETE /cb/load` | 持续调用下游，按秒统计 ok / failed / noInstance / rejected（日志 `[LOAD]`） |
-| `POST /cb/{backend}/reset` | 重置熔断器 |
+| `GET /cb` | 每个 cluster：熔断器状态、窗口调用数 / 失败率（-1 = 未达 `minimumNumberOfCalls`）、舱壁在途数 / 峰值、实际生效的配置 |
+| `GET /cb/call?cluster=lb-health-bulkhead` | 走该 cluster 的一次调用。熔断器打开：503 `{"rejected":"circuit-breaker"}`；舱壁满：先排队，等满 `max-wait-duration` 仍拿不到名额才 429 `{"rejected":"bulkhead"}` |
+| `POST /cb/load?cluster=&rps=20&seconds=150&concurrent=false` / `GET /cb/load` / `DELETE /cb/load` | 持续调用，按秒统计 ok / failed / noInstance / rejected / bulkheadFull / waiting（排队中）/ inFlight（日志 `[LOAD]`）。`concurrent=true` 每个调用一个虚拟线程，不等上一个返回；发送结束后继续每秒一行，直到排队的调用都结束 |
+| `POST /cb/{cluster}/reset` | 重置熔断器和峰值计数 |
 
-滑动窗口每个参数的含义、两个 backend 实际生效的默认值（**`minimumNumberOfCalls` 都是 100**，backendB 因此需要
-≥ 10 次/秒才会打开），以及"interval 60 s、refetch 180 s，0 秒健康、1 秒宕机，持续调用"的完整推演：
+**actuator**：`/api/lb-health/actuator/` 下有 `health`（组件 `circuitBreakers`，每个 cluster 一项；熔断器 OPEN 不会让
+本应用变 DOWN）、`circuitbreakers`、`circuitbreakerevents`、`bulkheads`、`bulkheadevents`、`metrics`（`resilience4j.*`）、
+`info`、`loggers`。resilience4j 2.3.0 自带的 health indicator 在 Boot 4 上注册不了，由 `CircuitBreakersHealthIndicator` 代替。
+舱壁默认上限 `configs.default.max-concurrent-calls` = 20。
+
+`configs.default` 每一项的作用、组合起来的效果（例如打开前要攒 30 ~ 120 次失败）、风险清单（最重要的：业务
+`RestTemplate` 没有超时），以及"interval 60 s、refetch 180 s，0 秒健康、1 秒宕机，持续调用"的完整推演，都在
 [`docs/resilience4j-circuit-breaker.md`](docs/resilience4j-circuit-breaker.md)。推演由 `CircuitBreakerScenarioTest`
-在虚拟时间上用真实的健康检查 supplier 和真实的 `CircuitBreaker` 跑出（`-Dscenario.print` 打印时间线）。
+在虚拟时间上跑出来（`-Dscenario.print` 打印时间线）。
 
 ## 测试
 
@@ -145,4 +160,7 @@ webclient 时开启）恢复到那些线程上。
 - `HealthCheckConfigValidatorTest`：上面每条校验规则。
 - `LbHealthApplicationTest`：完整应用，10 个 connector 在随机空闲端口上，通过真实 HTTP 探活：eager-load 在没有请求时就建好
   supplier；一个实例 503、一个超过读超时后，每 20ms 读一次 `get()`，读到的只可能是"上一轮完整列表"或"新一轮完整列表"；
-  `choose` 不会选到 DOWN 的实例。
+  `choose` 不会选到 DOWN 的实例。熔断器 / 舱壁：两个 cluster 各有一套，配置等于 `configs.default`；空窗口时第 50 次失败打开，
+  另一个 cluster 不受影响；自动切到 HALF_OPEN；舱壁满时排队（60 s），120 次全部成功、在途峰值 = 10、排队时间不算慢调用；等满时间仍拿不到名额就拒绝。
+- `CircuitBreakerScenarioTest`：§3 的推演（全部宕机 20 次/秒、5 次/秒，挂 1 个实例，90 秒恢复）。
+- `DownstreamCircuitBreakerFailurePredicateTest`：每类异常的判定；返回 false 会被记为成功。

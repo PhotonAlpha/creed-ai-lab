@@ -1,5 +1,6 @@
 package com.creed.resource.lbhealth.lb;
 
+import com.creed.resource.lbhealth.downstream.DownstreamCircuitBreakerFailurePredicate;
 import com.creed.resource.lbhealth.lb.ScriptedProbes.Mode;
 import com.creed.resource.lbhealth.lb.ScriptedProbes.Outcome;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -79,15 +80,28 @@ class CircuitBreakerScenarioTest {
 
     // ------------------------------------------------------------------------------------------ the config, mirrored
 
-    /** {@code backendA: slidingWindowSize 100} - everything else the default. */
-    private CircuitBreakerConfig backendA() {
-        return onVirtualTime(CircuitBreakerConfig.custom().slidingWindowSize(100));
+    /**
+     * {@code resilience4j.circuitbreaker.configs.default} of application.yml, key by key - except
+     * {@code automatic-transition-from-open-to-half-open-enabled}: the automatic switch is a task on a REAL-time
+     * scheduler (15 s of wall clock), which virtual time cannot drive. Under continuous traffic the lazy switch happens
+     * on the first call after the wait instead - at most one call period (50 ms at 20/s) later; docs §4.2.
+     * {@code LbHealthApplicationTest} pins that the bound config carries these values.
+     */
+    private CircuitBreakerConfig configured() {
+        return onVirtualTime(configuredBuilder());
     }
 
-    /** {@code backendB: slidingWindowSize 10, permittedNumberOfCallsInHalfOpenState 3, TIME_BASED}. */
-    private CircuitBreakerConfig backendB() {
-        return onVirtualTime(CircuitBreakerConfig.custom().slidingWindowSize(10).permittedNumberOfCallsInHalfOpenState(3)
-                .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED));
+    static CircuitBreakerConfig.Builder configuredBuilder() {
+        return CircuitBreakerConfig.custom()
+                .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                .slidingWindowSize(200)
+                .minimumNumberOfCalls(50)
+                .failureRateThreshold(60)
+                .waitDurationInOpenState(Duration.ofSeconds(15))
+                .permittedNumberOfCallsInHalfOpenState(10)
+                .recordException(new DownstreamCircuitBreakerFailurePredicate())
+                .slowCallRateThreshold(100)
+                .slowCallDurationThreshold(Duration.ofSeconds(60));
     }
 
     private CircuitBreakerConfig onVirtualTime(CircuitBreakerConfig.Builder builder) {
@@ -112,10 +126,10 @@ class CircuitBreakerScenarioTest {
     }
 
     @Test
-    void theMirroredConfigsKeepTheDefaultMinimumOf100Calls() {
-        assertThat(backendA().getMinimumNumberOfCalls()).isEqualTo(100);
-        assertThat(backendB().getMinimumNumberOfCalls()).as("TIME_BASED: never capped").isEqualTo(100);
-        // the same setters on a COUNT_BASED window of 10 do not cap it either: 100 calls never fit, it never opens
+    void theMinimumIsAFloorNotAWindowAndOnlyTheFourArgBuilderCapsIt() {
+        assertThat(configured().getMinimumNumberOfCalls()).isEqualTo(50);
+        assertThat(configured().getSlidingWindowSize()).isEqualTo(200);
+        // separate setters (what the Spring binding calls) never cap: COUNT_BASED 10 + default minimum 100 never opens
         assertThat(CircuitBreakerConfig.custom().slidingWindowSize(10).build().getMinimumNumberOfCalls()).isEqualTo(100);
         // only slidingWindow(size, minimum, type, strategy) caps a COUNT_BASED minimum at the window size
         assertThat(CircuitBreakerConfig.custom().slidingWindow(10, 100,
@@ -124,52 +138,38 @@ class CircuitBreakerScenarioTest {
                 .isEqualTo(10);
     }
 
-    // ----------------------------------------------------------------------------------- the whole service goes down
+    // ----------------------------------------------------------------------------------- the whole cluster goes down
 
+    /**
+     * Window: the last 200 calls, all successes. 60 % of 200 = 120 failures - at 20/s that is 6 s. Then OPEN 15 s,
+     * and every HALF_OPEN's 10 trials go to the STALE list (the 0 s round's 10 instances, dead) until the 60 s round:
+     * a 15 s wait shorter than the 60 s health-check interval makes each trial cost 10 real downstream failures.
+     */
     @Test
-    void backendA_allDown_20rps_opensAfter50FailuresThenTheDownstreamIsLeftAlone() {
-        Result r = run(backendA(), 20, all(), 1, null, 200);
+    void allDown_20rps_opensAfter120FailuresAndEveryTrialBeforeThe60sRoundHitsTheDeadInstances() {
+        Result r = run(configured(), 20, all(), 1, null, 200);
 
-        // the window held the last 100 calls, all successes; 50 failures make 50 % - at 20/s that is 2.5 s
-        assertThat(r.transitions()).containsExactly(
-                "t=3.45s CLOSED -> OPEN",
-                "t=63.50s OPEN -> HALF_OPEN", "t=63.95s HALF_OPEN -> OPEN",       // 10 trial calls, empty list
-                "t=124.00s OPEN -> HALF_OPEN", "t=124.45s HALF_OPEN -> OPEN",
-                "t=184.50s OPEN -> HALF_OPEN", "t=184.95s HALF_OPEN -> OPEN");
-        assertThat(r.failedDownstream()).as("calls that reached a dead instance").isEqualTo(50);
-        assertThat(r.noInstance()).as("trial calls with an empty list: recorded, nothing sent").isEqualTo(30);
-        assertThat(r.lbSizeAt(59)).as("the 0 s round's list: stale for 60 s").isEqualTo(10);
+        assertThat(r.transitions()).startsWith(
+                "t=6.95s CLOSED -> OPEN",
+                "t=22.00s OPEN -> HALF_OPEN", "t=22.45s HALF_OPEN -> OPEN",
+                "t=37.50s OPEN -> HALF_OPEN", "t=37.95s HALF_OPEN -> OPEN",
+                "t=53.00s OPEN -> HALF_OPEN", "t=53.45s HALF_OPEN -> OPEN",
+                "t=68.50s OPEN -> HALF_OPEN", "t=68.95s HALF_OPEN -> OPEN");
+        assertThat(r.failedDownstream()).as("120 to open + 3 trials x 10 against the stale list").isEqualTo(150);
+        assertThat(r.noInstance()).as("from 68.5 s the trials meet the empty list: 9 x 10").isEqualTo(90);
+        assertThat(r.rejected()).isEqualTo(3740);
+        assertThat(r.lbSizeAt(59)).isEqualTo(10);
         assertThat(r.lbSizeAt(60)).isZero();
     }
 
+    /** A count, not a rate: still 120 failures, so 24 s at 5/s - and a HALF_OPEN's 10 trials take 2 s. */
     @Test
-    void backendB_allDown_20rps_opensWhenHalfTheLast10SecondsFailed() {
-        Result r = run(backendB(), 20, all(), 1, null, 200);
+    void allDown_5rps_needsTheSame120FailuresSoItTakes24s() {
+        Result r = run(configured(), 5, all(), 1, null, 200);
 
-        // 10 one-second buckets of 20 calls. At 5.95 s the window is seconds -4..5: 100 successes (-4..0) and 100
-        // failures (1..5) - 50 %, and the check is >=
-        assertThat(r.transitions()).first().isEqualTo("t=5.95s CLOSED -> OPEN");
-        assertThat(r.failedDownstream()).isEqualTo(100);
-        assertThat(r.transitions()).contains("t=66.00s OPEN -> HALF_OPEN", "t=66.10s HALF_OPEN -> OPEN");
-        assertThat(r.noInstance()).as("3 trial calls per HALF_OPEN").isEqualTo(9);
-    }
-
-    @Test
-    void backendB_allDown_5rps_neverOpens_TheMinimumOf100CallsNeverFitsIn10Seconds() {
-        Result r = run(backendB(), 5, all(), 1, null, 200);
-
-        assertThat(r.transitions()).isEmpty();
-        assertThat(r.failedDownstream()).as("every call from 1 s to the 60 s round").isEqualTo(5 * 59);
-        assertThat(r.noInstance()).as("then every call fails at the load balancer").isEqualTo(5 * 140);
-        assertThat(r.rejected()).isZero();
-    }
-
-    @Test
-    void backendA_allDown_5rps_stillOpens_ItsMinimumIsACountNotARate() {
-        Result r = run(backendA(), 5, all(), 1, null, 200);
-
-        assertThat(r.transitions()).first().isEqualTo("t=10.80s CLOSED -> OPEN");
-        assertThat(r.failedDownstream()).isEqualTo(50);
+        assertThat(r.transitions()).startsWith("t=24.80s CLOSED -> OPEN", "t=40.00s OPEN -> HALF_OPEN",
+                "t=41.80s HALF_OPEN -> OPEN");
+        assertThat(r.failedDownstream()).isEqualTo(120 + 2 * 10);
     }
 
     @Test
@@ -182,53 +182,74 @@ class CircuitBreakerScenarioTest {
 
     // ------------------------------------------------------------------------------------------ one instance of ten
 
+    /** Round robin: 1 call in 10 lands on i03 - 10 %, 20 failures in a full window of 200. */
     @Test
-    void oneOfTenDown_20rps_neitherBreakerOpens_10PercentFailUntilThe60sRound() {
-        for (CircuitBreakerConfig config : List.of(backendA(), backendB())) {
-            Result r = run(config, 20, Set.of("i03"), 1, null, 200);
-            assertThat(r.transitions()).isEmpty();
-            assertThat(r.failedDownstream()).isEqualTo(2 * 59);
-            assertThat(r.lbSizeAt(60)).isEqualTo(9);
-            stop();
-            virtualTime();
-        }
+    void oneOfTenDown_20rps_neverOpens_10PercentIsFarBelow60() {
+        Result r = run(configured(), 20, Set.of("i03"), 1, null, 200);
+        assertThat(r.transitions()).isEmpty();
+        assertThat(r.seconds().get(30).shape()).isEqualTo("CLOSED lb=10 ok=18 failed=2 noInstance=0 rejected=0");
+        assertThat(r.failedDownstream()).isEqualTo(2 * 59);
+        assertThat(r.lbSizeAt(60)).isEqualTo(9);
+        assertThat(r.seconds().get(60).shape()).isEqualTo("CLOSED lb=9 ok=20 failed=0 noInstance=0 rejected=0");
+    }
+
+    /** 2 in 10: 20 %, 40 failures in the window - still a third of the 60 % threshold. Twice the failures of one. */
+    @Test
+    void twoOfTenDown_20rps_neverOpens_20PercentAndTwiceTheFailures() {
+        Result r = run(configured(), 20, Set.of("i03", "i07"), 1, null, 200);
+        assertThat(r.transitions()).isEmpty();
+        assertThat(r.seconds().get(30).shape()).isEqualTo("CLOSED lb=10 ok=16 failed=4 noInstance=0 rejected=0");
+        assertThat(r.failedDownstream()).isEqualTo(4 * 59);
+        assertThat(r.lbSizeAt(60)).isEqualTo(8);
+    }
+
+    /** Where it starts to open: 5 of 10 = 50 % never; 6 of 10 = 60 % opens - and then also blocks the 4 healthy ones. */
+    @Test
+    void theThreshold_fiveOfTenNeverOpens_sixOfTenOpensAndBlocksTheHealthyFourToo() {
+        Result five = run(configured(), 20, Set.of("i01", "i03", "i05", "i07", "i09"), 1, null, 200);
+        assertThat(five.transitions()).isEmpty();
+        assertThat(five.failedDownstream()).isEqualTo(10 * 59);
+
+        stop();
+        virtualTime();
+        Result six = run(configured(), 20, Set.of("i00", "i01", "i03", "i05", "i07", "i09"), 1, null, 200);
+        assertThat(six.transitions()).startsWith("t=10.95s CLOSED -> OPEN")
+                .endsWith("t=72.50s OPEN -> HALF_OPEN", "t=72.95s HALF_OPEN -> CLOSED");
+        assertThat(six.failedDownstream()).isEqualTo(138);
+        // 60..71 s: the list holds the 4 healthy instances, but the breaker is still OPEN
+        assertThat(six.seconds().get(65).shape()).isEqualTo("OPEN lb=4 ok=0 failed=0 noInstance=0 rejected=20");
     }
 
     // -------------------------------------------------------------------------------------------------------- recovery
 
+    /**
+     * Back at 90 s, in the list again at the 120 s round; the breaker re-opened at 115.45 s (a trial against the empty
+     * list), so traffic flows at its next trial, 130.50 s - 10.5 s after the load balancer.
+     */
     @Test
-    void recovery_serverBackAt90s_trafficFlowsOnlyAtTheBreakersNextTrialAfterThe120sRound() {
-        Result a = run(backendA(), 20, all(), 1, 90.0, 200);
-        assertThat(a.lbSizeAt(119)).as("the 60 s round emptied it, the 120 s round refills it").isZero();
-        assertThat(a.lbSizeAt(120)).isEqualTo(10);
-        assertThat(a.transitions()).contains("t=124.00s OPEN -> HALF_OPEN", "t=124.45s HALF_OPEN -> CLOSED");
-        assertThat(a.firstOkAfter(1)).isEqualTo(124.0);
-
-        stop();
-        virtualTime();
-        Result b = run(backendB(), 20, all(), 1, 90.0, 200);
-        // OPEN again at 66.10 s, so the wait ends at 126.10 s; the switch needs a call strictly AFTER it (isAfter):
-        // the calls at 126.00, 126.05 and 126.10 s are still rejected
-        assertThat(b.transitions()).contains("t=126.15s OPEN -> HALF_OPEN", "t=126.25s HALF_OPEN -> CLOSED");
-        assertThat(b.firstOkAfter(1)).isEqualTo(126.15);
+    void recovery_serverBackAt90s_trafficFlowsAtTheNextTrialAfterThe120sRound() {
+        Result r = run(configured(), 20, all(), 1, 90.0, 200);
+        assertThat(r.lbSizeAt(119)).isZero();
+        assertThat(r.lbSizeAt(120)).isEqualTo(10);
+        assertThat(r.transitions()).endsWith("t=115.45s HALF_OPEN -> OPEN", "t=130.50s OPEN -> HALF_OPEN",
+                "t=130.95s HALF_OPEN -> CLOSED");
+        assertThat(r.firstOkAfter(1)).isEqualTo(130.5);
     }
 
     /**
-     * The doc's advice, measured: with "No instances available" ignored, HALF_OPEN trials that meet an empty list are not
-     * counted - the permit is released, HALF_OPEN stays, and the first call after the 120 s round closes it. Without
-     * it, every trial against the empty list re-opens the breaker for another 60 s (124.00 s above).
+     * With "No instances available" IGNORED (not answered false by the predicate - false would be a success and close
+     * the breaker on an empty list), a trial that meets the empty list releases its permit: HALF_OPEN stays and lets
+     * every call through to the load balancer, which fails it locally, until the 120 s round. First success at 120 s,
+     * like no breaker at all - at the price of 1030 local failures instead of rejections.
      */
     @Test
     void recovery_ignoringNoInstancesAvailable_closesRightAfterTheListComesBack() {
-        CircuitBreakerConfig ignoring = onVirtualTime(CircuitBreakerConfig.custom().slidingWindowSize(100)
-                .ignoreExceptions(IllegalStateException.class));
-        Result r = run(ignoring, 20, all(), 1, 90.0, 200);
+        Result r = run(onVirtualTime(configuredBuilder().ignoreException(e -> e instanceof IllegalStateException
+                && String.valueOf(e.getMessage()).startsWith("No instances available"))), 20, all(), 1, 90.0, 200);
 
-        assertThat(r.transitions()).containsExactly("t=3.45s CLOSED -> OPEN", "t=63.50s OPEN -> HALF_OPEN",
-                "t=120.45s HALF_OPEN -> CLOSED");
+        assertThat(r.transitions()).endsWith("t=68.50s OPEN -> HALF_OPEN", "t=120.45s HALF_OPEN -> CLOSED");
         assertThat(r.firstOkAfter(1)).isEqualTo(120.0);
-        // HALF_OPEN from 63.50 s lets every call through to the empty list (cheap, local): 10 in second 63, then 20/s
-        assertThat(r.noInstance()).isEqualTo(10 + 56 * 20);
+        assertThat(r.noInstance()).isEqualTo(10 + 51 * 20);
     }
 
     // -------------------------------------------------------------------------------------------------------- the run

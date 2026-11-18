@@ -25,6 +25,9 @@ import react from '@vitejs/plugin-react';
  */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
+  // Same prefix src/api/ccrg.ts calls; escaped for the rewrite below.
+  const ccrgBase = (env.VITE_CCRG_API_BASE || '/api/ccrg').replace(/\/+$/, '');
+  const ccrgBasePattern = new RegExp('^' + ccrgBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
   return {
     plugins: [react()],
@@ -52,11 +55,11 @@ export default defineConfig(({ mode }) => {
         // ccrg-tool-starter (the old ccrg-tool-ui's backend, :8600) serves `/api/admin`, `/api/prompt`,
         // `/api/system/...` — names the catch-all below would send to env-matrix. The UI calls
         // `/api/ccrg/...` and the prefix is stripped here. Same first-match rule as above.
-        '/api/ccrg': {
+        [ccrgBase]: {
           target: env.VITE_CCRG_TARGET ?? 'http://localhost:8600',
           changeOrigin: true,
           xfwd: true,
-          rewrite: (path) => path.replace(/^\/api\/ccrg/, '/api'),
+          rewrite: (path) => path.replace(ccrgBasePattern, '/api'),
         },
         '/api': {
           target: env.VITE_API_TARGET ?? 'http://localhost:3001',

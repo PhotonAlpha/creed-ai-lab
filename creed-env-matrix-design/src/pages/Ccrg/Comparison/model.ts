@@ -1,4 +1,4 @@
-import type { BatchFormVo, SelectorVo, WalkPathInfo } from '../../../api/ccrg';
+import type { BatchFormVo, RouteInfoVo, SelectorVo, WalkPathInfo } from '../../../api/ccrg';
 
 /**
  * Batch Export and Crossover share one form: a list of combinations, each comparing two "sources"
@@ -145,16 +145,21 @@ export function toRequest(batch: Combination[], connectionId?: string): BatchFor
     batch: batch.map((c) => ({
       compareAll: c.compareAll,
       baseRelease: c.baseRelease,
-      routes: c.routes.map((r) => ({
-        releaseName: r.releaseName,
-        projectName: r.projectName,
-        countryCode: r.countryCode,
-        app: r.app,
-        environment: r.environment,
-        instance: r.instance,
-        node: r.node,
-        zone: r.zone.join(','),
-      })),
+      routes: c.routes.map(toRoute),
     })),
+  };
+}
+
+/** One source as the backend's `RouteInfoVo` (zones comma-joined). Also what `/ccrg/yaml` sends. */
+export function toRoute(r: Source): RouteInfoVo {
+  return {
+    releaseName: r.releaseName,
+    projectName: r.projectName,
+    countryCode: r.countryCode,
+    app: r.app,
+    environment: r.environment,
+    instance: r.instance,
+    node: r.node,
+    zone: r.zone.join(','),
   };
 }

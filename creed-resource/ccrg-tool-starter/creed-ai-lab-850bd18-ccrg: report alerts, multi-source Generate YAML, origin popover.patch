@@ -1,0 +1,3215 @@
+From 850bd180d2be2825db9c80100b4239261bf1b00a Mon Sep 17 00:00:00 2001
+From: EthanCao <ethan.caoq@foxmail.com>
+Date: Wed, 18 Nov 2026 22:21:59 +0800
+Subject: [PATCH] ccrg: report alerts, multi-source Generate YAML, origin
+ popover
+
+- Restore HTMLReportGeneratorImpl and overall-html-fragment.html from
+  develop/deperacted-version: release/release-ccrg did not compile
+  (PdfController imports HTMLReportGeneratorImpl) and the Overall tab was empty.
+- Report alerts (ConfigAlertService, ccrg.alerts.* in application.yml):
+  another environment's address and plain-text secrets (critical), watched
+  keys that differ (high), accepted differences. Banner + Alerts tab in
+  report-html-export-index, severity badges and "Alerts only" filter in the
+  Overall Comparison; secrets masked in the Alerts tab.
+- Origin popover: one delegated listener and one popover at a time
+  (fragments/origin-popover-script.html) instead of an eager popover per
+  line with click/hover/focus triggers and stacked 20 s timers.
+- Generate YAML: several sources merged in order, the later source wins a
+  key; POST /prompt/generate-yaml/merge returns every conflicting key. The
+  page edits a list of sources (add / duplicate / reorder / remove, two per
+  row on wide screens); the saved form is now an array (old format still loads).
+- Tests: ConfigAlertServiceTest, HtmlReportAlertsRenderTest,
+  EffectiveYamlServiceTest.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ creed-env-matrix-design/CLAUDE.md             |   2 +-
+ creed-env-matrix-design/README.md             |   2 +-
+ creed-env-matrix-design/README.zh-CN.md       |   2 +-
+ creed-env-matrix-design/src/api/ccrg.ts       |   7 +
+ creed-env-matrix-design/src/locales/en-US.ts  |  28 +-
+ creed-env-matrix-design/src/locales/zh-CN.ts  |  28 +-
+ .../src/pages/Ccrg/Yaml/index.tsx             | 380 ++++++++----
+ .../prompt/PromptCombinationController.java   |  10 +
+ .../controller/prompt/vo/EffectiveYamlVo.java |  20 +-
+ .../prompt/vo/GenerateYamlRequest.java        |  12 +
+ .../vo/PropertyReviewOverviewVo.java          |   4 +
+ .../controller/vo/PropertyReviewVo.java       |   7 +
+ .../vo/ReportPropertiesOverviewVo.java        |  37 +-
+ .../com/creed/parent/dal/model/DiffInfo.java  |   3 +
+ .../parent/service/EffectiveYamlService.java  | 140 ++++-
+ .../service/report/alert/ConfigAlert.java     |  31 +
+ .../report/alert/ConfigAlertProperties.java   |  93 +++
+ .../service/report/alert/ConfigAlertRule.java |  25 +
+ .../report/alert/ConfigAlertService.java      | 236 ++++++++
+ .../report/alert/ConfigAlertSeverity.java     |  30 +
+ .../report/impl/HTMLReportGeneratorImpl.java  | 543 ++++++++++++++++++
+ .../src/main/resources/application.yml        |  20 +-
+ .../main/resources/static/pdf/css/style.css   |  28 +
+ .../fragments/alerts-html-fragment.html       |  94 +++
+ .../fragments/matching-html-fragment.html     |  10 +-
+ .../fragments/non-matching-html-fragment.html |  20 +-
+ .../fragments/origin-popover-script.html      |  87 +++
+ .../fragments/overall-html-fragment.html      | 168 ++++++
+ .../templates/report-html-export-index.html   |  51 +-
+ .../templates/report-html-index.html          |  18 +-
+ .../service/EffectiveYamlServiceTest.java     | 117 ++++
+ .../report/ConfigAlertServiceTest.java        | 120 ++++
+ .../report/HtmlReportAlertsRenderTest.java    | 137 +++++
+ creed-resource/scripts/conf/pdf/css/style.css |  28 +
+ 34 files changed, 2337 insertions(+), 201 deletions(-)
+ create mode 100644 creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/vo/GenerateYamlRequest.java
+ create mode 100644 creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlert.java
+ create mode 100644 creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertProperties.java
+ create mode 100644 creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertRule.java
+ create mode 100644 creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertService.java
+ create mode 100644 creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertSeverity.java
+ create mode 100644 creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/impl/HTMLReportGeneratorImpl.java
+ create mode 100644 creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/alerts-html-fragment.html
+ create mode 100644 creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/origin-popover-script.html
+ create mode 100644 creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/EffectiveYamlServiceTest.java
+ create mode 100644 creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/ConfigAlertServiceTest.java
+ create mode 100644 creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/HtmlReportAlertsRenderTest.java
+
+diff --git a/creed-env-matrix-design/CLAUDE.md b/creed-env-matrix-design/CLAUDE.md
+index b75c5d17..62d7f427 100644
+--- a/creed-env-matrix-design/CLAUDE.md
++++ b/creed-env-matrix-design/CLAUDE.md
+@@ -268,7 +268,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
+ 
+ ### 5.8 CCRG 比较工具（`/ccrg/*`）
+ - 旧 Vue 应用 `ccrg-tool-ui` 的全部页面迁移到此：拉取配置 / 生成报告 / 批量导出 / 跨项目比较 / 快捷跳转 / 安全管理 / 字典管理，
+-  另新增「生成 YAML」（`/ccrg/yaml`，`pages/Ccrg/Yaml`）：一个来源（批量导出来源 1 的结构，可一键复制）→ `POST /api/prompt/generate-yaml` → 生效配置 `.yml`，页面显示 + 下载；排除 ccrg-tool 自身 `classpath:` 的属性源；
++  另新增「生成 YAML」（`/ccrg/yaml`，`pages/Ccrg/Yaml`）：一个或多个来源（批量导出来源的结构，可一键复制；可增删、复制、前移/后移，最多 10 个；宽屏一行两个来源（xl 及以上），合并顺序为先左后右、再从上到下）→ `POST /api/prompt/generate-yaml/merge` → 按列表顺序合并（**后面的来源覆盖前面的**，与 Spring 多个 config location 的规则一致），取值不同的 key 以 `conflicts` 返回并在页面列出 → 生效配置 `.yml`，页面显示 + 下载；`ccrg.yaml` 本地存储由单个对象改为数组（旧格式仍可读取）；排除 ccrg-tool 自身 `classpath:` 的属性源；
+   菜单为一个分组。页面布局参考 `ccrg-tool-ui/ui-current.png`：上方查询卡片，下方表格卡片 + 底部操作按钮。
+ - 后端响应为 `R<T>` 信封 `{code, data, msg}`，成功 `code = 0`；报告下载成功返回文件、失败返回 JSON（HTTP 都是 200），按 content-type 区分。
+ - 批量导出与跨项目比较共用 `pages/Ccrg/Comparison`（`mode`），差异见 `model.ts`。各页面保存的表单使用各自的 localStorage 键。
+diff --git a/creed-env-matrix-design/README.md b/creed-env-matrix-design/README.md
+index c2390cc9..34c3d749 100644
+--- a/creed-env-matrix-design/README.md
++++ b/creed-env-matrix-design/README.md
+@@ -695,7 +695,7 @@ The old Vue app `ccrg-tool-ui` (Element Plus), migrated page for page onto this
+ | GenReport | `/ccrg/report` | Compare two releases of one project / country / app, publish xlsx or HTML to Confluence (progress over SSE); list, open, delete the generated pages |
+ | Batch export | `/ccrg/batch` | Combinations of two sources of the **same** project → one xlsx / HTML download |
+ | Crossover | `/ccrg/crossover` | The same form, each source picking **its own** project |
+-| Generate YAML | `/ccrg/yaml` | One source (Batch export's Source 1 shape, or copied from it) → its effective configuration as a `.yml`, shown and downloadable (`POST /api/prompt/generate-yaml`) |
++| Generate YAML | `/ccrg/yaml` | One or more sources (Batch export's source shape, or copied from it) → their effective configuration merged top to bottom into one `.yml` — a key several sources set takes the lowest source's value, and every such disagreement is listed — shown and downloadable (`POST /api/prompt/generate-yaml/merge`; one source: `/generate-yaml`) |
+ | ShortcutGO | `/ccrg/shortcut` | project → branch → release → Artifactory builds; GO copies the name and opens the build |
+ | Secure management | `/ccrg/secure` | Decrypt a value with its hex symmetric key |
+ | Dict management | `/ccrg/dict` | The config-folder tree the cascades walk: CRUD, copy, JSON export / import, `data.sql` dump |
+diff --git a/creed-env-matrix-design/README.zh-CN.md b/creed-env-matrix-design/README.zh-CN.md
+index 0e227320..224de405 100644
+--- a/creed-env-matrix-design/README.zh-CN.md
++++ b/creed-env-matrix-design/README.zh-CN.md
+@@ -581,7 +581,7 @@ Camel XML 路由在所有路由文件中按 route id 逐步比较（from、to、
+ | 生成报告 | `/ccrg/report` | 比较同一项目 / 国家 / 应用的两个 release，以 xlsx 或 HTML 发布到 Confluence（SSE 进度）；列出、打开、删除已生成页面 |
+ | 批量导出 | `/ccrg/batch` | 多个组合，每个组合两个来源，**同一**项目 → 下载一份 xlsx / HTML |
+ | 跨项目比较 | `/ccrg/crossover` | 同一表单，每个来源**各自**选择项目 |
+-| 生成 YAML | `/ccrg/yaml` | 一个来源（与批量导出的来源 1 相同，也可从其复制）→ 实际生效的配置，输出为 `.yml`，页面显示并可下载（`POST /api/prompt/generate-yaml`） |
++| 生成 YAML | `/ccrg/yaml` | 一个或多个来源（与批量导出的来源结构相同，也可从其复制）→ 各自生效的配置按从上到下的顺序合并成一个 `.yml`：多个来源设置同一个 key 时取列表中最靠下的来源的值，所有取值不同的 key 都会列出；页面显示并可下载（`POST /api/prompt/generate-yaml/merge`；单个来源：`/generate-yaml`） |
+ | 快捷跳转 | `/ccrg/shortcut` | 项目 → 分支 → release → Artifactory 构建；GO 复制名称并打开该构建 |
+ | 安全管理 | `/ccrg/secure` | 用十六进制对称密钥解密一个值 |
+ | 字典管理 | `/ccrg/dict` | 级联下拉所遍历的配置目录树：增删改、复制、JSON 导出 / 导入、导出 `data.sql` |
+diff --git a/creed-env-matrix-design/src/api/ccrg.ts b/creed-env-matrix-design/src/api/ccrg.ts
+index e009aa58..3209a0f8 100644
+--- a/creed-env-matrix-design/src/api/ccrg.ts
++++ b/creed-env-matrix-design/src/api/ccrg.ts
+@@ -156,6 +156,10 @@ export interface EffectiveYamlVo {
+   unresolved: string[];
+   /** Header comment + the properties, nested — exactly the file the page downloads. */
+   yaml: string;
++  /** Each source in merge order (1-based index); the last one wins a key. */
++  sources: { index: number; label: string; activeProfiles?: string; propertyCount: number }[];
++  /** Keys several sources set with different values; `values[i]` is source i+1's (null = not set). */
++  conflicts: { key: string; winner: number; values: (string | null)[] }[];
+ }
+ 
+ /** instance name -> its folders, keyed by the "value" the user picks. */
+@@ -250,6 +254,9 @@ export const ccrgApi = {
+   mergeReports: (mergeIds: string[]) => post<unknown>('/prompt/merge-reports', { mergeIds }),
+   deleteReports: (mergeIds: string[]) => post<unknown>('/prompt/delete-reports', { mergeIds }),
+   generateYaml: (route: RouteInfoVo) => post<EffectiveYamlVo>('/prompt/generate-yaml', route),
++  /** Several sources merged in order — the last source wins a key set by several. */
++  generateMergedYaml: (sources: RouteInfoVo[]) =>
++    post<EffectiveYamlVo>('/prompt/generate-yaml/merge', { sources }),
+ 
+   // Batch / Crossover
+   batchXlsx: (form: BatchFormVo) =>
+diff --git a/creed-env-matrix-design/src/locales/en-US.ts b/creed-env-matrix-design/src/locales/en-US.ts
+index 42f21635..6aec7f9c 100644
+--- a/creed-env-matrix-design/src/locales/en-US.ts
++++ b/creed-env-matrix-design/src/locales/en-US.ts
+@@ -1183,21 +1183,37 @@ const enUS = {
+   'ccrg.compare.reloadReleases': 'Reload release folder',
+   'ccrg.compare.reloaded': 'Release folders reloaded',
+   'ccrg.compare.missing': 'Every source needs: {fields}',
+-  'ccrg.yaml.hint': 'One source → the configuration it runs with, as a .yml',
+-  'ccrg.yaml.useBatchSource': "Use Batch export's Source 1",
+-  'ccrg.yaml.useBatchSourceHint': 'Copies Source 1 of the first combination saved on Batch export (save it there first)',
+-  'ccrg.yaml.noBatchSource': 'Batch export has no saved Source 1 — fill it in and save it there first',
+-  'ccrg.yaml.batchSourceLoaded': "Loaded Batch export's Source 1",
++  'ccrg.yaml.hint': 'One or more sources → one merged .yml',
++  'ccrg.yaml.useBatchSource': 'Use Batch export\'s sources',
++  'ccrg.yaml.useBatchSourceHint': 'Replaces the list with the sources of the first combination saved on Batch export (save it there first)',
++  'ccrg.yaml.noBatchSource': 'Batch export has no saved source — fill it in and save it there first',
++  'ccrg.yaml.batchSourceLoaded': 'Loaded {count} source(s) from Batch export',
+   'ccrg.yaml.generate': 'Generate YAML',
+   'ccrg.yaml.failed': 'Generating the YAML failed: {message}',
+   'ccrg.yaml.result': 'YAML',
+-  'ccrg.yaml.empty': 'Pick a source and click "Generate YAML"',
++  'ccrg.yaml.empty': 'Pick one or more sources and click "Generate YAML"',
+   'ccrg.yaml.download': 'Download .yml',
+   'ccrg.yaml.copy': 'Copy',
+   'ccrg.yaml.copied': 'Copied',
+   'ccrg.yaml.profiles': 'Active profiles',
+   'ccrg.yaml.count': 'Properties',
+   'ccrg.yaml.unresolved': '{count} properties still hold a ${...} placeholder that nothing defines',
++  'ccrg.yaml.addSource': 'Add source',
++  'ccrg.yaml.maxSources': 'At most {max} sources',
++  'ccrg.yaml.duplicate': 'Duplicate this source',
++  'ccrg.yaml.moveUp': 'Move earlier (lower priority)',
++  'ccrg.yaml.moveDown': 'Move later (higher priority)',
++  'ccrg.yaml.remove': 'Remove',
++  'ccrg.yaml.mergeOrder': 'Sources merge in order (left to right, then top to bottom): when several set the same key, the later one wins.',
++  'ccrg.yaml.lowest': 'Lowest priority',
++  'ccrg.yaml.highest': 'Highest priority',
++  'ccrg.yaml.sources': 'Sources',
++  'ccrg.yaml.conflictCount': 'Overridden keys',
++  'ccrg.yaml.conflicts': '{count} keys are set differently by several sources — the file holds the value marked "used"',
++  'ccrg.yaml.used': 'used',
++  'ccrg.yaml.notSet': 'not set',
++  'ccrg.yaml.key': 'Key',
++  'ccrg.yaml.sourceMissing': 'Source {index} needs: {fields}',
+   'ccrg.prompt.subtitle': 'Compare two releases and publish the result to Confluence',
+   'ccrg.prompt.pages': 'Generated pages',
+   'ccrg.prompt.col.date': 'Date',
+diff --git a/creed-env-matrix-design/src/locales/zh-CN.ts b/creed-env-matrix-design/src/locales/zh-CN.ts
+index 5ce2eeac..cd72f1b9 100644
+--- a/creed-env-matrix-design/src/locales/zh-CN.ts
++++ b/creed-env-matrix-design/src/locales/zh-CN.ts
+@@ -1175,21 +1175,37 @@ const zhCN: Record<keyof typeof enUS, string> = {
+   'ccrg.compare.reloadReleases': '重新加载 Release 目录',
+   'ccrg.compare.reloaded': 'Release 目录已重新加载',
+   'ccrg.compare.missing': '每个来源都需要：{fields}',
+-  'ccrg.yaml.hint': '一个来源 → 它实际生效的配置，输出为 .yml',
+-  'ccrg.yaml.useBatchSource': '使用批量导出的来源 1',
+-  'ccrg.yaml.useBatchSourceHint': '复制「批量导出」页面已保存的第一个组合的来源 1（需先在该页面保存）',
+-  'ccrg.yaml.noBatchSource': '批量导出还没有保存来源 1 —— 请先在该页面填写并保存',
+-  'ccrg.yaml.batchSourceLoaded': '已载入批量导出的来源 1',
++  'ccrg.yaml.hint': '一个或多个来源 → 合并成一个 .yml',
++  'ccrg.yaml.useBatchSource': '使用批量导出的来源',
++  'ccrg.yaml.useBatchSourceHint': '用「批量导出」页面已保存的第一个组合的来源替换当前列表（需先在该页面保存）',
++  'ccrg.yaml.noBatchSource': '批量导出还没有保存来源 —— 请先在该页面填写并保存',
++  'ccrg.yaml.batchSourceLoaded': '已从批量导出载入 {count} 个来源',
+   'ccrg.yaml.generate': '生成 YAML',
+   'ccrg.yaml.failed': '生成 YAML 失败：{message}',
+   'ccrg.yaml.result': 'YAML',
+-  'ccrg.yaml.empty': '选择来源后点击「生成 YAML」',
++  'ccrg.yaml.empty': '选择一个或多个来源后点击「生成 YAML」',
+   'ccrg.yaml.download': '下载 .yml',
+   'ccrg.yaml.copy': '复制',
+   'ccrg.yaml.copied': '已复制',
+   'ccrg.yaml.profiles': '生效的 profiles',
+   'ccrg.yaml.count': '属性数',
+   'ccrg.yaml.unresolved': '{count} 个属性仍含有未定义的 ${...} 占位符',
++  'ccrg.yaml.addSource': '添加来源',
++  'ccrg.yaml.maxSources': '最多 {max} 个来源',
++  'ccrg.yaml.duplicate': '复制此来源',
++  'ccrg.yaml.moveUp': '前移（降低优先级）',
++  'ccrg.yaml.moveDown': '后移（提高优先级）',
++  'ccrg.yaml.remove': '删除',
++  'ccrg.yaml.mergeOrder': '来源按顺序合并（先从左到右，再从上到下）：多个来源设置同一个 key 时，排在后面的来源生效。',
++  'ccrg.yaml.lowest': '优先级最低',
++  'ccrg.yaml.highest': '优先级最高',
++  'ccrg.yaml.sources': '来源',
++  'ccrg.yaml.conflictCount': '被覆盖的 key',
++  'ccrg.yaml.conflicts': '{count} 个 key 在多个来源中取值不同 —— 文件里使用的是标记为「生效」的值',
++  'ccrg.yaml.used': '生效',
++  'ccrg.yaml.notSet': '未设置',
++  'ccrg.yaml.key': 'Key',
++  'ccrg.yaml.sourceMissing': '来源 {index} 需要：{fields}',
+   'ccrg.prompt.subtitle': '比较两个 release，并把结果发布到 Confluence',
+   'ccrg.prompt.pages': '已生成的页面',
+   'ccrg.prompt.col.date': '日期',
+diff --git a/creed-env-matrix-design/src/pages/Ccrg/Yaml/index.tsx b/creed-env-matrix-design/src/pages/Ccrg/Yaml/index.tsx
+index 73dec0f6..75b2e503 100644
+--- a/creed-env-matrix-design/src/pages/Ccrg/Yaml/index.tsx
++++ b/creed-env-matrix-design/src/pages/Ccrg/Yaml/index.tsx
+@@ -1,7 +1,34 @@
+ import { useEffect, useRef, useState } from 'react';
+ import { PageContainer, ProCard } from '@ant-design/pro-components';
+-import { Alert, App, Button, Descriptions, Empty, Form, Select, Space, Tag, Tooltip, Typography, theme } from 'antd';
+-import { CodeOutlined, DownloadOutlined, ImportOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons';
++import {
++  Alert,
++  App,
++  Button,
++  Descriptions,
++  Empty,
++  Col,
++  Form,
++  Row,
++  Select,
++  Space,
++  Table,
++  Tag,
++  Tooltip,
++  Typography,
++  theme,
++} from 'antd';
++import {
++  ArrowLeftOutlined,
++  ArrowRightOutlined,
++  CodeOutlined,
++  CopyOutlined,
++  DeleteOutlined,
++  DownloadOutlined,
++  ImportOutlined,
++  PlusOutlined,
++  SaveOutlined,
++  UndoOutlined,
++} from '@ant-design/icons';
+ import { ccrgApi, saveFile } from '../../../api/ccrg';
+ import type { EffectiveYamlVo, SelectorVo } from '../../../api/ccrg';
+ import { useI18n } from '../../../locales';
+@@ -11,15 +38,17 @@ import { REQUIRED, clearBelow, emptySource, isMissing, normalize, toRoute, walk
+ import type { Source } from '../Comparison/model';
+ 
+ /**
+- * Generate YAML (`/ccrg/yaml`): one source — the same object as Batch export's "Source 1" — rendered as
+- * the configuration it would run with (`POST /prompt/generate-yaml`), shown here and downloadable as .yml.
++ * Generate YAML (`/ccrg/yaml`): one or more sources — each the same object as Batch export's sources —
++ * merged in list order (two per row: left to right, then top to bottom) into the configuration they would run with (`POST /prompt/generate-yaml/merge`):
++ * a key set by several sources takes the LAST one's value, and every such disagreement is listed.
+  *
+- * The cascade is Batch export's for a single source, without the two-source locking. "Use Batch export's
+- * Source 1" copies that source with its dropdown lists, so no level has to be walked again.
++ * Each source has Batch export's cascade, without the two-source locking.
+  */
+ 
+ const STORAGE_KEY = 'ccrg.yaml';
+ const BATCH_KEY = 'ccrg.batch';
++/** Same limit as EffectiveYamlService.MAX_SOURCES: each source is a full environment load. */
++const MAX_SOURCES = 10;
+ 
+ const FIELD_LABEL: Record<string, MessageKey> = {
+   projectName: 'ccrg.field.project',
+@@ -31,13 +60,14 @@ const FIELD_LABEL: Record<string, MessageKey> = {
+   zone: 'ccrg.field.zone',
+ };
+ 
+-function loadSaved(): Source {
+-  const saved = storage.load<Partial<Source>>(STORAGE_KEY);
+-  if (!saved) return emptySource();
++/** The key used to hold one Source; the list used to — both shapes still load. */
++function loadSaved(): Source[] {
++  const saved = storage.load<Partial<Source> | Partial<Source>[]>(STORAGE_KEY);
++  if (!saved) return [emptySource()];
+   try {
+-    return normalize([{ routes: [saved] }])[0].routes[0];
++    return normalize([{ routes: Array.isArray(saved) ? saved : [saved] }])[0].routes;
+   } catch {
+-    return emptySource();
++    return [emptySource()];
+   }
+ }
+ 
+@@ -46,7 +76,7 @@ export function YamlPage() {
+   const { message } = App.useApp();
+   const { token } = theme.useToken();
+ 
+-  const [source, setSource] = useState<Source>(loadSaved);
++  const [sources, setSources] = useState<Source[]>(loadSaved);
+   const [projects, setProjects] = useState<SelectorVo[]>([]);
+   const [loading, setLoading] = useState(false);
+   const [showErrors, setShowErrors] = useState(false);
+@@ -62,16 +92,24 @@ export function YamlPage() {
+       .catch((e) => message.error(errorText(e)));
+   }, [message]);
+ 
+-  const mutate = (fn: (draft: Source) => void) =>
+-    setSource((prev) => {
+-      const next = structuredClone(prev);
+-      fn(next);
++  const mutate = (index: number, fn: (draft: Source) => void) =>
++    setSources((prev) => {
++      if (!prev[index]) return prev;
++      const next = [...prev];
++      const draft = structuredClone(prev[index]);
++      fn(draft);
++      next[index] = draft;
+       return next;
+     });
+ 
+-  /** Any change to the source makes a shown YAML stale. */
+-  const edit = (fn: (draft: Source) => void) => {
+-    mutate(fn);
++  /** Any change to a source makes a shown YAML stale. */
++  const edit = (index: number, fn: (draft: Source) => void) => {
++    mutate(index, fn);
++    setResult(undefined);
++  };
++
++  const setList = (fn: (list: Source[]) => Source[]) => {
++    setSources((prev) => fn([...prev]));
+     setResult(undefined);
+   };
+ 
+@@ -89,29 +127,29 @@ export function YamlPage() {
+ 
+   // --- the cascade; each handler takes the source as it was when picked, since state is async ---
+ 
+-  const onProject = async (projectName: string) => {
+-    edit((d) => {
++  const onProject = async (i: number, projectName: string) => {
++    edit(i, (d) => {
+       d.projectName = projectName;
+       clearBelow(d, 'project');
+       d.releaseSelector = [];
+     });
+     if (!projectName) return;
+     const data = await fetching(() => ccrgApi.pathWalk({ dictType: 'COMMON', projectName }));
+-    if (data) mutate((d) => (d.releaseSelector = data));
++    if (data) mutate(i, (d) => (d.releaseSelector = data));
+   };
+ 
+-  const onCountry = async (from: Source, countryCode: string) => {
+-    edit((d) => {
++  const onCountry = async (i: number, from: Source, countryCode: string) => {
++    edit(i, (d) => {
+       d.countryCode = countryCode;
+       clearBelow(d, 'country');
+     });
+     if (!countryCode) return;
+     const data = await fetching(() => ccrgApi.pathWalk(walk({ ...from, countryCode }, 'APP', 2)));
+-    if (data) mutate((d) => (d.appSelector = data));
++    if (data) mutate(i, (d) => (d.appSelector = data));
+   };
+ 
+-  const onRelease = async (from: Source, releaseName: string) => {
+-    edit((d) => {
++  const onRelease = async (i: number, from: Source, releaseName: string) => {
++    edit(i, (d) => {
+       d.releaseName = releaseName;
+       clearBelow(d, 'release');
+       d.countrySelector = [];
+@@ -119,78 +157,96 @@ export function YamlPage() {
+     if (!releaseName) return;
+     const data = await fetching(() => ccrgApi.pathWalk(walk({ ...from, releaseName }, 'COMMON', 1)));
+     if (!data) return;
+-    mutate((d) => (d.countrySelector = data));
++    mutate(i, (d) => (d.countrySelector = data));
+     // the backend's default country, as on Batch export
+     const preset = data.find((s) => s.selected)?.name;
+-    if (preset) await onCountry({ ...from, releaseName }, preset);
++    if (preset) await onCountry(i, { ...from, releaseName }, preset);
+   };
+ 
+-  const onApp = async (from: Source, app: string) => {
+-    edit((d) => {
++  const onApp = async (i: number, from: Source, app: string) => {
++    edit(i, (d) => {
+       d.app = app;
+       clearBelow(d, 'app');
+     });
+     if (!app) return;
+     const data = await fetching(() => ccrgApi.pathWalk(walk({ ...from, app }, 'ENVIRONMENT', 3)));
+-    if (data) mutate((d) => (d.environmentSelector = data));
++    if (data) mutate(i, (d) => (d.environmentSelector = data));
+   };
+ 
+-  const onEnvironment = async (from: Source, environment: string) => {
+-    edit((d) => {
++  const onEnvironment = async (i: number, from: Source, environment: string) => {
++    edit(i, (d) => {
+       d.environment = environment;
+       clearBelow(d, 'environment');
+     });
+     if (!environment) return;
+     const data = await fetching(() => ccrgApi.pathWalk(walk({ ...from, environment }, 'INSTANCE', 4)));
+-    if (data) mutate((d) => (d.instanceSelector = data));
++    if (data) mutate(i, (d) => (d.instanceSelector = data));
+   };
+ 
+-  const onInstance = async (from: Source, instance: string) => {
+-    edit((d) => {
++  const onInstance = async (i: number, from: Source, instance: string) => {
++    edit(i, (d) => {
+       d.instance = instance;
+       d.zone = [];
+       d.zoneSelector = [];
+     });
+     if (!instance) return;
+     const data = await fetching(() => ccrgApi.pathWalk(walk({ ...from, instance }, 'ZONE', 5)));
+-    if (data) mutate((d) => (d.zoneSelector = data));
++    if (data) mutate(i, (d) => (d.zoneSelector = data));
+   };
+ 
++  // --- list operations ---
++
++  const move = (i: number, by: -1 | 1) =>
++    setList((list) => {
++      [list[i], list[i + by]] = [list[i + by], list[i]];
++      return list;
++    });
++  const duplicate = (i: number) =>
++    setList((list) => {
++      list.splice(i + 1, 0, structuredClone(list[i]));
++      return list;
++    });
++  const remove = (i: number) => setList((list) => list.filter((_, k) => k !== i));
++  const add = () => setList((list) => [...list, emptySource()]);
++
+   // --- toolbar ---
+ 
+-  const loadBatchSource = () => {
+-    let first: Source | undefined;
++  const loadBatchSources = () => {
++    let routes: Source[] = [];
+     try {
+-      first = normalize(storage.load(BATCH_KEY))[0]?.routes[0];
++      routes = (normalize(storage.load(BATCH_KEY))[0]?.routes ?? []).filter((r) => r.projectName);
+     } catch {
+-      first = undefined;
++      routes = [];
+     }
+-    if (!first?.projectName) {
++    if (routes.length === 0) {
+       message.warning(t('ccrg.yaml.noBatchSource'));
+       return;
+     }
+-    setSource(first);
++    setSources(routes.slice(0, MAX_SOURCES));
+     setResult(undefined);
+     setShowErrors(false);
+-    message.success(t('ccrg.yaml.batchSourceLoaded'));
++    message.success(t('ccrg.yaml.batchSourceLoaded', { count: Math.min(routes.length, MAX_SOURCES) }));
+   };
+ 
+   const save = () => {
+-    if (storage.save(STORAGE_KEY, source)) message.success(t('ccrg.saved'));
++    if (storage.save(STORAGE_KEY, sources)) message.success(t('ccrg.saved'));
+     else message.error(t('ccrg.saveFailed'));
+   };
+ 
+-  const complete = REQUIRED.every((f) => !isMissing(source, f));
++  const missingOf = (s: Source) => REQUIRED.filter((f) => isMissing(s, f));
++  const incomplete = sources
++    .map((s, i) => ({ index: i + 1, fields: missingOf(s) }))
++    .filter((x) => x.fields.length > 0);
+ 
+   const generate = async () => {
+-    if (!complete) {
++    if (incomplete.length > 0) {
+       setShowErrors(true);
+       message.warning(t('ccrg.incomplete'));
+       return;
+     }
+     const id = ++requestId.current;
+     try {
+-      const answer = await runWithProgress(() => ccrgApi.generateYaml(toRoute(source)));
++      const answer = await runWithProgress(() => ccrgApi.generateMergedYaml(sources.map(toRoute)));
+       if (id === requestId.current) setResult(answer);
+     } catch (e) {
+       if (id === requestId.current) message.error(t('ccrg.yaml.failed', { message: errorText(e) }));
+@@ -203,20 +259,118 @@ export function YamlPage() {
+     message.success(t('ccrg.downloaded'));
+   };
+ 
+-  const errorOf = (field: keyof Source) => (showErrors && isMissing(source, field) ? 'error' : undefined);
++  // --- rendering ---
+ 
+-  const select = (field: keyof Source, selector: SelectorVo[], onChange: (v: string) => void) => (
+-    <Form.Item label={t(FIELD_LABEL[field])} required validateStatus={errorOf(field)}>
+-      <Select
+-        showSearch
+-        allowClear
+-        disabled={loading}
+-        value={(source[field] as string) || undefined}
+-        options={toOptions(selector)}
+-        onChange={(v?: string) => onChange(v ?? '')}
+-      />
+-    </Form.Item>
+-  );
++  const renderSource = (source: Source, i: number) => {
++    const errorOf = (field: keyof Source) => (showErrors && isMissing(source, field) ? 'error' : undefined);
++    const select = (field: keyof Source, selector: SelectorVo[], onChange: (v: string) => void) => (
++      <Form.Item label={t(FIELD_LABEL[field])} required validateStatus={errorOf(field)}>
++        <Select
++          showSearch
++          allowClear
++          disabled={loading}
++          value={(source[field] as string) || undefined}
++          options={toOptions(selector)}
++          onChange={(v?: string) => onChange(v ?? '')}
++        />
++      </Form.Item>
++    );
++    const many = sources.length > 1;
++    return (
++      <ProCard
++        bordered
++        size="small"
++        style={{ height: '100%' }}
++        title={
++          <Space size="small">
++            {t('ccrg.compare.source', { index: i + 1 })}
++            {many && i === 0 && <Tag>{t('ccrg.yaml.lowest')}</Tag>}
++            {many && i === sources.length - 1 && <Tag color="blue">{t('ccrg.yaml.highest')}</Tag>}
++          </Space>
++        }
++        extra={
++          <Space size={4}>
++            <Tooltip title={t('ccrg.yaml.moveUp')}>
++              <Button size="small" type="text" icon={<ArrowLeftOutlined />} disabled={i === 0} onClick={() => move(i, -1)} />
++            </Tooltip>
++            <Tooltip title={t('ccrg.yaml.moveDown')}>
++              <Button
++                size="small"
++                type="text"
++                icon={<ArrowRightOutlined />}
++                disabled={i === sources.length - 1}
++                onClick={() => move(i, 1)}
++              />
++            </Tooltip>
++            <Tooltip title={t('ccrg.yaml.duplicate')}>
++              <Button
++                size="small"
++                type="text"
++                icon={<CopyOutlined />}
++                disabled={sources.length >= MAX_SOURCES}
++                onClick={() => duplicate(i)}
++              />
++            </Tooltip>
++            <Tooltip title={t('ccrg.yaml.remove')}>
++              <Button size="small" type="text" danger icon={<DeleteOutlined />} disabled={!many} onClick={() => remove(i)} />
++            </Tooltip>
++          </Space>
++        }
++      >
++        <Form layout="horizontal" labelCol={{ flex: '120px' }} labelAlign="left">
++          {select('projectName', projects, (v) => onProject(i, v))}
++          {select('releaseName', source.releaseSelector, (v) => onRelease(i, source, v))}
++          {select('countryCode', source.countrySelector, (v) => onCountry(i, source, v))}
++          {select('app', source.appSelector, (v) => onApp(i, source, v))}
++          {select('environment', source.environmentSelector, (v) => onEnvironment(i, source, v))}
++          {select('instance', source.instanceSelector, (v) => onInstance(i, source, v))}
++          <Form.Item label={t('ccrg.field.zone')} required validateStatus={errorOf('zone')} style={{ marginBottom: 0 }}>
++            <Select
++              mode="multiple"
++              allowClear
++              disabled={loading}
++              value={source.zone}
++              options={toOptions(source.zoneSelector)}
++              onChange={(v: string[]) => edit(i, (d) => (d.zone = v))}
++            />
++          </Form.Item>
++        </Form>
++      </ProCard>
++    );
++  };
++
++  const conflictColumns = result
++    ? [
++        {
++          key: 'key',
++          title: t('ccrg.yaml.key'),
++          dataIndex: 'key',
++          width: 280,
++          render: (key: string) => <Typography.Text code>{key}</Typography.Text>,
++        },
++        ...result.sources.map((s) => ({
++          key: `s${s.index}`,
++          title: (
++            <Tooltip title={s.label}>
++              <span>{t('ccrg.compare.source', { index: s.index })}</span>
++            </Tooltip>
++          ),
++          render: (_: unknown, row: EffectiveYamlVo['conflicts'][number]) => {
++            const value = row.values[s.index - 1];
++            if (value === null || value === undefined) return <Typography.Text type="secondary">{t('ccrg.yaml.notSet')}</Typography.Text>;
++            const used = row.winner === s.index;
++            return (
++              <Space size={4} align="start">
++                <Typography.Text strong={used} delete={!used} type={used ? undefined : 'secondary'} style={{ wordBreak: 'break-all' }}>
++                  {value}
++                </Typography.Text>
++                {used && <Tag color="green">{t('ccrg.yaml.used')}</Tag>}
++              </Space>
++            );
++          },
++        })),
++      ]
++    : [];
+ 
+   return (
+     <PageContainer title={t('nav.ccrg.yaml')} subTitle={t('ccrg.yaml.hint')}>
+@@ -225,18 +379,18 @@ export function YamlPage() {
+         <GuidelineBanner />
+         <ProCard
+           bordered
+-          title={t('ccrg.compare.source', { index: 1 })}
++          title={t('ccrg.yaml.sources')}
+           extra={
+             <Space wrap>
+               <Tooltip title={t('ccrg.yaml.useBatchSourceHint')}>
+-                <Button icon={<ImportOutlined />} onClick={loadBatchSource}>
++                <Button icon={<ImportOutlined />} onClick={loadBatchSources}>
+                   {t('ccrg.yaml.useBatchSource')}
+                 </Button>
+               </Tooltip>
+               <Button
+                 icon={<UndoOutlined />}
+                 onClick={() => {
+-                  setSource(emptySource());
++                  setSources([emptySource()]);
+                   setResult(undefined);
+                   setShowErrors(false);
+                 }}
+@@ -246,37 +400,39 @@ export function YamlPage() {
+             </Space>
+           }
+         >
+-          <Form layout="horizontal" labelCol={{ flex: '120px' }} labelAlign="left" style={{ maxWidth: 720 }}>
+-            {select('projectName', projects, onProject)}
+-            {select('releaseName', source.releaseSelector, (v) => onRelease(source, v))}
+-            {select('countryCode', source.countrySelector, (v) => onCountry(source, v))}
+-            {select('app', source.appSelector, (v) => onApp(source, v))}
+-            {select('environment', source.environmentSelector, (v) => onEnvironment(source, v))}
+-            {select('instance', source.instanceSelector, (v) => onInstance(source, v))}
+-            <Form.Item label={t('ccrg.field.zone')} required validateStatus={errorOf('zone')}>
+-              <Select
+-                mode="multiple"
+-                allowClear
+-                disabled={loading}
+-                value={source.zone}
+-                options={toOptions(source.zoneSelector)}
+-                onChange={(v: string[]) => edit((d) => (d.zone = v))}
+-              />
+-            </Form.Item>
+-          </Form>
+-          <Space wrap>
+-            <Button icon={<SaveOutlined />} onClick={save}>
+-              {t('ccrg.saveConfig')}
+-            </Button>
+-            <Button type="primary" icon={<CodeOutlined />} onClick={generate}>
+-              {t('ccrg.yaml.generate')}
+-            </Button>
++          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
++            {sources.length > 1 && <Alert type="info" showIcon message={t('ccrg.yaml.mergeOrder')} />}
++            {/* two sources per row on wide screens; merge order reads left to right, then top to bottom */}
++            <Row gutter={[16, 16]}>
++              {sources.map((s, i) => (
++                <Col key={i} xs={24} xl={12}>
++                  {renderSource(s, i)}
++                </Col>
++              ))}
++            </Row>
++            <Tooltip title={sources.length >= MAX_SOURCES ? t('ccrg.yaml.maxSources', { max: MAX_SOURCES }) : undefined}>
++              <Button type="dashed" block icon={<PlusOutlined />} disabled={sources.length >= MAX_SOURCES} onClick={add}>
++                {t('ccrg.yaml.addSource')}
++              </Button>
++            </Tooltip>
++            <Space wrap>
++              <Button icon={<SaveOutlined />} onClick={save}>
++                {t('ccrg.saveConfig')}
++              </Button>
++              <Button type="primary" icon={<CodeOutlined />} onClick={generate}>
++                {t('ccrg.yaml.generate')}
++              </Button>
++            </Space>
++            {showErrors &&
++              incomplete.map((x) => (
++                <Typography.Text key={x.index} type="danger">
++                  {t('ccrg.yaml.sourceMissing', {
++                    index: x.index,
++                    fields: x.fields.map((f) => t(FIELD_LABEL[f])).join(' / '),
++                  })}
++                </Typography.Text>
++              ))}
+           </Space>
+-          {showErrors && !complete && (
+-            <Typography.Paragraph type="danger" style={{ marginTop: 8, marginBottom: 0 }}>
+-              {t('ccrg.compare.missing', { fields: REQUIRED.map((f) => t(FIELD_LABEL[f])).join(' / ') })}
+-            </Typography.Paragraph>
+-          )}
+         </ProCard>
+ 
+         <ProCard
+@@ -299,12 +455,42 @@ export function YamlPage() {
+             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+               <Descriptions
+                 size="small"
+-                column={{ xs: 1, md: 2 }}
++                column={1}
+                 items={[
+-                  { key: 'profiles', label: t('ccrg.yaml.profiles'), children: result.activeProfiles || '—' },
++                  ...result.sources.map((s) => ({
++                    key: `s${s.index}`,
++                    label: t('ccrg.compare.source', { index: s.index }),
++                    children: (
++                      <Space size={[8, 4]} wrap>
++                        <span>{s.label}</span>
++                        <Tag>{`${t('ccrg.yaml.profiles')}: ${s.activeProfiles || '—'}`}</Tag>
++                        <Tag>{`${t('ccrg.yaml.count')}: ${s.propertyCount}`}</Tag>
++                      </Space>
++                    ),
++                  })),
+                   { key: 'count', label: t('ccrg.yaml.count'), children: result.propertyCount },
++                  ...(result.sources.length > 1
++                    ? [{ key: 'conflicts', label: t('ccrg.yaml.conflictCount'), children: result.conflicts.length }]
++                    : []),
+                 ]}
+               />
++              {result.conflicts.length > 0 && (
++                <Alert
++                  type="warning"
++                  showIcon
++                  message={t('ccrg.yaml.conflicts', { count: result.conflicts.length })}
++                  description={
++                    <Table
++                      size="small"
++                      rowKey="key"
++                      columns={conflictColumns}
++                      dataSource={result.conflicts}
++                      pagination={result.conflicts.length > 10 ? { pageSize: 10, size: 'small' } : false}
++                      scroll={{ x: 'max-content' }}
++                    />
++                  }
++                />
++              )}
+               {result.unresolved.length > 0 && (
+                 <Alert
+                   type="warning"
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/PromptCombinationController.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/PromptCombinationController.java
+index 1d98bf22..e2c92afd 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/PromptCombinationController.java
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/PromptCombinationController.java
+@@ -5,6 +5,7 @@ import com.creed.parent.client.vo.confluence.content.PageResult;
+ import com.creed.parent.constant.ReportTypeEnum;
+ import com.creed.parent.context.TenantContextHolder;
+ import com.creed.parent.controller.prompt.vo.EffectiveYamlVo;
++import com.creed.parent.controller.prompt.vo.GenerateYamlRequest;
+ import com.creed.parent.controller.prompt.vo.PageParam;
+ import com.creed.parent.controller.prompt.vo.PromptBatchForm;
+ import com.creed.parent.controller.prompt.vo.PromptCombinationRequest;
+@@ -67,4 +68,13 @@ public class PromptCombinationController {
+         return R.success(effectiveYamlService.generate(route));
+     }
+ 
++    /**
++     * Several sources → one .yml, merged in list order: a key set by several sources takes the last one's
++     * value. Every key the sources disagree on comes back in {@code conflicts}.
++     */
++    @PostMapping("/generate-yaml/merge")
++    public R<EffectiveYamlVo> generateMergedYaml(@RequestBody GenerateYamlRequest request) {
++        return R.success(effectiveYamlService.generate(request == null ? null : request.sources()));
++    }
++
+ }
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/vo/EffectiveYamlVo.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/vo/EffectiveYamlVo.java
+index 055981ae..5e6e5dad 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/vo/EffectiveYamlVo.java
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/vo/EffectiveYamlVo.java
+@@ -3,13 +3,27 @@ package com.creed.parent.controller.prompt.vo;
+ import java.util.List;
+ 
+ /**
+- * One source's effective configuration as a .yml.
++ * One or more sources' effective configuration, merged into one .yml.
+  *
+  * @param fileName       suggested download name
+- * @param activeProfiles the profiles Spring activated for the source, comma-joined
++ * @param activeProfiles the profiles Spring activated, per source, joined with " | "
+  * @param propertyCount  properties in {@code yaml}
+  * @param unresolved     names whose value still holds a {@code ${...}} placeholder nothing defines
+  * @param yaml           header comment + the properties, nested
++ * @param sources        each source in merge order (the last one wins a conflict)
++ * @param conflicts      keys more than one source sets with DIFFERENT values; empty for one source
+  */
+-public record EffectiveYamlVo(String fileName, String activeProfiles, int propertyCount, List<String> unresolved, String yaml) {
++public record EffectiveYamlVo(String fileName, String activeProfiles, int propertyCount, List<String> unresolved, String yaml,
++                              List<Source> sources, List<Conflict> conflicts) {
++
++    /** @param index 1-based, in merge order */
++    public record Source(int index, String label, String activeProfiles, int propertyCount) {
++    }
++
++    /**
++     * @param winner 1-based index of the source whose value is in the file
++     * @param values the value per source in merge order; {@code null} = that source does not set the key
++     */
++    public record Conflict(String key, int winner, List<String> values) {
++    }
+ }
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/vo/GenerateYamlRequest.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/vo/GenerateYamlRequest.java
+new file mode 100644
+index 00000000..c3b74630
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/vo/GenerateYamlRequest.java
+@@ -0,0 +1,12 @@
++package com.creed.parent.controller.prompt.vo;
++
++import com.creed.parent.controller.vo.RouteInfoVo;
++
++import java.util.List;
++
++/**
++ * Sources to merge into one .yml, in merge order: a key set by several sources takes the LAST one's value,
++ * like Spring with several config locations.
++ */
++public record GenerateYamlRequest(List<RouteInfoVo> sources) {
++}
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/PropertyReviewOverviewVo.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/PropertyReviewOverviewVo.java
+index edb8b022..ed47589c 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/PropertyReviewOverviewVo.java
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/PropertyReviewOverviewVo.java
+@@ -7,6 +7,8 @@ import lombok.Builder;
+ import lombok.Data;
+ import lombok.NoArgsConstructor;
+ 
++import com.creed.parent.service.report.alert.ConfigAlert;
++
+ import java.util.List;
+ 
+ /**
+@@ -27,4 +29,6 @@ public class PropertyReviewOverviewVo {
+     private List<PropertyReviewVo> overallProperties;
+     private OverallSummaryVo overallSummary;
+     private String customFilename;
++    /** Critical / watched differences, most severe first ({@code ConfigAlertService}). */
++    private List<ConfigAlert> alerts;
+ }
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/PropertyReviewVo.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/PropertyReviewVo.java
+index f9739dfe..0f0ceaa3 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/PropertyReviewVo.java
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/PropertyReviewVo.java
+@@ -1,5 +1,6 @@
+ package com.creed.parent.controller.vo;
+ 
++import com.fasterxml.jackson.annotation.JsonIgnore;
+ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+ import com.fasterxml.jackson.annotation.JsonInclude;
+ import com.creed.parent.ccrg.SourceData;
+@@ -31,6 +32,12 @@ public class PropertyReviewVo {
+     private List<PropertiesVo> missingProperties;
+     // get all change files
+     private List<String> changeFiles;
++    /**
++     * The property name on each line of {@link #content} (index = line - 1), null for a line that only
++     * opens a parent map. Lets a diff row be traced back to its key, e.g. for the alert badges.
++     */
++    @JsonIgnore
++    private List<String> lineKeys;
+     @Deprecated
+     private Map<String, SourceData> metaData;
+ }
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/ReportPropertiesOverviewVo.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/ReportPropertiesOverviewVo.java
+index 0504702b..06fcb73e 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/ReportPropertiesOverviewVo.java
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/vo/ReportPropertiesOverviewVo.java
+@@ -1,5 +1,10 @@
+ package com.creed.parent.controller.vo;
+ 
++import com.creed.parent.service.report.alert.ConfigAlert;
++import com.creed.parent.service.report.alert.ConfigAlertSeverity;
++
++import java.util.List;
++
+ /**
+  * @author EthanCao
+  * @description ccrg-tool
+@@ -8,13 +13,39 @@ package com.creed.parent.controller.vo;
+ public record ReportPropertiesOverviewVo(PropertiesOverviewVo nonMatchingPropertiesOverview,
+                                          PropertiesOverviewVo matchingPropertiesOverview,
+                                          PropertiesOverviewVo overallPropertiesOverview,
+-                                         OverallSummaryVo overallSummary) {
++                                         OverallSummaryVo overallSummary,
++                                         List<ConfigAlert> alerts) {
++
++    public ReportPropertiesOverviewVo {
++        alerts = alerts == null ? List.of() : List.copyOf(alerts);
++    }
+ 
+     /**
+      * Without the overall comparison — what {@code PdfController} still builds. The template only
+-     * renders the "Overall Comparison" tab when {@code overallPropertiesOverview} is present.
++     * renders the "Overall Comparison" and "Alerts" tabs when {@code overallPropertiesOverview} is present.
+      */
+     public ReportPropertiesOverviewVo(PropertiesOverviewVo nonMatchingPropertiesOverview, PropertiesOverviewVo matchingPropertiesOverview) {
+-        this(nonMatchingPropertiesOverview, matchingPropertiesOverview, null, null);
++        this(nonMatchingPropertiesOverview, matchingPropertiesOverview, null, null, null);
++    }
++
++    public long count(ConfigAlertSeverity severity) {
++        return alerts.stream().filter(a -> a.getSeverity() == severity).count();
++    }
++
++    public long getCriticalCount() {
++        return count(ConfigAlertSeverity.CRITICAL);
++    }
++
++    public long getHighCount() {
++        return count(ConfigAlertSeverity.HIGH);
++    }
++
++    public long getAcceptedCount() {
++        return count(ConfigAlertSeverity.ACCEPTED);
++    }
++
++    /** Alerts that need a look: everything but the accepted ones. */
++    public long getOpenCount() {
++        return getCriticalCount() + getHighCount();
+     }
+ }
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/dal/model/DiffInfo.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/dal/model/DiffInfo.java
+index 67e7875b..64e59960 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/dal/model/DiffInfo.java
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/dal/model/DiffInfo.java
+@@ -15,6 +15,9 @@ public class DiffInfo {
+     private String origin;
+     private String originFile;
+     private DiffPosition position;
++    /** Overall Comparison only: the property this line belongs to has an alert ({@code ConfigAlertSeverity#getCss()}). */
++    private String alertSeverity;
++    private String alertTitle;
+ 
+     public DiffInfo(DiffPosition position) {
+         this.position = position;
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/EffectiveYamlService.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/EffectiveYamlService.java
+index 735b1d60..5b87f6d1 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/EffectiveYamlService.java
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/EffectiveYamlService.java
+@@ -22,8 +22,8 @@ import java.util.stream.Collectors;
+ import java.util.stream.Stream;
+ 
+ /**
+- * One source of the Batch form (project / release / country / app / environment / instance / zones) →
+- * the configuration that source would run with, as one .yml.
++ * One or more sources of the Batch form (project / release / country / app / environment / instance / zones) →
++ * the configuration they would run with, merged in order (the last source wins a key), as one .yml.
+  *
+  * <p>{@link EnvironmentInspectionService#getAllProperties(String, com.creed.parent.definition.RouteDefinition, int)}
+  * already answers the EFFECTIVE view - one entry per key, the property source with the highest precedence
+@@ -47,43 +47,108 @@ public class EffectiveYamlService {
+     @Resource
+     private EnvironmentInspectionService environmentInspectionService;
+ 
++    /** At most this many sources per merge: each one is a full environment load. */
++    static final int MAX_SOURCES = 10;
++
+     public EffectiveYamlVo generate(RouteInfoVo route) {
+-        List<String> missing = REQUIRED.entrySet().stream()
+-                .filter(e -> route == null || StringUtils.isBlank(e.getValue().apply(route)))
++        return generate(Collections.singletonList(route));
++    }
++
++    /**
++     * Loads every source's effective configuration and merges them in list order: a key set by several
++     * sources takes the LAST one's value (Spring's rule for several config locations). Every key whose
++     * sources disagree is reported, so an override is never silent.
++     */
++    public EffectiveYamlVo generate(List<RouteInfoVo> routes) {
++        if (routes == null || routes.isEmpty()) {
++            throw new ServiceException(GlobalErrorCodeConstants.BAD_REQUEST.code(), "no source");
++        }
++        if (routes.size() > MAX_SOURCES) {
++            throw new ServiceException(GlobalErrorCodeConstants.BAD_REQUEST.code(), "at most " + MAX_SOURCES + " sources");
++        }
++        // validate all before loading any: a load takes seconds, a typo in source 3 should not wait for 1 and 2
++        for (int i = 0; i < routes.size(); i++) {
++            RouteInfoVo route = routes.get(i);
++            List<String> missing = REQUIRED.entrySet().stream()
++                    .filter(e -> route == null || StringUtils.isBlank(e.getValue().apply(route)))
++                    .map(Map.Entry::getKey)
++                    .toList();
++            if (!missing.isEmpty()) {
++                throw new ServiceException(GlobalErrorCodeConstants.BAD_REQUEST.code(),
++                        (routes.size() > 1 ? "source " + (i + 1) + " " : "") + "missing: " + String.join(", ", missing));
++            }
++        }
++
++        List<Loaded> loaded = new ArrayList<>();
++        for (int i = 0; i < routes.size(); i++) {
++            loaded.add(load(routes.get(i), i + 1, routes.size()));
++        }
++
++        Map<String, String> merged = new TreeMap<>();
++        loaded.forEach(l -> merged.putAll(l.properties()));
++        List<EffectiveYamlVo.Conflict> conflicts = conflicts(merged.keySet(), loaded);
++        List<String> unresolved = merged.entrySet().stream()
++                .filter(e -> e.getValue().contains("${"))
+                 .map(Map.Entry::getKey)
+                 .toList();
+-        if (!missing.isEmpty()) {
+-            throw new ServiceException(GlobalErrorCodeConstants.BAD_REQUEST.code(), "missing: " + String.join(", ", missing));
+-        }
++        List<EffectiveYamlVo.Source> sources = loaded.stream()
++                .map(l -> new EffectiveYamlVo.Source(l.index(), label(l.route()), l.profiles(), l.properties().size()))
++                .toList();
++
++        String yaml = header(sources, merged.size(), unresolved.size(), conflicts.size())
++                + PropertySourcesTranslateUtil.map2YamlConverter(merged);
++        log.info("generate yaml from {} source(s): {} properties, {} unresolved, {} conflicts",
++                routes.size(), merged.size(), unresolved.size(), conflicts.size());
++        // one value when every source runs the same profiles, else one per source in merge order
++        List<String> perSource = loaded.stream().map(l -> StringUtils.defaultString(l.profiles())).toList();
++        String profiles = perSource.stream().distinct().count() == 1 ? perSource.get(0) : String.join(" | ", perSource);
++        return new EffectiveYamlVo(fileName(routes), profiles, merged.size(), unresolved, yaml, sources, conflicts);
++    }
++
++    private record Loaded(int index, RouteInfoVo route, String profiles, Map<String, String> properties) {
++    }
++
++    private Loaded load(RouteInfoVo route, int index, int total) {
+         // same sub-folder rule as EnvironmentInspectionService#getAllProperties(List)
+         String subFolder = StringUtils.isNotBlank(route.getReleaseName())
+                 ? route.getProjectName() + "/" + route.getReleaseName()
+                 : route.getProjectName();
+         EnvironmentConfigurationVo configuration;
+         try {
+-            configuration = environmentInspectionService.getAllProperties(subFolder, PropertySourceConvert.INSTANCE.convert(route), 1);
++            configuration = environmentInspectionService.getAllProperties(subFolder, PropertySourceConvert.INSTANCE.convert(route), index);
+         } catch (RuntimeException e) {
+             // e.g. no Thymeleaf fragment for this project/app, or the release is not pulled - say which,
+             // instead of the handler's bare "Internal Server Error"
+             log.error("generate yaml {} failed", subFolder, e);
+             throw new ServiceException(GlobalErrorCodeConstants.INTERNAL_SERVER_ERROR.code(),
+-                    "cannot load the configuration of " + subFolder + ": " + ExceptionUtils.getRootCauseMessage(e));
++                    (total > 1 ? "source " + index + ": " : "")
++                            + "cannot load the configuration of " + subFolder + ": " + ExceptionUtils.getRootCauseMessage(e));
+         }
+-
+         // sorted: the converter writes in iteration order, and a sorted file diffs cleanly against another source
+         Map<String, String> properties = Optional.ofNullable(configuration.getProperties()).orElse(List.of()).stream()
+                 .filter(p -> !isOwnClasspath(p))
+                 .collect(Collectors.toMap(PropertiesVo::getPropertyName,
+                         p -> Objects.toString(p.getPropertyValue(), ""), (first, second) -> first, TreeMap::new));
+-        List<String> unresolved = properties.entrySet().stream()
+-                .filter(e -> e.getValue().contains("${"))
+-                .map(Map.Entry::getKey)
+-                .toList();
++        return new Loaded(index, route, configuration.getActiveProfile(), properties);
++    }
+ 
+-        String yaml = header(route, configuration.getActiveProfile(), properties.size(), unresolved.size())
+-                + PropertySourcesTranslateUtil.map2YamlConverter(properties);
+-        log.info("generate yaml {}: {} properties, {} unresolved", subFolder, properties.size(), unresolved.size());
+-        return new EffectiveYamlVo(fileName(route), configuration.getActiveProfile(), properties.size(), unresolved, yaml);
++    /** Keys at least two sources set with different values; the winner is the last source setting it. */
++    static List<EffectiveYamlVo.Conflict> conflicts(Collection<String> keys, List<Loaded> loaded) {
++        if (loaded.size() < 2) {
++            return List.of();
++        }
++        List<EffectiveYamlVo.Conflict> conflicts = new ArrayList<>();
++        for (String key : keys) {
++            List<String> values = loaded.stream().map(l -> l.properties().get(key)).toList();
++            if (values.stream().filter(Objects::nonNull).distinct().count() > 1) {
++                int winner = 0;
++                for (int i = 0; i < values.size(); i++) {
++                    if (values.get(i) != null) winner = i + 1;
++                }
++                conflicts.add(new EffectiveYamlVo.Conflict(key, winner, values));
++            }
++        }
++        return conflicts;
+     }
+ 
+     /**
+@@ -96,25 +161,42 @@ public class EffectiveYamlService {
+                 || StringUtils.startsWith(p.getSourceName(), "applicationConfig: [classpath:");
+     }
+ 
+-    private static String header(RouteInfoVo r, String profiles, int count, int unresolved) {
++    static String label(RouteInfoVo r) {
++        return Stream.of(r.getProjectName() + (StringUtils.isNotBlank(r.getReleaseName()) ? "/" + r.getReleaseName() : ""),
++                        r.getCountryCode(), r.getApp(), r.getEnvironment(), r.getInstance(),
++                        StringUtils.isNotBlank(r.getZone()) ? "zone " + r.getZone() : null)
++                .filter(StringUtils::isNotBlank)
++                .collect(Collectors.joining(" · "));
++    }
++
++    private static String header(List<EffectiveYamlVo.Source> sources, int count, int unresolved, int conflicts) {
+         StringBuilder sb = new StringBuilder()
+                 .append("# Effective configuration - generated by ccrg-tool ")
+-                .append(OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)).append('\n')
+-                .append("# project: ").append(r.getProjectName())
+-                .append(StringUtils.isNotBlank(r.getReleaseName()) ? " / " + r.getReleaseName() : "").append('\n')
+-                .append("# country: ").append(r.getCountryCode())
+-                .append(", app: ").append(r.getApp())
+-                .append(", environment: ").append(r.getEnvironment())
+-                .append(", instance: ").append(r.getInstance())
+-                .append(", zone: ").append(StringUtils.defaultString(r.getZone())).append('\n')
+-                .append("# spring.profiles.active: ").append(StringUtils.defaultString(profiles)).append('\n')
+-                .append("# ").append(count).append(" properties");
++                .append(OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)).append('\n');
++        if (sources.size() > 1) {
++            sb.append("# merged from ").append(sources.size()).append(" sources; a key set by several takes the LAST one's value:\n");
++        }
++        for (EffectiveYamlVo.Source s : sources) {
++            sb.append("# ").append(sources.size() > 1 ? "[" + s.index() + "] " : "source: ").append(s.label())
++                    .append(" (spring.profiles.active: ").append(StringUtils.defaultString(s.activeProfiles()))
++                    .append(", ").append(s.propertyCount()).append(" properties)\n");
++        }
++        sb.append("# ").append(count).append(" properties");
++        if (sources.size() > 1) {
++            sb.append(", ").append(conflicts).append(" overridden with a different value");
++        }
+         if (unresolved > 0) {
+             sb.append(", ").append(unresolved).append(" with an unresolved ${...} placeholder");
+         }
+         return sb.append("\n\n").toString();
+     }
+ 
++    static String fileName(List<RouteInfoVo> routes) {
++        String first = fileName(routes.get(0));
++        return routes.size() == 1 ? first
++                : "merged-" + first.substring(0, first.length() - ".yml".length()) + "-and-" + (routes.size() - 1) + "-more.yml";
++    }
++
+     static String fileName(RouteInfoVo r) {
+         String base = Stream.of(r.getProjectName(), r.getReleaseName(), r.getCountryCode(), r.getApp(), r.getEnvironment(), r.getInstance())
+                 .filter(StringUtils::isNotBlank)
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlert.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlert.java
+new file mode 100644
+index 00000000..2f3305fc
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlert.java
+@@ -0,0 +1,31 @@
++package com.creed.parent.service.report.alert;
++
++import lombok.Data;
++
++/**
++ * One finding of {@link ConfigAlertService}. Values are display text: a secret is already masked.
++ *
++ * @author EthanCao
++ * @description ccrg-tool
++ * @date 2026-11-18
++ */
++@Data
++public class ConfigAlert {
++    private ConfigAlertSeverity severity;
++    private ConfigAlertRule rule;
++    private String key;
++    /** "baseline", "comparison" or "both" - which side the finding is about. */
++    private String side;
++    /** {@code null} = the side does not set the key. */
++    private String leftValue;
++    private String rightValue;
++    private String reason;
++    /** Set for an accepted alert: the accept rule's own reason. */
++    private String acceptedReason;
++    /** Index of the key's row in the Overall Comparison table, for the "Show line" link; null = no row. */
++    private Integer overallRow;
++
++    public String getTitle() {
++        return rule == null ? "" : rule.getTitle();
++    }
++}
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertProperties.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertProperties.java
+new file mode 100644
+index 00000000..cc75fe15
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertProperties.java
+@@ -0,0 +1,93 @@
++package com.creed.parent.service.report.alert;
++
++import lombok.Data;
++import org.springframework.boot.context.properties.ConfigurationProperties;
++import org.springframework.context.annotation.Configuration;
++
++import java.util.ArrayList;
++import java.util.List;
++
++/**
++ * {@code ccrg.alerts.*}: the rules behind the report's Alerts tab. Every list is data so a new critical
++ * key is a yml change, not a release. A list set in yml REPLACES the default here (Spring binds lists
++ * whole) - copy the defaults when extending one.
++ * <p>
++ * Key patterns are globs over the full property name, case-insensitive: {@code *} = any characters.
++ *
++ * @author EthanCao
++ * @description ccrg-tool
++ * @date 2026-11-18
++ */
++@Configuration
++@ConfigurationProperties(prefix = "ccrg.alerts")
++@Data
++public class ConfigAlertProperties {
++
++    private boolean enabled = true;
++
++    /**
++     * Environment names as they appear inside host names / URLs. A value is checked token by token
++     * ({@code pgdb-uat1.sg.internal} -> pgdb, uat1, sg, internal), trailing digits dropped, so
++     * {@code uat1} counts as {@code uat} but {@code product} never counts as {@code prod}.
++     */
++    private List<String> environmentTokens = new ArrayList<>(List.of(
++            "dev", "sit", "uat", "pt", "perf", "preprod", "staging", "prod", "dr"));
++
++    /** Keys whose value is an address; any value containing {@code ://} is one as well. */
++    private List<String> addressKeys = new ArrayList<>(List.of(
++            "*url", "*uri", "*host", "*hosts", "*endpoint", "*endpoints", "*address", "*addresses",
++            "*bootstrap-servers", "*nodes"));
++
++    /** Keys that hold a secret... */
++    private List<String> secretKeys = new ArrayList<>(List.of(
++            "*password*", "*passwd*", "*secret*", "*token*", "*credential*", "*private-key*",
++            "*api-key*", "*apikey*"));
++
++    /** ...unless they also match one of these (a token URL or a token lifetime is no secret). */
++    private List<String> secretKeyExcludes = new ArrayList<>(List.of(
++            "*url", "*uri", "*endpoint", "*path", "*header*", "*name", "*type", "*enabled",
++            "*seconds", "*timeout*", "*ttl*", "*validity*", "*expir*", "*length", "*size", "*policy*"));
++
++    /** Regexes for a secret value that is NOT plain text: encrypted, a placeholder, or masked. */
++    private List<String> protectedValuePatterns = new ArrayList<>(List.of(
++            "^\\{cipher\\}.+", "^ENC\\(.+\\)$", "^\\$\\{[^}]+\\}$", "^\\*+$"));
++
++    /** A watched key raises its severity whenever the two sides differ, a missing side included. */
++    private List<WatchRule> watchlist = new ArrayList<>(List.of(
++            new WatchRule("spring.datasource.*", ConfigAlertSeverity.HIGH, "Database connection settings"),
++            new WatchRule("spring.profiles.active", ConfigAlertSeverity.HIGH, "Changes which profile files load"),
++            new WatchRule("server.port", ConfigAlertSeverity.HIGH, "Listening port"),
++            new WatchRule("server.ssl.*", ConfigAlertSeverity.HIGH, "TLS settings"),
++            new WatchRule("logging.level.root", ConfigAlertSeverity.HIGH, "Root log level"),
++            new WatchRule("*url", ConfigAlertSeverity.HIGH, "Address of another system"),
++            new WatchRule("*host", ConfigAlertSeverity.HIGH, "Address of another system")));
++
++    /** Expected differences: matching alerts still show, under "Accepted", and stop counting as alerts. */
++    private List<AcceptRule> accepted = new ArrayList<>();
++
++    @Data
++    public static class WatchRule {
++        private String key;
++        private ConfigAlertSeverity severity = ConfigAlertSeverity.HIGH;
++        private String reason;
++
++        public WatchRule() {
++        }
++
++        public WatchRule(String key, ConfigAlertSeverity severity, String reason) {
++            this.key = key;
++            this.severity = severity;
++            this.reason = reason;
++        }
++    }
++
++    @Data
++    public static class AcceptRule {
++        /** Glob over the property name. */
++        private String key;
++        /** Optional: only this rule ({@link ConfigAlertRule} name); blank = any rule. */
++        private ConfigAlertRule rule;
++        /** Shown next to the accepted alert, e.g. who accepted it and why. */
++        private String reason;
++    }
++}
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertRule.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertRule.java
+new file mode 100644
+index 00000000..28969e7c
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertRule.java
+@@ -0,0 +1,25 @@
++package com.creed.parent.service.report.alert;
++
++/**
++ * @author EthanCao
++ * @description ccrg-tool
++ * @date 2026-11-18
++ */
++public enum ConfigAlertRule {
++    /** An address names a different environment than the side's own (a PROD file pointing at uat1). */
++    FOREIGN_ENVIRONMENT("Another environment's address"),
++    /** A secret key whose value is neither {cipher}, ENC(...), a placeholder nor masked. */
++    PLAIN_SECRET("Unencrypted secret"),
++    /** A key on the watchlist differs between the two sides. */
++    WATCHED_KEY_CHANGED("Watched key changed");
++
++    private final String title;
++
++    ConfigAlertRule(String title) {
++        this.title = title;
++    }
++
++    public String getTitle() {
++        return title;
++    }
++}
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertService.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertService.java
+new file mode 100644
+index 00000000..e5ace36e
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertService.java
+@@ -0,0 +1,236 @@
++package com.creed.parent.service.report.alert;
++
++import com.creed.parent.model.ReportDetails;
++import lombok.RequiredArgsConstructor;
++import org.apache.commons.lang3.StringUtils;
++import org.springframework.stereotype.Service;
++
++import java.util.*;
++import java.util.regex.Pattern;
++import java.util.stream.Collectors;
++
++/**
++ * Flags the differences in a comparison that are dangerous rather than merely different. A plain diff
++ * gives a release bump and a PROD datasource pointing at UAT the same red/green weight; this tags them
++ * with a severity so the report can put them first.
++ * <p>
++ * Rules (all lists in {@link ConfigAlertProperties}):
++ * <ul>
++ *   <li>{@link ConfigAlertRule#FOREIGN_ENVIRONMENT} - critical, checked per side against that side's own environment;</li>
++ *   <li>{@link ConfigAlertRule#PLAIN_SECRET} - critical, per side;</li>
++ *   <li>{@link ConfigAlertRule#WATCHED_KEY_CHANGED} - the rule's severity, when the two sides differ.</li>
++ * </ul>
++ * Pure function of its input - no Spring context needed to test it.
++ *
++ * @author EthanCao
++ * @description ccrg-tool
++ * @date 2026-11-18
++ */
++@Service
++@RequiredArgsConstructor
++public class ConfigAlertService {
++
++    private static final Pattern TRAILING_DIGITS = Pattern.compile("\\d+$");
++    private static final Pattern NON_ALNUM = Pattern.compile("[^a-z0-9]+");
++
++    private final ConfigAlertProperties properties;
++
++    /**
++     * @param left  baseline properties, name -> value as rendered in the report
++     * @param right comparison properties
++     */
++    public List<ConfigAlert> evaluate(Map<String, String> left, Map<String, String> right,
++                                      ReportDetails leftDetails, ReportDetails rightDetails) {
++        if (!properties.isEnabled()) {
++            return List.of();
++        }
++        Rules rules = new Rules(properties);
++        String leftEnv = tier(leftDetails, rules.envTokens);
++        String rightEnv = tier(rightDetails, rules.envTokens);
++
++        SortedSet<String> keys = new TreeSet<>(left.keySet());
++        keys.addAll(right.keySet());
++
++        List<ConfigAlert> alerts = new ArrayList<>();
++        for (String key : keys) {
++            String l = left.get(key);
++            String r = right.get(key);
++            boolean secretKey = rules.isSecretKey(key);
++
++            // 1. another environment's address
++            if (rules.isAddress(key, l) || rules.isAddress(key, r)) {
++                String lHit = foreignToken(l, leftEnv, rules);
++                String rHit = foreignToken(r, rightEnv, rules);
++                if (lHit != null || rHit != null) {
++                    List<String> why = new ArrayList<>();
++                    if (lHit != null) why.add("Baseline is " + leftEnv.toUpperCase() + " but the value contains \"" + lHit + "\"");
++                    if (rHit != null) why.add("Comparison is " + rightEnv.toUpperCase() + " but the value contains \"" + rHit + "\"");
++                    alerts.add(alert(ConfigAlertSeverity.CRITICAL, ConfigAlertRule.FOREIGN_ENVIRONMENT, key,
++                            side(lHit != null, rHit != null), l, r, secretKey, String.join("; ", why) + "."));
++                }
++            }
++
++            // 2. plain-text secret
++            if (secretKey) {
++                boolean lPlain = rules.isPlainSecret(l);
++                boolean rPlain = rules.isPlainSecret(r);
++                if (lPlain || rPlain) {
++                    alerts.add(alert(ConfigAlertSeverity.CRITICAL, ConfigAlertRule.PLAIN_SECRET, key,
++                            side(lPlain, rPlain), l, r, true,
++                            "The key holds a secret and the value is not {cipher}…, ENC(…) or a ${…} placeholder."));
++                }
++            }
++
++            // 3. watchlist
++            if (!Objects.equals(l, r)) {
++                ConfigAlertProperties.WatchRule watch = rules.watchRule(key);
++                if (watch != null) {
++                    String detail = l == null ? "Not set in the baseline."
++                            : r == null ? "Not set in the comparison; the code default applies."
++                            : "Value changed.";
++                    String reason = StringUtils.isBlank(watch.getReason()) ? detail : watch.getReason() + " · " + detail;
++                    ConfigAlertSeverity severity = watch.getSeverity() == null ? ConfigAlertSeverity.HIGH : watch.getSeverity();
++                    alerts.add(alert(severity, ConfigAlertRule.WATCHED_KEY_CHANGED, key, "both", l, r, secretKey, reason));
++                }
++            }
++        }
++
++        for (ConfigAlert alert : alerts) {
++            ConfigAlertProperties.AcceptRule accept = rules.acceptRule(alert);
++            if (accept != null) {
++                alert.setSeverity(ConfigAlertSeverity.ACCEPTED);
++                alert.setAcceptedReason(StringUtils.defaultIfBlank(accept.getReason(), "Accepted difference"));
++            }
++        }
++        alerts.sort(Comparator.comparing(ConfigAlert::getSeverity)
++                .thenComparing(ConfigAlert::getKey)
++                .thenComparing(ConfigAlert::getRule));
++        return alerts;
++    }
++
++    /** The environment a side belongs to, as one of the tokens: "UAT" / "UAT1" -> uat. Null = unknown. */
++    static String tier(ReportDetails details, Set<String> envTokens) {
++        if (details == null) {
++            return null;
++        }
++        for (String candidate : new String[]{details.getEnvironment(), details.getInstance()}) {
++            if (StringUtils.isNotBlank(candidate)) {
++                String base = TRAILING_DIGITS.matcher(candidate.trim().toLowerCase(Locale.ROOT)).replaceFirst("");
++                if (envTokens.contains(base)) {
++                    return base;
++                }
++            }
++        }
++        return null;
++    }
++
++    /** The first token naming an environment other than {@code ownTier}, as written (uat1), or null. */
++    static String foreignToken(String value, String ownTier, Rules rules) {
++        if (ownTier == null || StringUtils.isBlank(value)) {
++            return null;
++        }
++        for (String token : NON_ALNUM.split(value.toLowerCase(Locale.ROOT))) {
++            String base = TRAILING_DIGITS.matcher(token).replaceFirst("");
++            if (!base.isEmpty() && rules.envTokens.contains(base) && !base.equals(ownTier)) {
++                return token;
++            }
++        }
++        return null;
++    }
++
++    private static String side(boolean left, boolean right) {
++        return left && right ? "both" : left ? "baseline" : "comparison";
++    }
++
++    private static ConfigAlert alert(ConfigAlertSeverity severity, ConfigAlertRule rule, String key, String side,
++                                     String l, String r, boolean mask, String reason) {
++        ConfigAlert alert = new ConfigAlert();
++        alert.setSeverity(severity);
++        alert.setRule(rule);
++        alert.setKey(key);
++        alert.setSide(side);
++        alert.setLeftValue(mask ? mask(l) : l);
++        alert.setRightValue(mask ? mask(r) : r);
++        alert.setReason(reason);
++        return alert;
++    }
++
++    /** Never put a secret in the Alerts tab: only its length, and whether it is protected. */
++    static String mask(String value) {
++        if (value == null) {
++            return null;
++        }
++        if (value.isEmpty()) {
++            return "";
++        }
++        if (value.startsWith("{cipher}")) return "{cipher}…";
++        if (value.startsWith("ENC(")) return "ENC(…)";
++        if (value.startsWith("${")) return value;
++        return "•••••••• (" + value.length() + " chars, plain text)";
++    }
++
++    /** The configured lists, compiled once per evaluation. */
++    static final class Rules {
++        final Set<String> envTokens;
++        private final List<Pattern> addressKeys;
++        private final List<Pattern> secretKeys;
++        private final List<Pattern> secretKeyExcludes;
++        private final List<Pattern> protectedValues;
++        private final List<Map.Entry<Pattern, ConfigAlertProperties.WatchRule>> watchlist;
++        private final List<Map.Entry<Pattern, ConfigAlertProperties.AcceptRule>> accepted;
++
++        Rules(ConfigAlertProperties p) {
++            envTokens = p.getEnvironmentTokens().stream().map(t -> t.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
++            addressKeys = globs(p.getAddressKeys());
++            secretKeys = globs(p.getSecretKeys());
++            secretKeyExcludes = globs(p.getSecretKeyExcludes());
++            protectedValues = p.getProtectedValuePatterns().stream().map(Pattern::compile).toList();
++            watchlist = p.getWatchlist().stream().filter(w -> StringUtils.isNotBlank(w.getKey()))
++                    .map(w -> Map.entry(glob(w.getKey()), w)).toList();
++            accepted = p.getAccepted().stream().filter(a -> StringUtils.isNotBlank(a.getKey()))
++                    .map(a -> Map.entry(glob(a.getKey()), a)).toList();
++        }
++
++        boolean isAddress(String key, String value) {
++            return value != null && (matchesAny(addressKeys, key) || value.contains("://"));
++        }
++
++        boolean isSecretKey(String key) {
++            return matchesAny(secretKeys, key) && !matchesAny(secretKeyExcludes, key);
++        }
++
++        boolean isPlainSecret(String value) {
++            if (StringUtils.isBlank(value)) {
++                return false;
++            }
++            String v = value.trim();
++            return protectedValues.stream().noneMatch(p -> p.matcher(v).matches());
++        }
++
++        ConfigAlertProperties.WatchRule watchRule(String key) {
++            return watchlist.stream().filter(e -> e.getKey().matcher(key).matches())
++                    .map(Map.Entry::getValue).findFirst().orElse(null);
++        }
++
++        ConfigAlertProperties.AcceptRule acceptRule(ConfigAlert alert) {
++            return accepted.stream()
++                    .filter(e -> e.getKey().matcher(alert.getKey()).matches())
++                    .filter(e -> e.getValue().getRule() == null || e.getValue().getRule() == alert.getRule())
++                    .map(Map.Entry::getValue).findFirst().orElse(null);
++        }
++
++        private static boolean matchesAny(List<Pattern> patterns, String key) {
++            return patterns.stream().anyMatch(p -> p.matcher(key).matches());
++        }
++
++        private static List<Pattern> globs(List<String> globs) {
++            return globs.stream().filter(StringUtils::isNotBlank).map(Rules::glob).toList();
++        }
++
++        /** {@code *} = any characters, everything else literal; case-insensitive, whole name. */
++        static Pattern glob(String glob) {
++            String regex = Arrays.stream(glob.trim().split("\\*", -1)).map(Pattern::quote).collect(Collectors.joining(".*"));
++            return Pattern.compile(regex, Pattern.CASE_INSENSITIVE);
++        }
++    }
++}
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertSeverity.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertSeverity.java
+new file mode 100644
+index 00000000..93dc02b7
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/alert/ConfigAlertSeverity.java
+@@ -0,0 +1,30 @@
++package com.creed.parent.service.report.alert;
++
++/**
++ * Ordered most severe first: sorting by the enum puts the worst alerts on top.
++ *
++ * @author EthanCao
++ * @description ccrg-tool
++ * @date 2026-11-18
++ */
++public enum ConfigAlertSeverity {
++    CRITICAL("Critical"),
++    HIGH("High"),
++    /** Matched an {@code accepted} rule: shown, not counted. */
++    ACCEPTED("Accepted");
++
++    private final String label;
++
++    ConfigAlertSeverity(String label) {
++        this.label = label;
++    }
++
++    public String getLabel() {
++        return label;
++    }
++
++    /** CSS suffix used by the templates: {@code cfg-sev-critical} etc. */
++    public String getCss() {
++        return name().toLowerCase();
++    }
++}
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/impl/HTMLReportGeneratorImpl.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/impl/HTMLReportGeneratorImpl.java
+new file mode 100644
+index 00000000..5d15a4ea
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/report/impl/HTMLReportGeneratorImpl.java
+@@ -0,0 +1,543 @@
++package com.creed.parent.service.report.impl;
++
++import com.creed.parent.constant.ReportTypeEnum;
++import com.creed.parent.controller.pdf.dto.ContextInformation;
++import com.creed.parent.controller.vo.EnvironmentConfigurationVo;
++import com.creed.parent.controller.vo.OverallSummaryVo;
++import com.creed.parent.controller.vo.PropertiesOverviewVo;
++import com.creed.parent.controller.vo.PropertiesVo;
++import com.creed.parent.controller.vo.PropertyReviewOverviewVo;
++import com.creed.parent.controller.vo.PropertyReviewVo;
++import com.creed.parent.controller.vo.ReportPropertiesOverviewVo;
++import com.creed.parent.dal.model.DiffDisplay;
++import com.creed.parent.dal.model.DiffInfo;
++import com.creed.parent.definition.RouteDefinition;
++import com.creed.parent.exception.ServiceException;
++import com.creed.parent.listener.EmitterEvent;
++import com.creed.parent.listener.EmitterEventEnum;
++import com.creed.parent.model.ReportDetails;
++import com.creed.parent.service.DiffService;
++import com.creed.parent.service.report.AssetService;
++import com.creed.parent.service.report.ReportGenerator;
++import com.creed.parent.service.report.ReportMetadataInfo;
++import com.creed.parent.service.report.alert.ConfigAlert;
++import com.creed.parent.service.report.alert.ConfigAlertService;
++import com.creed.parent.service.report.alert.ConfigAlertSeverity;
++import com.creed.parent.utils.PdfUtils;
++import com.creed.parent.utils.PropertySourcesTranslateUtil;
++import com.creed.parent.utils.json.JacksonUtils;
++import jakarta.annotation.Resource;
++import lombok.Getter;
++import lombok.Setter;
++import lombok.extern.slf4j.Slf4j;
++import org.apache.commons.collections4.CollectionUtils;
++import org.apache.commons.collections4.SetUtils;
++import org.apache.commons.io.IOUtils;
++import org.apache.commons.lang3.StringUtils;
++import org.apache.commons.lang3.exception.ExceptionUtils;
++import org.apache.commons.lang3.tuple.Pair;
++import org.springframework.context.ApplicationEventPublisher;
++import org.springframework.context.annotation.Lazy;
++import org.springframework.stereotype.Service;
++import org.springframework.util.StopWatch;
++import org.thymeleaf.TemplateEngine;
++import org.thymeleaf.context.Context;
++
++import java.io.BufferedOutputStream;
++import java.io.OutputStream;
++import java.nio.charset.StandardCharsets;
++import java.util.*;
++import java.util.concurrent.TimeUnit;
++import java.util.function.Function;
++import java.util.function.Predicate;
++import java.util.function.Supplier;
++import java.util.function.UnaryOperator;
++import java.util.regex.Matcher;
++import java.util.regex.Pattern;
++import java.util.stream.Collectors;
++import java.util.stream.Stream;
++
++/**
++ * @author EthanCao
++ * @description ccrg-tool
++ * @date 2026-01-27T18
++ */
++@Service("htmlReportGenerator")
++@Slf4j
++public class HTMLReportGeneratorImpl implements ReportGenerator {
++    private static final Pattern FILE_PATH_PATTERN = Pattern.compile(".*/(?<filePath>[^/]+/LX/[^]]+).*");
++
++    @Getter
++    @Setter
++    private UnaryOperator<String> extractOriginFileFunc = (original) -> {
++        if (StringUtils.isNotBlank(original)) {
++            Matcher matcher = FILE_PATH_PATTERN.matcher(original);
++            if (matcher.matches()) {
++                return matcher.group("filePath");
++            }
++        }
++        return StringUtils.EMPTY;
++    };
++
++    public static final List<String> SKIP_KEYS = List.of("gebng.users");
++
++
++    @Resource
++    private TemplateEngine templateEngine;
++
++    @Resource
++    @Lazy
++    private DiffService diffService;
++
++    @Resource
++    ApplicationEventPublisher applicationEventPublisher;
++
++    @Resource
++    AssetService assetService;
++
++    @Resource
++    ConfigAlertService configAlertService;
++
++    /** The page every HTML comparison renders — the download and the {@code PdfController} preview alike. */
++    public static final String REPORT_TEMPLATE = "report-html-export-index";
++
++    @Override
++    public void generateReport(List<EnvironmentConfigurationVo> environmentConfiguration, ReportTypeEnum reportType, Locale locale, ReportMetadataInfo metadata, OutputStream os) {
++        if (CollectionUtils.isEmpty(environmentConfiguration)) {
++            log.warn("!!environmentConfiguration is empty!!");
++            return;
++        }
++        log.info("propertyReviewOverview {} with Locale:{}...", reportType, locale);
++        // outside the try: generateComparison's ServiceException must reach the caller unwrapped, as before
++        Map<String, Object> model = buildReportModel(environmentConfiguration, metadata);
++        try {
++            StopWatch stopWatch = new StopWatch();
++            stopWatch.start("generateComparison data");
++            Runtime runtime = Runtime.getRuntime();
++            long startMemory = runtime.totalMemory() - runtime.freeMemory();
++            log.info("Before generate HTML memory usage: {} bytes ~= {}", startMemory, PdfUtils.humanReadableByteCount(startMemory));
++
++            Context context = new Context();
++            context.setLocale(locale);
++            context.setVariables(model);
++
++            String html = templateEngine.process(REPORT_TEMPLATE, context);
++
++            stopWatch.stop();
++            log.info(">>stopWatch for generate HTML<<{}", stopWatch.prettyPrint(TimeUnit.MILLISECONDS));
++            long endMemory = runtime.totalMemory() - runtime.freeMemory();
++            log.info("After generate HTML memory usage: {} bytes ~= {}", endMemory, PdfUtils.humanReadableByteCount(endMemory));
++
++            try (BufferedOutputStream bos = new BufferedOutputStream(os)) {
++                IOUtils.write(html, bos, StandardCharsets.UTF_8);
++            }
++
++        } catch (Exception e) {
++            log.error("Upload Exception: ", e);
++            throw new ServiceException(500, ExceptionUtils.getMessage(e));
++        }
++    }
++
++    /**
++     * Every variable {@link #REPORT_TEMPLATE} reads: assets inlined, all three tabs. Shared by the
++     * download above and the preview endpoint, so a page in the browser is exactly the file a user gets.
++     */
++    public Map<String, Object> buildReportModel(List<EnvironmentConfigurationVo> environmentConfiguration, ReportMetadataInfo metadata) {
++        // 1. 根据properties进行分组
++        PropertyReviewOverviewVo propertyReviewOverview = generateComparison(environmentConfiguration, metadata);
++        // The whole comparison as JSON — every property twice, plus the overall copy. DEBUG only.
++        if (log.isDebugEnabled()) {
++            log.debug("propertyReviewOverview {}", JacksonUtils.toJsonString(propertyReviewOverview));
++        }
++        // 2. 根据分组结果开始生成HTML
++        Map<String, Object> model = new HashMap<>();
++        ContextInformation contextInformation = new ContextInformation();
++        contextInformation.setFooter("Power By Comparator Tool");
++        contextInformation.setTitle("Comparison Report");
++        model.put("contextInformation", contextInformation);
++        model.put("bootstrapCss", assetService.getBootstrapCss());
++        model.put("bootstrapIconsCss", assetService.getBootstrapIconsCss());
++        model.put("styleCss", assetService.getStyleCss());
++        model.put("bootstrapJs", assetService.getBootstrapJs());
++        model.put("favIcon", assetService.getFavicon());
++        model.put("logo", assetService.getLogoImg());
++
++        model.put("noneMatchingFragmentTemplate", "fragments/non-matching-html-fragment");
++        model.put("noneMatchingFragmentName", "noneMatchingHtml");
++
++        model.put("matchingFragmentTemplate", "fragments/matching-html-fragment");
++        model.put("matchingFragmentName", "matchingHtml");
++
++        model.put("overallFragmentTemplate", "fragments/overall-html-fragment");
++        model.put("overallFragmentName", "overallHtml");
++
++        model.put("alertsFragmentTemplate", "fragments/alerts-html-fragment");
++        model.put("alertsFragmentName", "alertsHtml");
++
++        List<PropertyReviewVo> nonMatchingProperties = propertyReviewOverview.getNonMatchingProperties();
++        PropertyReviewVo leftPropertyReviewN = nonMatchingProperties.get(0);
++        PropertyReviewVo rightPropertyReviewN = nonMatchingProperties.get(1);
++        List<DiffDisplay> diffDisplaysN = diffService.diffDisplayList(leftPropertyReviewN, rightPropertyReviewN);
++        PropertiesOverviewVo nonMatchingRecord = new PropertiesOverviewVo(leftPropertyReviewN, rightPropertyReviewN, diffDisplaysN);
++
++        List<PropertyReviewVo> matchingProperties = propertyReviewOverview.getMatchingProperties();
++        PropertyReviewVo leftPropertyReview = matchingProperties.get(0);
++        PropertyReviewVo rightPropertyReview = matchingProperties.get(1);
++        List<DiffDisplay> diffDisplays = diffService.nonDiffDisplayList(leftPropertyReview, rightPropertyReview);
++        PropertiesOverviewVo matchingRecord = new PropertiesOverviewVo(leftPropertyReview, rightPropertyReview, diffDisplays);
++
++        List<PropertyReviewVo> overallProperties = propertyReviewOverview.getOverallProperties();
++        PropertyReviewVo leftPropertyReviewO = overallProperties.get(0);
++        PropertyReviewVo rightPropertyReviewO = overallProperties.get(1);
++        List<DiffDisplay> diffDisplaysO = diffService.overallDisplayList(leftPropertyReviewO, rightPropertyReviewO);
++        PropertiesOverviewVo overallRecord = new PropertiesOverviewVo(leftPropertyReviewO, rightPropertyReviewO, diffDisplaysO);
++        List<ConfigAlert> alerts = Optional.ofNullable(propertyReviewOverview.getAlerts()).orElse(List.of());
++        markAlertRows(diffDisplaysO, leftPropertyReviewO.getLineKeys(), rightPropertyReviewO.getLineKeys(), alerts);
++
++        model.put("reportPropertiesOverview", new ReportPropertiesOverviewVo(nonMatchingRecord, matchingRecord,
++                overallRecord, propertyReviewOverview.getOverallSummary(), alerts));
++        return model;
++    }
++
++    /**
++     * Badges the Overall Comparison lines whose property has an open (not accepted) alert, and gives each
++     * alert the index of its first row for the Alerts tab's "Show line" link. A row is traced back to its
++     * property through {@link PropertyReviewVo#getLineKeys()}.
++     */
++    static void markAlertRows(List<DiffDisplay> rows, List<String> leftKeys, List<String> rightKeys, List<ConfigAlert> alerts) {
++        if (alerts.isEmpty() || rows == null) {
++            return;
++        }
++        Map<String, List<ConfigAlert>> byKey = alerts.stream().collect(Collectors.groupingBy(ConfigAlert::getKey));
++        for (int i = 0; i < rows.size(); i++) {
++            DiffDisplay row = rows.get(i);
++            for (Pair<DiffInfo, List<String>> side : List.of(Pair.of(row.getLeft(), leftKeys), Pair.of(row.getRight(), rightKeys))) {
++                DiffInfo info = side.getLeft();
++                String key = keyAt(side.getRight(), info);
++                // a per-side finding (the plain secret only R2 has) badges that side only
++                String sideName = side.getRight() == leftKeys ? "baseline" : "comparison";
++                List<ConfigAlert> found = key == null || !byKey.containsKey(key) ? List.of()
++                        : byKey.get(key).stream().filter(a -> "both".equals(a.getSide()) || sideName.equals(a.getSide())).toList();
++                if (found.isEmpty()) {
++                    continue;
++                }
++                for (ConfigAlert alert : found) {
++                    if (alert.getOverallRow() == null) {
++                        alert.setOverallRow(i);
++                    }
++                }
++                // alerts are sorted most severe first, so the first one is the badge
++                found.stream().filter(a -> a.getSeverity() != ConfigAlertSeverity.ACCEPTED)
++                        .findFirst().ifPresent(a -> {
++                            info.setAlertSeverity(a.getSeverity().getCss());
++                            info.setAlertTitle(found.stream().map(ConfigAlert::getTitle).distinct().collect(Collectors.joining(" · ")));
++                        });
++            }
++        }
++    }
++
++    private static String keyAt(List<String> lineKeys, DiffInfo info) {
++        if (lineKeys == null || info == null || StringUtils.isEmpty(info.getValue()) || info.getLineNumber() == null) {
++            return null;
++        }
++        int index = info.getLineNumber() - 1;
++        return index >= 0 && index < lineKeys.size() ? lineKeys.get(index) : null;
++    }
++
++    private static final Pattern LINE_KEY_MARKER = Pattern.compile(".*(?:: |- )k(\\d+)$");
++
++    /**
++     * The property on each line of {@code map2YamlConverter(properties)}: the same keys rendered with the
++     * values replaced by markers k0, k1, ... produce exactly the same lines (the origin YAML relies on the
++     * same parity), so line n of the marker YAML names the key of line n of the content.
++     */
++    static List<String> lineKeys(Collection<String> orderedKeys) {
++        List<String> keys = new ArrayList<>(orderedKeys);
++        Map<String, String> markers = new LinkedHashMap<>();
++        for (int i = 0; i < keys.size(); i++) {
++            markers.put(keys.get(i), "k" + i);
++        }
++        String yaml = PropertySourcesTranslateUtil.map2YamlConverter(markers);
++        List<String> result = new ArrayList<>();
++        for (String line : yaml.split(System.lineSeparator())) {
++            Matcher m = LINE_KEY_MARKER.matcher(line);
++            result.add(m.matches() ? keys.get(Integer.parseInt(m.group(1))) : null);
++        }
++        return result;
++    }
++
++    private static Map<String, String> asText(Map<String, PropertiesVo> properties) {
++        Map<String, String> text = new HashMap<>();
++        properties.forEach((k, v) -> text.put(k, Objects.toString(v.getPropertyValue(), "")));
++        return text;
++    }
++
++    @Override
++    public boolean supports(ReportTypeEnum reportType) {
++        return ReportTypeEnum.HTML.equals(reportType);
++    }
++
++
++    public PropertyReviewOverviewVo generateComparison(List<EnvironmentConfigurationVo> environmentConfiguration, ReportMetadataInfo metadata) {
++
++        Runtime runtime = Runtime.getRuntime();
++        long startMemory = runtime.totalMemory() - runtime.freeMemory();
++        log.info(">>Before Start Memory Usage: {} bytes ~= {}", startMemory, PdfUtils.humanReadableByteCount(startMemory));
++
++        log.debug(">>environmentConfiguration: {}", JacksonUtils.toJsonString(environmentConfiguration));
++        long endMemory = runtime.totalMemory() - runtime.freeMemory();
++
++        log.info(">>After Start Memory Usage: {} bytes ~= {}", endMemory, PdfUtils.humanReadableByteCount(endMemory));
++
++        String connectionId = metadata.getConnectionId();
++        applicationEventPublisher.publishEvent(new EmitterEvent(this, connectionId, EmitterEventEnum.PROPERTIES_COUNTING));
++
++        List<PropertiesVo> sourceDataList = Optional.of(environmentConfiguration).orElse(Collections.emptyList())
++                .stream().map(EnvironmentConfigurationVo::getProperties)
++                .flatMap(Collection::stream)
++                .toList();
++        // filter out activeSources
++        Map<Integer, List<PropertiesVo>> activeSources = sourceDataList.stream().filter(PropertiesVo::getActive)
++                .collect(Collectors.groupingBy(PropertiesVo::getSource, Collectors.mapping(Function.identity(), Collectors.toList())));
++        if (activeSources.size() < 2) {
++            throw new ServiceException(500, "At least one environmentConfiguration loading failure!");
++        }
++        Function<Map<Integer, List<PropertiesVo>>, Map<String, PropertiesVo>> sourceUniqueKVMappingFunc = as ->
++                as.get(1).stream().collect(Collectors.toMap(entry -> entry.getPropertyName() + ":" + entry.getPropertyValue(), Function.identity()));
++
++        Function<Map<Integer, List<PropertiesVo>>, Map<String, PropertiesVo>> targetUniqueKVMappingFunc = as ->
++                as.get(2).stream().collect(Collectors.toMap(entry -> entry.getPropertyName() + ":" + entry.getPropertyValue(), Function.identity()));
++        Supplier<Pair<ReportDetails, ReportDetails>> reportDetailsPair = () -> {
++            List<ReportDetails> reportDetails = builReportDetails(environmentConfiguration);
++            ReportDetails leftReportDetails = reportDetails.get(0);
++            ReportDetails rightReportDetails = new ReportDetails();
++            if (reportDetails.size() > 1) {
++                rightReportDetails = reportDetails.get(1);
++            }
++            return Pair.of(leftReportDetails, rightReportDetails);
++        };
++        List<PropertyReviewVo> nonMatchingProperties = computeNonMatching(activeSources, sourceUniqueKVMappingFunc, targetUniqueKVMappingFunc, reportDetailsPair);
++        List<PropertyReviewVo> matchingProperties = computeMatching(activeSources, sourceUniqueKVMappingFunc, targetUniqueKVMappingFunc, reportDetailsPair);
++        log.debug(">>nonMatchingProperties:{}", JacksonUtils.toJsonString(nonMatchingProperties));
++
++        Map<String, PropertiesVo> allSource1 = byPropertyName(activeSources.get(1));
++        Map<String, PropertiesVo> allSource2 = byPropertyName(activeSources.get(2));
++        List<PropertyReviewVo> overallProperties = computeOverall(allSource1, allSource2, reportDetailsPair);
++        Pair<ReportDetails, ReportDetails> details = reportDetailsPair.get();
++        List<ConfigAlert> alerts = configAlertService == null ? List.of()
++                : configAlertService.evaluate(asText(allSource1), asText(allSource2), details.getLeft(), details.getRight());
++
++        return PropertyReviewOverviewVo.builder()
++                .nonMatchingProperties(nonMatchingProperties)
++                .matchingProperties(matchingProperties)
++                .overallProperties(overallProperties)
++                .overallSummary(summarize(allSource1, allSource2))
++                .alerts(alerts)
++                .build();
++    }
++
++    /** First occurrence wins on a repeated name — the same merge the matching / non-matching maps use. */
++    private Map<String, PropertiesVo> byPropertyName(List<PropertiesVo> properties) {
++        return properties.stream().collect(Collectors.toMap(PropertiesVo::getPropertyName, Function.identity(), (o, n) -> o));
++    }
++
++    /**
++     * Every property of both sources, matching or not: the union of names. Rendered through
++     * DiffUtils with EQUAL parts it is the whole file side by side, which neither the matching nor the
++     * non-matching half can show on its own — each has only one kind of line.
++     */
++    protected List<PropertyReviewVo> computeOverall(Map<String, PropertiesVo> allSource1,
++                                                    Map<String, PropertiesVo> allSource2,
++                                                    Supplier<Pair<ReportDetails, ReportDetails>> reportDetailsPair) {
++        Set<String> allKeys = new HashSet<>(allSource1.keySet());
++        allKeys.addAll(allSource2.keySet());
++        return getPropertyReviewList(reportDetailsPair, allKeys, allSource1, allSource2);
++    }
++
++    protected OverallSummaryVo summarize(Map<String, PropertiesVo> allSource1, Map<String, PropertiesVo> allSource2) {
++        int identical = 0;
++        int changed = 0;
++        for (Map.Entry<String, PropertiesVo> entry : allSource1.entrySet()) {
++            PropertiesVo other = allSource2.get(entry.getKey());
++            if (other == null) {
++                continue;
++            }
++            // compared as rendered: the YAML holds Objects.toString(value, "")
++            if (Objects.equals(Objects.toString(entry.getValue().getPropertyValue(), ""), Objects.toString(other.getPropertyValue(), ""))) {
++                identical++;
++            } else {
++                changed++;
++            }
++        }
++        int onlyInBaseline = allSource1.size() - identical - changed;
++        int onlyInComparison = allSource2.size() - identical - changed;
++        return new OverallSummaryVo(identical + changed + onlyInBaseline + onlyInComparison, identical, changed, onlyInBaseline, onlyInComparison);
++    }
++
++    private List<ReportDetails> builReportDetails(List<EnvironmentConfigurationVo> environmentConfiguration) {
++        var reportDetails = new ArrayList<ReportDetails>();
++        for (EnvironmentConfigurationVo vo : environmentConfiguration) {
++            ReportDetails details = new ReportDetails();
++            details.setProfile(vo.getActiveProfile());
++            RouteDefinition routeDefinition = vo.getRouteDefinition();
++            details.setReleaseName(routeDefinition.getReleaseName());
++            details.setCountryCode(routeDefinition.getCountryCode());
++            details.setInstance(routeDefinition.getInstance());
++            details.setEnvironment(routeDefinition.getEnvironment());
++            details.setFileNames(String.join(",", listAllFiles(vo)));
++            reportDetails.add(details);
++        }
++        return reportDetails;
++    }
++
++    protected List<PropertyReviewVo> computeNonMatching(Map<Integer, List<PropertiesVo>> activeSources,
++                                                        Function<Map<Integer, List<PropertiesVo>>, Map<String, PropertiesVo>> sourceUniqueKVMappingFunc,
++                                                        Function<Map<Integer, List<PropertiesVo>>, Map<String, PropertiesVo>> targetUniqueKVMappingFunc,
++                                                        Supplier<Pair<ReportDetails, ReportDetails>> reportDetailsPair) {
++        Map<String, PropertiesVo> sourceUniqueKVMapping = sourceUniqueKVMappingFunc.apply(activeSources);
++        Map<String, PropertiesVo> targetUniqueKVMapping = targetUniqueKVMappingFunc.apply(activeSources);
++
++        Collection<String> matchingKeys = CollectionUtils.intersection(sourceUniqueKVMapping.keySet(), targetUniqueKVMapping.keySet());
++        //rest is noneMatching values
++        Map<String, PropertiesVo> nonMatching4Source1 = activeSources.get(1).stream().filter(sd -> !matchingKeys.contains(sd.getPropertyName() + ":" + sd.getPropertyValue()))
++                .collect(Collectors.toMap(PropertiesVo::getPropertyName, Function.identity(), (o, n) -> o));//16230 207 = 16437
++        Map<String, PropertiesVo> nonMatching4Source2 = activeSources.get(2).stream().filter(sd -> !matchingKeys.contains(sd.getPropertyName() + ":" + sd.getPropertyValue()))
++                .collect(Collectors.toMap(PropertiesVo::getPropertyName, Function.identity(), (o, n) -> o));//16230 182 = 16412
++        HashSet<String> nonMatchingKeys = new HashSet<>(nonMatching4Source1.keySet());
++        nonMatchingKeys.addAll(nonMatching4Source2.keySet());
++        return getPropertyReviewList(reportDetailsPair, nonMatchingKeys, nonMatching4Source1, nonMatching4Source2);
++    }
++
++    protected List<PropertyReviewVo> computeMatching(Map<Integer, List<PropertiesVo>> activeSources,
++                                                     Function<Map<Integer, List<PropertiesVo>>, Map<String, PropertiesVo>> sourceUniqueKVMappingFunc,
++                                                     Function<Map<Integer, List<PropertiesVo>>, Map<String, PropertiesVo>> targetUniqueKVMappingFunc,
++                                                     Supplier<Pair<ReportDetails, ReportDetails>> reportDetailsPair) {
++        Map<String, PropertiesVo> sourceUniqueKVMapping = sourceUniqueKVMappingFunc.apply(activeSources);
++        Map<String, PropertiesVo> targetUniqueKVMapping = targetUniqueKVMappingFunc.apply(activeSources);
++
++        Collection<String> matchingKeys = CollectionUtils.intersection(sourceUniqueKVMapping.keySet(), targetUniqueKVMapping.keySet());
++        //rest is matching values
++        Map<String, PropertiesVo> matching4Source1 = activeSources.get(1).stream().filter(sd -> matchingKeys.contains(sd.getPropertyName() + ":" + sd.getPropertyValue()))
++                .collect(Collectors.toMap(PropertiesVo::getPropertyName, Function.identity(), (o, n) -> o));//16230 207 = 16437
++        Map<String, PropertiesVo> matching4Source2 = activeSources.get(2).stream().filter(sd -> matchingKeys.contains(sd.getPropertyName() + ":" + sd.getPropertyValue()))
++                .collect(Collectors.toMap(PropertiesVo::getPropertyName, Function.identity(), (o, n) -> o));//16230 182 = 16412
++        HashSet<String> propertyKeys = new HashSet<>(matching4Source1.keySet());
++        propertyKeys.addAll(matching4Source2.keySet());
++        return getPropertyReviewList(reportDetailsPair, propertyKeys, matching4Source1, matching4Source2);
++    }
++
++
++    private List<PropertyReviewVo> getPropertyReviewList(Supplier<Pair<ReportDetails, ReportDetails>> reportDetailsPair,
++                                                         Collection<String> uniqueKeys,
++                                                         Map<String, PropertiesVo> sourceProperties,
++                                                         Map<String, PropertiesVo> targetProperties) {
++        Map<String, String> source1Properties = uniqueKeys.stream()
++                .filter(sourceProperties::containsKey)
++                .collect(Collectors.toMap(key -> key, key -> Objects.toString(sourceProperties.get(key).getPropertyValue(), "")))
++                .entrySet().stream()
++                .sorted(Map.Entry.comparingByKey())
++                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (o, n) -> o, LinkedHashMap::new));
++
++        Map<String, String> source1PropertiesOrigin = uniqueKeys.stream()
++                .filter(sourceProperties::containsKey)
++                .collect(Collectors.toMap(key -> key, key -> getOriginValueFunc().apply(sourceProperties.get(key).getOrigin())))
++                .entrySet().stream()
++                .sorted(Map.Entry.comparingByKey())
++                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (o, n) -> o, LinkedHashMap::new));
++        String yaml1 = PropertySourcesTranslateUtil.map2YamlConverter(source1Properties);
++        String yaml1PropertiesOrigin = PropertySourcesTranslateUtil.map2YamlConverter(source1PropertiesOrigin);
++
++        Map<String, String> source2Properties = uniqueKeys.stream()
++                .filter(targetProperties::containsKey)
++                .collect(Collectors.toMap(key -> key, key -> Objects.toString(targetProperties.get(key).getPropertyValue(), "")))
++                .entrySet().stream()
++                .sorted(Map.Entry.comparingByKey())
++                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (o, n) -> o, LinkedHashMap::new));
++        Map<String, String> source2PropertiesOrigin = uniqueKeys.stream()
++                .filter(targetProperties::containsKey)
++                .collect(Collectors.toMap(key -> key, key -> getOriginValueFunc().apply(targetProperties.get(key).getOrigin())))
++                .entrySet().stream()
++                .sorted(Map.Entry.comparingByKey())
++                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (o, n) -> o, LinkedHashMap::new));
++        String yaml2 = PropertySourcesTranslateUtil.map2YamlConverter(source2Properties);
++        String yaml2PropertiesOrigin = PropertySourcesTranslateUtil.map2YamlConverter(source2PropertiesOrigin);
++
++        Set<String> missingInTarget = SetUtils.difference(source1Properties.keySet(), source2Properties.keySet());
++        Set<String> missingInSource = SetUtils.difference(source2Properties.keySet(), source1Properties.keySet());
++        // group by parent property key
++        Predicate<String> filterByKey = keyStr -> !StringUtils.startsWithAny(keyStr, SKIP_KEYS.toArray(String[]::new));
++        List<PropertiesVo> missingInTargetProps = missingInTarget.stream()
++                .filter(filterByKey)
++                .sorted(Comparator.naturalOrder())
++                .map(sourceProperties::get)
++                .filter(Objects::nonNull)
++                .toList();
++
++        List<PropertiesVo> missingInSourceProps = missingInSource.stream()
++                .filter(filterByKey)
++                .sorted(Comparator.naturalOrder())
++                .map(targetProperties::get)
++                .filter(Objects::nonNull)
++                .toList();
++        Comparator<String> lengthComparator = Comparator.comparingInt(str -> StringUtils.length(str));
++        Comparator<String> tComparator = lengthComparator.thenComparing(Comparator.naturalOrder());
++        // get all original
++        List<String> changeFiles = Stream.of(sourceProperties.values(), targetProperties.values())
++                .flatMap(Collection::stream)
++                .map(PropertiesVo::getOrigin)
++                .map(extractOriginFileFunc)
++                .filter(StringUtils::isNotBlank)
++                .distinct()
++                .sorted(tComparator)
++                .toList();
++        // List<String> baselineOriginalFiles = sourceProperties.values().stream()
++        //         .map(PropertiesVo::getOrigin)
++        //         .map(extractOriginFileFunc)
++        //         .filter(StringUtils::isNotBlank)
++        //         .distinct()
++        //         .sorted(tComparator)
++        //         .toList();
++        // List<String> comparisonOriginalFiles = targetProperties.values().stream()
++        //         .map(PropertiesVo::getOrigin)
++        //         .map(extractOriginFileFunc)
++        //         .filter(StringUtils::isNotBlank)
++        //         .distinct()
++        //         .sorted(tComparator)
++        //         .toList();
++
++
++        Pair<ReportDetails, ReportDetails> pair = reportDetailsPair.get();
++        return Arrays.asList(PropertyReviewVo.builder()
++                        .content(yaml1)
++                        .contentOrigin(yaml1PropertiesOrigin)
++                        .lineKeys(lineKeys(source1Properties.keySet()))
++                        .reportDetails(pair.getLeft())
++                        .changeFiles(changeFiles)
++                        .missingProperties(missingInTargetProps)
++                        .build(),
++                PropertyReviewVo.builder()
++                        .content(yaml2)
++                        .contentOrigin(yaml2PropertiesOrigin)
++                        .lineKeys(lineKeys(source2Properties.keySet()))
++                        .reportDetails(pair.getRight())
++                        .changeFiles(changeFiles)
++                        .missingProperties(missingInSourceProps)
++                        .build());
++    }
++
++    private List<String> listAllFiles(EnvironmentConfigurationVo vo) {
++        return Optional.ofNullable(vo).map(EnvironmentConfigurationVo::getProperties).orElse(Collections.emptyList())
++                .stream().map(PropertiesVo::getOrigin)
++                .map(origin -> StringUtils.substringBetween(origin, "[file:", "]"))
++                .filter(Objects::nonNull)
++                .distinct()
++                .sorted(Comparator.naturalOrder())
++                .toList();
++    }
++
++    protected Function<Object, String> getOriginValueFunc() {
++        return value -> Objects.toString(value, "").replaceAll(" ", "");
++    }
++
++
++}
+diff --git a/creed-resource/ccrg-tool-starter/src/main/resources/application.yml b/creed-resource/ccrg-tool-starter/src/main/resources/application.yml
+index 6e170642..ba23f26a 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/resources/application.yml
++++ b/creed-resource/ccrg-tool-starter/src/main/resources/application.yml
+@@ -41,4 +41,22 @@ access:
+     ancestor-id: 131219
+   
+ properties-matrix:
+-  root-path: ./config
+\ No newline at end of file
++  root-path: ./config
++# Report "Alerts" tab (ConfigAlertService). Lists set here REPLACE the defaults in ConfigAlertProperties.
++# Key patterns are globs over the full property name, case-insensitive (* = anything).
++ccrg:
++  alerts:
++    enabled: ${CREED_CCRG_ALERTS_ENABLED:true}
++    environment-tokens: [dev, sit, uat, pt, perf, preprod, staging, prod, dr]
++    watchlist:
++      - { key: "spring.datasource.*",    severity: HIGH, reason: "Database connection settings" }
++      - { key: "spring.profiles.active", severity: HIGH, reason: "Changes which profile files load" }
++      - { key: "server.port",            severity: HIGH, reason: "Listening port" }
++      - { key: "server.ssl.*",           severity: HIGH, reason: "TLS settings" }
++      - { key: "logging.level.root",     severity: HIGH, reason: "Root log level" }
++      - { key: "*url",                   severity: HIGH, reason: "Address of another system" }
++      - { key: "*host",                  severity: HIGH, reason: "Address of another system" }
++    # Expected differences: still listed, under "Accepted", not counted. rule is optional:
++    # FOREIGN_ENVIRONMENT | PLAIN_SECRET | WATCHED_KEY_CHANGED
++    accepted: []
++    #  - { key: "app.dr.*.url", rule: FOREIGN_ENVIRONMENT, reason: "PROD replicates to DR by design" }
+diff --git a/creed-resource/ccrg-tool-starter/src/main/resources/static/pdf/css/style.css b/creed-resource/ccrg-tool-starter/src/main/resources/static/pdf/css/style.css
+index e69de29b..88950308 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/resources/static/pdf/css/style.css
++++ b/creed-resource/ccrg-tool-starter/src/main/resources/static/pdf/css/style.css
+@@ -0,0 +1,28 @@
++
++
++/* Origin of a property line (fragments/origin-popover-script.html): hover = native tooltip, click = pinned popover. */
++.code-content[data-origin]:not([data-origin=""]) { cursor: pointer; }
++.code-content[data-origin]:not([data-origin=""]):hover { text-decoration: underline dotted; }
++.code-content.origin-open { outline: 2px solid var(--bs-primary); outline-offset: 1px; border-radius: 2px; }
++.origin-popover { --bs-popover-max-width: min(720px, 90vw); }
++.origin-popover .origin-text { font-size: .8125rem; user-select: all; }
++
++/* Configuration alerts (fragments/alerts-html-fragment.html, Overall Comparison badges). */
++.cfg-sev-critical { --cfg-c: var(--bs-danger-text-emphasis); --cfg-bg: var(--bs-danger-bg-subtle); --cfg-b: var(--bs-danger); }
++.cfg-sev-high { --cfg-c: var(--bs-warning-text-emphasis); --cfg-bg: var(--bs-warning-bg-subtle); --cfg-b: var(--bs-warning); }
++.cfg-sev-accepted { --cfg-c: var(--bs-success-text-emphasis); --cfg-bg: var(--bs-success-bg-subtle); --cfg-b: var(--bs-success); }
++.badge.cfg-sev { color: var(--cfg-c); background: var(--cfg-bg); border: 1px solid var(--cfg-b); font-weight: 600; }
++.cfg-stat { min-width: 110px; padding: .5rem .75rem; border: 1px solid var(--bs-border-color); border-left: 4px solid var(--cfg-b); border-radius: .375rem; }
++.cfg-stat b { display: block; font-size: 1.5rem; line-height: 1.2; color: var(--cfg-c); font-variant-numeric: tabular-nums; }
++.cfg-stat span { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--bs-secondary-color); }
++.cfg-alert-list { display: flex; flex-direction: column; gap: .5rem; }
++.cfg-alert { padding: .625rem .75rem; border: 1px solid var(--bs-border-color); border-left: 4px solid var(--cfg-b); border-radius: .375rem; }
++.cfg-alert.cfg-sev-accepted { opacity: .75; }
++.cfg-values { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0 .75rem; margin-top: .25rem; }
++.cfg-values dt { font-weight: 400; color: var(--bs-secondary-color); }
++.cfg-values dd { margin: 0; word-break: break-all; }
++tr.cfg-row-critical > td.blob-num { box-shadow: inset 3px 0 0 var(--bs-danger); }
++tr.cfg-row-high > td.blob-num { box-shadow: inset 3px 0 0 var(--bs-warning); }
++tr.cfg-flash > td { animation: cfg-flash 1.6s ease-out; }
++@keyframes cfg-flash { from { background-color: var(--bs-primary-bg-subtle); } }
++@media (prefers-reduced-motion: reduce) { tr.cfg-flash > td { animation: none; outline: 2px solid var(--bs-primary); } }
+diff --git a/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/alerts-html-fragment.html b/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/alerts-html-fragment.html
+new file mode 100644
+index 00000000..d939ac2e
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/alerts-html-fragment.html
+@@ -0,0 +1,94 @@
++<!--/*@thymesVar id="reportPropertiesOverview" type="com.creed.parent.controller.vo.ReportPropertiesOverviewVo"*/-->
++<!DOCTYPE html>
++<html lang="en" xmlns:th="http://www.thymeleaf.org">
++<!--/*
++  Alerts tab: the differences that are dangerous, not merely different (ConfigAlertService), most severe
++  first. Values are display text from the service - a secret arrives masked. "Show line" opens the
++  Overall Comparison tab at the property's row (ConfigAlert#overallRow).
++*/-->
++<div th:fragment="alertsHtml"
++     th:with="ov=${reportPropertiesOverview},alerts=${reportPropertiesOverview?.alerts},left=${reportPropertiesOverview?.overallPropertiesOverview?.leftPropertyReview?.reportDetails},right=${reportPropertiesOverview?.overallPropertiesOverview?.rightPropertyReview?.reportDetails}">
++
++    <div class="d-flex flex-wrap gap-2 mb-3">
++        <div class="cfg-stat cfg-sev-critical">
++            <b th:text="${ov.criticalCount}">0</b><span>Critical</span>
++        </div>
++        <div class="cfg-stat cfg-sev-high">
++            <b th:text="${ov.highCount}">0</b><span>High</span>
++        </div>
++        <div class="cfg-stat cfg-sev-accepted">
++            <b th:text="${ov.acceptedCount}">0</b><span>Accepted</span>
++        </div>
++        <div class="small text-muted align-self-center ms-auto">
++            Baseline <span class="fw-semibold" th:text="|${left?.releaseName} · ${left?.environment} ${left?.instance}|"></span>
++            → comparison <span class="fw-semibold" th:text="|${right?.releaseName} · ${right?.environment} ${right?.instance}|"></span>
++        </div>
++    </div>
++
++    <div class="alert alert-success" th:if="${#lists.isEmpty(alerts)}">
++        <i class="bi bi-check-circle me-1"></i>No alerts: no address of another environment, no plain-text secret,
++        and no watched key differs.
++    </div>
++
++    <div class="cfg-alert-list" th:unless="${#lists.isEmpty(alerts)}">
++        <div th:each="a : ${alerts}" th:class="|cfg-alert cfg-sev-${a.severity.css}|">
++            <div class="d-flex flex-wrap align-items-start gap-2">
++                <span th:class="|badge cfg-sev cfg-sev-${a.severity.css}|" th:text="${a.severity.label}"></span>
++                <span class="fw-semibold" th:text="${a.title}"></span>
++                <span class="badge text-bg-light border fw-normal" th:if="${a.side != 'both'}" th:text="${a.side}"></span>
++                <button type="button" class="btn btn-sm btn-outline-primary py-0 ms-auto cfg-show-line"
++                        th:if="${a.overallRow != null}" th:attr="data-row=${a.overallRow}">
++                    <i class="bi bi-arrow-right-short"></i>Show line
++                </button>
++            </div>
++            <div class="font-monospace small text-break mt-1" th:text="${a.key}"></div>
++            <dl class="cfg-values font-monospace small mb-1">
++                <dt th:text="${left?.releaseName ?: 'Baseline'}"></dt>
++                <dd th:class="${a.leftValue == null} ? 'text-muted fst-italic'" th:text="${a.leftValue ?: '(not set)'}"></dd>
++                <dt th:text="${right?.releaseName ?: 'Comparison'}"></dt>
++                <dd th:class="${a.rightValue == null} ? 'text-muted fst-italic'" th:text="${a.rightValue ?: '(not set)'}"></dd>
++            </dl>
++            <div class="small text-muted" th:text="${a.reason}"></div>
++            <div class="small text-success" th:if="${a.acceptedReason != null}">
++                <i class="bi bi-check2-circle me-1"></i><span th:text="|Accepted: ${a.acceptedReason}|"></span>
++            </div>
++        </div>
++    </div>
++
++    <script>
++        (() => {
++            // One delegated handler: switch to the Overall tab, make sure the row is visible, scroll, flash.
++            document.addEventListener('click', (e) => {
++                const btn = e.target.closest('.cfg-show-line, .cfg-open-alerts');
++                if (!btn) return;
++                if (btn.classList.contains('cfg-open-alerts')) {
++                    const t = document.querySelector('[data-bs-target="#divAlerts"]');
++                    if (t) bootstrap.Tab.getOrCreateInstance(t).show();
++                    return;
++                }
++                const row = document.getElementById('overall-row-' + btn.dataset.row);
++                const tabBtn = document.querySelector('[data-bs-target="#div3"]');
++                if (!row || !tabBtn) return;
++                const table = document.getElementById('overallDiffTable');
++                const visible = () => getComputedStyle(row).display !== 'none';
++                const go = () => {
++                    if (!visible()) {
++                        table.classList.remove('overall-only-diff', 'overall-only-alerts');
++                        ['overallOnlyDiff', 'overallOnlyAlerts'].forEach(id => {
++                            const c = document.getElementById(id);
++                            if (c) c.checked = false;
++                        });
++                    }
++                    row.scrollIntoView({behavior: 'smooth', block: 'center'});
++                    row.classList.remove('cfg-flash');
++                    void row.offsetWidth;
++                    row.classList.add('cfg-flash');
++                };
++                if (tabBtn.classList.contains('active')) { go(); return; }
++                tabBtn.addEventListener('shown.bs.tab', go, {once: true});
++                bootstrap.Tab.getOrCreateInstance(tabBtn).show();
++            });
++        })();
++    </script>
++</div>
++</html>
+diff --git a/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/matching-html-fragment.html b/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/matching-html-fragment.html
+index 52ef1e92..4c5415e2 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/matching-html-fragment.html
++++ b/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/matching-html-fragment.html
+@@ -93,9 +93,8 @@
+                             <div>
+                                 <span style="white-space: pre-wrap"
+                                       class="code-content"
+-                                      data-bs-toggle="popover" data-bs-trigger="click hover focus"
+-                                      data-bs-placement="top" data-bs-html="true"
+-                                      th:attrappend="data-bs-content=${!#strings.isEmpty(dis?.left?.origin)} ? '<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${dis?.left?.origin} : null"
++                                      th:attr="data-origin=${dis?.left?.origin}"
++                                      th:title="${dis?.left?.origin}"
+                                       th:utext="${dis?.left?.value?: ''} + ${!#strings.isEmpty(dis?.left?.origin) ? '<i class=&quot;ps-2 bi bi-file-earmark-code me-1&quot;></i>' : ''}"></span>
+                             </div>
+                         </td>
+@@ -113,9 +112,8 @@
+                             <div>
+                                 <span style="white-space: pre-wrap"
+                                       class="code-content"
+-                                      data-bs-toggle="popover" data-bs-trigger="click hover focus"
+-                                      data-bs-placement="top" data-bs-html="true"
+-                                      th:attrappend="data-bs-content=${!#strings.isEmpty(dis?.right?.origin)} ? '<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${dis?.right?.origin} : null"
++                                      th:attr="data-origin=${dis?.right?.origin}"
++                                      th:title="${dis?.right?.origin}"
+                                       th:utext="${dis?.right?.value?: ''} + ${!#strings.isEmpty(dis?.right?.origin) ? '<i class=&quot;ps-2 bi bi-file-earmark-code me-1&quot;></i>' : ''}"></span>
+                             </div>
+                         </td>
+diff --git a/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/non-matching-html-fragment.html b/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/non-matching-html-fragment.html
+index ef57fc2b..0b18ed81 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/non-matching-html-fragment.html
++++ b/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/non-matching-html-fragment.html
+@@ -160,9 +160,8 @@
+                                                   th:with="prop=${leftReport?.missingProperties[index]}">
+                                             <div class="border-bottom border-secondary-subtle">
+                                                     <span class="code-content"
+-                                                          data-bs-toggle="popover" data-bs-trigger="click hover focus"
+-                                                          data-bs-placement="top" data-bs-html="true"
+-                                                          th:attr="data-bs-content='<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${prop?.origin}"
++                                                          th:attr="data-origin=${prop?.origin}"
++                                                          th:title="${prop?.origin}"
+                                                           th:text="|${prop?.propertyName}=|"
+                                                     ></span>
+                                                 <strong class="text-primary" th:text="${prop?.propertyValue}">This
+@@ -176,9 +175,8 @@
+                                                   th:with="prop=${rightReport?.missingProperties[index]}">
+                                             <div class="border-bottom border-secondary-subtle">
+                                                     <span class="code-content"
+-                                                          data-bs-toggle="popover" data-bs-trigger="click hover focus"
+-                                                          data-bs-placement="top" data-bs-html="true"
+-                                                          th:attr="data-bs-content='<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${prop?.origin}"
++                                                          th:attr="data-origin=${prop?.origin}"
++                                                          th:title="${prop?.origin}"
+                                                           th:text="|${prop?.propertyName}=|">
+                                                     </span>
+                                                     <strong class="text-primary" th:text="${prop?.propertyValue}">This line rendered as bold text.</strong>
+@@ -241,9 +239,8 @@
+                             <div >
+                                 <span style="white-space: pre-wrap"
+                                       class="code-content"
+-                                      data-bs-toggle="popover" data-bs-trigger="click hover focus"
+-                                      data-bs-placement="top" data-bs-html="true"
+-                                      th:attrappend="data-bs-content=${!#strings.isEmpty(dis?.left?.origin)} ? '<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${dis?.left?.origin} : null"
++                                      th:attr="data-origin=${dis?.left?.origin}"
++                                      th:title="${dis?.left?.origin}"
+                                       th:utext="${dis?.left?.value?: ''} + ${!#strings.isEmpty(dis?.left?.origin) ? '<i class=&quot;ps-2 bi bi-file-earmark-code me-1&quot;></i>' : ''}"></span>
+                             </div>
+                         </td>
+@@ -260,9 +257,8 @@
+                             <div >
+                                 <span style="white-space: pre-wrap"
+                                       class="code-content"
+-                                      data-bs-toggle="popover" data-bs-trigger="click hover focus"
+-                                      data-bs-placement="top" data-bs-html="true"
+-                                      th:attrappend="data-bs-content=${!#strings.isEmpty(dis?.right?.origin)} ? '<i class=&quot;bi bi-file-earmark-code me-1&quot;></i>' + ${dis?.right?.origin} : null"
++                                      th:attr="data-origin=${dis?.right?.origin}"
++                                      th:title="${dis?.right?.origin}"
+                                       th:utext="${dis?.right?.value?: ''} + ${!#strings.isEmpty(dis?.right?.origin) ? '<i class=&quot;ps-2 bi bi-file-earmark-code me-1&quot;></i>' : ''}"></span>
+                             </div>
+                         </td>
+diff --git a/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/origin-popover-script.html b/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/origin-popover-script.html
+new file mode 100644
+index 00000000..6d7388f5
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/origin-popover-script.html
+@@ -0,0 +1,87 @@
++<!--/*
++  Where a property line comes from (its "origin": file + line).
++  - hover: the native tooltip (th:title on the line) - no JS, never flickers, never covers other lines;
++  - click: pins ONE popover with the full origin and a Copy button; a second click, Esc, a click
++    elsewhere or switching tab closes it. Opening another line closes the previous one.
++
++  Replaces one bootstrap.Popover per line, created eagerly at load (thousands in a large report), with
++  trigger "click hover focus": hover opened it, clicking left it open, every click queued another 20 s
++  hide timer, and several popovers could stay open at once on top of the lines being read.
++  One delegated listener; the popover is created on demand and disposed when closed.
++*/-->
++<script th:fragment="originPopover">
++    (() => {
++        let open = null; // { el, pop }
++
++        const close = () => {
++            if (!open) return;
++            open.el.classList.remove('origin-open');
++            open.pop.dispose();
++            open = null;
++        };
++
++        const content = (origin) => {
++            const box = document.createElement('div');
++            box.className = 'd-flex align-items-start gap-2';
++            const text = document.createElement('code');
++            text.className = 'origin-text text-break';
++            text.textContent = origin;                  // text, never HTML
++            const copy = document.createElement('button');
++            copy.type = 'button';
++            copy.className = 'btn btn-sm btn-outline-secondary py-0 flex-shrink-0';
++            copy.innerHTML = '<i class="bi bi-clipboard"></i>';
++            copy.title = 'Copy';
++            copy.addEventListener('click', (e) => {
++                e.stopPropagation();
++                const done = () => { copy.innerHTML = '<i class="bi bi-check2"></i>'; };
++                // file:// and plain http have no Clipboard API, and it can also reject (no focus, no
++                // permission): select the text and use the legacy copy - the text stays selected for Ctrl+C.
++                const legacy = () => {
++                    const range = document.createRange();
++                    range.selectNodeContents(text);
++                    const sel = window.getSelection();
++                    sel.removeAllRanges();
++                    sel.addRange(range);
++                    try {
++                        if (document.execCommand('copy')) done();
++                    } catch (ignored) { /* left selected */ }
++                };
++                if (navigator.clipboard && window.isSecureContext) {
++                    // writeText can also stay pending (a permission decision nobody makes): give it 1 s
++                    let settled = false;
++                    const settle = (fn) => () => { if (!settled) { settled = true; fn(); } };
++                    navigator.clipboard.writeText(origin).then(settle(done), settle(legacy));
++                    setTimeout(settle(legacy), 1000);
++                } else {
++                    legacy();
++                }
++            });
++            box.append(text, copy);
++            return box;
++        };
++
++        document.addEventListener('click', (e) => {
++            if (e.target.closest('.popover')) return;   // clicks inside the popover (select / copy)
++            const el = e.target.closest('.code-content[data-origin]');
++            if (!el || !el.dataset.origin) { close(); return; }
++            if (open && open.el === el) { close(); return; }
++            close();
++            const pop = new bootstrap.Popover(el, {
++                trigger: 'manual',
++                container: 'body',
++                placement: 'top',
++                html: true,
++                sanitize: false,                        // content is a DOM node built with textContent
++                customClass: 'origin-popover',
++                title: '<i class="bi bi-file-earmark-code me-1"></i>Source',
++                content: content(el.dataset.origin),
++            });
++            pop.show();
++            el.classList.add('origin-open');
++            open = { el, pop };
++        });
++
++        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
++        document.addEventListener('shown.bs.tab', close);
++    })();
++</script>
+diff --git a/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/overall-html-fragment.html b/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/overall-html-fragment.html
+index e69de29b..8dcbdeca 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/overall-html-fragment.html
++++ b/creed-resource/ccrg-tool-starter/src/main/resources/templates/fragments/overall-html-fragment.html
+@@ -0,0 +1,168 @@
++<!--/*@thymesVar id="reportPropertiesOverview" type="com.creed.parent.controller.vo.ReportPropertiesOverviewVo"*/-->
++<!DOCTYPE html>
++<html lang="en" xmlns:th="http://www.thymeleaf.org">
++<!--/*
++  Overall comparison: every property of both sources side by side, identical lines included.
++  Rows are DiffDisplay from DiffService#overallDisplayList — deltaType EQUAL (plain), DELETE on the left
++  (red) / CHANGE on the right (green). "Differences only" hides the EQUAL rows client-side.
++*/-->
++<div th:fragment="overallHtml">
++    <style>
++        .overall-only-diff tr.overall-equal { display: none; }
++        .overall-only-alerts tr:not(.cfg-alert-row) { display: none; }
++    </style>
++    <table class="table table-hover table-borderless"
++           th:with="leftReport=${reportPropertiesOverview?.overallPropertiesOverview?.leftPropertyReview},rightReport=${reportPropertiesOverview?.overallPropertiesOverview?.rightPropertyReview},displayList=${reportPropertiesOverview?.overallPropertiesOverview?.displayList},summary=${reportPropertiesOverview?.overallSummary}"
++           style="table-layout: fixed; word-break: break-all; word-wrap: break-word; ">
++
++        <colgroup>
++            <col style="width: 40px;">
++            <col style="width: auto;">
++            <col style="width: 40px;">
++            <col style="width: auto;">
++        </colgroup>
++
++        <tbody>
++        <tr>
++            <th scope="col" colspan="4" class="text-center">
++                <div class="alert alert-primary mb-0" role="alert">
++                    Overall Comparison
++                </div>
++            </th>
++        </tr>
++        <tr th:if="${summary != null}">
++            <th scope="col" colspan="4" class="border-bottom">
++                <div class="d-flex flex-wrap gap-2 align-items-center font-8">
++                    <span class="badge text-bg-secondary" th:text="|Total ${summary.total}|"></span>
++                    <span class="badge text-bg-light border" th:text="|Identical ${summary.identical}|"></span>
++                    <span class="badge text-bg-warning" th:text="|Different value ${summary.changed}|"></span>
++                    <span class="badge text-bg-danger"
++                          th:text="|Only in ${leftReport?.reportDetails?.releaseName} ${summary.onlyInBaseline}|"></span>
++                    <span class="badge text-bg-success"
++                          th:text="|Only in ${rightReport?.reportDetails?.releaseName} ${summary.onlyInComparison}|"></span>
++                    <div class="form-check form-switch ms-auto mb-0"
++                         th:if="${reportPropertiesOverview?.openCount > 0}">
++                        <input class="form-check-input" type="checkbox" role="switch" id="overallOnlyAlerts"
++                               onchange="document.getElementById('overallDiffTable').classList.toggle('overall-only-alerts', this.checked)">
++                        <label class="form-check-label" for="overallOnlyAlerts">Alerts only</label>
++                    </div>
++                    <div class="form-check form-switch mb-0">
++                        <input class="form-check-input" type="checkbox" role="switch" id="overallOnlyDiff"
++                               onchange="document.getElementById('overallDiffTable').classList.toggle('overall-only-diff', this.checked)">
++                        <label class="form-check-label" for="overallOnlyDiff">Differences only</label>
++                    </div>
++                </div>
++            </th>
++        </tr>
++        <tr>
++            <th scope="col" colspan="2" class="border-bottom">
++                <p class="mb-1 font-8">
++                    Release:
++                    <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.releaseName}"></span>
++                </p>
++                <p class="mb-1 font-8">
++                    Country:
++                    <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.countryCode}"></span>
++                </p>
++                <p class="mb-1 font-8">
++                    Profiles:
++                    <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.profile}"></span>
++                </p>
++                <p class="mb-1 font-8">
++                    Environment:
++                    <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.environment}"></span>
++                </p>
++                <p class="mb-1 font-8">
++                    Instance:
++                    <span class="fw-lighter text-primary" th:text="${leftReport?.reportDetails?.instance}"></span>
++                </p>
++            </th>
++            <th scope="col" colspan="2" class="border-bottom">
++                <p class="mb-1 font-8">
++                    Release:
++                    <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.releaseName}"></span>
++                </p>
++                <p class="mb-1 font-8">
++                    Country:
++                    <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.countryCode}"></span>
++                </p>
++                <p class="mb-1 font-8">
++                    Profiles:
++                    <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.profile}"></span>
++                </p>
++                <p class="mb-1 font-8">
++                    Environment:
++                    <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.environment}"></span>
++                </p>
++                <p class="mb-1 font-8">
++                    Instance:
++                    <span class="fw-lighter text-primary" th:text="${rightReport?.reportDetails?.instance}"></span>
++                </p>
++            </th>
++        </tr>
++        <tr>
++            <td colspan="4" class="p-0">
++                <table id="overallDiffTable" class="diff-table font-monospace small mb-0 table table-hover table-borderless">
++                    <colgroup>
++                        <col class="col-num">
++                        <col class="col-code">
++                        <col class="col-num">
++                        <col class="col-code">
++                    </colgroup>
++                    <tbody>
++                    <tr th:if="${#lists.isEmpty(displayList)}">
++                        <td class="blob-num context-num">1</td>
++                        <td class="blob-code context-code">Data not found!</td>
++                        <td class="blob-num context-num">1</td>
++                        <td class="blob-code context-code">Data not found!</td>
++                    </tr>
++                    <tr th:each="dis,iterStat : ${displayList}"
++                        th:id="|overall-row-${iterStat.index}|"
++                        th:with="sev=${dis?.left?.alertSeverity ?: dis?.right?.alertSeverity}"
++                        th:classappend="|${dis?.left?.deltaType == 'EQUAL' ? 'overall-equal' : ''} ${sev != null ? 'cfg-alert-row cfg-row-' + sev : ''}|">
++                        <td class="blob-num context-num" th:text="${iterStat?.index + 1}"></td>
++
++                        <td th:if="${#strings.isEmpty(dis?.left?.value)}" class="empty-line"></td>
++                        <td th:unless="${#strings.isEmpty(dis?.left?.value)}"
++                            th:class="|blob-code context-code ${dis?.left?.deltaType == 'DELETE' ? 'del-code' : ''}|">
++                            <div>
++                                <span th:if="${dis?.left?.alertSeverity != null}"
++                                      th:class="|badge cfg-sev cfg-sev-${dis?.left?.alertSeverity} me-1|"
++                                      th:title="${dis?.left?.alertTitle}"
++                                      th:text="${#strings.capitalize(dis?.left?.alertSeverity)}"></span>
++                                <!--/* th:utext: DiffService#diffLines adds the red/green spans; the text itself is escaped there. */-->
++                                <span style="white-space: pre-wrap"
++                                      class="code-content"
++                                      th:attr="data-origin=${dis?.left?.origin}"
++                                      th:title="${dis?.left?.origin}"
++                                      th:utext="${dis?.left?.value?: ''} + ${!#strings.isEmpty(dis?.left?.origin) ? '<i class=&quot;ps-2 bi bi-file-earmark-code me-1&quot;></i>' : ''}"></span>
++                            </div>
++                        </td>
++
++                        <td class="blob-num context-num" th:text="${iterStat?.index + 1}"></td>
++
++                        <td th:if="${#strings.isEmpty(dis?.right?.value)}" class="empty-line"></td>
++                        <td th:unless="${#strings.isEmpty(dis?.right?.value)}"
++                            th:class="|blob-code context-code ${dis?.right?.deltaType == 'CHANGE' ? 'add-code' : ''}|">
++                            <div>
++                                <span th:if="${dis?.right?.alertSeverity != null}"
++                                      th:class="|badge cfg-sev cfg-sev-${dis?.right?.alertSeverity} me-1|"
++                                      th:title="${dis?.right?.alertTitle}"
++                                      th:text="${#strings.capitalize(dis?.right?.alertSeverity)}"></span>
++                                <!--/* th:utext: DiffService#diffLines adds the red/green spans; the text itself is escaped there. */-->
++                                <span style="white-space: pre-wrap"
++                                      class="code-content"
++                                      th:attr="data-origin=${dis?.right?.origin}"
++                                      th:title="${dis?.right?.origin}"
++                                      th:utext="${dis?.right?.value?: ''} + ${!#strings.isEmpty(dis?.right?.origin) ? '<i class=&quot;ps-2 bi bi-file-earmark-code me-1&quot;></i>' : ''}"></span>
++                            </div>
++                        </td>
++                    </tr>
++                    </tbody>
++                </table>
++            </td>
++        </tr>
++        </tbody>
++    </table>
++</div>
++</html>
+diff --git a/creed-resource/ccrg-tool-starter/src/main/resources/templates/report-html-export-index.html b/creed-resource/ccrg-tool-starter/src/main/resources/templates/report-html-export-index.html
+index a1775b40..74782cb6 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/resources/templates/report-html-export-index.html
++++ b/creed-resource/ccrg-tool-starter/src/main/resources/templates/report-html-export-index.html
+@@ -22,7 +22,23 @@
+             </nav>
+         </div>
+     </header>
+-    <main>
++    <main th:with="hasOverall=${reportPropertiesOverview?.overallPropertiesOverview != null}">
++        <!--/* Before the tabs: a critical finding must not depend on someone opening the right tab. */-->
++        <div th:if="${hasOverall and reportPropertiesOverview.openCount > 0}"
++             th:class="|alert ${reportPropertiesOverview.criticalCount > 0 ? 'alert-danger' : 'alert-warning'} d-flex flex-wrap align-items-center gap-2 py-2|"
++             role="alert">
++            <i class="bi bi-exclamation-octagon-fill"></i>
++            <span>
++                <strong th:if="${reportPropertiesOverview.criticalCount > 0}"
++                        th:text="|${reportPropertiesOverview.criticalCount} critical|"></strong>
++                <span th:if="${reportPropertiesOverview.criticalCount > 0 and reportPropertiesOverview.highCount > 0}">·</span>
++                <strong th:if="${reportPropertiesOverview.highCount > 0}"
++                        th:text="|${reportPropertiesOverview.highCount} high|"></strong>
++                configuration alert(s) in this comparison.
++            </span>
++            <button type="button" class="btn btn-sm btn-light ms-auto cfg-open-alerts">Review alerts</button>
++        </div>
++
+         <ul class="nav nav-pills">
+             <li class="nav-item">
+                 <button class="nav-link active"
+@@ -40,6 +56,17 @@
+                 </button>
+             </li>
+ 
++            <li class="nav-item" th:if="${hasOverall}">
++                <button class="nav-link"
++                        data-bs-toggle="tab"
++                        data-bs-target="#divAlerts">
++                    Alerts
++                    <span th:if="${reportPropertiesOverview.openCount > 0}"
++                          th:class="|badge rounded-pill ms-1 ${reportPropertiesOverview.criticalCount > 0 ? 'text-bg-danger' : 'text-bg-warning'}|"
++                          th:text="${reportPropertiesOverview.openCount}"></span>
++                </button>
++            </li>
++
+             <!--/* Only when the generator supplied it: PdfController renders this page without one. */-->
+             <li class="nav-item" th:if="${reportPropertiesOverview?.overallPropertiesOverview != null}">
+                 <button class="nav-link"
+@@ -59,6 +86,10 @@
+                 <div th:replace="~{${matchingFragmentTemplate} :: ${matchingFragmentName}}"></div>
+             </div>
+ 
++            <div class="tab-pane fade" id="divAlerts" th:if="${hasOverall}">
++                <div th:replace="~{${alertsFragmentTemplate} :: ${alertsFragmentName}}"></div>
++            </div>
++
+             <!--/* th:if on the wrapper, not on the th:replace element: fragment inclusion runs before th:if. */-->
+             <div class="tab-pane fade" id="div3" th:if="${reportPropertiesOverview?.overallPropertiesOverview != null}">
+                 <div th:replace="~{${overallFragmentTemplate} :: ${overallFragmentName}}"></div>
+@@ -79,22 +110,6 @@
+ </div>
+ 
+ <script th:utext="${bootstrapJs}">/* bootstrap js inlined here */</script>
+-<script>
+-    // Show a popover with the file path + line number when hovering a code line.
+-    document.querySelectorAll('.code-content[data-bs-toggle="popover"]')
+-        .forEach(el => {
+-            const pop = new bootstrap.Popover(el, {
+-                container: 'body',
+-                customClass: 'my-popover-width'
+-            });
+-
+-            el.addEventListener('click', () => {
+-                setTimeout(() => {
+-                    pop.hide();
+-                }, 20000);
+-            });
+-        });
+-
+-</script>
++<script th:replace="~{fragments/origin-popover-script :: originPopover}"></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/creed-resource/ccrg-tool-starter/src/main/resources/templates/report-html-index.html b/creed-resource/ccrg-tool-starter/src/main/resources/templates/report-html-index.html
+index 14a57368..f5f5e905 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/resources/templates/report-html-index.html
++++ b/creed-resource/ccrg-tool-starter/src/main/resources/templates/report-html-index.html
+@@ -61,22 +61,6 @@
+ </div>
+ 
+ <script th:src="@{/webjars/bootstrap/js/bootstrap.bundle.min.js}"></script>
+-<script>
+-    // Show a popover with the file path + line number when hovering a code line.
+-    document.querySelectorAll('.code-content[data-bs-toggle="popover"]')
+-        .forEach(el => {
+-        const pop = new bootstrap.Popover(el, {
+-            container: 'body',
+-            customClass: 'my-popover-width'
+-        });
+-
+-        el.addEventListener('click', () => {
+-            setTimeout(() => {
+-                pop.hide();
+-            }, 20000);
+-        });
+-    });
+-
+-</script>
++<script th:replace="~{fragments/origin-popover-script :: originPopover}"></script>
+ </body>
+ </html>
+\ No newline at end of file
+diff --git a/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/EffectiveYamlServiceTest.java b/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/EffectiveYamlServiceTest.java
+new file mode 100644
+index 00000000..47932522
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/EffectiveYamlServiceTest.java
+@@ -0,0 +1,117 @@
++package com.creed.parent.service;
++
++import com.creed.parent.controller.prompt.vo.EffectiveYamlVo;
++import com.creed.parent.controller.vo.EnvironmentConfigurationVo;
++import com.creed.parent.controller.vo.PropertiesVo;
++import com.creed.parent.controller.vo.RouteInfoVo;
++import com.creed.parent.definition.RouteDefinition;
++import com.creed.parent.exception.ServiceException;
++import org.junit.jupiter.api.Test;
++import org.springframework.test.util.ReflectionTestUtils;
++
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.ArgumentMatchers.anyInt;
++import static org.mockito.ArgumentMatchers.anyString;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++class EffectiveYamlServiceTest {
++
++    private final EnvironmentInspectionService inspection = mock(EnvironmentInspectionService.class);
++    private final EffectiveYamlService service = new EffectiveYamlService();
++
++    EffectiveYamlServiceTest() {
++        ReflectionTestUtils.setField(service, "environmentInspectionService", inspection);
++    }
++
++    private static RouteInfoVo route(String instance) {
++        RouteInfoVo r = new RouteInfoVo();
++        r.setProjectName("idbproxy");
++        r.setReleaseName("R1");
++        r.setCountryCode("SG");
++        r.setApp("ccs");
++        r.setEnvironment("UAT");
++        r.setInstance(instance);
++        return r;
++    }
++
++    private static EnvironmentConfigurationVo config(String profile, Map<String, String> props) {
++        List<PropertiesVo> list = new ArrayList<>();
++        props.forEach((k, v) -> {
++            PropertiesVo p = new PropertiesVo();
++            p.setPropertyName(k);
++            p.setPropertyValue(v);
++            p.setSourceName("Config resource 'file [/repo/application.yml]'");
++            list.add(p);
++        });
++        return new EnvironmentConfigurationVo(profile, list);
++    }
++
++    private void answer(Map<String, EnvironmentConfigurationVo> byInstance) {
++        when(inspection.getAllProperties(anyString(), any(RouteDefinition.class), anyInt()))
++                .thenAnswer(inv -> byInstance.get(inv.getArgument(1, RouteDefinition.class).getInstance()));
++    }
++
++    @Test
++    void laterSourceWinsAndEveryDisagreementIsReported() {
++        Map<String, String> one = new LinkedHashMap<>();
++        one.put("server.port", "8080");
++        one.put("only.first", "a");
++        one.put("same.everywhere", "x");
++        one.put("db.url", "jdbc:one");
++        Map<String, String> two = new LinkedHashMap<>();
++        two.put("server.port", "9090");
++        two.put("same.everywhere", "x");
++        two.put("only.second", "${MISSING}");
++        Map<String, String> three = new LinkedHashMap<>();
++        three.put("db.url", "jdbc:three");
++        answer(Map.of("UAT1", config("uat", one), "UAT2", config("uat,ext", two), "UAT3", config("dr", three)));
++
++        EffectiveYamlVo vo = service.generate(List.of(route("UAT1"), route("UAT2"), route("UAT3")));
++
++        assertThat(vo.propertyCount()).isEqualTo(5);
++        assertThat(vo.yaml())
++                .contains("port: 9090").doesNotContain("port: 8080")
++                .contains("url: jdbc:three")
++                .contains("first: a")
++                .contains("# merged from 3 sources")
++                .contains("# [2] idbproxy/R1 · SG · ccs · UAT · UAT2 (spring.profiles.active: uat,ext, 3 properties)")
++                .contains("2 overridden with a different value");
++        assertThat(vo.conflicts()).containsExactly(
++                new EffectiveYamlVo.Conflict("db.url", 3, Arrays.asList("jdbc:one", null, "jdbc:three")),
++                new EffectiveYamlVo.Conflict("server.port", 2, Arrays.asList("8080", "9090", null)));
++        assertThat(vo.unresolved()).containsExactly("only.second");
++        assertThat(vo.activeProfiles()).isEqualTo("uat | uat,ext | dr");
++        assertThat(vo.sources()).extracting(EffectiveYamlVo.Source::propertyCount).containsExactly(4, 3, 1);
++        assertThat(vo.fileName()).isEqualTo("merged-idbproxy-R1-SG-ccs-UAT-UAT1-and-2-more.yml");
++    }
++
++    @Test
++    void singleSourceKeepsTheOldShape() {
++        answer(Map.of("UAT1", config("uat", Map.of("a.b", "1"))));
++        EffectiveYamlVo vo = service.generate(route("UAT1"));
++        assertThat(vo.fileName()).isEqualTo("idbproxy-R1-SG-ccs-UAT-UAT1.yml");
++        assertThat(vo.conflicts()).isEmpty();
++        assertThat(vo.yaml()).contains("# source: idbproxy/R1").doesNotContain("merged");
++    }
++
++    @Test
++    void anIncompleteSourceIsRejectedBeforeAnythingLoads() {
++        RouteInfoVo broken = route("UAT2");
++        broken.setApp(null);
++        assertThatThrownBy(() -> service.generate(List.of(route("UAT1"), broken)))
++                .isInstanceOf(ServiceException.class)
++                .hasMessageContaining("source 2 missing: app");
++        verify(inspection, never()).getAllProperties(anyString(), any(), anyInt());
++    }
++}
+diff --git a/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/ConfigAlertServiceTest.java b/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/ConfigAlertServiceTest.java
+new file mode 100644
+index 00000000..b25b61d7
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/ConfigAlertServiceTest.java
+@@ -0,0 +1,120 @@
++package com.creed.parent.service.report;
++
++import com.creed.parent.model.ReportDetails;
++import com.creed.parent.service.report.alert.ConfigAlert;
++import com.creed.parent.service.report.alert.ConfigAlertProperties;
++import com.creed.parent.service.report.alert.ConfigAlertRule;
++import com.creed.parent.service.report.alert.ConfigAlertService;
++import com.creed.parent.service.report.alert.ConfigAlertSeverity;
++import org.junit.jupiter.api.Test;
++
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++class ConfigAlertServiceTest {
++
++    private final ConfigAlertProperties props = new ConfigAlertProperties();
++    private final ConfigAlertService service = new ConfigAlertService(props);
++
++    private static ReportDetails env(String env, String instance) {
++        ReportDetails d = new ReportDetails();
++        d.setEnvironment(env);
++        d.setInstance(instance);
++        return d;
++    }
++
++    private List<ConfigAlert> run(Map<String, String> left, Map<String, String> right) {
++        return service.evaluate(left, right, env("PROD", "PROD1"), env("PROD", "PROD1"));
++    }
++
++    private static ConfigAlert only(List<ConfigAlert> alerts, ConfigAlertRule rule) {
++        List<ConfigAlert> found = alerts.stream().filter(a -> a.getRule() == rule).toList();
++        assertThat(found).hasSize(1);
++        return found.get(0);
++    }
++
++    @Test
++    void prodPointingAtUatIsCriticalButProductIsNotProd() {
++        List<ConfigAlert> alerts = run(
++                Map.of("spring.datasource.url", "jdbc:postgresql://pgdb-prod.sg.internal:5432/idb",
++                        "catalog.product.base-url", "https://product-api.sg.internal",
++                        "app.name", "uat-like-name"),
++                Map.of("spring.datasource.url", "jdbc:postgresql://pgdb-uat1.sg.internal:5432/idb",
++                        "catalog.product.base-url", "https://product-api.sg.internal",
++                        "app.name", "uat-like-name"));
++
++        ConfigAlert foreign = only(alerts, ConfigAlertRule.FOREIGN_ENVIRONMENT);
++        assertThat(foreign.getKey()).isEqualTo("spring.datasource.url");
++        assertThat(foreign.getSeverity()).isEqualTo(ConfigAlertSeverity.CRITICAL);
++        assertThat(foreign.getSide()).isEqualTo("comparison");
++        assertThat(foreign.getReason()).contains("PROD").contains("\"uat1\"");
++        // app.name is not an address; "product" is not "prod"; and the datasource is also watched
++        assertThat(alerts).extracting(ConfigAlert::getKey).doesNotContain("app.name", "catalog.product.base-url");
++        assertThat(only(alerts, ConfigAlertRule.WATCHED_KEY_CHANGED).getKey()).isEqualTo("spring.datasource.url");
++        assertThat(alerts.get(0).getSeverity()).isEqualTo(ConfigAlertSeverity.CRITICAL);
++    }
++
++    @Test
++    void unknownEnvironmentSkipsTheEnvironmentCheck() {
++        List<ConfigAlert> alerts = service.evaluate(Map.of("a.url", "http://x-uat.internal"), Map.of("a.url", "http://x-uat.internal"),
++                env("LAB", null), env(null, null));
++        assertThat(alerts).isEmpty();
++    }
++
++    @Test
++    void plainSecretIsCriticalAndMaskedEncryptedOrPlaceholderIsFine() {
++        Map<String, String> left = new HashMap<>(Map.of(
++                "spring.datasource.password", "{cipher}AQB3f9a",
++                "jwt.token-validity-seconds", "3600",
++                "oauth.token-url", "https://auth.prod.internal/token",
++                "client.secret", "ENC(abc)",
++                "api.key-store.password", "${KEYSTORE_PASSWORD}"));
++        Map<String, String> right = new HashMap<>(left);
++        right.put("spring.datasource.password", "Prod#2026!");
++
++        List<ConfigAlert> alerts = run(left, right);
++        ConfigAlert secret = only(alerts, ConfigAlertRule.PLAIN_SECRET);
++        assertThat(secret.getKey()).isEqualTo("spring.datasource.password");
++        assertThat(secret.getSide()).isEqualTo("comparison");
++        assertThat(secret.getLeftValue()).isEqualTo("{cipher}…");
++        assertThat(secret.getRightValue()).doesNotContain("Prod#2026!").contains("10 chars");
++        // the watched-key alert for the same key must not leak the value either
++        assertThat(only(alerts, ConfigAlertRule.WATCHED_KEY_CHANGED).getRightValue()).doesNotContain("Prod#2026!");
++    }
++
++    @Test
++    void watchedKeyMissingOnOneSideAndUnwatchedChangeIsIgnored() {
++        List<ConfigAlert> alerts = run(
++                Map.of("notification.smtp.host", "smtp.sg.internal", "logging.level.root", "INFO", "cache.ttl", "600"),
++                Map.of("logging.level.root", "DEBUG", "cache.ttl", "60"));
++
++        assertThat(alerts).extracting(ConfigAlert::getKey).containsExactly("logging.level.root", "notification.smtp.host");
++        ConfigAlert missing = alerts.get(1);
++        assertThat(missing.getRightValue()).isNull();
++        assertThat(missing.getReason()).contains("Not set in the comparison");
++        assertThat(missing.getSeverity()).isEqualTo(ConfigAlertSeverity.HIGH);
++    }
++
++    @Test
++    void acceptedRuleKeepsTheAlertButStopsCountingIt() {
++        ConfigAlertProperties.AcceptRule accept = new ConfigAlertProperties.AcceptRule();
++        accept.setKey("logging.level.*");
++        accept.setReason("Debug window for incident 4711");
++        props.setAccepted(List.of(accept));
++
++        List<ConfigAlert> alerts = run(Map.of("logging.level.root", "INFO"), Map.of("logging.level.root", "DEBUG"));
++        assertThat(alerts).singleElement().satisfies(a -> {
++            assertThat(a.getSeverity()).isEqualTo(ConfigAlertSeverity.ACCEPTED);
++            assertThat(a.getAcceptedReason()).isEqualTo("Debug window for incident 4711");
++        });
++    }
++
++    @Test
++    void disabledReturnsNothing() {
++        props.setEnabled(false);
++        assertThat(run(Map.of("a.password", "x"), Map.of())).isEmpty();
++    }
++}
+diff --git a/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/HtmlReportAlertsRenderTest.java b/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/HtmlReportAlertsRenderTest.java
+new file mode 100644
+index 00000000..c4aed779
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/HtmlReportAlertsRenderTest.java
+@@ -0,0 +1,137 @@
++package com.creed.parent.service.report;
++
++import com.creed.parent.constant.ReportTypeEnum;
++import com.creed.parent.controller.vo.EnvironmentConfigurationVo;
++import com.creed.parent.controller.vo.PropertiesVo;
++import com.creed.parent.definition.RouteDefinition;
++import com.creed.parent.service.DiffService;
++import com.creed.parent.service.report.alert.ConfigAlertProperties;
++import com.creed.parent.service.report.alert.ConfigAlertService;
++import com.creed.parent.service.report.impl.HTMLReportGeneratorImpl;
++import org.junit.jupiter.api.Test;
++import org.springframework.test.util.ReflectionTestUtils;
++import org.thymeleaf.spring6.SpringTemplateEngine;
++import org.thymeleaf.templatemode.TemplateMode;
++import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
++
++import java.io.ByteArrayOutputStream;
++import java.nio.charset.StandardCharsets;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.util.ArrayList;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Locale;
++import java.util.Map;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++/**
++ * Renders the real report-html-export-index page (all fragments, inlined assets) from two in-memory
++ * sources and checks the Alerts tab and the Overall Comparison badges. The page is also written to
++ * {@code target/ccrg-alerts-report.html} to look at.
++ */
++class HtmlReportAlertsRenderTest {
++
++    private static final String SECRET = "Prod#2026!";
++
++    private static EnvironmentConfigurationVo source(int source, String release, Map<String, String> props, Map<String, String> files) {
++        List<PropertiesVo> list = new ArrayList<>();
++        props.forEach((k, v) -> {
++            PropertiesVo p = new PropertiesVo();
++            p.setPropertyName(k);
++            p.setPropertyValue(v);
++            p.setOrigin("URL [file:/opt/ccrg/repo/idbproxy/" + release + "/SG/ccs/"
++                    + files.getOrDefault(k, "application-PROD.yml") + "] - " + (list.size() + 3) + ":5");
++            p.setSource(source);
++            p.setActive(true);
++            list.add(p);
++        });
++        RouteDefinition route = new RouteDefinition();
++        route.setReleaseName(release);
++        route.setCountryCode("SG");
++        route.setEnvironment("PROD");
++        route.setInstance("PROD1");
++        EnvironmentConfigurationVo vo = new EnvironmentConfigurationVo("PROD", list);
++        vo.setSource(source);
++        vo.setRouteDefinition(route);
++        return vo;
++    }
++
++    @Test
++    void reportShowsAlertsTabBannerAndRowBadges() throws Exception {
++        Map<String, String> r1 = new LinkedHashMap<>();
++        r1.put("app.name", "idbproxy");
++        r1.put("app.version", "1.4.0");
++        r1.put("cache.ttl", "600");
++        r1.put("feature.new-checkout.enabled", "false");
++        r1.put("logging.level.root", "INFO");
++        r1.put("notification.smtp.host", "smtp.sg.internal");
++        r1.put("payment.api.base-url", "https://pay.sg.internal/api");
++        r1.put("server.port", "8443");
++        r1.put("server.ssl.enabled", "true");
++        r1.put("spring.datasource.hikari.maximum-pool-size", "50");
++        r1.put("spring.datasource.password", "{cipher}AQB3f9a7c1d2e3");
++        r1.put("spring.datasource.url", "jdbc:postgresql://pgdb-prod.sg.internal:5432/idb");
++        r1.put("spring.datasource.username", "idb_app");
++        r1.put("upstream.timeout-ms", "3000");
++
++        Map<String, String> r2 = new LinkedHashMap<>(r1);
++        r2.put("app.version", "1.5.0");
++        r2.put("feature.new-checkout.enabled", "true");
++        r2.put("logging.level.root", "DEBUG");
++        r2.remove("notification.smtp.host");
++        r2.put("payment.api.base-url", "http://pay.sg.internal/api");
++        r2.put("server.ssl.enabled", "false");
++        r2.put("spring.datasource.hikari.maximum-pool-size", "5");
++        r2.put("spring.datasource.password", SECRET);
++        r2.put("spring.datasource.url", "jdbc:postgresql://pgdb-uat1.sg.internal:5432/idb");
++        r2.put("upstream.gateway.url", "https://gw.sit2.sg.internal");
++
++        ConfigAlertProperties alertProps = new ConfigAlertProperties();
++        ConfigAlertProperties.AcceptRule accept = new ConfigAlertProperties.AcceptRule();
++        accept.setKey("server.ssl.*");
++        accept.setReason("TLS terminates at the load balancer from R2 (CHG-1182)");
++        alertProps.setAccepted(List.of(accept));
++
++        HTMLReportGeneratorImpl generator = new HTMLReportGeneratorImpl();
++        ReflectionTestUtils.setField(generator, "templateEngine", templateEngine());
++        ReflectionTestUtils.setField(generator, "diffService", new DiffService());
++        ReflectionTestUtils.setField(generator, "applicationEventPublisher", (org.springframework.context.ApplicationEventPublisher) e -> { });
++        AssetService assets = new AssetService();
++        ReflectionTestUtils.invokeMethod(assets, "load");
++        ReflectionTestUtils.setField(generator, "assetService", assets);
++        ReflectionTestUtils.setField(generator, "configAlertService", new ConfigAlertService(alertProps));
++
++        ReportMetadataInfo metadata = new ReportMetadataInfo();
++        metadata.setConnectionId("test");
++        ByteArrayOutputStream out = new ByteArrayOutputStream();
++        generator.generateReport(List.of(source(1, "R1", r1, Map.of()), source(2, "R2", r2, Map.of())),
++                ReportTypeEnum.HTML, Locale.ENGLISH, metadata, out);
++        String html = out.toString(StandardCharsets.UTF_8);
++        Files.writeString(Path.of("target", "ccrg-alerts-report.html"), html);
++
++        assertThat(html).contains("data-bs-target=\"#divAlerts\"", "id=\"divAlerts\"", "Review alerts");
++        assertThat(html).contains("Another environment&#39;s address", "Unencrypted secret", "Watched key changed");
++        // the datasource url row and the gateway url row carry a critical badge in the Overall tab
++        assertThat(html).contains("cfg-alert-row cfg-row-critical");
++        assertThat(html).contains("data-row=\"");
++        assertThat(html).contains("Accepted: TLS terminates at the load balancer");
++        // the plain password is masked in the Alerts tab: its only occurrences are the diff lines
++        String alertsTab = html.substring(html.indexOf("id=\"divAlerts\""), html.indexOf("id=\"div3\""));
++        assertThat(alertsTab).doesNotContain(SECRET).contains("10 chars, plain text");
++        // old eager popover attributes are gone from the overall fragment
++        assertThat(html).doesNotContain("data-bs-trigger=\"click hover focus\"");
++    }
++
++    private static SpringTemplateEngine templateEngine() {
++        ClassLoaderTemplateResolver resolver = new ClassLoaderTemplateResolver();
++        resolver.setPrefix("templates/");
++        resolver.setSuffix(".html");
++        resolver.setTemplateMode(TemplateMode.HTML);
++        resolver.setCharacterEncoding("UTF-8");
++        SpringTemplateEngine engine = new SpringTemplateEngine();
++        engine.setTemplateResolver(resolver);
++        return engine;
++    }
++}
+diff --git a/creed-resource/scripts/conf/pdf/css/style.css b/creed-resource/scripts/conf/pdf/css/style.css
+index e69de29b..88950308 100644
+--- a/creed-resource/scripts/conf/pdf/css/style.css
++++ b/creed-resource/scripts/conf/pdf/css/style.css
+@@ -0,0 +1,28 @@
++
++
++/* Origin of a property line (fragments/origin-popover-script.html): hover = native tooltip, click = pinned popover. */
++.code-content[data-origin]:not([data-origin=""]) { cursor: pointer; }
++.code-content[data-origin]:not([data-origin=""]):hover { text-decoration: underline dotted; }
++.code-content.origin-open { outline: 2px solid var(--bs-primary); outline-offset: 1px; border-radius: 2px; }
++.origin-popover { --bs-popover-max-width: min(720px, 90vw); }
++.origin-popover .origin-text { font-size: .8125rem; user-select: all; }
++
++/* Configuration alerts (fragments/alerts-html-fragment.html, Overall Comparison badges). */
++.cfg-sev-critical { --cfg-c: var(--bs-danger-text-emphasis); --cfg-bg: var(--bs-danger-bg-subtle); --cfg-b: var(--bs-danger); }
++.cfg-sev-high { --cfg-c: var(--bs-warning-text-emphasis); --cfg-bg: var(--bs-warning-bg-subtle); --cfg-b: var(--bs-warning); }
++.cfg-sev-accepted { --cfg-c: var(--bs-success-text-emphasis); --cfg-bg: var(--bs-success-bg-subtle); --cfg-b: var(--bs-success); }
++.badge.cfg-sev { color: var(--cfg-c); background: var(--cfg-bg); border: 1px solid var(--cfg-b); font-weight: 600; }
++.cfg-stat { min-width: 110px; padding: .5rem .75rem; border: 1px solid var(--bs-border-color); border-left: 4px solid var(--cfg-b); border-radius: .375rem; }
++.cfg-stat b { display: block; font-size: 1.5rem; line-height: 1.2; color: var(--cfg-c); font-variant-numeric: tabular-nums; }
++.cfg-stat span { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--bs-secondary-color); }
++.cfg-alert-list { display: flex; flex-direction: column; gap: .5rem; }
++.cfg-alert { padding: .625rem .75rem; border: 1px solid var(--bs-border-color); border-left: 4px solid var(--cfg-b); border-radius: .375rem; }
++.cfg-alert.cfg-sev-accepted { opacity: .75; }
++.cfg-values { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0 .75rem; margin-top: .25rem; }
++.cfg-values dt { font-weight: 400; color: var(--bs-secondary-color); }
++.cfg-values dd { margin: 0; word-break: break-all; }
++tr.cfg-row-critical > td.blob-num { box-shadow: inset 3px 0 0 var(--bs-danger); }
++tr.cfg-row-high > td.blob-num { box-shadow: inset 3px 0 0 var(--bs-warning); }
++tr.cfg-flash > td { animation: cfg-flash 1.6s ease-out; }
++@keyframes cfg-flash { from { background-color: var(--bs-primary-bg-subtle); } }
++@media (prefers-reduced-motion: reduce) { tr.cfg-flash > td { animation: none; outline: 2px solid var(--bs-primary); } }
+-- 
+2.50.1
+

@@ -575,19 +575,27 @@ Camel XML 路由在所有路由文件中按 route id 逐步比较（from、to、
 `/api/admin`、`/api/prompt`、`/api/system/...` 否则会被兜底的 `/api` 规则发往 env-matrix。所有响应都是
 `R<T>` 信封 `{code, data, msg}`，成功为 `code = 0`。
 
+这个前缀本身由 `.env` 的 `VITE_CCRG_API_BASE` 配置（默认 `/api/ccrg`）：`src/api/ccrg.ts` 用它发请求，开发代理
+注册同一个前缀并改写为 `/api`，所以只需改 `.env`，两边一起变（改后重启 `npm run dev`，Vite 启动时读取 `.env`）。
+部署时该值在 `npm run build` 时写入产物，部署环境需要把这个前缀转发到 ccrg-tool-starter。
+
 | 页面 | 路由 | 功能 |
 |---|---|---|
 | 拉取配置 | `/ccrg/install` | 已安装的 release，每个项目一棵树；从 Artifactory 按 项目 → release → 构建号 安装；卸载单行、整个项目或所选 |
 | 生成报告 | `/ccrg/report` | 比较同一项目 / 国家 / 应用的两个 release，以 xlsx 或 HTML 发布到 Confluence（SSE 进度）；列出、打开、删除已生成页面 |
 | 批量导出 | `/ccrg/batch` | 多个组合，每个组合两个来源，**同一**项目 → 下载一份 xlsx / HTML |
 | 跨项目比较 | `/ccrg/crossover` | 同一表单，每个来源**各自**选择项目 |
+| 生成 YAML | `/ccrg/yaml` | 一个或多个来源（与批量导出的来源结构相同，也可从其复制）→ 各自生效的配置按从上到下的顺序合并成一个 `.yml`：多个来源设置同一个 key 时取列表中最靠下的来源的值，所有取值不同的 key 都会列出；页面显示并可下载（`POST /api/prompt/generate-yaml/merge`；单个来源：`/generate-yaml`） |
 | 快捷跳转 | `/ccrg/shortcut` | 项目 → 分支 → release → Artifactory 构建；GO 复制名称并打开该构建 |
 | 安全管理 | `/ccrg/secure` | 用十六进制对称密钥解密一个值 |
 | 字典管理 | `/ccrg/dict` | 级联下拉所遍历的配置目录树：增删改、复制、JSON 导出 / 导入、导出 `data.sql` |
 
 - **批量导出与跨项目比较**是同一个组件（`pages/Ccrg/Comparison`，`mode` 区分），差异写在 `model.ts`。
   同一组合内，两个来源处于同一 release 时选择的国家 / 应用会复制到另一个来源并锁定。
-- 「保存配置」按页面分别存 `localStorage`（`ccrg.batch`、`ccrg.crossover`、`ccrg.prompt`、`ccrg.shortcut`）。
+- **生成 YAML** 输出*生效*视图：每个键一个值（优先级最高的属性源胜出），占位符已解析，键排序。经 `classpath:` 位置加载的
+  属性源被排除 —— 那是 ccrg-tool 自己的 classpath，不是被检查的应用的。仍含未解析 `${...}` 的属性列在文本上方。
+  生成的 `.yml` 由 Spring 加载回来与原属性完全一致（`PropertySourcesTranslateUtilTest`）。
+- 「保存配置」按页面分别存 `localStorage`（`ccrg.batch`、`ccrg.crossover`、`ccrg.prompt`、`ccrg.shortcut`、`ccrg.yaml`）。
   旧页面中批量导出和跨项目比较共用一个键，互相覆盖。
 - 「从模板创建」即表单的 JSON —— 复制出来分享，粘贴进去替换。
 - 与旧 UI 一致：「合并 Confluence 页面」仍不可用。改为可用：「重新加载 Release 目录」（旧版无动作）、拉取配置的搜索
