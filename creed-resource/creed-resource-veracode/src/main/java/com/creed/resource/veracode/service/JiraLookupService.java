@@ -17,10 +17,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -28,8 +31,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -68,8 +73,24 @@ public class JiraLookupService {
     static final String JIRA = "Jira";
     private static final String FIELDS = "summary,status,versions,labels,priority,assignee,project";
     private static final Pattern CVE_PARTS = Pattern.compile("CVE-(\\d{4})-(\\d+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
+    /** Jira limits a summary to 255 characters. */
+    private static final int SUMMARY_MAX = 255;
 
-    private final JiraClient jira;
+    // create request field names
+    private static final String PROJECT = "project";
+    private static final String ISSUE_TYPE = "issuetype";
+    private static final String SUMMARY = "summary";
+    private static final String DESCRIPTION = "description";
+    private static final String LABELS = "labels";
+    private static final String NAME = "name";
+    private static final String KEY = "key";
+
+    /** The fields every create request carries by itself; anything else required comes from the page. */
+    private static final Set<String> FILLED = Set.of(PROJECT, ISSUE_TYPE, SUMMARY, DESCRIPTION, JiraFieldMeta.VERSIONS,
+            LABELS);
+
+    private final JiraClient jiraClient;
     private final JiraProperties props;
     private final ApplicationAliases apps;
     /**
@@ -79,13 +100,15 @@ public class JiraLookupService {
      */
     private final Cache<String, List<?>> metaCache;
 
-    /** @param assignee display name; {@code null} = unassigned */
-    /** @param labels the issue's labels - an application's label missing from them is added, not a second issue */
+    /**
+     * @param assignee display name; {@code null} = unassigned
+     * @param labels   the issue's labels - an application's label missing from them is added, not a second issue
+     */
     public record IssueRef(String key, String summary, String status, String priority, String assignee,
                            List<String> versions, List<String> labels, String url) {
 
         public boolean hasLabel(String label) {
-            return label == null || labels != null && labels.stream().anyMatch(label::equalsIgnoreCase);
+            return label == null || (labels != null && labels.stream().anyMatch(label::equalsIgnoreCase));
         }
 
         IssueRef withLabels(List<String> added) {
@@ -182,10 +205,6 @@ public class JiraLookupService {
         return new Target(props.sastProjectKey(), props.sastIssueType(), props.sast().defaults());
     }
 
-    /** The fields every create request carries by itself; anything else required comes from the page. */
-    private static final Set<String> FILLED = Set.of("project", "issuetype", "summary", "description",
-            JiraFieldMeta.VERSIONS, "labels");
-
     public Connection connection(JiraToken token) {
         token.require();
         // "test connection" is how a user says "I changed something in Jira": what this token had cached goes, and what
@@ -204,11 +223,9 @@ public class JiraLookupService {
                 screens.put(type.id(), fieldsOf(token, project, type));
             }
         } catch (UpstreamException e) {
-            Problem problem = e.status() == 0 ? Problem.UNREACHABLE
-                    : e.status() == 401 ? Problem.TOKEN_REJECTED : Problem.PROJECT;
-            return new Connection(false, props.baseUrl(), project, wanted, problem != Problem.UNREACHABLE
-                    && problem != Problem.TOKEN_REJECTED, false, false, 0, List.of(), List.of(), List.of(), List.of(), List.of(), problem, e.status(),
-                    e.getMessage());
+            Problem problem = problemOf(e.status());
+            return new Connection(false, props.baseUrl(), project, wanted, problem == Problem.PROJECT, false, false, 0,
+                    List.of(), List.of(), List.of(), List.of(), List.of(), problem, e.status(), e.getMessage());
         }
         List<IssueTypeOption> options = types.stream().map(t -> {
             JiraFieldMeta versions = versionsField(screens.get(t.id()));
@@ -244,6 +261,15 @@ public class JiraLookupService {
                 options, null, 200, message);
     }
 
+    /** A failed create-metadata read: no answer, the token refused, else the project refused. */
+    private static Problem problemOf(int status) {
+        return switch (status) {
+            case 0 -> Problem.UNREACHABLE;
+            case 401 -> Problem.TOKEN_REJECTED;
+            default -> Problem.PROJECT;
+        };
+    }
+
     /** {@code sast.defaults.affects-versions} the SAST issue type has: the page's SAST version preselection. */
     public List<String> sastDefaultVersions(CreateMeta meta) {
         return defaultVersions(meta, props.sast().defaults());
@@ -257,7 +283,7 @@ public class JiraLookupService {
     private static List<String> defaultVersions(CreateMeta meta, JiraProperties.CreateDefaults defaults) {
         return defaults.affectsVersions().stream()
                 .map(v -> v == null ? null : meta.versions().get(v.trim().toLowerCase(Locale.ROOT)))
-                .filter(java.util.Objects::nonNull).distinct().toList();
+                .filter(Objects::nonNull).distinct().toList();
     }
 
     /**
@@ -311,15 +337,15 @@ public class JiraLookupService {
      * <p>Never call it from inside another {@code cached} read: Caffeine refuses a load that loads the same cache.
      */
     @SuppressWarnings("unchecked")
-    private <T> List<T> cached(String key, java.util.function.Supplier<List<T>> read) {
+    private <T> List<T> cached(String key, Supplier<List<T>> read) {
         return (List<T>) metaCache.get(key, k -> read.get());
     }
 
     private static String fingerprint(JiraToken token) {
         try {
-            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(token.authorization().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException e) {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(token.authorization().getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
     }
@@ -328,7 +354,7 @@ public class JiraLookupService {
                             JiraProperties.CreateDefaults defaults) {
         List<CreateField> asked = fields.stream()
                 .filter(f -> JiraFieldMeta.COMPONENTS.equals(f.fieldId())
-                        || f.required() && !f.hasDefaultValue() && !FILLED.contains(f.fieldId()))
+                        || (f.required() && !f.hasDefaultValue() && !FILLED.contains(f.fieldId())))
                 .map(CreateField::of)
                 .map(f -> f.withConfigured(defaults.of(f.fieldId(), f.name())))
                 .toList();
@@ -349,13 +375,13 @@ public class JiraLookupService {
     /** Sub-task types are left out: they cannot be created without a parent. */
     private List<JiraIssueType> creatableTypes(JiraToken token, String projectKey) {
         return cached(fingerprint(token) + "|types|" + projectKey.toLowerCase(Locale.ROOT), () ->
-                pages(from -> jira.createIssueTypes(token.authorization(), projectKey, from, props.pageSize()))
+                pages(from -> jiraClient.createIssueTypes(token.authorization(), projectKey, from, props.pageSize()))
                         .stream().filter(t -> !Boolean.TRUE.equals(t.subtask())).toList());
     }
 
     private List<JiraFieldMeta> fieldsOf(JiraToken token, String projectKey, JiraIssueType type) {
         return cached(fingerprint(token) + "|fields|" + projectKey.toLowerCase(Locale.ROOT) + "|" + type.id(), () ->
-                pages(from -> jira.createFields(token.authorization(), projectKey, type.id(), from, props.pageSize())));
+                pages(from -> jiraClient.createFields(token.authorization(), projectKey, type.id(), from, props.pageSize())));
     }
 
     private static JiraFieldMeta versionsField(List<JiraFieldMeta> fields) {
@@ -389,15 +415,7 @@ public class JiraLookupService {
      */
     public Map<String, Object> resolveFields(CreateMeta meta, Map<String, Object> values) {
         Map<String, Object> given = values == null ? Map.of() : values;
-        Set<String> known = new HashSet<>();
-        meta.fields().forEach(f -> known.add(f.fieldId()));
-        for (String key : given.keySet()) {
-            // the Jira version to file under: read by createVersion, the create request sets it itself
-            if (!known.contains(key) && !JiraFieldMeta.VERSIONS.equals(key)) {
-                throw new IllegalArgumentException("field '" + key + "' is not one the page fills for " + meta.issueType()
-                        + " (fields: " + String.join(", ", known) + ")");
-            }
-        }
+        requireKnown(meta, given.keySet());
         Map<String, Object> jiraFields = new LinkedHashMap<>();
         List<String> missing = new ArrayList<>();
         for (CreateField f : meta.fields()) {
@@ -406,34 +424,54 @@ public class JiraLookupService {
                 if (f.required()) {
                     missing.add(f.name());
                 }
-                continue;
+            } else {
+                jiraFields.put(f.fieldId(), json(f, chosen, meta.cloud()));
             }
-            if (!f.multiple() && chosen.size() > 1) {
-                throw new IllegalArgumentException(f.name() + " takes one value, got " + chosen);
-            }
-            List<Object> json = new ArrayList<>();
-            for (String value : chosen) {
-                json.add(switch (f.kind()) {
-                    case OPTIONS -> {
-                        CreateField.Option option = f.option(value);
-                        if (option == null) {
-                            throw new IllegalArgumentException(f.name() + " has no value '" + value + "' (has: "
-                                    + String.join(", ", f.options().stream().map(CreateField.Option::label).toList()) + ")");
-                        }
-                        yield Map.of("id", option.id());
-                    }
-                    // Cloud has no user names in its API, only account ids
-                    case USER -> Map.of(meta.cloud() ? "accountId" : "name", value);
-                    case NUMBER -> number(f, value);
-                    case TEXT -> value;
-                });
-            }
-            jiraFields.put(f.fieldId(), f.multiple() ? json : json.getFirst());
         }
         if (!missing.isEmpty()) {
             throw new FieldsRequiredException(meta.projectKey(), meta.issueType(), missing);
         }
         return jiraFields;
+    }
+
+    /** Every key is a field the page fills, or the Jira version to file under (read by createVersion). */
+    private static void requireKnown(CreateMeta meta, Set<String> keys) {
+        Set<String> known = new HashSet<>();
+        meta.fields().forEach(f -> known.add(f.fieldId()));
+        for (String key : keys) {
+            if (!known.contains(key) && !JiraFieldMeta.VERSIONS.equals(key)) {
+                throw new IllegalArgumentException("field '" + key + "' is not one the page fills for " + meta.issueType()
+                        + " (fields: " + String.join(", ", known) + ")");
+            }
+        }
+    }
+
+    /** One field's values in Jira's JSON: a list for a multi-valued field, else the one value. */
+    private static Object json(CreateField f, List<String> chosen, boolean cloud) {
+        if (!f.multiple() && chosen.size() > 1) {
+            throw new IllegalArgumentException(f.name() + " takes one value, got " + chosen);
+        }
+        List<Object> json = chosen.stream().map(value -> jsonValue(f, value, cloud)).toList();
+        return f.multiple() ? json : json.getFirst();
+    }
+
+    private static Object jsonValue(CreateField f, String value, boolean cloud) {
+        return switch (f.kind()) {
+            case OPTIONS -> Map.of("id", option(f, value).id());
+            // Cloud has no user names in its API, only account ids
+            case USER -> Map.of(cloud ? "accountId" : NAME, value);
+            case NUMBER -> number(f, value);
+            case TEXT -> value;
+        };
+    }
+
+    private static CreateField.Option option(CreateField f, String value) {
+        CreateField.Option option = f.option(value);
+        if (option == null) {
+            throw new IllegalArgumentException(f.name() + " has no value '" + value + "' (has: "
+                    + String.join(", ", f.options().stream().map(CreateField.Option::label).toList()) + ")");
+        }
+        return option;
     }
 
     /** Required create-screen fields left empty - answered 400 before anything is created. */
@@ -446,12 +484,21 @@ public class JiraLookupService {
 
     private static List<String> texts(Object value) {
         List<String> out = new ArrayList<>();
-        for (Object v : value instanceof Collection<?> c ? c : value == null ? List.of() : List.of(value)) {
+        // not a pattern-binding conditional in the for header: javac 21 crashes on that as an enhanced-for target
+        // ("AssertionError: inconsistent stack types at join point"); fixed in later JDKs
+        for (Object v : asCollection(value)) {
             if (v != null && !v.toString().isBlank()) {
                 out.add(v.toString().trim());
             }
         }
         return out;
+    }
+
+    private static Collection<?> asCollection(Object value) {
+        if (value instanceof Collection<?> c) {
+            return c;
+        }
+        return value == null ? List.of() : List.of(value);
     }
 
     private static Double number(CreateField f, String value) {
@@ -571,7 +618,7 @@ public class JiraLookupService {
         Map<String, List<IssueRef>> result = new LinkedHashMap<>();
         findings.forEach(f -> result.put(f.id(), new ArrayList<>()));
         List<List<Finding>> batches = new ArrayList<>();
-        List<java.util.concurrent.Callable<List<JiraIssue>>> searches = new ArrayList<>();
+        List<Callable<List<JiraIssue>>> searches = new ArrayList<>();
         for (int from = 0; from < findings.size(); from += props.searchBatchSize()) {
             List<Finding> batch = findings.subList(from, Math.min(findings.size(), from + props.searchBatchSize()));
             String jql = Jql.lookup(props.projectKey(), versions, countries.field(), countries.values(), batch);
@@ -584,19 +631,19 @@ public class JiraLookupService {
         for (int b = 0; b < batches.size(); b++) {
             // a batch tests every finding against every issue returned: each finding's patterns are built once
             List<Wanted> batch = batches.get(b).stream().map(f -> Wanted.of(f, props.summaryTemplate())).toList();
-            for (JiraIssue issue : found.get(b)) {
-                if (!versionMatches(issue, versions)) {
-                    continue;
-                }
-                Summary summary = Summary.of(issue.summary());
-                for (Wanted w : batch) {
-                    if (w.namedIn(summary)) {
-                        result.get(w.finding().id()).add(toRef(issue));
-                    }
-                }
-            }
+            found.get(b).stream().filter(issue -> versionMatches(issue, versions))
+                    .forEach(issue -> addCovering(result, batch, issue));
         }
         return result;
+    }
+
+    private void addCovering(Map<String, List<IssueRef>> result, List<Wanted> batch, JiraIssue issue) {
+        Summary summary = Summary.of(issue.summary());
+        for (Wanted w : batch) {
+            if (w.namedIn(summary)) {
+                result.get(w.finding().id()).add(toRef(issue));
+            }
+        }
     }
 
     /**
@@ -609,41 +656,58 @@ public class JiraLookupService {
     private List<JiraIssue> search(String jql, JiraToken token) {
         Map<String, JiraIssue> byKey = new LinkedHashMap<>();
         if (token.cloud()) {
-            Set<String> tokens = new java.util.HashSet<>();
-            String next = null;
-            do {
-                String from = next;
-                JiraSearchResult page = UpstreamException.call(JIRA,
-                        () -> jira.searchJql(token.authorization(), jql, FIELDS, from, props.pageSize()));
-                boolean more = addNew(byKey, page);
-                next = !more || Boolean.TRUE.equals(page.isLast()) ? null : page.nextPageToken();
-                if (next != null && !tokens.add(next)) {
-                    log.warn("Jira search: nextPageToken {} came back again after {} issue(s) - stopped paging", next,
-                            byKey.size());
-                    next = null;
-                } else if (!more && !page.issuesOrEmpty().isEmpty()) {
-                    log.warn("Jira search: a page of {} issue(s) read before, isLast={} - stopped paging after {} issue(s)",
-                            page.issuesOrEmpty().size(), page.isLast(), byKey.size());
-                }
-            } while (next != null);
+            searchCloud(jql, token, byKey);
         } else {
-            int startAt = 0;
-            while (true) {
-                int from = startAt;
-                JiraSearchResult page = UpstreamException.call(JIRA,
-                        () -> jira.search(token.authorization(), jql, FIELDS, from, props.pageSize()));
-                boolean more = addNew(byKey, page);
-                startAt += page.issuesOrEmpty().size();
-                if (!more || page.total() != null && startAt >= page.total()) {
-                    if (!more && !page.issuesOrEmpty().isEmpty()) {
-                        log.warn("Jira search: startAt={} answered {} issue(s) read before (total={}) - stopped paging",
-                                from, page.issuesOrEmpty().size(), page.total());
-                    }
-                    break;
-                }
-            }
+            searchDataCenter(jql, token, byKey);
         }
         return List.copyOf(byKey.values());
+    }
+
+    /** Cloud {@code search/jql}: paged by {@code nextPageToken} until {@code isLast} or no token. */
+    private void searchCloud(String jql, JiraToken token, Map<String, JiraIssue> byKey) {
+        Set<String> tokens = new HashSet<>();
+        String next = null;
+        do {
+            String from = next;
+            JiraSearchResult page = UpstreamException.call(JIRA,
+                    () -> jiraClient.searchJql(token.authorization(), jql, FIELDS, from, props.pageSize()));
+            boolean more = addNew(byKey, page);
+            next = nextPageToken(page, more);
+            if (next != null && !tokens.add(next)) {
+                log.warn("Jira search: nextPageToken {} came back again after {} issue(s) - stopped paging", next,
+                        byKey.size());
+                next = null;
+            } else if (!more && !page.issuesOrEmpty().isEmpty()) {
+                log.warn("Jira search: a page of {} issue(s) read before, isLast={} - stopped paging after {} issue(s)",
+                        page.issuesOrEmpty().size(), page.isLast(), byKey.size());
+            }
+        } while (next != null);
+    }
+
+    /** {@code null} = the last page: Jira says so, or the page brought nothing new. */
+    private static String nextPageToken(JiraSearchResult page, boolean more) {
+        if (!more || Boolean.TRUE.equals(page.isLast())) {
+            return null;
+        }
+        return page.nextPageToken();
+    }
+
+    /** Data Center {@code search}: paged by {@code startAt} until {@code total} or a page with nothing new. */
+    private void searchDataCenter(String jql, JiraToken token, Map<String, JiraIssue> byKey) {
+        int startAt = 0;
+        boolean more = true;
+        while (more) {
+            int from = startAt;
+            JiraSearchResult page = UpstreamException.call(JIRA,
+                    () -> jiraClient.search(token.authorization(), jql, FIELDS, from, props.pageSize()));
+            boolean added = addNew(byKey, page);
+            startAt += page.issuesOrEmpty().size();
+            if (!added && !page.issuesOrEmpty().isEmpty()) {
+                log.warn("Jira search: startAt={} answered {} issue(s) read before (total={}) - stopped paging",
+                        from, page.issuesOrEmpty().size(), page.total());
+            }
+            more = added && (page.total() == null || startAt < page.total());
+        }
     }
 
     /** @return whether the page brought an issue not read before (an empty page brings none) */
@@ -655,22 +719,21 @@ public class JiraLookupService {
         return added;
     }
 
-
     /** @param fields from {@link #resolveFields}: the create screen's other fields, already in Jira's shape */
     public IssueRef create(Finding finding, String jiraVersion, Map<String, Object> fields, ReportView report,
                            JiraToken token) {
         List<String> labels = labels(finding);
         String summary = summary(finding);
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("project", Map.of("key", props.projectKey()));
-        body.put("issuetype", Map.of("name", token.issueTypeOr(props.issueType())));
-        body.put("summary", summary);
-        body.put("description", JiraDescription.of(finding, report, apps));
-        body.put("versions", List.of(Map.of("name", jiraVersion)));
-        body.put("labels", labels);
+        body.put(PROJECT, Map.of(KEY, props.projectKey()));
+        body.put(ISSUE_TYPE, Map.of(NAME, token.issueTypeOr(props.issueType())));
+        body.put(SUMMARY, summary);
+        body.put(DESCRIPTION, JiraDescription.of(finding, report, apps));
+        body.put(JiraFieldMeta.VERSIONS, List.of(Map.of(NAME, jiraVersion)));
+        body.put(LABELS, labels);
         body.putAll(fields);
         JiraCreatedIssue created = UpstreamException.call(JIRA,
-                () -> jira.createIssue(token.authorization(), new JiraCreateIssueRequest(body)));
+                () -> jiraClient.createIssue(token.authorization(), new JiraCreateIssueRequest(body)));
         log.info("created {} for {} (report {})", created.key(), finding.id(), report.fileName());
         return new IssueRef(created.key(), summary, null, null, null, List.of(jiraVersion), labels,
                 props.browse(created.key()));
@@ -691,8 +754,10 @@ public class JiraLookupService {
     public IssueRef addApplicationLabels(IssueRef issue, List<Finding> labelling, List<Finding> sharing,
                                          Function<Finding, ReportView> reportOf, JiraToken token) {
         List<String> labels = labelling.stream().map(this::applicationLabel).filter(Objects::nonNull).distinct().toList();
-        return labels.isEmpty() ? issue : addLabels(issue, labels,
-                String.join(", ", labelling.stream().map(Finding::id).toList()),
+        if (labels.isEmpty()) {
+            return issue;
+        }
+        return addLabels(issue, labels, String.join(", ", labelling.stream().map(Finding::id).toList()),
                 current -> JiraDescription.mergeSca(current, sharing, reportOf, apps), token);
     }
 
@@ -710,12 +775,12 @@ public class JiraLookupService {
             return issue;
         }
         String current = UpstreamException.call(JIRA,
-                () -> jira.issue(token.authorization(), issue.key(), "description")).description();
+                () -> jiraClient.issue(token.authorization(), issue.key(), DESCRIPTION)).description();
         Map<String, Object> update = new LinkedHashMap<>();
-        update.put("update", Map.of("labels", missing.stream().map(l -> Map.of("add", l)).toList()));
-        update.put("fields", Map.of("description", description.apply(current)));
+        update.put("update", Map.of(LABELS, missing.stream().map(l -> Map.of("add", l)).toList()));
+        update.put("fields", Map.of(DESCRIPTION, description.apply(current)));
         UpstreamException.call(JIRA, () -> {
-            jira.updateIssue(token.authorization(), issue.key(), update);
+            jiraClient.updateIssue(token.authorization(), issue.key(), update);
             return null;
         });
         log.info("labelled {} with {} for {}, description updated", issue.key(), missing, forId);
@@ -739,7 +804,7 @@ public class JiraLookupService {
             return;
         }
         UpstreamException.call(JIRA, () -> {
-            jira.addAttachments(token.authorization(), "no-check", key, MultipartFiles.of(files));
+            jiraClient.addAttachments(token.authorization(), "no-check", key, MultipartFiles.of(files));
             return null;
         });
         log.info("attached {} to {}", files.stream().map(VeracodeAnalysisService.UploadedFile::filename).toList(), key);
@@ -765,7 +830,7 @@ public class JiraLookupService {
 
     /** Jira refuses a label with a space in it: spaces become {@code _}. */
     private static String label(String text) {
-        return text == null || text.isBlank() ? null : text.trim().replaceAll("\\s+", "_");
+        return text == null || text.isBlank() ? null : WHITESPACE.matcher(text.trim()).replaceAll("_");
     }
 
     /**
@@ -781,9 +846,8 @@ public class JiraLookupService {
                 .replace("{cve}", finding.cveText())
                 .replace("{cwe}", finding.cweText())
                 .replace("{file}", Objects.requireNonNullElse(finding.fileName(), ""))
-                .replace("{version}", Objects.requireNonNullElse(finding.affectedVersion(), ""))
-                .replaceAll("\\s+", " ").trim();
-        return summary.length() <= 255 ? summary : summary.substring(0, 254) + "…";
+                .replace("{version}", Objects.requireNonNullElse(finding.affectedVersion(), ""));
+        return cut(WHITESPACE.matcher(summary).replaceAll(" ").trim());
     }
 
     /**
@@ -894,7 +958,7 @@ public class JiraLookupService {
         Map<String, List<IssueRef>> result = new LinkedHashMap<>();
         issues.forEach(i -> result.put(i.id(), new ArrayList<>()));
         List<List<SastIssue>> batches = new ArrayList<>();
-        List<java.util.concurrent.Callable<List<JiraIssue>>> searches = new ArrayList<>();
+        List<Callable<List<JiraIssue>>> searches = new ArrayList<>();
         for (int from = 0; from < issues.size(); from += props.searchBatchSize()) {
             List<SastIssue> batch = issues.subList(from, Math.min(issues.size(), from + props.searchBatchSize()));
             String jql = Jql.sastLookup(props.sastProjectKey(), countries.field(), countries.values(), batch);
@@ -927,17 +991,17 @@ public class JiraLookupService {
         List<String> labels = sastLabels(issue);
         String summary = sastSummary(issue);
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("project", Map.of("key", props.sastProjectKey()));
-        body.put("issuetype", Map.of("name", props.sastIssueType()));
-        body.put("summary", summary);
-        body.put("description", JiraDescription.ofSast(issue, reports, apps, props.sastProject()));
+        body.put(PROJECT, Map.of(KEY, props.sastProjectKey()));
+        body.put(ISSUE_TYPE, Map.of(NAME, props.sastIssueType()));
+        body.put(SUMMARY, summary);
+        body.put(DESCRIPTION, JiraDescription.ofSast(issue, reports, apps, props.sastProject()));
         if (jiraVersion != null) {
-            body.put("versions", List.of(Map.of("name", jiraVersion)));
+            body.put(JiraFieldMeta.VERSIONS, List.of(Map.of(NAME, jiraVersion)));
         }
-        body.put("labels", labels);
+        body.put(LABELS, labels);
         body.putAll(fields);
         JiraCreatedIssue created = UpstreamException.call(JIRA,
-                () -> jira.createIssue(token.authorization(), new JiraCreateIssueRequest(body)));
+                () -> jiraClient.createIssue(token.authorization(), new JiraCreateIssueRequest(body)));
         log.info("created {} for {} ({} open flaws)", created.key(), issue.id(), issue.flaws().size());
         return new IssueRef(created.key(), summary, null, null, null,
                 jiraVersion == null ? List.of() : List.of(jiraVersion), labels, props.browse(created.key()));
@@ -993,9 +1057,8 @@ public class JiraLookupService {
                 .replace("{project}", props.sastProject())
                 .replace("{jiraProject}", props.sastProjectKey())
                 .replace("{cwe}", issue.cweText())
-                .replace("{category}", issue.categoryText())
-                .replaceAll("\\s+", " ").trim();
-        return summary.length() <= 255 ? summary : summary.substring(0, 254) + "…";
+                .replace("{category}", issue.categoryText());
+        return cut(WHITESPACE.matcher(summary).replaceAll(" ").trim());
     }
 
     /**
@@ -1020,16 +1083,28 @@ public class JiraLookupService {
             all.addAll(p.valuesOrEmpty());
             startAt += p.valuesOrEmpty().size();
             if (p.valuesOrEmpty().isEmpty() || Boolean.TRUE.equals(p.isLast())
-                    || p.total() != null && startAt >= p.total()) {
+                    || (p.total() != null && startAt >= p.total())) {
                 return all;
             }
         }
     }
 
+    private static List<String> labelsOf(JiraIssue issue) {
+        if (issue.fields() == null || issue.fields().labels() == null) {
+            return List.of();
+        }
+        return List.copyOf(issue.fields().labels());
+    }
+
+    /** Jira refuses a summary longer than {@value #SUMMARY_MAX} characters: a long one is cut, with an ellipsis. */
+    private static String cut(String summary) {
+        return summary.length() <= SUMMARY_MAX ? summary : summary.substring(0, SUMMARY_MAX - 1) + "…";
+    }
+
     private IssueRef toRef(JiraIssue issue) {
         return new IssueRef(issue.key(), issue.summary(), issue.statusName(), issue.priorityName(),
                 issue.assigneeName(), issue.versionNames(),
-                issue.fields() == null || issue.fields().labels() == null ? List.of() : List.copyOf(issue.fields().labels()),
+                labelsOf(issue),
                 props.browse(issue.key()));
     }
 }
