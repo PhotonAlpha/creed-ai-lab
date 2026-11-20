@@ -68,6 +68,7 @@
         <module>creed-jasper-report</module>
         <module>creed-gateway-proxy</module>
         <module>creed-config-management</module>
+        <module>creed-framework</module>
     </modules>
 
     <dependencyManagement>
@@ -130,6 +131,11 @@
             <dependency>
                 <groupId>com.creed</groupId>
                 <artifactId>creed-common-metrics</artifactId>
+                <version>1.0.0-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>com.creed</groupId>
+                <artifactId>creed-tracker</artifactId>
                 <version>1.0.0-SNAPSHOT</version>
             </dependency>
         </dependencies>

@@ -37,6 +37,23 @@ External config: `application.yml` / `application-<profile>.yml` in `CREED_VERAC
 (default `/etc/veracode/config/`, the OpenShift ConfigMap mount) override every packaged file,
 `application-ssl.yml` included; env vars still win. Read at startup only.
 
+
+## User journey (2026-11-20)
+
+Asked for: follow one user through Splunk. `creed-framework/creed-tracker` (new library) + config here:
+- *Connect* on the page (`POST /api/veracode/jira/connection`, also run when a remembered token is restored) answers
+  `Set-Cookie: sid=<uuid>; Path=/; HttpOnly; SameSite=Lax` and `X-Session-Id`. The browser sends it on every later
+  `/api` request (same origin through Vite / creed-gateway-proxy - no page change needed).
+- `logbook.filter.enabled: true` (`CREED_VERACODE_LOGBOOK_FILTER`), style `splunk` (`CREED_VERACODE_LOGBOOK_STYLE`),
+  `/actuator/**` excluded, the page's token headers masked. Each line: `sid=… direction=inbound|outbound peer=…` on
+  logger `creed.tracker.http.inbound` / `.outbound` (level `CREED_VERACODE_LOGBOOK_LEVEL`, INFO; was TRACE on
+  `org.zalando.logbook.Logbook`). Splunk: `sid=<id> | sort _time`; `direction=outbound` = the Jira / Confluence calls.
+- Response headers > 8KB (`server.tomcat.max-http-response-header-size`): Tomcat answers 500 with no headers and logs
+  `HeadersTooLargeException`; the request line is still in the log (written before the controller runs), the
+  response line is not, and the tracker WARNs `sid=… GET /… response headers ~N bytes exceed 8192 … largest headers:`.
+  Pinned in creed-tracker's `TrackerJourneyTest` on a real Tomcat.
+- Checked live (2026-11-20): connect → cookie; inbound + outbound Jira lines under one sid; token count in the log 0.
+
 ## API (`/api/veracode`)
 
 | | |

@@ -257,6 +257,9 @@ export const ccrgApi = {
     get<PageResult<ConfluenceContent>>(`/prompt/list-reports${toQuery({ pageNo: String(pageNo), pageSize: String(pageSize) })}`),
   mergeReports: (mergeIds: string[]) => post<unknown>('/prompt/merge-reports', { mergeIds }),
   deleteReports: (mergeIds: string[]) => post<unknown>('/prompt/delete-reports', { mergeIds }),
+  /** Crossover's form (both sources in full) → the same Confluence page as `generative`; answers the page link. */
+  crossoverGenerative: (form: BatchFormVo, type: 'xlsx' | 'html') =>
+    post<string>(`/prompt/generative/crossover${toQuery({ type })}`, form),
   generateYaml: (route: RouteInfoVo) => post<EffectiveYamlVo>('/prompt/generate-yaml', route),
   /** Several sources merged in order — the last source wins a key set by several. */
   generateMergedYaml: (sources: RouteInfoVo[]) =>

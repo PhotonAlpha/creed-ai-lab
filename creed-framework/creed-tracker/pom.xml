@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.creed</groupId>
+        <artifactId>creed-framework</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>creed-tracker</artifactId>
+    <name>creed-tracker</name>
+    <description>User-journey tracking: a SameSite=Lax "sid" cookie issued at a start path, carried on the MDC (and
+        onto context-propagated threads), stamped on every Logbook line with its direction (inbound / outbound)</description>
+
+    <properties>
+        <!-- not in the Boot BOM; same as creed-resource-veracode / creed-simple-metrics (4.x = Boot 4 / Jackson 3) -->
+        <logbook.version>4.2.0</logbook.version>
+    </properties>
+
+    <dependencies>
+        <!-- The filter and the auto-configuration. Optional: the application brings its own web starter. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- TrackingSink replaces Logbook's Sink only when Logbook is there. -->
+        <dependency>
+            <groupId>org.zalando</groupId>
+            <artifactId>logbook-spring-boot-starter</artifactId>
+            <version>${logbook.version}</version>
+            <optional>true</optional>
+        </dependency>
+        <!-- The sid ThreadLocalAccessor: ContextSnapshot carries it onto virtual / pool threads. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>context-propagation</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

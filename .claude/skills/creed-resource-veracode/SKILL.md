@@ -225,10 +225,19 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   spaces in phrases (`Jql.searchPhrase`), not escaped. The mock implements the same token semantics, so a
   substring-based "fix" in the mock would hide a real-Jira miss.
 - createmeta pages until an **empty page, `isLast`, or `startAt >= total`** — trusting `total` alone can spin.
-- **Logbook** (`LogbookHttpExecHandler`, `addExecInterceptorFirst`) logs every Jira exchange at TRACE on
-  `org.zalando.logbook.Logbook`. It sees the wire, i.e. the user's Bearer token: never drop `Authorization` from
-  `logbook.obfuscate.headers`. The starter's inbound servlet filter is off (`logbook.filter.enabled: false`) —
-  turning it on would log `X-Jira-Token` and whole uploads.
+- **Logbook** (`LogbookHttpExecHandler`, `addExecInterceptorFirst`) logs every Jira exchange. It sees the wire, i.e.
+  the user's Bearer token: never drop `Authorization` from `logbook.obfuscate.headers`.
+- **User journey = creed-tracker** (2026-11-20, asked for; `creed-framework/creed-tracker`): `POST /jira/connection`
+  (`creed.tracker.start-paths`) answers a new `sid` cookie (`HttpOnly; SameSite=Lax`, + `X-Session-Id`); every later
+  request runs with it on the MDC, carried onto `Concurrently`'s threads by the tracker's `ThreadLocalAccessor`
+  (ServiceLoader - `captureAll()` picks it up). Logbook's **inbound filter is on** since then and writes through the
+  tracker's `TrackingSink`: `creed.tracker.http.inbound` / `.outbound` at INFO, each line `sid=… direction=… peer=…`,
+  style `splunk` (Splunk: `sid=<id> | sort _time`). This is only safe while `X-Jira-Token` / `X-Jira-User` /
+  `X-Confluence-Token` / `X-Confluence-User` stay in `logbook.obfuscate.headers` and `JsonBodyOnlyStrategy` keeps
+  multipart uploads, the SSE stream and the exports out (headers only, never buffered). A new token header must join
+  that list. Don't use Logbook's `origin=` to tell the sides apart - it flips on a response; `direction=` does not.
+  Response headers over 8KB: Tomcat answers 500 itself, Logbook has the request line only, the tracker WARNs with sid +
+  largest headers.
 - **Logbook logs JSON bodies only** (2026-11-13, asked for, as creed-simple-metrics): `config/JsonBodyOnlyStrategy`
   (bean in `LogbookConfiguration`, so Logbook's own `Strategy` and the `logbook.strategy` property back off) leaves out -
   and never buffers - a body whose type is not in `veracode.logbook.allowed-content-types` (`application/json`): the

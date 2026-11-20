@@ -175,21 +175,42 @@ veracode:
 # Lines go to the org.zalando.logbook.Logbook logger at TRACE - CREED_VERACODE_LOGBOOK_LEVEL=OFF silences it.
 logbook:
   filter:
-    enabled: false           # this service's own inbound requests (uploads, X-Jira-Token) are not logged
+    # User journey (2026-11-20, asked for): this service's own requests are logged too, under the sid cookie the Jira
+    # connection test issues (creed.tracker). Safe because the user's tokens travel in headers masked below, and
+    # JsonBodyOnlyStrategy never buffers / prints a non-JSON body - uploads (multipart), the SSE progress stream and the
+    # xlsx / zip exports pass as headers only.
+    enabled: ${CREED_VERACODE_LOGBOOK_FILTER:true}
+  predicate:
+    exclude:
+      - path: /actuator/**
   format:
-    style: ${CREED_VERACODE_LOGBOOK_STYLE:http}   # http (readable blocks) | splunk | json | curl
+    # splunk = one key=value line per request / response, which Splunk extracts on its own: search
+    # `sid=<id> | sort _time` for one user's journey, `direction=inbound` / `direction=outbound` (the Jira / Confluence
+    # calls) to tell the two sides apart. http (multi-line blocks) | json | curl also work, the sid is added to each.
+    style: ${CREED_VERACODE_LOGBOOK_STYLE:splunk}
   obfuscate:
-    headers:                 # the user's token travels as Authorization: Bearer
+    headers:                 # the user's token travels as Authorization: Bearer (outbound) ...
       - Authorization
       - Proxy-Authorization
       - Cookie
       - Set-Cookie
+      - X-Jira-Token          # ... and as these, inbound from the page (with the filter on)
+      - X-Jira-User
+      - X-Confluence-Token
+      - X-Confluence-User
   write:
     max-body-size: -1   # createmeta / issue bodies can be long
 
+# The sid (creed-framework/creed-tracker): a new journey per Jira connection test - the page runs it on "Connect" and
+# when it restores a remembered token. Logged on creed.tracker.http.inbound / .outbound at INFO.
+creed:
+  tracker:
+    start-paths: ${CREED_VERACODE_TRACKER_START_PATHS:/api/veracode/jira/connection}
+
 logging:
   level:
-    org.zalando.logbook.Logbook: ${CREED_VERACODE_LOGBOOK_LEVEL:TRACE}
+    # Logbook writes through creed-tracker's TrackingSink: one logger per direction, INFO (OFF silences a side).
+    creed.tracker.http: ${CREED_VERACODE_LOGBOOK_LEVEL:INFO}
   # traceId / spanId: no logging.pattern.correlation here on purpose - with tracing on the classpath Boot's default
   # (LogCorrelationEnvironmentPostProcessor) prints [traceId-spanId] on every line of a request, Logbook's Jira exchanges
   # on the search threads included (Concurrently), and pads it blank outside one (startup), keeping the columns aligned.

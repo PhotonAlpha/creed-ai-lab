@@ -323,6 +323,13 @@ env-matrix. README "CCRG comparator" has the page table.
   `content-type`, never by status.
 - **Batch and Crossover are one component** (`Comparison`, keyed by `mode` in `App.tsx`); `model.ts` says
   what differs. Each page saves under its own localStorage key — the Vue pages shared one.
+- **Crossover restricts nothing across sources** (2026-11-20, asked for): the same-release copy/lock of country and
+  app (`disableCountry` / `disableApp`, `sameRelease`) and the project lock are batch-only — `locked()` and the
+  `onCountry` / `onApp` sync check `mode === 'batch'`, so SG vs CN on one release works. Its *Generate HTML report* is
+  the Confluence path (`ccrgApi.crossoverGenerative` → `POST /prompt/generative/crossover` →
+  `PromptCombinationGenerativeV2Service.generateCrossoverInConfluence`, which shares `publishInConfluence` with
+  `/ccrg/report`); `confluence-index.html` adds each side's country / app / environment when they differ, and the
+  comparison side's Artifactory link uses its own project. The zip download stays as a second button.
 - Cascade handlers take the source *as it was when picked* and mutate a `structuredClone`: answers arrive
   after state has moved on, and the batch mode writes to both sources.
 - Pull config's tree needs **controlled** `expandedRowKeys`: `defaultExpandAllRows` only sees rows present

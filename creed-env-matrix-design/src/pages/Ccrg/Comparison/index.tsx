@@ -5,6 +5,7 @@ import {
   CopyOutlined,
   DeleteOutlined,
   FileExcelOutlined,
+  FileZipOutlined,
   Html5Outlined,
   ImportOutlined,
   PlusOutlined,
@@ -51,7 +52,7 @@ const FIELD_LABEL: Record<string, MessageKey> = {
 
 export function ComparisonPage({ mode }: { mode: ComparisonMode }) {
   const { t } = useI18n();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const navigate = useNavigate();
   const storageKey = `ccrg.${mode}`;
 
@@ -135,7 +136,8 @@ export function ComparisonPage({ mode }: { mode: ComparisonMode }) {
     if (!data) return;
     mutate((d) => {
       const c = d[b];
-      if (sameRelease(c)) {
+      // batch only: crossover compares any country with any other (SG vs CN on one release), so nothing is copied or locked
+      if (mode === 'batch' && sameRelease(c)) {
         c.routes.forEach((r) => {
           r.appSelector = data;
           r.countryCode = countryCode;
@@ -161,10 +163,10 @@ export function ComparisonPage({ mode }: { mode: ComparisonMode }) {
     if (!releaseName) return;
     const data = await fetching(() => ccrgApi.pathWalk(walk({ ...source, releaseName }, 'COMMON', 1)));
     if (!data) return;
-    // batch: the backend's default country is picked, and a still-valid country survives the change.
-    // crossover: the old page always started the source over below the release.
+    // batch: the backend's default country is picked. Either mode: a still-valid country survives the change (crossover
+    // used to start the source over below the release - asked 2026-11-20 to stop restricting it).
     const preset = mode === 'batch' ? data.find((s) => s.selected)?.name : undefined;
-    const keeps = mode === 'batch' && !preset && data.some((s) => s.name === source.countryCode);
+    const keeps = !preset && data.some((s) => s.name === source.countryCode);
     mutate((d) => {
       const c = d[b];
       const r = c.routes[idx];
@@ -189,7 +191,7 @@ export function ComparisonPage({ mode }: { mode: ComparisonMode }) {
     const keepsEnv = data.some((s) => s.name === source.environment);
     mutate((d) => {
       const c = d[b];
-      if (sameRelease(c)) {
+      if (mode === 'batch' && sameRelease(c)) {
         c.routes.forEach((r) => {
           r.environmentSelector = data;
           r.app = app;
@@ -202,7 +204,7 @@ export function ComparisonPage({ mode }: { mode: ComparisonMode }) {
         c.disableApp = false;
       }
       if (mode === 'batch') c.disableProject = true;
-      if (!keepsEnv) c.routes.forEach((r) => clearBelow(r, 'app'));
+      if (!keepsEnv) (mode === 'batch' ? c.routes : [c.routes[idx]]).forEach((r) => clearBelow(r, 'app'));
     });
   };
 
@@ -264,22 +266,47 @@ export function ComparisonPage({ mode }: { mode: ComparisonMode }) {
     else message.error(t('ccrg.saveFailed'));
   };
 
-  const generate = async (kind: 'xlsx' | 'html') => {
+  const generate = async (kind: 'xlsx' | 'html' | 'zip') => {
     if (!isComplete(batch)) {
       setShowErrors(true);
       message.warning(t('ccrg.incomplete'));
+      return;
+    }
+    if (kind === 'html' && mode === 'crossover') {
+      await publish();
       return;
     }
     // The HTML report streams progress over SSE; the xlsx endpoint takes no connection id.
     try {
       const file = await runWithProgress(
         (connectionId) => (kind === 'xlsx' ? ccrgApi.batchXlsx(toRequest(batch)) : ccrgApi.batchHtml(toRequest(batch, connectionId))),
-        kind === 'html',
+        kind !== 'xlsx',
       );
       saveFile(file);
       message.success(t('ccrg.downloaded'));
     } catch (e) {
       message.error(t('ccrg.downloadFailed', { message: errorText(e) }));
+    }
+  };
+
+  /** Crossover's HTML report = a Confluence page, made the way /ccrg/report makes its own (listed there too). */
+  const publish = async () => {
+    try {
+      const link = await runWithProgress(
+        (connectionId) => ccrgApi.crossoverGenerative(toRequest(batch, connectionId), 'html'),
+        true,
+      );
+      storage.save(storageKey, batch);
+      modal.success({
+        title: t('ccrg.compare.published'),
+        content: link ? (
+          <Typography.Link href={String(link)} target="_blank" rel="noreferrer">
+            {String(link)}
+          </Typography.Link>
+        ) : null,
+      });
+    } catch (e) {
+      message.error(errorText(e));
     }
   };
 
@@ -370,7 +397,8 @@ export function ComparisonPage({ mode }: { mode: ComparisonMode }) {
 
             <Row gutter={[16, 16]}>
               {combo.routes.map((source, idx) => {
-                const locked = (flag: boolean) => idx !== 0 && flag;
+                // crossover locks nothing: every source picks its own project / release / country / app
+                const locked = (flag: boolean) => mode === 'batch' && idx !== 0 && flag;
                 const select = (
                   field: keyof Source,
                   selector: SelectorVo[],
@@ -425,9 +453,16 @@ export function ComparisonPage({ mode }: { mode: ComparisonMode }) {
             <Button icon={<FileExcelOutlined />} onClick={() => generate('xlsx')}>
               {t('ccrg.generateXlsx')}
             </Button>
-            <Button type="primary" icon={<Html5Outlined />} onClick={() => generate('html')}>
-              {t('ccrg.generateHtml')}
-            </Button>
+            {mode === 'crossover' && (
+              <Button icon={<FileZipOutlined />} onClick={() => generate('zip')}>
+                {t('ccrg.compare.downloadHtmlZip')}
+              </Button>
+            )}
+            <Tooltip title={mode === 'crossover' ? t('ccrg.compare.publishHint') : undefined}>
+              <Button type="primary" icon={<Html5Outlined />} onClick={() => generate('html')}>
+                {t('ccrg.generateHtml')}
+              </Button>
+            </Tooltip>
           </Space>
           {showErrors && !isComplete(batch) && (
             <Typography.Paragraph type="danger" style={{ marginTop: 8 }}>

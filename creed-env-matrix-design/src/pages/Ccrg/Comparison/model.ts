@@ -6,11 +6,11 @@ import type { BatchFormVo, RouteInfoVo, SelectorVo, WalkPathInfo } from '../../.
  *
  * - **batch** — both sources are the same project: picking it on source 1 fills and locks source 2,
  *   and the release list is shared.
- * - **crossover** — each source picks its own project, so every list is per source.
+ * - **crossover** — each source picks its own project, release, country and app, so every list is per
+ *   source and nothing is copied or locked (asked 2026-11-20: compare SG with CN freely).
  *
- * Within a combination, a country / app picked while both sources sit on the same release is copied
- * to the other source and locked there (`disableCountry` / `disableApp`): two different releases may
- * legitimately differ below the release level, the same release cannot.
+ * batch only: a country / app picked while both sources sit on the same release is copied to the other
+ * source and locked there (`disableCountry` / `disableApp`).
  */
 export type ComparisonMode = 'batch' | 'crossover';
 

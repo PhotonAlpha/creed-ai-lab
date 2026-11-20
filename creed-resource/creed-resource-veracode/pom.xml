@@ -61,6 +61,14 @@
             <version>${logbook.version}</version>
         </dependency>
 
+        <!-- User journey (asked for, 2026-11-20): the Jira connection test issues a SameSite=Lax `sid` cookie; every
+             later request runs with it on the MDC, and Logbook's lines (inbound filter + Jira / Confluence clients)
+             carry sid= and direction=inbound|outbound (creed.tracker.*, creed-framework/creed-tracker). -->
+        <dependency>
+            <groupId>com.creed</groupId>
+            <artifactId>creed-tracker</artifactId>
+        </dependency>
+
         <!-- Excel (.xlsx) export: poi-ooxml pulls in poi + the OOXML schemas. -->
         <dependency>
             <groupId>org.apache.poi</groupId>

@@ -272,7 +272,7 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   另新增「生成 YAML」（`/ccrg/yaml`，`pages/Ccrg/Yaml`）：一个或多个来源（批量导出来源的结构，可一键复制；可增删、复制、前移/后移，最多 10 个；宽屏一行两个来源（xl 及以上），合并顺序为先左后右、再从上到下）→ `POST /api/prompt/generate-yaml/merge` → 按列表顺序合并（**后面的来源覆盖前面的**，与 Spring 多个 config location 的规则一致），取值不同的 key 以 `conflicts` 返回并在页面列出 → 生效配置 `.yml`，页面显示 + 下载；`ccrg.yaml` 本地存储由单个对象改为数组（旧格式仍可读取）；排除 ccrg-tool 自身 `classpath:` 的属性源；
   菜单为一个分组。页面布局参考 `ccrg-tool-ui/ui-current.png`：上方查询卡片，下方表格卡片 + 底部操作按钮。
 - 后端响应为 `R<T>` 信封 `{code, data, msg}`，成功 `code = 0`；报告下载成功返回文件、失败返回 JSON（HTTP 都是 200），按 content-type 区分。
-- 批量导出与跨项目比较共用 `pages/Ccrg/Comparison`（`mode`），差异见 `model.ts`。各页面保存的表单使用各自的 localStorage 键。
+- 批量导出与跨项目比较共用 `pages/Ccrg/Comparison`（`mode`），差异见 `model.ts`。跨项目比较（2026-11-20，按需求）不在来源之间复制 / 锁定项目、发布目录、国家、应用，可自由比较 SG 与 CN；「生成 HTML 报告」走 `POST /api/prompt/generative/crossover` 发布 Confluence 页面（与生成报告同一流程），zip 下载另有按钮。各页面保存的表单使用各自的 localStorage 键。
 - 详细说明见 `README.md` / `README.zh-CN.md` 的「CCRG 比较工具」一节。
 
 ## 6. 命令
