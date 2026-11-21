@@ -455,10 +455,12 @@ curl -s 'http://127.0.0.1:9200/app-logs-*/_search?size=0&pretty' -H 'Content-Typ
 | `context:defaultSize` | 100 | 打开时，选中那条的前后各 100 条（默认 5） |
 | `context:step` | 100 | **Load newer / Load older** 每点一次再加 100 条 |
 | `context:tieBreakerFields` | `offset` | 先按 `@timestamp` 排，同一毫秒再按文件里的位置排，顺序和文件一致 |
-| `defaultColumns` | `log` | 只显示原文一列，看起来就是日志文件 |
+| `defaultColumns` | `log`, `show_source` | Discover 默认显示原文和 Show Source 链接两列，不用展开就能点（Show Source 打开的上下文视图只显示 `log` 一列，由链接指定） |
 | `truncate:maxHeight` | 0 | 长堆栈完整展开，不折叠 |
 
-**用法：展开一条 → 点 `show_source` 那一行的 Show Source 链接。**
+**用法：点表格里 `show_source` 列的 Show Source 链接（或展开一条，点 `show_source` 那一行）。**
+**要在新标签页打开：Cmd+点击（Windows / Linux 用 Ctrl+点击）或鼠标中键。** 直接点击会在当前标签页打开：
+Url 格式生成的是 `target="_blank"`，但 Discover 把单元格内容交给 DOMPurify 清洗后再显示，`target` 属性被去掉了，没有设置项能改。
 
 1. Discover 里照常搜索，比如 `"6aff23516b3ce7d2bb6dfe1649dad5b1"` 或 `level:ERROR`。
 2. 展开要看的那一条（最左边的 ↗ / ▸），在字段表里找到 `show_source`，点 **Show Source**。

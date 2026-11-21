@@ -30,10 +30,11 @@ ok "默认索引模式 = app-logs-*"
 # 上下文视图（View surrounding documents，对应 Splunk 的 Show Source）：
 #   排序 —— 先 @timestamp，同一毫秒再按 offset（forwarder 的 offset_key，日志在文件里的位置）；默认的 _doc 是写入顺序，和文件顺序不一定一致
 #   条数 —— 打开时前后各 100 条，Load newer / older 每次再加 100（默认都是 5）
-# defaultColumns ["log"] = Discover / 上下文视图默认只显示原文一列，看起来像日志文件。
+# defaultColumns ["log","show_source"] = Discover 默认显示原文 + Show Source 链接两列（点链接直接看上下文）；
+#   Show Source 打开的上下文视图由链接自己指定只显示 log 一列，看起来像日志文件。
 # truncate:maxHeight 0 = 长堆栈不折叠。
 osd POST "/api/opensearch-dashboards/settings" '{ "changes": {
   "context:tieBreakerFields": ["offset"], "context:defaultSize": 100, "context:step": 100,
-  "defaultColumns": ["log"], "truncate:maxHeight": 0 } }' \
+  "defaultColumns": ["log", "show_source"], "truncate:maxHeight": 0 } }' \
   || { fail "设置上下文视图失败 ($API_CODE): $API_BODY"; exit 1; }
-ok "上下文视图：按 @timestamp, offset 排序，前后各 100 条；默认只显示 log 列，长日志不折叠"
+ok "上下文视图：按 @timestamp, offset 排序，前后各 100 条；Discover 默认显示 log + show_source 列，长日志不折叠"
