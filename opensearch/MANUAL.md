@@ -26,6 +26,13 @@
 
 启动顺序：**OpenSearch → Dashboards → 初始化（模板 / pipeline / 索引模式）→ Fluent Bit 汇聚端 → 各台 forwarder**。
 
+第一次照着下面一步一步做。配置都改好以后，日常启停用 `bin/` 下的脚本，不用再敲 nohup 和 kill，见 **7.1 启停脚本**：
+
+```bash
+bin/start-opensearch.sh && bin/start-dashboards.sh && bin/start-aggregator.sh && bin/start-forwarder.sh   # 启动
+bin/stop-forwarder.sh && bin/stop-aggregator.sh && bin/stop-dashboards.sh && bin/stop-opensearch.sh       # 停止
+```
+
 ---
 
 ## 0. 准备（日志服务器上，只做一次）
@@ -48,6 +55,7 @@ cd ~/Desktop/workspace/sourcecode/github_space/creed-ai-lab
 rsync -av --exclude 'opensearch-3.10.0/' --exclude 'opensearch-dashboards-3.10.0/' \
       --exclude 'fluent-bit/' --exclude 'fluent-bit-[0-9]*/' --exclude 'fluent-bit-pkg/' --exclude '*.pkg' \
       --exclude 'fluent-bit-browser-experimental/' --exclude 'fluent-bit-manual/state/' --exclude '.DS_Store' \
+      --exclude 'run/' --exclude 'bin/env.local.sh' \
       opensearch/ root@10.0.0.50:/opt/logstack/
 ```
 
@@ -146,6 +154,8 @@ nohup ./bin/opensearch > /data/opensearch/logs/opensearch-console.log 2>&1 &
 echo $! > /data/opensearch/opensearch.pid
 ```
 
+> 同样的事，脚本版：`/opt/logstack/bin/start-opensearch.sh`（会等到 9200 能访问才返回，见 7.1）。
+
 等 20～60 秒，验证：
 
 ```bash
@@ -207,6 +217,8 @@ cd /opt/logstack/opensearch-dashboards-3.10.0
 nohup ./bin/opensearch-dashboards > /data/opensearch/logs/dashboards.log 2>&1 &
 echo $! > /data/opensearch/dashboards.pid
 ```
+
+> 脚本版：`/opt/logstack/bin/start-dashboards.sh`（等到 `/api/status` 返回 200，见 7.1）。
 
 第一次启动要 1～2 分钟。日志里出现 `http server running at http://0.0.0.0:5601` 就好了：
 
@@ -291,6 +303,8 @@ nohup /opt/fluent-bit/bin/fluent-bit -c aggregator.yaml > aggregator.log 2>&1 &
 echo $! > aggregator.pid
 ```
 
+> 脚本版：`/opt/logstack/bin/start-aggregator.sh`（先 `--dry-run`，再启动，等到健康检查通过，见 7.1）。
+
 `aggregator.yaml` 默认就写 `127.0.0.1:9200`，不用改。唯一可能要调的是最后的缓冲上限 `storage.total_limit_size`（默认 5G，只在 OpenSearch 停掉期间占用）。
 
 防火墙：业务服务器要能连日志服务器的 24224，办公网要能连 5601：
@@ -342,6 +356,9 @@ echo $! > aggregator.pid
 lsof -nP -iTCP:24224 -sTCP:LISTEN                                  # 应看到 fluent-bit 在 *:24224 监听
 ```
 
+> 脚本版：`bin/start-aggregator.sh`。脚本自己会找 `fluent-bit`（`/opt/fluent-bit/bin` → `/usr/local/bin` → `fluent-bit-pkg/` 里解开的），
+> 不用设 `$FB`。
+
 **让别的机器能发进来：**
 
 - **IP**：forwarder 里 `outputs[0].host` 写这台 Mac 的 IP（`ipconfig getifaddr en0` 查）。Mac 的 IP 常常是 DHCP 分配的，
@@ -383,6 +400,8 @@ HOSTNAME=ethan-mac nohup $FB -c forwarder.yaml > forwarder.log 2>&1 &
 echo $! > forwarder.pid
 ```
 
+> 脚本版：`bin/start-forwarder.sh`。`host` 字段取 `FORWARDER_HOSTNAME`（默认 `hostname -s`），Mac 上写进 `bin/env.local.sh`（见 7.1）。
+
 > 这台 Mac 的主机名是 `192.168.5.11`，`hostname -s` 只会得到 `192`，所以这里直接写一个好认的名字。
 > Linux 服务器一般用 `HOSTNAME=$(hostname -s)` 就行。
 
@@ -403,6 +422,10 @@ vi forwarder.yaml            # path 改成这台机器的日志目录；outputs.
 HOSTNAME=$(hostname -s) nohup /opt/fluent-bit/bin/fluent-bit -c forwarder.yaml > forwarder.log 2>&1 &
 echo $! > forwarder.pid
 ```
+
+> 脚本版：把 `bin/_lib.sh`、`bin/start-forwarder.sh`、`bin/stop-forwarder.sh` 也拷到业务服务器（比如 `/opt/logstack-forwarder/bin/`），
+> 然后 `FB_DIR=/opt/logstack-forwarder /opt/logstack-forwarder/bin/start-forwarder.sh`。
+> 也可以把 `FB_DIR=/opt/logstack-forwarder` 写进同目录的 `bin/env.local.sh`，之后直接执行脚本。
 
 启动用户要对 `/opt/logstack-forwarder/` 有写权限（`state/` 建在这里），对日志文件有读权限。
 
@@ -499,15 +522,14 @@ Url 格式生成的是 `target="_blank"`，但 Discover 把单元格内容交给
 
 ```bash
 cd ~/Desktop/workspace/sourcecode/github_space/creed-ai-lab/opensearch/fluent-bit-manual
-kill $(cat forwarder.pid)                                   # 1. 停 forwarder
+../bin/stop-forwarder.sh                                    # 1. 停 forwarder
 rm -f state/forwarder/tail.db*                              # 2. 删书签：下次从头读每个文件
 rm -rf state/forwarder/storage                              #    还没发出去的缓冲也不要了
 # 3. 删旧索引。OpenSearch 不允许 DELETE app-logs-*，要逐个写名字
 for i in $(curl -s 'http://127.0.0.1:9200/_cat/indices/app-logs-*?h=index'); do
   curl -s -XDELETE "http://127.0.0.1:9200/$i"; echo
 done
-HOSTNAME=ethan-mac nohup $FB -c forwarder.yaml > forwarder.log 2>&1 &   # 4. 重新启动 forwarder（同 4.3）
-echo $! > forwarder.pid
+../bin/start-forwarder.sh                                   # 4. 重新启动 forwarder（同 4.3）
 ```
 
 - 第 3 步不能省：`generate_id` 按记录内容生成 `_id`。多了 `offset` 字段以后，同一行日志的 `_id` 也变了。
@@ -519,15 +541,69 @@ echo $! > forwarder.pid
 
 ## 7. 停止 / 重启 / 常见问题
 
+### 7.1 启停脚本（`bin/`）
+
+把上面 1.3、2.3、4.x 的 nohup 命令包装成了脚本，每个服务一对：
+
+| 服务 | 启动 | 停止 | pid / 日志 | 就绪判断 |
+|---|---|---|---|---|
+| OpenSearch | `bin/start-opensearch.sh` | `bin/stop-opensearch.sh` | `$RUN_DIR/opensearch.pid`、`$RUN_DIR/logs/opensearch-console.log` | `:9200` 返回 2xx（最多等 120s） |
+| Dashboards | `bin/start-dashboards.sh` | `bin/stop-dashboards.sh` | `$RUN_DIR/dashboards.pid`、`$RUN_DIR/logs/dashboards.log` | `:5601/api/status` 返回 200（180s） |
+| Fluent Bit 汇聚端 | `bin/start-aggregator.sh` | `bin/stop-aggregator.sh` | `fluent-bit-manual/aggregator.pid`、`aggregator.log` | `:2020/api/v1/health`（30s） |
+| Fluent Bit forwarder | `bin/start-forwarder.sh` | `bin/stop-forwarder.sh` | `fluent-bit-manual/forwarder.pid`、`forwarder.log` | `:2021/api/v1/uptime`（30s） |
+
+```bash
+cd /opt/logstack            # Mac 上是 ~/Desktop/workspace/sourcecode/github_space/creed-ai-lab/opensearch；在哪个目录执行都行
+bin/start-opensearch.sh && bin/start-dashboards.sh && bin/start-aggregator.sh && bin/start-forwarder.sh   # 启动（按这个顺序）
+bin/stop-forwarder.sh && bin/stop-aggregator.sh && bin/stop-dashboards.sh && bin/stop-opensearch.sh       # 停止（倒过来）
+```
+
+**启动脚本做的事：**
+
+- 已经在运行（pid 文件里的进程还活着）：不重复启动，等它就绪后返回 0。所以重复执行没有副作用。
+- pid 文件里的进程已经不在了：删掉旧 pid 文件，正常启动。
+- 有同类进程在跑，但不在 pid 文件里（比如在终端里前台启动的）：**报错退出，不启动第二个**，并打印那个 pid。
+  这种情况先在那个终端 Ctrl+C，或者 `echo <pid> > <pid 文件>` 让脚本接管。forwarder 跑两个会报 `database is locked`。
+- 端口已被别的程序占用（9200 / 5601 / 24224）：报错退出。
+- Fluent Bit 两个脚本启动前先跑一次 `--dry-run`，配置写错直接报错，不启动。
+- 用 nohup 在后台启动，日志**追加**写入，每次启动前写一行 `===== <时间> start =====` 分隔。
+- 等到上表的「就绪判断」通过才返回。进程中途退出了，就打印日志最后 30 行，返回 1。
+  `--no-wait` 不等；`WAIT_TIMEOUT=300 bin/start-dashboards.sh` 改等待时间。
+- 拒绝用 root 启动 OpenSearch / Dashboards（0.3）。
+
+**停止脚本：**先发 SIGTERM 让它正常关闭（Fluent Bit 会先把缓冲写出去，OpenSearch 会刷盘）。
+OpenSearch 最多等 90s，其余等 30s。超时还没退出就报错，进程保留；加 `--force` 才 `kill -9`。
+pid 文件不在、但有同类进程在跑时，只提示 pid，**不替你停**，因为不能确定那是不是你要停的那个。
+
+**路径和本机设置**都有默认值，不一样的写进 `bin/env.local.sh`（不进 git；`cp bin/env.example.sh bin/env.local.sh` 再改）：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `OS_HOME` / `OSD_HOME` | 本目录下的 `opensearch-<版本>/` / `opensearch-dashboards-<版本>/` | 解压目录 |
+| `RUN_DIR` | `/data/opensearch`（存在且可写时），否则本目录下的 `run/` | OpenSearch / Dashboards 的 pid 和控制台日志 |
+| `FB` | `/opt/fluent-bit/bin/fluent-bit` → `/usr/local/bin/fluent-bit` → `fluent-bit-pkg/` 里解开的 | 按顺序找第一个存在的 |
+| `FB_DIR` | 本目录下的 `fluent-bit-manual/` | `aggregator.yaml` / `forwarder.yaml` 所在目录，pid、日志、`state/` 也在这里 |
+| `FORWARDER_HOSTNAME` | `hostname -s` | forwarder 写进每条日志的 `host` 字段 |
+| `OPENSEARCH_JAVA_HOME` | 不设 | **macOS 必填**：本机 JDK 21+（包里的 JDK 是 Linux 的，见 1.3）。Linux 上不要设 |
+
+这台 Mac 的 `bin/env.local.sh`：
+
+```bash
+OPENSEARCH_JAVA_HOME=/Users/ethan/Desktop/workspace/tools/jdk/jdk-25.0.3+9/Contents/Home
+FORWARDER_HOSTNAME=ethan-mac
+```
+
+每个脚本都可以加 `-h` 查看用法。
+
 ### 查看是否在运行
 
 ```bash
-cd ~/Desktop/workspace/sourcecode/github_space/creed-ai-lab/opensearch/fluent-bit-manual   # Linux 业务服务器上是 /opt/logstack-forwarder
+cd ~/Desktop/workspace/sourcecode/github_space/creed-ai-lab/opensearch      # 服务器上是 /opt/logstack
 
-# pid 文件里记的进程还在不在（在就打印进程，不在就提示）
-for f in forwarder aggregator; do
-  [ -f $f.pid ] || { echo "$f: 没有 $f.pid"; continue; }
-  ps -o pid,etime,command -p "$(cat $f.pid)" | tail -n +2 | grep . || echo "$f: pid $(cat $f.pid) 已经不在了"
+# pid 文件里记的进程还在不在（在就打印进程，不在就提示）。RUN_DIR 换成你的（服务器上 /data/opensearch，Mac 上 run）
+for f in run/opensearch.pid run/dashboards.pid fluent-bit-manual/aggregator.pid fluent-bit-manual/forwarder.pid; do
+  [ -f $f ] || { echo "$f: 没有"; continue; }
+  ps -o pid,etime,command -p "$(cat $f)" | tail -n +2 | cut -c1-120 | grep . || echo "$f: pid $(cat $f) 已经不在了"
 done
 
 # 实际在跑的 Fluent Bit 进程（pid 文件丢了 / 对不上时用这个找）
@@ -544,15 +620,27 @@ pid 文件和实际进程对不上（比如另一个终端里重新启动过）�
 
 ### 停止和重启
 
+用 7.1 的脚本（推荐）：
+
 ```bash
-# 停（顺序反过来：forwarder → 汇聚端 → Dashboards → OpenSearch）。SIGTERM 会正常关闭，Fluent Bit 会先把缓冲写出去
+# 停（顺序反过来：forwarder → 汇聚端 → Dashboards → OpenSearch）
+bin/stop-forwarder.sh && bin/stop-aggregator.sh && bin/stop-dashboards.sh && bin/stop-opensearch.sh
+# 启动
+bin/start-opensearch.sh && bin/start-dashboards.sh && bin/start-aggregator.sh && bin/start-forwarder.sh
+# 只重启一个，比如改了 forwarder.yaml
+bin/stop-forwarder.sh && bin/start-forwarder.sh
+```
+
+不用脚本时，手动 kill（SIGTERM 会正常关闭，Fluent Bit 会先把缓冲写出去）：
+
+```bash
 kill $(cat fluent-bit-manual/forwarder.pid)              # 各台 forwarder（Linux 业务服务器上是 /opt/logstack-forwarder/forwarder.pid）
 kill $(cat fluent-bit-manual/aggregator.pid)                # 汇聚端（Linux 和 Mac 都在 fluent-bit-manual/ 下）
 kill $(cat /data/opensearch/dashboards.pid)
 kill $(cat /data/opensearch/opensearch.pid)
 ```
 
-再启动就是按 1.3 → 2.3 → 汇聚端（4.1 或 4.2）→ forwarder（4.3 / 4.4）重新执行一遍 nohup 命令（第 3 步的初始化不用再做）。
+再启动就是按 1.3 → 2.3 → 汇聚端（4.1 或 4.2）→ forwarder（4.3 / 4.4）重新执行一遍（第 3 步的初始化不用再做）。
 `nohup` 启动的进程**服务器重启后不会自动起来**；要开机自启，用 `install.sh` 的 systemd 方式。
 
 ### 改了配置以后
@@ -583,4 +671,7 @@ kill $(cat /data/opensearch/opensearch.pid)
 | `index` / `host` 显示 `unknown` | 那条数据不是经过 forwarder 来的，或者 forwarder 配置里漏了 record_modifier |
 | 一条日志被拆成很多条 / 很多条被合成一条 | 日志行首格式和 `parsers.yaml` 里的正则对不上，改那两条正则，重启 forwarder |
 | 很多 `parse_error:*` | 解析规则不认识这种格式：用 `03-ingest-pipeline.sh --simulate` 调试，改 patterns |
+| `start-*.sh` 报「已经有进程在跑……但不是本脚本启动的」 | 那个服务是在终端里前台启动的，或者 pid 文件被删了。在原来的终端 Ctrl+C，或者 `echo <pid> > <pid 文件>` 让脚本接管（7.1） |
+| `start-opensearch.sh` 报「macOS 上必须设 OPENSEARCH_JAVA_HOME」 | 写进 `bin/env.local.sh`（7.1） |
+| `stop-*.sh` 报「还没退出」 | 再等一会儿重新执行；确实卡住了再加 `--force`（kill -9。Fluent Bit 没写出去的数据还在 `state/` 里，下次启动会补发） |
 | 想把某台机器的日志全部重新导一遍 | 停 forwarder → 删除它的 `db` 书签文件 → 启动。会产生重复数据，先删掉对应日期的 `app-logs-*` 索引 |

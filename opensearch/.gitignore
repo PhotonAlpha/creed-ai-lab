@@ -18,3 +18,6 @@ fluent-bit-[0-9]*/
 /fluent-bit-manual/*.pid
 *.pkg
 fluent-bit-pkg/
+# bin/*.sh 的本机设置和运行时文件
+/bin/env.local.sh
+/run/

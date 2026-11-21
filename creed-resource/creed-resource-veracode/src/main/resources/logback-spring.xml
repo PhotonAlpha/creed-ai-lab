@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  日志配置:业务日志与指标日志分离。
+  - 业务日志:控制台 + ${LOG_PATH}/${appName}.log
+  - 指标日志:名为 "METRICS" 的具名 logger 的输出单独写入
+             ${LOG_PATH}/${appName}-metrics.log,且不再回流到业务日志(additivity=false)。
+             代码侧使用 LoggerFactory.getLogger("METRICS") 即可写入,与具体类名解耦,各项目通用。
+-->
+<configuration scan="true" scanPeriod="60 seconds">
+
+    <!-- 复用 Spring Boot 默认的转换规则(彩色输出、CONSOLE_LOG_PATTERN 等) -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!--
+      只保留 PoolingHttpClientConnectionManager 的 "endpoint leased" 那一行,
+      其余 DEBUG(releasing/released/acquired/executing exchange/keep-alive)全部丢弃。
+      TurboFilter 全局生效、在 appender 路由之前,不影响其它 logger。
+    -->
+<!--    <turboFilter class="com.creed.simple.web.PoolLeasedOnlyTurboFilter"/>-->
+
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="creed-resource-veracode"/>
+    <!-- 日志根目录,可通过 logging.file.path 覆盖,默认写到 ./logs -->
+    <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="./logs"/>
+
+    <property scope="context" name="log-pattern" value="%d{dd-MM-yyyy HH:mm:ss.SSS} ${LOG_LEVEL_PATTERN:-%5p} [${appName},%X{traceId:-},%X{spanId:-}] [%thread] %-40.40logger{39}[%line] : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
+    <property scope="context" name="console-pattern" value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}) %clr(${LOG_LEVEL_PATTERN:-%5p}) [${appName},%X{traceId:-},%X{spanId:-}] [%thread] %clr(%-40.40logger{39}){cyan}[%line] %clr(:) %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
+
+    <property name="BUSINESS_FILE" value="${LOG_PATH}/${appName}"/>
+    <property name="METRICS_FILE" value="${LOG_PATH}/${appName}-metrics"/>
+    <property name="LOGBOOK_FILE" value="${LOG_PATH}/${appName}-logbook"/>
+
+    <!-- 指标日志使用纯净的时间戳格式,便于后续采集/解析 -->
+    <property name="METRICS_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %msg%n"/>
+
+    <!-- ============ 控制台:业务日志 ============ -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${console-pattern}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ============ 文件:业务日志 ============ -->
+    <appender name="BUSINESS" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${BUSINESS_FILE}.log</file>
+        <encoder>
+            <pattern>${log-pattern}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${BUSINESS_FILE}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>15</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+
+
+    <!-- ============ 文件:指标日志 ============ -->
+    <appender name="METRICS" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${METRICS_FILE}.log</file>
+        <encoder>
+            <pattern>${METRICS_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${METRICS_FILE}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>15</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- 指标日志:单独落盘到指标文件,同时输出到控制台;additivity=false 避免回流到业务文件 -->
+    <logger name="METRICS" level="INFO" additivity="false">
+        <appender-ref ref="METRICS"/>
+<!--        <appender-ref ref="CONSOLE"/>-->
+    </logger>
+
+    <!-- ============ 文件:Logbook 审计日志 ============ -->
+    <appender name="LOGBOOK_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOGBOOK_FILE}.log</file>
+        <encoder>
+            <pattern>${log-pattern}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOGBOOK_FILE}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>15</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Logbook 审计量大、格式(splunk/json/http,见 application.yml logbook.format.style)与业务日志不同,
+         独立落盘 + 独立滚动策略,且不回流业务文件(additivity=false)。AsyncAppender 把落盘/控制台 I/O
+         摘出请求热路径——LogbookHttpExecHandler 在 hc5 exec chain 里同步调用 sink.write(),不异步化的话
+         这段 I/O 直接算在下游调用耗时里。neverBlock=true 保证队列打满时丢日志而不是阻塞调用线程;
+         discardingThreshold=0 关掉"队列超 80% 自动丢 TRACE/DEBUG/INFO"的默认行为——Logbook 全部走
+         TRACE,默认阈值会把审计日志整体误伤,只有 neverBlock 兜底的整队列丢弃才是我们想要的降级方式。 -->
+    <appender name="ASYNC_LOGBOOK" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>2048</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <appender-ref ref="LOGBOOK_FILE"/>
+        <appender-ref ref="CONSOLE"/>
+    </appender>
+
+    <!-- Zalando Logbook writes audit blocks at TRACE on this logger; without this line the
+         request/response audit (servlet filter + hc5 LogbookHttpExecHandler) is silently off. -->
+    <logger name="org.zalando.logbook" level="TRACE" additivity="false">
+<!--        <appender-ref ref="ASYNC_LOGBOOK"/>-->
+        <appender-ref ref="BUSINESS"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <!--<logger name="org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager" level="debug" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="BUSINESS"/>
+    </logger>-->
+
+    <!-- 连接关闭可见性:"http-outgoing-N close connection GRACEFUL|IMMEDIATE" 来自这个 logger,
+         不是 PoolingHttpClientConnectionManager —— 后者的 "Closing connections idle longer than"
+         被上面的 PoolLeasedOnlyTurboFilter 拦掉,而且只说明扫描跑了、不说明真关了连接。
+         IdleConnectionEvictor 的 closeIdle、TTL 到期、异常关闭都打同一行,按时间点区分;
+         每次请求还会多一行 "set socket timeout to ..."。排查完调回 INFO。 -->
+    <logger name="org.apache.hc.client5.http.impl.io.DefaultManagedHttpClientConnection" level="debug" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="BUSINESS"/>
+    </logger>
+
+<!--    <logger name="org.apache.hc.client5.http.wire" level="debug" additivity="false">-->
+<!--        <appender-ref ref="CONSOLE"/>-->
+<!--        <appender-ref ref="BUSINESS"/>-->
+<!--    </logger>-->
+
+    <!-- 业务日志:控制台 + 业务文件 + OTLP -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="BUSINESS"/>
+    </root>
+
+</configuration>

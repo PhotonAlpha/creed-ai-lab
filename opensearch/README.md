@@ -55,6 +55,7 @@
 │   └── forwarder-example.yaml   业务服务器端样例
 ├── bootstrap/01..04-*.sh  模板 / ISM / pipeline / 索引模式
 ├── fluent-bit-manual/    手动 nohup 启动用的 Fluent Bit 配置：aggregator.yaml / forwarder.yaml（见 MANUAL.md 第 4 节）
+├── bin/                  手动方式的启停脚本：start-/stop-{opensearch,dashboards,aggregator,forwarder}.sh（见 MANUAL.md 7.1）
 ├── systemd/*.service
 ├── macos/                macOS 本地验证（brew services + LaunchAgent）
 ├── optional/nginx-basic-auth.conf
@@ -154,6 +155,13 @@ open http://127.0.0.1:5601
 ## 启停命令
 
 启动顺序：OpenSearch → Dashboards → Fluent Bit。停止反过来。
+
+下面是 `install.sh`（systemd）装出来的服务。按 MANUAL.md 手动部署的，用 `bin/` 下的脚本（MANUAL.md 7.1）：
+
+```bash
+bin/start-opensearch.sh && bin/start-dashboards.sh && bin/start-aggregator.sh && bin/start-forwarder.sh
+bin/stop-forwarder.sh && bin/stop-aggregator.sh && bin/stop-dashboards.sh && bin/stop-opensearch.sh
+```
 
 ```bash
 # 启动
