@@ -203,7 +203,10 @@ page, Reports card foldable. **83 tests pass.**
 2026-11-11 (asked for): **closed issues may be filed again** - `veracode.jira.closed-statuses` (`Closed, Done`);
 `FindingView` / `SastIssueView.recreatable` = every issue found is in one; `CreateIssuesRequest` /
 `CreateSastIssuesRequest.recreateClosed` files that **one** id anyway (more ids = 400, re-checked against Jira under the
-create lock). Page: red *Re-create* on such a row, `modal.confirm` listing the closed issues
+create lock). **2026-11-22 (asked for): no longer status-gated** - `recreatable` = has issues and needs no label
+(the page shows Re-create wherever there is no create / label button), `recreateClosed` files the one id whatever the
+status; `closed-statuses` now only steers the template pick. 126 tests pass
+(`aFiledFindingMayBeFiledAgainOneAtATimeWhateverItsIssuesStatus`). Page: red *Re-create* on such a row, `modal.confirm` listing the closed issues
 (`pages/Veracode/recreateClosed.tsx`). **81 tests pass**
 (`aFindingWhoseIssuesAreAllClosedMayBeFiledAgainOneAtATime`; SAST shares the code path, no test of its own - the mock
 has no closed SAST issue).

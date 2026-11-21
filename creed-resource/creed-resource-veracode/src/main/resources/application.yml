@@ -73,8 +73,8 @@ veracode:
     # {component}, {jiraProject}, {version} also work. An issue matches when its summary names the CVE (Unknown + CWE
     # without one) and - as far as the template has them - the {file} and the {component}.
     summary-template: ${CREED_JIRA_SUMMARY_TEMPLATE:{project} - {cve}|{cwe} - {file}}
-    # A finding (SCA or SAST) whose issues are ALL in one of these statuses (any case) may be filed again - one at a
-    # time, after the page's confirmation (recreateClosed). Bulk creates still treat a closed issue as filed.
+    # Finished statuses (any case): the template export prefers an issue not in one. (Re-create no longer depends on
+    # them: any filed finding may be filed again, one at a time, after the page's confirmation - recreateClosed.)
     closed-statuses: Closed, Done
     # The SCA issue type's Country field, by id (customfield_10300) or name, any case: its options are the page's Country
     # select (several = any of them), searched as cf[<id>] in (...). Not on the create screen = no select. Creating

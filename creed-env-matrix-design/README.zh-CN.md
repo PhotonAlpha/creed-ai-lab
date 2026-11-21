@@ -485,9 +485,9 @@ salt 解密。只有 V9 之前保存的记录（没有 IV / salt）才使用表�
     显示「缺少 label」，用橙色的「同步 label 与描述」/「全部同步」补上，而不是再建一个：加上 label，并按它现在覆盖的 application
     重写描述（「Jira 标题」各 application 的三行、漏洞、来源）；不在本次分析中的 application 保留原有的三行、漏洞行和来源。
     SCA 标签页的同类按钮为「添加 label 与描述」：加上 label，并重写描述：每个 application 一张 *Veracode SCA finding* 表格，本次分析中的 application 用新表格，不在本次分析中的（以前分析时建的）保留原表格，其他文字去掉。
-  - **已关闭的 Jira 可以重新创建**（SCA 与 SAST 相同）：一个漏洞找到的 Jira 全部为 Closed / Done（后端 `veracode.jira.closed-statuses`）时，
-    该行显示红色「重新创建」。点击后弹框列出这些已关闭的 Jira，提醒确认确实需要重新跟踪而不是重复报告，选「仍然创建」才新建。
-    只能逐行进行，「创建全部缺失」不会这样做；后端会重新读取 Jira，期间有 Jira 被重新打开则不再新建。
+  - **重新创建**（SCA 与 SAST 相同）：一个漏洞已有 Jira、且该行没有创建 / 添加 label 按钮时，不论 Jira 状态，
+    该行都显示红色「重新创建」。点击后弹框列出已有的 Jira（含状态），提醒确认确实需要重新跟踪而不是重复报告，选「仍然创建」才新建。
+    只能逐行进行，「创建全部缺失」不会这样做。
     每行可展开查看具体代码位置。SAST 项目配置错误时只在该标签页报错，SCA 不受影响。
 - **Country**（「Jira 设置」里的多选下拉）：只查找 Country 为所选值之一的 Jira（SCA 和 SAST 都过滤，JQL `cf[<id>] in (...)`），不选 = 不限。
   选项来自创建界面上的 Country 字段（后端 `veracode.jira.country-field`），没有该字段时下拉框置灰并提示原因。新建 Jira 的 Country 取自 Jira 字段栏，不取这里的值。

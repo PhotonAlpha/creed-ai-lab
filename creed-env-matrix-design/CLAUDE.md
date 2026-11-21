@@ -195,8 +195,8 @@ endpoint 的切面，这个缺口正是本工具要暴露的。
   SAST 同理，按钮为「同步 label 与描述」：加 label 并按现在覆盖的 application 重写描述，与 SCA 规则一致：不在本次分析中的 application 保留原有的三行、漏洞行和来源（来源行带 application：`Source (名称): …`）。
   按钮按颜色区分：创建 = 蓝色（primary）+ ➕ 图标，添加 label = 橙色 + 标签图标（与「缺少 label」标签、统计卡片同色）；
   工具栏「创建全部缺失」只建缺失的，「全部添加 label 与描述」（SAST：「全部同步 label 与描述」）一键给所有缺少 label 的 Jira 加上，避免遗漏。
-- 已关闭的 Jira：一个漏洞（SCA 或 SAST）找到的 Jira **全部**为 Closed / Done（`veracode.jira.closed-statuses`）时，该行显示红色「重新创建」，
-  点击后弹框列出已关闭的 Jira 并提醒慎重，确认后只为这一行新建（`recreateClosed`，后端只接受单个 id，并重新检查状态）；批量创建仍视为已存在。
+- 重新创建：一个漏洞（SCA 或 SAST）已有 Jira、且该行没有创建 / 添加 label 按钮时，**不论 Jira 状态**都显示红色「重新创建」（2026-11-22 起，原来只在全部 Closed / Done 时显示），
+  点击后弹框列出已有的 Jira（含状态）并提醒慎重，确认后只为这一行新建（`recreateClosed`，后端只接受单个 id）；批量创建仍视为已存在。
   application 显示在分组（折叠面板）标题上，单个报告时显示在上方的报告表中；只有关闭分组、多个 application 混在一个表里时才显示 application 列。
   查找用批量 JQL 搜索：每 50 条漏洞一次（Data Center `/rest/api/2/search`，Cloud `/rest/api/3/search/jql`）。
 - 创建 Jira 使用**用户自己的访问令牌**：页面「Jira 令牌」中配置并「测试连接」（显示令牌对应的用户、是否能访问项目），

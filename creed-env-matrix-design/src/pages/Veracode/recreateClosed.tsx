@@ -11,9 +11,9 @@ export const RECREATE_BUTTON = { color: 'danger', icon: <RedoOutlined /> } as co
 type Modal = ReturnType<typeof App.useApp>['modal'];
 
 /**
- * Asks before a finding whose Jira issues are all finished (`veracode.jira.closed-statuses`: Closed / Done) is filed
- * again (asked for, 2026-11-10): the closed issues are listed, so the user can tell a regression from a duplicate.
- * The server re-checks - an issue reopened meanwhile answers ALREADY_EXISTS.
+ * Asks before a finding that already has Jira issues is filed again (asked for, 2026-11-10; since 2026-11-22 whatever
+ * their status - offered wherever there is no create / label button): the issues are listed with their status, so the
+ * user can tell a regression from a duplicate. One finding at a time; the server refuses more.
  */
 export function confirmRecreate(modal: Modal, t: ReturnType<typeof useI18n>['t'], issues: IssueRef[], project: string, onOk: () => Promise<void>) {
   modal.confirm({

@@ -25,7 +25,7 @@ import java.util.Objects;
  *                      covers is labelled there, not filed again (as SCA); {@code needsLabel} = some are missing
  * @param byApplication the issue per application, as the page and the Confluence export show it (asked for,
  *                      2026-11-10) - display only, the Jira summary stays {@code summary}
- * @param recreatable   its issues are all finished ({@code closed-statuses}): it may be filed again, confirmed
+ * @param recreatable   it has issues and needs no label: it may be filed again, confirmed - open or closed
  */
 public record SastIssueView(String id, String summary, String cwe, String cweName, String category, String severity,
                             List<SastFlaw> flaws, List<String> applications, FindingStatus status,

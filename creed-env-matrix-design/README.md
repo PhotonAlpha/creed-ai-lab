@@ -561,10 +561,9 @@ node mock for it: the Java module mocks Jira in-process and bundles a sample Ver
     application not in this analysis keeps its blocks, rows and source line. On the SCA tab the same button
     is **Add label & finding**: the label, and the description rewritten as one *Veracode SCA finding* table per
     application: this analysis' applications get new tables, others (filed from an earlier analysis) keep theirs; any
-    other text in it goes. On both tabs a finding whose issues are
-    **all** Closed / Done (`veracode.jira.closed-statuses`) gets a red **Re-create**: a dialog lists the closed issues
-    and asks the user to make sure it is a regression, not a duplicate; one row at a time, never in bulk, and the
-    server re-reads Jira first (an issue reopened meanwhile means nothing is created). Rows expand to the flaws (application, file:line, module). A SAST project Jira refuses
+    other text in it goes. On both tabs a finding that already has issues and
+    shows no create / label button gets a red **Re-create**, whatever the issues' status: a dialog lists them with their
+    status and asks the user to make sure it is a regression, not a duplicate; one row at a time, never in bulk. Rows expand to the flaws (application, file:line, module). A SAST project Jira refuses
     is reported in the tab; SCA keeps working.
 - **Country** (a multi-select under *Jira settings*): only issues (SCA and SAST) whose Country is one of those chosen are looked up
   (JQL `cf[<id>] in (...)`); none = any. The options are the create screen's Country field (backend

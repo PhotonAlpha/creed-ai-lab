@@ -304,17 +304,17 @@ class VeracodeApiTest {
     }
 
     @Test
-    void aFindingWhoseIssuesAreAllClosedMayBeFiledAgainOneAtATime() throws Exception {
+    void aFiledFindingMayBeFiledAgainOneAtATimeWhateverItsIssuesStatus() throws Exception {
         String spring = "creed-platform-2026-10-06-Creed|CVE-2022-22965@spring-beans-5.3.17.jar";
         String log4j = "creed-platform-2026-10-06-Creed|CVE-2021-44228@log4j-core-2.14.1.jar";
         // under 2.2.1 spring-beans has only CREED-102, Done; log4j-core's CREED-101 (2.3.0) is In Progress
         String uploadId = JsonPath.read(mvc.perform(multipart("/api/veracode/analysis/upload").file(sample())
                         .param("jiraVersions", "2.2.1", "2.3.0"))
                 .andExpect(jsonPath("$.findings[?(@.id=='" + spring + "')].recreatable").value(true))
-                .andExpect(jsonPath("$.findings[?(@.id=='" + log4j + "')].recreatable").value(false))
+                .andExpect(jsonPath("$.findings[?(@.id=='" + log4j + "')].recreatable").value(true))
                 .andReturn().getResponse().getContentAsString(), "$.uploadId");
         String fields = "\"fields\":{\"components\":[\"Security\"],\"customfield_10100\":\"Production\"},\"jiraVersions\":[\"2.2.1\"]";
-        // without the flag a closed issue still counts as filed
+        // without the flag an existing issue - closed too - counts as filed
         mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"uploadId\":\"%s\",\"findingIds\":[\"%s\"],%s}".formatted(uploadId, spring, fields)))
                 .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"));
@@ -330,15 +330,15 @@ class VeracodeApiTest {
                                 .formatted(uploadId, spring, fields)))
                 .andExpect(jsonPath("$.results[0].outcome").value("CREATED"))
                 .andExpect(jsonPath("$.results[0].issues[0].key").value("CREED-105"));
-        // now an open issue exists: the flag files nothing more, and the page no longer offers it
+        // an open issue exists now: still offered, and filed again when asked (2026-11-22, asked for)
+        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"uploadId\":\"%s\",\"jiraVersions\":[\"2.2.1\"]}".formatted(uploadId)))
+                .andExpect(jsonPath("$.findings[?(@.id=='" + spring + "')].recreatable").value(true));
         mvc.perform(post("/api/veracode/jira/issues").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"uploadId\":\"%s\",\"findingIds\":[\"%s\"],%s,\"recreateClosed\":true}"
                                 .formatted(uploadId, spring, fields)))
-                .andExpect(jsonPath("$.results[0].outcome").value("ALREADY_EXISTS"));
-        mvc.perform(post("/api/veracode/analysis").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"uploadId\":\"%s\",\"jiraVersions\":[\"2.2.1\"]}".formatted(uploadId)))
-                .andExpect(jsonPath("$.findings[?(@.id=='" + spring + "')].recreatable").value(false));
-        assertThat(jira.all()).hasSize(5);
+                .andExpect(jsonPath("$.results[0].outcome").value("CREATED"));
+        assertThat(jira.all()).hasSize(6);
     }
 
     @Test

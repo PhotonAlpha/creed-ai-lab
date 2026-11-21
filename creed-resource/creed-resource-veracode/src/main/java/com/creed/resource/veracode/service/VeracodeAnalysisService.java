@@ -204,7 +204,8 @@ public class VeracodeAnalysisService {
                         warnings.add(f.id() + ": not created - " + e.getMessage());
                     }
                 }
-                views.add(FindingView.of(f, jira.summary(f), status, issues, needsLabel(f, issues), allClosed(issues)));
+                views.add(FindingView.of(f, jira.summary(f), status, issues, needsLabel(f, issues),
+                        !issues.isEmpty() && !needsLabel(f, issues)));
             }
             return new AnalysisResponse(s.uploadId(), s.reports(), jiraProps.projectKey(),
                     List.copyOf(s.meta().versions().values()), s.versions(),
@@ -225,7 +226,7 @@ public class VeracodeAnalysisService {
 
     /**
      * @param jiraVersions   exactly one: the version the issues are filed under (and looked up in, first)
-     * @param recreateClosed the one finding named is filed again when its issues are all finished
+     * @param recreateClosed the one finding named is filed again although it has issues, open or not
      */
     public CreateIssuesResponse create(String uploadId, List<String> findingIds, Map<String, Object> fields,
                                        List<String> jiraVersions, List<String> countries, boolean recreateClosed,
@@ -278,7 +279,7 @@ public class VeracodeAnalysisService {
     /**
      * One finding filed: its issue exists (found in Jira, or created by this request for another application's
      * finding of the same {@link Finding#issueKey}) -> labelled with the finding's application if it is not yet;
-     * none -> created. {@code recreateClosed} and all of them finished -> created again.
+     * none -> created. {@code recreateClosed} -> created again, whatever the existing ones' status.
      *
      * <p>Labelling takes along every other finding of the request that shares the issue and lacks its label: one
      * read and one update for the issue, not one pair per application (the description written is the same).
@@ -290,7 +291,7 @@ public class VeracodeAnalysisService {
             return done;
         }
         List<IssueRef> existing = current(s.matches().getOrDefault(f.id(), List.of()), filing.issues().get(f.issueKey()));
-        if (!existing.isEmpty() && !(recreateClosed && allClosed(existing))) {
+        if (!existing.isEmpty() && !recreateClosed) {
             if (!needsLabel(f, existing)) {
                 return new Result(f.id(), Outcome.ALREADY_EXISTS, existing, null);
             }
@@ -357,12 +358,6 @@ public class VeracodeAnalysisService {
         }
     }
 
-    /** Issues exist, but none carries the finding's application label yet. */
-    /** Re-checked here, not trusted from the page: an issue reopened since the analysis answers {@code ALREADY_EXISTS}. */
-    private boolean allClosed(List<IssueRef> issues) {
-        return jiraProps.allClosed(issues.stream().map(IssueRef::status).toList());
-    }
-
     /** Filing again what Jira already holds is one deliberate, confirmed act - never a bulk one. */
     private static void requireOne(boolean recreateClosed, List<String> ids) {
         if (recreateClosed && ids.stream().distinct().count() != 1) {
@@ -370,6 +365,7 @@ public class VeracodeAnalysisService {
         }
     }
 
+    /** Issues exist, but none carries the finding's application label yet. */
     private boolean needsLabel(Finding f, List<IssueRef> issues) {
         String label = jira.applicationLabel(f);
         return !issues.isEmpty() && label != null && issues.stream().noneMatch(i -> i.hasLabel(label));
@@ -407,7 +403,8 @@ public class VeracodeAnalysisService {
         List<SastIssueView> views = issues.stream().map(i -> {
             List<IssueRef> found = matches.getOrDefault(i.id(), List.of());
             return SastIssueView.of(i, jira.sastSummary(i), found.isEmpty() ? FindingStatus.MISSING : FindingStatus.EXISTS,
-                    found, jira.missingSastLabels(i, found), name, apps, allClosed(found));
+                    found, jira.missingSastLabels(i, found), name, apps,
+                    !found.isEmpty() && jira.missingSastLabels(i, found).isEmpty());
         }).toList();
         int exists = (int) views.stream().filter(v -> v.status() == FindingStatus.EXISTS).count();
         int needsLabel = (int) views.stream().filter(SastIssueView::needsLabel).count();
@@ -454,7 +451,7 @@ public class VeracodeAnalysisService {
                 }
                 List<IssueRef> existing = matches.getOrDefault(id, List.of());
                 try {
-                    if (!existing.isEmpty() && !(recreateClosed && allClosed(existing))) {
+                    if (!existing.isEmpty() && !recreateClosed) {
                         // as SCA: an application whose flaws the issue already covers gets its label, not a second issue
                         List<String> missing = jira.missingSastLabels(issue, existing);
                         if (missing.isEmpty()) {

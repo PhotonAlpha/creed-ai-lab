@@ -16,8 +16,8 @@ import java.util.List;
  * @param needsLabel      the issue exists (another application filed it) but lacks this application's label:
  *                        creating adds the label instead of a second issue
  * @param summary         the summary this page files the finding under ({@code summary-template}), existing or not
- * @param recreatable     its issues are all finished ({@code closed-statuses}): the page offers filing it again,
- *                        after a confirmation
+ * @param recreatable     it has issues and needs no label (no create / label button): the page offers filing it
+ *                        again, after a confirmation - open issues or closed
  */
 public record FindingView(String id, String application, String title, String cveId, String cve, String cwe,
                           String fileName, List<String> components, String severity, Double cvss,

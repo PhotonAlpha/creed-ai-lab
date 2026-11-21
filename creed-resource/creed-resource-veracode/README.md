@@ -67,11 +67,11 @@ new, other applications' tables kept, other text dropped); SAST `mergeSast`, as 
 old one held of applications not in this analysis (head blocks, `Veracode application(s)` entries, flaw rows,
 `Source (<application>): ...` lines; the open-flaw count and highest severity include them).
 
-**A closed issue may be filed again, one at a time.** A finding (SCA or SAST) whose issues are **all** in
-`veracode.jira.closed-statuses` (default `Closed, Done`, any case) is `recreatable` in the analysis; the page asks
-for a confirmation and sends `"recreateClosed": true` with that one id (`POST /jira/issues` or `/jira/sast-issues`).
-More than one id with the flag is 400; the server re-reads Jira, so an issue reopened meanwhile answers
-`ALREADY_EXISTS`. Without the flag - bulk create, auto-create - a closed issue still counts as filed.
+**A filed finding may be filed again, one at a time.** A finding (SCA or SAST) that has issues and needs no label is
+`recreatable` in the analysis, whatever the issues' status (since 2026-11-22; before, only when all were in
+`veracode.jira.closed-statuses`). The page asks for a confirmation and sends `"recreateClosed": true` (the name kept
+for compatibility) with that one id (`POST /jira/issues` or `/jira/sast-issues`). More than one id with the flag is
+400. Without the flag - bulk create, auto-create - any existing issue still counts as filed.
 
 **Country narrows the SCA and SAST lookups.** `veracode.jira.country-field` (default `Country`; field id or name, any case) names
 a field of the SCA issue type's create screen; its options are `countries` in `POST /jira/connection` and in every

@@ -38,8 +38,8 @@ import java.util.Map;
  *                       {@code searchConcurrency} x 2 (an analysis searches SCA and SAST side by side)
  * @param defaults       what the page preselects once the connection test has read Jira - only values Jira offers
  * @param sast           where SAST (static-analysis) issues go - their own project, issue type, labels and summary
- * @param closedStatuses statuses (any case) of a finished issue: a finding whose issues are all in one may be filed
- *                       again, one at a time and after the page's confirmation (asked for, 2026-11-10)
+ * @param closedStatuses statuses (any case) of a finished issue: the template export prefers an issue not in one.
+ *                       (Until 2026-11-22 they also gated Re-create; now any filed finding may be filed again)
  * @param countryField   the SCA issue type's Country field, by id ({@code customfield_10300}) or name, any case: its
  *                       options are the page's Country select, and the ones chosen narrow the lookup
  *                       ({@code cf[10300] in (...)}; asked for, 2026-11-11). Not on the create screen = no select
@@ -70,12 +70,6 @@ public record JiraProperties(
         @DefaultValue("Country") String countryField,
         @DefaultValue("60s") Duration metaCacheTtl,
         @DefaultValue("4") @Min(1) @Max(50) int searchConcurrency) {
-
-    /** Every issue is finished ({@code closed-statuses}); {@code false} for none - a missing one is just created. */
-    public boolean allClosed(List<String> statuses) {
-        return !statuses.isEmpty() && statuses.stream().allMatch(s -> s != null
-                && closedStatuses.stream().anyMatch(c -> c.trim().equalsIgnoreCase(s.trim())));
-    }
 
     /**
      * SAST issues: one per CWE + flaw category ({@code categoryname}), looked up and created by their summary alone -

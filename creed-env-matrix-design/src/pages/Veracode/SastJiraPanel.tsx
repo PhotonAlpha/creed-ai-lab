@@ -95,10 +95,10 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, cou
       const issues = prev.sast.issues.map((i): SastIssue => {
         const r = byId.get(i.id);
         if (r?.outcome === 'CREATED') {
-          return { ...i, status: 'CREATED', issues: r.issues, needsLabel: false, missingLabels: [], recreatable: false };
+          return { ...i, status: 'CREATED', issues: r.issues, needsLabel: false, missingLabels: [], recreatable: r.issues.length > 0 };
         }
         if (r?.outcome === 'ALREADY_EXISTS' || r?.outcome === 'LABELED') {
-          return { ...i, status: 'EXISTS', issues: r.issues, needsLabel: false, missingLabels: [], recreatable: false };
+          return { ...i, status: 'EXISTS', issues: r.issues, needsLabel: false, missingLabels: [], recreatable: r.issues.length > 0 };
         }
         return i;
       });
@@ -262,7 +262,7 @@ export function SastJiraPanel({ analysis, sast, auth, hasToken, scaVersions, cou
           { size: 'small', kind: LABEL_BUTTON })
         : i.status === 'MISSING' ? createButton([i.id], t('veracode.createOne'),
           t('veracode.sastJira.createOneConfirm', { project: sast.projectKey, type: sast.issueType }), { size: 'small' })
-          : i.recreatable && (
+          : i.issues.length > 0 && (
             <Tooltip title={canCreate ? t('veracode.recreate.hint') : createBlocked}>
               <Button size="small" variant="filled" {...RECREATE_BUTTON} loading={creating} disabled={!canCreate}
                       onClick={() => confirmRecreate(modal, t, i.issues, sast.projectKey, () => create([i.id], true))}>

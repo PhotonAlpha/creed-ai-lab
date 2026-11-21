@@ -106,10 +106,11 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   the `${...}` text in the cell. The DB is the module's first: H2 in PostgreSQL mode by default (one migration
   folder for both), in-memory in `application-test.yml`.
 
-- **Filing a closed issue again is single and confirmed** (2026-11-11, asked for): `recreateClosed` is honoured only
-  with exactly one id and only while every matched issue is in `veracode.jira.closed-statuses`; it is re-checked
-  server-side under `createLock`. Never thread it into bulk create or `autoCreate` - those must keep treating a closed
-  issue as filed, or every re-analysis duplicates the project's history.
+- **Filing a filed finding again is single and confirmed** (2026-11-11; status gate dropped 2026-11-22, asked for):
+  `recreateClosed` (name kept) is honoured only with exactly one id, whatever the issues' status; `recreatable` = has
+  issues and needs no label - the page offers Re-create wherever no create / label button shows. Never thread it into
+  bulk create or `autoCreate` - those must keep treating any existing issue as filed, or every re-analysis duplicates
+  the project's history.
 
 - **Only create screens are cached, never issues** (2026-11-12): `meta-cache-ttl` keeps Jira's **raw createmeta reads**
   in a Caffeine cache (bean in `config/JiraMetaCacheConfiguration`, injected; `expireAfterWrite`, max 500; concurrent

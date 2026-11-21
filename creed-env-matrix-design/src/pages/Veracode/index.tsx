@@ -489,9 +489,9 @@ export function VeracodePage() {
       });
       const findings = prev.findings.map((f): Finding => {
         const r = byId.get(f.id);
-        if (r?.outcome === 'CREATED') return { ...f, status: 'CREATED', issues: r.issues, needsLabel: false, recreatable: false };
+        if (r?.outcome === 'CREATED') return { ...f, status: 'CREATED', issues: r.issues, needsLabel: false, recreatable: r.issues.length > 0 };
         if (r?.outcome === 'ALREADY_EXISTS' || r?.outcome === 'LABELED') {
-          return { ...f, status: 'EXISTS', issues: r.issues, needsLabel: false, recreatable: false };
+          return { ...f, status: 'EXISTS', issues: r.issues, needsLabel: false, recreatable: r.issues.length > 0 };
         }
         const sibling = f.status === 'MISSING' ? filed.get(issueKey(f)) : undefined;
         return sibling ? { ...f, status: 'EXISTS', issues: sibling.issues, needsLabel: true } : f;
@@ -782,8 +782,8 @@ export function VeracodePage() {
       key: 'actions',
       width: 130,
       fixed: 'right',
-      // an existing issue of another application is labelled, not created again
-      render: (_, f) => (!creatable(f) && f.recreatable ? (
+      // an existing issue of another application is labelled, not created again; no create / label button = Re-create
+      render: (_, f) => (!creatable(f) && f.issues.length > 0 ? (
         <Tooltip title={canCreate ? t('veracode.recreate.hint') : createBlocked}>
           <Button size="small" variant="filled" {...RECREATE_BUTTON} loading={creating} disabled={!canCreate}
                   onClick={() => confirmRecreate(modal, t, f.issues, analysis?.projectKey ?? '', () => create([f.id], true))}>

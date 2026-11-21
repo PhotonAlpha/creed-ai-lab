@@ -56,7 +56,7 @@ export interface Finding {
   needsLabel: boolean;
   /** The summary it is filed under (`summary-template`), whether the issue exists or not. */
   summary?: string;
-  /** Its issues are all finished (Closed / Done): it may be filed again, one at a time, after a confirmation. */
+  /** It has issues and needs no label (no create / label button): it may be filed again, one at a time, confirmed - open or closed. */
   recreatable?: boolean;
 }
 
@@ -186,7 +186,7 @@ export interface SastIssue {
   /** As SCA: the issue exists but lacks the label of some application with open flaws in it (`missingLabels`). */
   needsLabel: boolean;
   missingLabels: string[];
-  /** As SCA: its issues are all finished, it may be filed again after a confirmation. */
+  /** As SCA: it has issues and needs no label, it may be filed again after a confirmation. */
   recreatable?: boolean;
   /**
    * The issue per application, as the page and the Confluence export show it (display only; the Jira summary stays
