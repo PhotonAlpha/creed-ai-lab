@@ -1,0 +1,22 @@
+# 与 RPM 自带的 fluent-bit.service 同名；放在 /etc/systemd/system 优先于 /usr/lib/systemd/system 的那份。
+[Unit]
+Description=Fluent Bit aggregator (logstack, forward :24224 -> OpenSearch)
+Documentation=file://@INSTALL_ROOT@/README.md
+Wants=network-online.target
+# 只排序、不强依赖：OpenSearch 挂了 Fluent Bit 照常收数据，落到磁盘缓冲
+After=network-online.target opensearch.service
+
+[Service]
+Type=simple
+User=@SVC_USER@
+Group=@SVC_USER@
+ExecStart=@FLB_BIN@ -c @INSTALL_ROOT@/fluent-bit/fluent-bit.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+LimitNOFILE=65536
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

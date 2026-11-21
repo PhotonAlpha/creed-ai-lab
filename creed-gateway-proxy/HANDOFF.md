@@ -67,6 +67,11 @@ DDL and `created_at`).
   PUT → SIT 403 `not_available` "available again at 2026-11-16 20:00", `/totp` does not contain the
   windows, a window covering now → login works, DELETE → back to config, the page's audit list has no
   ADMIN rows. **Not verified:** a restart wiping the API's change (by design), the page in a browser.
+- **Changed by request (2026-11-21): allow wins over block.** A target with `allow.windows` is decided by
+  them alone — block windows (its own and the inherited `creed.splunk.block`) no longer apply to it, so
+  the broker-wide `22:00-09:00` stopped cutting the nights out of UAT's allowed range. `/totp` lists no
+  block windows for such a target. `Availability.restricted()`; test
+  `SplunkAdminTest.allowedWindowsOverrideTheInheritedBlockWindows`.
 - `GatewayProxyAppTest.totpInfoHasSixtySecondStepsTargetsAndBlock` fails, and did before 2026-11-15:
   the committed yml defaults the TOTP period to 30 s and lists UAT/SIT, the test expects 60 s and a
   `default` target.

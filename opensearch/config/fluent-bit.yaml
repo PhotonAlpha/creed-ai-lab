@@ -1,0 +1,67 @@
+# Fluent Bit 汇聚端（YAML 格式）：业务服务器 forward → 本机 24224 → 磁盘缓冲 → OpenSearch 127.0.0.1:9200
+# @XXX@ 占位符由 install.sh 渲染到 @INSTALL_ROOT@/fluent-bit/fluent-bit.yaml。
+#
+# YAML 注意事项：以 @ % * 开头的值必须加引号（'@timestamp'、'%Y.%m.%d'、'*'），否则是 YAML 语法错误；
+# 键名不区分大小写，这里统一小写。改完执行 install.sh --config-only，它会先用 --dry-run 检查。
+
+service:
+  flush: 2
+  daemon: off
+  log_level: info
+  parsers_file: @INSTALL_ROOT@/fluent-bit/parsers.yaml
+
+  # 内置指标 http://127.0.0.1:2020/api/v1/metrics(/prometheus)，只监听本机
+  http_server: on
+  http_listen: 127.0.0.1
+  http_port: 2020
+  health_check: on
+
+  # 磁盘缓冲：OpenSearch 挂掉时数据落盘，恢复后补发；重启 Fluent Bit 也不丢
+  storage.path: @DATA_ROOT@/fluent-bit/buffer
+  storage.sync: normal
+  storage.checksum: off
+  storage.backlog.mem_limit: 64M
+  storage.max_chunks_up: 128
+  storage.metrics: on
+
+pipeline:
+  inputs:
+    - name: forward
+      listen: 0.0.0.0
+      port: 24224
+      buffer_chunk_size: 1M
+      buffer_max_size: 6M
+      storage.type: filesystem
+
+  filters:
+    # forwarder 没打 index / host 字段时兜底（modify 的 add 只在字段不存在时添加）
+    - name: modify
+      match: '*'
+      add:
+        - index unknown
+        - host unknown
+
+  outputs:
+    - name: opensearch
+      match: '*'
+      host: 127.0.0.1
+      port: 9200
+
+      # 按天建索引 app-logs-YYYY.MM.DD（日期按 UTC，即新加坡时间 08:00 切换）
+      logstash_format: on
+      logstash_prefix: app-logs
+      logstash_dateformat: '%Y.%m.%d'
+      time_key: '@timestamp'
+
+      # OpenSearch 2.x+ 不接受 _type
+      suppress_type_name: on
+      # 按记录内容生成 _id：重试 / 补发时同一条日志不会重复入库
+      generate_id: on
+      replace_dots: on
+      # 被 OpenSearch 拒收时把原因打到 Fluent Bit 日志（journalctl -u fluent-bit）
+      trace_error: on
+
+      workers: 2
+      retry_limit: no_limits
+      # 该输出的磁盘缓冲上限；满了以后最老的 chunk 被丢弃
+      storage.total_limit_size: @FLB_BUFFER_LIMIT@

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS 本地：Fluent Bit 汇聚端的 LaunchAgent。@XXX@ 由 macos/install-macos.sh 渲染到 ~/Library/LaunchAgents/ -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.logstack.fluent-bit</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>@FLB_BIN@</string>
+        <string>-c</string>
+        <string>@INSTALL_ROOT@/fluent-bit/fluent-bit.yaml</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>@DATA_ROOT@/logs/fluent-bit.log</string>
+    <key>StandardErrorPath</key>
+    <string>@DATA_ROOT@/logs/fluent-bit.log</string>
+</dict>
+</plist>

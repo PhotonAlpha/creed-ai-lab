@@ -444,12 +444,17 @@ public class SplunkBroker {
                 block.blockedAt(now) != null ? "blocked" : null);
     }
 
-    /** A target's: its block windows, and whether it is refused now for either reason — never its allowed windows. */
+    /**
+     * A target's: its block windows, and whether it is refused now for either reason — never its allowed
+     * windows. A target with allowed windows lists no block windows: they do not apply to it.
+     */
     private static SplunkDtos.BlockInfo blockInfo(Availability availability, Instant now) {
         Availability.Refusal refusal = availability.refusalAt(now);
         Instant next = availability.nextChange(now);
         BlockWindows block = availability.block();
-        return new SplunkDtos.BlockInfo(block.windows().stream().map(BlockWindows.Window::toString).toList(),
+        List<String> windows = availability.restricted() ? List.of()
+                : block.windows().stream().map(BlockWindows.Window::toString).toList();
+        return new SplunkDtos.BlockInfo(windows,
                 block.zone().getId(), refusal != null, next == null ? null : next.toEpochMilli(),
                 refusal == null ? null : refusal.reason() == Availability.Reason.BLOCKED ? "blocked" : "not_available");
     }

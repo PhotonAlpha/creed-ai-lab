@@ -1,0 +1,24 @@
+# Fluent Bit 解析器（YAML 格式）。汇聚端和业务服务器（forwarder）都用这一份 —— forwarder 需要把它拷过去。
+# 字段解析（trace_id / level / msg）在 OpenSearch ingest pipeline 里做（bootstrap/03），这里只负责多行合并。
+# 正则用单引号：YAML 单引号里反斜杠原样保留，\d 不需要再转义。
+
+parsers:
+  - name: json
+    format: json
+    time_key: time
+    time_format: '%Y-%m-%dT%H:%M:%S.%L%z'
+
+# 多行合并：以日期开头的行开始一条新日志，其余行（Java 堆栈 at ...、Caused by ...、空行）并入上一条。
+# 认两种行首：yyyy-MM-dd HH:mm:ss / yyyy-MM-ddTHH:mm:ss（Spring Boot 默认）和 dd-MM-yyyy HH:mm:ss（veracode 等的 logback 配置）。
+# TODO: 还有别的行首格式时，两条正则一起改（第二条是第一条的否定）。
+multiline_parsers:
+  - name: multiline_app
+    type: regex
+    flush_timeout: 1000
+    rules:
+      - state: start_state
+        regex: '/^(\d{4}-\d{2}-\d{2}[ T]|\d{2}-\d{2}-\d{4} )\d{2}:\d{2}:\d{2}/'
+        next_state: cont
+      - state: cont
+        regex: '/^(?!(\d{4}-\d{2}-\d{2}[ T]|\d{2}-\d{2}-\d{4} )\d{2}:\d{2}:\d{2})/'
+        next_state: cont

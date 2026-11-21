@@ -251,8 +251,12 @@ export const ccrgApi = {
 
   // GenReport (Confluence)
   listInstances: (req: PromptCombinationRequest) => post<PromptCombinationResponse>('/prompt/list-instances', req),
+  /** Publishes the report as a Confluence page; answers the page link. */
   generative: (connectionId: string, batch: PromptCombinationRequest[], type: 'xlsx' | 'html') =>
-    post<unknown>(`/prompt/generative${toQuery({ type })}`, { connectionId, batch }),
+    post<string>(`/prompt/generative${toQuery({ type })}`, { connectionId, batch }),
+  /** The same combinations as `generative`, downloaded as the HTML zip Batch / Crossover download - nothing published. */
+  generativeHtmlZip: (connectionId: string, batch: PromptCombinationRequest[]) =>
+    download('/prompt/generative/download', jsonPost({ connectionId, batch }), 'report.zip'),
   listReports: (pageNo: number, pageSize: number) =>
     get<PageResult<ConfluenceContent>>(`/prompt/list-reports${toQuery({ pageNo: String(pageNo), pageSize: String(pageSize) })}`),
   mergeReports: (mergeIds: string[]) => post<unknown>('/prompt/merge-reports', { mergeIds }),

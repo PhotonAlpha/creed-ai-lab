@@ -101,7 +101,8 @@ creed:
     # block.windows / block.zone (this target's own block windows; what it leaves out is creed.splunk.block,
     # and `windows: ""` means this target is never blocked),
     # allow.windows (when set, the ONLY times this target issues sessions — same syntax, read on the
-    # target's block zone, block windows still apply; e.g. "2026-11-16 20:00:00 - 2026-11-20 00:00:00").
+    # target's block zone; block windows, its own or inherited, do NOT apply to it then: allow wins;
+    # e.g. "2026-11-16 20:00:00 - 2026-11-20 00:00:00").
     # allow is a starting value: the admin API (Bearer SPLUNK_ADMIN_TOKEN, see README) replaces it at
     # runtime, in memory — a restart comes back here.
     # Several targets: copy the block, or put the list in an external file

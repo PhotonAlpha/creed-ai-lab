@@ -36,7 +36,11 @@ class SplunkAdminTest {
     private final MemoryAuditStore store = new MemoryAuditStore();
 
     private SplunkBroker broker(Instant now, SplunkProperties.TargetAllow sitAllow) {
-        SplunkProperties splunk = SplunkTestSupport.splunk(false, true, null, "", List.of(
+        return broker(now, sitAllow, "");
+    }
+
+    private SplunkBroker broker(Instant now, SplunkProperties.TargetAllow sitAllow, String blockWindows) {
+        SplunkProperties splunk = SplunkTestSupport.splunk(false, true, null, blockWindows, List.of(
                 SplunkTestSupport.target("UAT", "https://splunk.uat:8000/", null),
                 new SplunkProperties.Target("SIT", "SIT", "https://splunk.sit:8000/", "admin", null, null, null, null, false,
                         null, null, sitAllow)));
@@ -44,7 +48,7 @@ class SplunkAdminTest {
         Clock clock = Clock.fixed(now, ZoneOffset.UTC);
         Totp totp = new Totp(new TotpProperties(60, 6, 1, true, true, 3, Duration.ofSeconds(60)), SECRET, clock::millis);
         return new SplunkBroker(totp, new SplunkLoginClient(splunk), splunk, new SplunkSecrets(env, splunk, q -> null), store,
-                new BlockWindows("", SHANGHAI), clock);
+                new BlockWindows(blockWindows, SHANGHAI), clock);
     }
 
     private SplunkAdmin admin(SplunkBroker broker, Instant now, String token) {
@@ -83,6 +87,22 @@ class SplunkAdminTest {
         SplunkBroker broker = broker(INSIDE, new SplunkProperties.TargetAllow(RANGE));
         assertThat(broker.issue(req(broker, "SIT"), CLIENT).target()).isEqualTo("SIT");
         assertThat(broker.info().targets().get(1).block().changesAtMillis())
+                .isEqualTo(ZonedDateTime.of(2026, 11, 20, 0, 0, 0, 0, SHANGHAI).toInstant().toEpochMilli());
+    }
+
+    @Test
+    void allowedWindowsOverrideTheInheritedBlockWindows() {
+        // 2026-11-17 23:00: inside the broker-wide 22:00-09:00, inside SIT's allowed range.
+        Instant night = ZonedDateTime.of(2026, 11, 17, 23, 0, 0, 0, SHANGHAI).toInstant();
+        SplunkBroker broker = broker(night, new SplunkProperties.TargetAllow(RANGE), "22:00-09:00");
+        // UAT, without allowed windows, is still blocked at night (refused before the code is spent)
+        assertThatThrownBy(() -> broker.issue(req(broker, "UAT"), CLIENT))
+                .isInstanceOfSatisfying(BrokerException.class, e -> assertThat(e.error()).isEqualTo("blocked"));
+        assertThat(broker.issue(req(broker, "SIT"), CLIENT).target()).isEqualTo("SIT");
+        SplunkDtos.BlockInfo sit = broker.info().targets().get(1).block();
+        assertThat(sit.blocked()).isFalse();
+        assertThat(sit.windows()).as("block windows do not apply to SIT").isEmpty();
+        assertThat(sit.changesAtMillis()).as("only the end of the range")
                 .isEqualTo(ZonedDateTime.of(2026, 11, 20, 0, 0, 0, 0, SHANGHAI).toInstant().toEpochMilli());
     }
 

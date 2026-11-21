@@ -1,0 +1,80 @@
+# 业务服务器端（forwarder）样例（YAML 格式）：tail 日志文件 → 加 index / host / source 三个字段 → forward 到汇聚端 24224
+# 每台业务服务器一份。连同 parsers.yaml 放在同一个目录（下面的 parsers_file 用相对路径，相对本文件所在目录）。
+#
+# 三个字段（对应 Splunk 的 index= host= source=，在 Dashboards 里用 index:sg-sit 这样过滤）：
+#   index   —— 环境 / 数据集名，写死在下面 record_modifier 里（TODO）
+#   host    —— 取环境变量 HOSTNAME。bash 的 HOSTNAME 不是导出变量，启动时必须显式给：
+#                HOSTNAME=$(hostname) nohup fluent-bit -c fluent-bit.yaml > fluent-bit.log 2>&1 &
+#              没给的话 host 是空字符串（汇聚端不会兜底成 unknown，因为字段存在）
+#   source  —— 日志文件的完整路径，由 tail 的 path_key 自动填
+#   offset  —— 在文件里的字节位置，由 tail 的 offset_key 自动填（Discover 上下文视图里同一毫秒的日志按它排序）
+#
+# 用 systemd 跑时（RPM 自带的 fluent-bit.service 读的是 /etc/fluent-bit/fluent-bit.conf），加一个 drop-in：
+#   mkdir -p /etc/systemd/system/fluent-bit.service.d
+#   cat > /etc/systemd/system/fluent-bit.service.d/logstack.conf <<'EOF'
+#   [Service]
+#   Environment=HOSTNAME=%H
+#   ExecStart=
+#   ExecStart=/opt/fluent-bit/bin/fluent-bit -c /etc/fluent-bit/fluent-bit.yaml
+#   EOF
+#
+# 改完先检查：fluent-bit -c fluent-bit.yaml --dry-run（查得出配置项名写错，查不出解析器名写错）
+
+service:
+  flush: 2
+  daemon: off
+  log_level: info
+  parsers_file: parsers.yaml
+  # 本机指标端口。和汇聚端装在同一台机器上时改成 2021，避免和汇聚端的 2020 冲突
+  http_server: on
+  http_listen: 127.0.0.1
+  http_port: 2020
+  # 磁盘缓冲 + tail 书签目录。TODO: 启动用户要有写权限（mkdir -p 后 chown 给启动用户）
+  storage.path: /var/lib/fluent-bit/storage
+  storage.sync: normal
+  storage.backlog.mem_limit: 16M
+
+pipeline:
+  inputs:
+    - name: tail
+      tag: app.*
+      # TODO: 改成业务日志路径；多个目录用逗号分隔
+      path: /var/log/myapp/*.log
+      # 指标日志（actuator-metrics 格式）不是业务日志，不收。多个模式用逗号分隔
+      exclude_path: '*-metrics.log'
+      # 原始整行放在 log 字段，文件完整路径放在 source 字段（与索引模板字段名一致）
+      key: log
+      path_key: source
+      # 这条日志在文件里的字节位置（记录末尾）。Discover 的上下文视图（View surrounding documents）
+      # 用它给同一毫秒的日志排序，顺序和文件里一致，相当于 Splunk 的 Show Source
+      offset_key: offset
+      # 书签：记录每个文件读到的位置，重启后从断点继续，不重读不漏读
+      db: /var/lib/fluent-bit/tail-app.db
+      db.locking: true
+      # true = 第一次见到的文件从头读（把已有的历史日志导进去）；之后靠书签续读，不会重复。
+      # 只要新日志、不要历史时改成 false
+      read_from_head: true
+      refresh_interval: 5
+      rotate_wait: 30
+      skip_long_lines: on
+      buffer_max_size: 1M
+      # Java 堆栈等多行日志合并成一条（parsers.yaml 里的 multiline_app）
+      multiline.parser: multiline_app
+      storage.type: filesystem
+
+  filters:
+    - name: record_modifier
+      match: app.*
+      record:
+        # TODO: 每个环境一个值（sg-sit / sg-uat / ...）
+        - index sg-sit
+        - host ${HOSTNAME}
+
+  outputs:
+    - name: forward
+      match: app.*
+      # TODO: 汇聚端地址（和汇聚端在同一台机器上时写 127.0.0.1）
+      host: 10.0.0.50
+      port: 24224
+      retry_limit: no_limits
+      storage.total_limit_size: 2G

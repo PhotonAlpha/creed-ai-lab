@@ -330,6 +330,12 @@ env-matrix. README "CCRG comparator" has the page table.
   `PromptCombinationGenerativeV2Service.generateCrossoverInConfluence`, which shares `publishInConfluence` with
   `/ccrg/report`); `confluence-index.html` adds each side's country / app / environment when they differ, and the
   comparison side's Artifactory link uses its own project. The zip download stays as a second button.
+- **`/ccrg/report` has the same three buttons** (2026-11-20, asked for): *Generate HTML report* shows the page link in
+  `modal.success` (`/prompt/generative` already answers it), *Download HTML (zip)* = `ccrgApi.generativeHtmlZip` →
+  `POST /prompt/generative/download` → `PromptCombinationGenerativeV2Service.toBatchForm` (instance-matrix pairing via
+  `generateCombination`, `RoutesConvert.copy`) → `ReportGenerationService.generatePdfBatch`, the Batch zip. The report
+  form can't be turned into `BatchFormVo` in the browser - the pairing is server-side. Don't enrich (MS modules) in
+  `toBatchForm`: `generatePdfBatch` enriches again and would multiply them.
 - Cascade handlers take the source *as it was when picked* and mutate a `structuredClone`: answers arrive
   after state has moved on, and the batch mode writes to both sources.
 - Pull config's tree needs **controlled** `expandedRowKeys`: `defaultExpandAllRows` only sees rows present

@@ -1,0 +1,25 @@
+[Unit]
+Description=OpenSearch Dashboards (logstack)
+Documentation=file://@INSTALL_ROOT@/README.md
+Wants=network-online.target opensearch.service
+After=network-online.target opensearch.service
+
+[Service]
+Type=simple
+User=@SVC_USER@
+Group=@SVC_USER@
+WorkingDirectory=@INSTALL_ROOT@/opensearch-dashboards
+Environment=OSD_PATH_CONF=@INSTALL_ROOT@/opensearch-dashboards/config
+# Dashboards 是 Node 进程；16GB 主机上 OpenSearch 占 8g 堆，这里给 1g 足够
+Environment=NODE_OPTIONS=--max-old-space-size=1024
+ExecStart=@INSTALL_ROOT@/opensearch-dashboards/bin/opensearch-dashboards
+
+LimitNOFILE=65536
+TimeoutStopSec=60
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+# OpenSearch Dashboards。@XXX@ 占位符由 install.sh 渲染。
+
+server.host: "0.0.0.0"          # TODO: 启用 optional/nginx-basic-auth.conf 时改成 "127.0.0.1"
+server.port: 5601
+server.name: "logstack"
+
+# 同机直连，不走网络
+opensearch.hosts: ["http://127.0.0.1:9200"]
+opensearch.requestTimeout: 60000
+
+path.data: "@DATA_ROOT@/dashboards"
+
+# 预设显示习惯。写在 overrides 里的设置在「高级设置」页面会被锁定、不能改；
+# 想让用户自己改，删掉这一段，改用 Dashboards API 设置（见 README）。
+uiSettings:
+  overrides:
+    "dateFormat": "YYYY-MM-DD HH:mm:ss.SSS"
+    "dateFormat:tz": "@TIMEZONE@"
+    "timepicker:timeDefaults": '{ "from": "now-7d", "to": "now" }'
+    "discover:sort:defaultOrder": "asc"

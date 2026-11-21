@@ -1,0 +1,15 @@
+# 安装到 $OS_HOME/config/jvm.options.d/logstack.options，覆盖发行版 jvm.options 里的同名项
+# （发行版的 jvm.options 随版本变化，不整体替换）。
+
+# 堆 = 物理内存一半，且不超过 31g（压缩指针边界）。Xms 必须等于 Xmx，避免运行中扩堆停顿。
+# @HEAP_GB@ 由 install.sh 计算（16GB 主机 → 8g）。TODO: 要固定值就在 install.sh 里设 HEAP_GB。
+-Xms@HEAP_GB@g
+-Xmx@HEAP_GB@g
+
+# GC 日志写到数据目录的 logs/（发行版自带的那条已被 install.sh 注释掉）
+-Xlog:gc*,gc+age=trace,safepoint:file=@DATA_ROOT@/logs/gc.log:utctime,pid,tags:filecount=16,filesize=64m
+
+# OOM 时留下堆转储，便于事后分析；放数据盘，注意磁盘空间
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=@DATA_ROOT@/logs
+-XX:ErrorFile=@DATA_ROOT@/logs/hs_err_pid%p.log

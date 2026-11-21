@@ -119,7 +119,8 @@ Same contract as the Node BFF had, so the page needs no change. Additions:
   carries each target's effective windows in `targets[].block` (`block` at the top is the broker-wide
   default); the page follows the selected target and tags blocked ones in the dropdown.
 - **Allowed windows (availability).** `creed.splunk.targets[].allow.windows` — same syntax — makes a
-  target issue sessions **only** inside those windows (block windows still apply on top), e.g. SIT only
+  target issue sessions **only** inside those windows, and **replaces** the block windows for it (its own
+  and the inherited `creed.splunk.block` — a nightly `22:00-09:00` no longer cuts into them), e.g. SIT only
   `2026-11-16 20:00:00 - 2026-11-20 00:00:00`. Outside them: `403 not_available` with `Retry-After`,
   before the code, which is not used. The page is told that the target is unavailable and when that
   changes (`targets[].block.reason = not_available`, `changesAtMillis`) — **never the windows themselves**.

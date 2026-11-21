@@ -582,7 +582,7 @@ Camel XML 路由在所有路由文件中按 route id 逐步比较（from、to、
 | 页面 | 路由 | 功能 |
 |---|---|---|
 | 拉取配置 | `/ccrg/install` | 已安装的 release，每个项目一棵树；从 Artifactory 按 项目 → release → 构建号 安装；卸载单行、整个项目或所选 |
-| 生成报告 | `/ccrg/report` | 比较同一项目 / 国家 / 应用的两个 release，以 xlsx 或 HTML 发布到 Confluence（SSE 进度）；列出、打开、删除已生成页面 |
+| 生成报告 | `/ccrg/report` | 比较同一项目 / 国家 / 应用的两个 release，以 xlsx 或 HTML 发布到 Confluence（SSE 进度；「生成 HTML 报告」完成后与跨项目比较一样弹框显示页面链接）；「下载 HTML（zip）」把同样的组合下载为 zip（`POST /api/prompt/generative/download`，不发布）；列出、打开、删除已生成页面 |
 | 批量导出 | `/ccrg/batch` | 多个组合，每个组合两个来源，**同一**项目 → 下载一份 xlsx / HTML |
 | 跨项目比较 | `/ccrg/crossover` | 同一表单，来源之间不再联动限制：每个来源**各自**选择项目、发布目录、国家和应用（同一 release 下 SG 对 CN 也可以），不复制、不锁定。「生成 HTML 报告」像「生成报告」一样发布 Confluence 页面（`POST /api/prompt/generative/crossover`，在 `/ccrg/report` 列出；两边国家 / 应用 / 环境不同时分别标出）；「下载 HTML（zip）」保留原来的下载 |
 | 生成 YAML | `/ccrg/yaml` | 一个或多个来源（与批量导出的来源结构相同，也可从其复制）→ 各自生效的配置按从上到下的顺序合并成一个 `.yml`：多个来源设置同一个 key 时取列表中最靠下的来源的值，所有取值不同的 key 都会列出；页面显示并可下载（`POST /api/prompt/generate-yaml/merge`；单个来源：`/generate-yaml`） |

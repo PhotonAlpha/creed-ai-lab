@@ -1,0 +1,312 @@
+From 189a212793c5f27598662244c913c0b2c34cae62 Mon Sep 17 00:00:00 2001
+From: EthanCao <ethan.caoq@foxmail.com>
+Date: Fri, 20 Nov 2026 17:26:57 +0800
+Subject: [PATCH] init ccrg be
+
+---
+ .../prompt/PromptCombinationController.java   | 29 +++++++
+ .../PromptCombinationGenerativeV2Service.java | 51 +++++++++--
+ .../service/ReportGenerationV2Service.java    | 17 +++-
+ .../resources/templates/confluence-index.html | 17 +++-
+ .../CrossoverConfluenceIndexRenderTest.java   | 87 +++++++++++++++++++
+ 5 files changed, 188 insertions(+), 13 deletions(-)
+ create mode 100644 creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/CrossoverConfluenceIndexRenderTest.java
+
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/PromptCombinationController.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/PromptCombinationController.java
+index e2c92afd..8d0dce8b 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/PromptCombinationController.java
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/controller/prompt/PromptCombinationController.java
+@@ -4,6 +4,7 @@ import com.creed.parent.client.vo.confluence.content.ConfluenceContentVO;
+ import com.creed.parent.client.vo.confluence.content.PageResult;
+ import com.creed.parent.constant.ReportTypeEnum;
+ import com.creed.parent.context.TenantContextHolder;
++import com.creed.parent.controller.vo.BatchFormVo;
+ import com.creed.parent.controller.prompt.vo.EffectiveYamlVo;
+ import com.creed.parent.controller.prompt.vo.GenerateYamlRequest;
+ import com.creed.parent.controller.prompt.vo.PageParam;
+@@ -15,10 +16,15 @@ import com.creed.parent.controller.prompt.vo.PromptMergeResponse;
+ import com.creed.parent.controller.vo.RouteInfoVo;
+ import com.creed.parent.service.EffectiveYamlService;
+ import com.creed.parent.service.PromptCombinationGenerativeV2Service;
++import com.creed.parent.service.ReportGenerationService;
+ import com.creed.parent.utils.R;
+ import jakarta.annotation.Resource;
++import jakarta.servlet.http.HttpServletResponse;
+ import org.springframework.web.bind.annotation.*;
+ 
++import java.io.IOException;
++import java.util.Locale;
++
+ /**
+  * @author EthanCao
+  * @description ccrg-tool
+@@ -31,6 +37,8 @@ public class PromptCombinationController {
+     PromptCombinationGenerativeV2Service promptCombinationGenerativeV2Service;
+     @Resource
+     EffectiveYamlService effectiveYamlService;
++    @Resource
++    ReportGenerationService reportGenerationService;
+ 
+     @PostMapping("/list-instances")
+     public R<PromptCombinationResponseVo> listInstances(@RequestBody PromptCombinationRequest request) {
+@@ -45,6 +53,27 @@ public class PromptCombinationController {
+         return R.success(promptCombinationGenerativeV2Service.generateReportsInConfluence(request, typeEnum));
+     }
+ 
++    /**
++     * Crossover's "Generate HTML report": the Batch/Crossover form ({@code BatchFormVo}, both sources in full) published
++     * as a Confluence page like {@link #generative} - same draft page, attachments and index, listed by /list-reports.
++     */
++    @PostMapping("/generative/crossover")
++    public R<?> generativeCrossover(@RequestBody BatchFormVo request, @RequestParam("type") String type) {
++        ReportTypeEnum typeEnum = ReportTypeEnum.findByType(type);
++        TenantContextHolder.setUploadConfluence(true);
++        return R.success(promptCombinationGenerativeV2Service.generateCrossoverInConfluence(request, typeEnum));
++    }
++
++    /**
++     * /ccrg/report's "Download HTML (zip)": the report form ({@link PromptBatchForm}) paired over the instance matrix
++     * like {@link #generative}, then the zip Batch / Crossover download (/system/report/generate-pdf-batch) - SSE
++     * progress on {@code connectionId} included. Nothing goes to Confluence.
++     */
++    @PostMapping("/generative/download")
++    public void generativeDownload(@RequestBody PromptBatchForm request, HttpServletResponse response) throws IOException {
++        reportGenerationService.generatePdfBatch(promptCombinationGenerativeV2Service.toBatchForm(request), Locale.ENGLISH, response);
++    }
++
+     @GetMapping("/list-reports")
+     public R<PageResult<ConfluenceContentVO>> listReports(PageParam pageParam) {
+         return R.success(promptCombinationGenerativeV2Service.listReports(pageParam));
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/PromptCombinationGenerativeV2Service.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/PromptCombinationGenerativeV2Service.java
+index 34bf3673..807a1c76 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/PromptCombinationGenerativeV2Service.java
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/PromptCombinationGenerativeV2Service.java
+@@ -191,12 +191,50 @@ public class PromptCombinationGenerativeV2Service {
+     }
+ 
+     public String generateReportsInConfluence(PromptBatchForm request, ReportTypeEnum reportType) {
+-        List<PromptCombinationRequest> batchRequests = request.getBatch();
+         log.info("generateReportsInConfluence starting...");
++        List<Supplier<List<RouteFormVo>>> batches = request.getBatch().stream()
++                .<Supplier<List<RouteFormVo>>>map(combinationRequest -> () -> self.generateCombination(combinationRequest).stream()
++                        .map(this::enrichRouteFormVo)
++                        .flatMap(Collection::stream)
++                        .toList())
++                .toList();
++        return publishInConfluence(request.getConnectionId(), batches, reportType);
++    }
++
++    /**
++     * Crossover (`/ccrg/crossover`, 2026-11-20, asked for): the form already names both sources in full - each its own
++     * project / release / country / app / environment / instance, so SG can sit beside CN - and goes through the same
++     * page as /ccrg/report: draft page, one attachment per combination (MS = one per module both sides have), then the
++     * index table. No instance-matrix pairing: what the user picked is what is compared.
++     */
++    public String generateCrossoverInConfluence(BatchFormVo form, ReportTypeEnum reportType) {
++        log.info("generateCrossoverInConfluence starting...");
++        List<Supplier<List<RouteFormVo>>> batches = form.getBatch().stream()
++                .<Supplier<List<RouteFormVo>>>map(routeForm -> () -> reportGenerationV2Service.enrichRouteFormVo(routeForm))
++                .toList();
++        return publishInConfluence(form.getConnectionId(), batches, reportType);
++    }
+ 
++    /**
++     * /ccrg/report's "Download HTML (zip)" (2026-11-20, asked for: the same buttons as Crossover): the report form's
++     * combinations paired over the instance matrix exactly as {@link #generateReportsInConfluence} pairs them, as the
++     * {@code BatchFormVo} the Batch / Crossover zip takes. MS modules are left to that zip's own expansion
++     * ({@code ReportGenerationService.enrichRouteFormVo}) - expanding them here too would multiply them.
++     */
++    public BatchFormVo toBatchForm(PromptBatchForm request) {
++        BatchFormVo form = new BatchFormVo();
++        form.setConnectionId(request.getConnectionId());
++        form.setBatch(request.getBatch().stream()
++                .flatMap(combinationRequest -> self.generateCombination(combinationRequest).stream())
++                .map(RoutesConvert.INSTANCE::copy)
++                .toList());
++        return form;
++    }
++
++    /** Each supplier is one combination of the form, expanded only once the draft page exists (progress follows it). */
++    private String publishInConfluence(String connectionId, List<Supplier<List<RouteFormVo>>> batches, ReportTypeEnum reportType) {
+         String fileName = DateTimeUtil.getTimeStr() + " Configs Report";
+         RequestContextHolder.setRequestAttributes(RequestContextHolder.getRequestAttributes(), true);
+-        String connectionId = request.getConnectionId();
+         applicationEventPublisher.publishEvent(new EmitterEvent(this, connectionId, EmitterEventEnum.INIT));
+         // 1. generate generateComparison
+ 
+@@ -214,13 +252,8 @@ public class PromptCombinationGenerativeV2Service {
+         StopWatch stopWatch = new StopWatch();
+         stopWatch.start("generateReportsInConfluence");
+         List<RouteFormVo> finalListing = new ArrayList<>();
+-        for (PromptCombinationRequest combinationRequest : batchRequests) {
+-            List<RouteWebFormVo> promptCombination = self.generateCombination(combinationRequest);
+-
+-            List<RouteFormVo> combinationList = promptCombination.stream()
+-                    .map(this::enrichRouteFormVo)
+-                    .flatMap(Collection::stream)
+-                    .toList();
++        for (Supplier<List<RouteFormVo>> batch : batches) {
++            List<RouteFormVo> combinationList = batch.get();
+             applicationEventPublisher.publishEvent(new EmitterEvent(this, connectionId, EmitterEventEnum.SET_TOTAL, combinationList.size()));
+             log.info("doGenerateAndUploadPdf:{}", JacksonUtils.toJsonString(combinationList));
+             doGenerateAndUpload2Cloud(combinationList, connectionId, draftPageId, reportType);
+diff --git a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/ReportGenerationV2Service.java b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/ReportGenerationV2Service.java
+index a355c998..8d0110bf 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/ReportGenerationV2Service.java
++++ b/creed-resource/ccrg-tool-starter/src/main/java/com/creed/parent/service/ReportGenerationV2Service.java
+@@ -656,9 +656,11 @@ public class ReportGenerationV2Service {
+                 .map(entry -> {
+                     String[] strings = StringUtils.split(entry.getKey(), "::");
+                     String projectName = findByProjectName(entry.getValue());
++                    // crossover: the second source may be another project - link its own release
++                    String comparisonProject = findByProjectName(entry.getValue(), 1);
+                     String sourceArtifactoryLink = getArtifactoryLink(projectName, strings[0]);
+-                    String comparisonArtifactoryLink = getArtifactoryLink(projectName, strings[1]);
+-                    RouteInfoGroupingVO routeInfoGrouping = new RouteInfoGroupingVO(projectName, strings[0], strings[1], groupingByApp(entry.getValue()));
++                    String comparisonArtifactoryLink = getArtifactoryLink(comparisonProject, strings[strings.length > 1 ? 1 : 0]);
++                    RouteInfoGroupingVO routeInfoGrouping = new RouteInfoGroupingVO(projectName, strings[0], strings[strings.length > 1 ? 1 : 0], groupingByApp(entry.getValue()));
+                     routeInfoGrouping.setSourceArtifactoryUrl(sourceArtifactoryLink);
+                     routeInfoGrouping.setComparisonArtifactoryUrl(comparisonArtifactoryLink);
+                     return routeInfoGrouping;
+@@ -678,6 +680,17 @@ public class ReportGenerationV2Service {
+                         ))
+                 );
+     }
++    /** The project of the {@code index}-th source; the first source's when the form has fewer. */
++    protected String findByProjectName(List<RouteFormVo> routeForms, int index) {
++        return routeForms.stream()
++                .findAny()
++                .map(RouteFormVo::getRoutes)
++                .filter(routes -> routes.size() > index)
++                .map(routes -> routes.get(index).getProjectName())
++                .filter(StringUtils::isNotBlank)
++                .orElseGet(() -> findByProjectName(routeForms));
++    }
++
+     protected String findByProjectName(List<RouteFormVo> routeForms) {
+         return routeForms.stream()
+                 .findAny()
+diff --git a/creed-resource/ccrg-tool-starter/src/main/resources/templates/confluence-index.html b/creed-resource/ccrg-tool-starter/src/main/resources/templates/confluence-index.html
+index a6cf1a0f..5a3b3962 100644
+--- a/creed-resource/ccrg-tool-starter/src/main/resources/templates/confluence-index.html
++++ b/creed-resource/ccrg-tool-starter/src/main/resources/templates/confluence-index.html
+@@ -69,8 +69,21 @@
+                             <tr>
+                                 <td th:text="|${itemStat.count}|"></td>
+                                 <td th:if="${itemStat.index == 0}" th:rowspan="${#lists.size(entryL2.value)}" th:text="|${entryL2.key == 'NA' ? entry.key : entryL2.key}|"></td>
+-                                <td th:text="${item.routes[0]?.instance}"></td>
+-                                <td th:text="${item.routes[1]?.instance}"></td>
++                                <!--/* crossover: two sources may differ above the instance (SG vs CN) - then each cell names its own */-->
++                                <th:block th:with="crossSource=${!#strings.equals(item.routes[0]?.countryCode, item.routes[1]?.countryCode) or !#strings.equals(item.routes[0]?.app, item.routes[1]?.app) or !#strings.equals(item.routes[0]?.environment, item.routes[1]?.environment)}">
++                                <td>
++                                    <span th:text="${item.routes[0]?.instance}"></span>
++                                    <th:block th:if="${crossSource}">
++                                        <br/><em th:text="|${item.routes[0]?.countryCode} / ${item.routes[0]?.app} / ${item.routes[0]?.environment}|"></em>
++                                    </th:block>
++                                </td>
++                                <td>
++                                    <span th:text="${item.routes[1]?.instance}"></span>
++                                    <th:block th:if="${crossSource}">
++                                        <br/><em th:text="|${item.routes[1]?.countryCode} / ${item.routes[1]?.app} / ${item.routes[1]?.environment}|"></em>
++                                    </th:block>
++                                </td>
++                                </th:block>
+                                 <td>
+                                     <ul>
+                                         <li>
+diff --git a/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/CrossoverConfluenceIndexRenderTest.java b/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/CrossoverConfluenceIndexRenderTest.java
+new file mode 100644
+index 00000000..ca19960c
+--- /dev/null
++++ b/creed-resource/ccrg-tool-starter/src/test/java/com/creed/parent/service/report/CrossoverConfluenceIndexRenderTest.java
+@@ -0,0 +1,87 @@
++package com.creed.parent.service.report;
++
++import com.creed.parent.client.vo.confluence.attachment.SimpleAttachmentContentVO;
++import com.creed.parent.controller.prompt.vo.RouteInfoGroupingVO;
++import com.creed.parent.controller.vo.RouteFormVo;
++import com.creed.parent.controller.vo.RouteInfoVo;
++import com.creed.parent.service.ReportGenerationV2Service;
++import org.junit.jupiter.api.Test;
++import org.springframework.test.util.ReflectionTestUtils;
++import org.thymeleaf.spring6.SpringTemplateEngine;
++import org.thymeleaf.templatemode.TemplateMode;
++import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
++
++import java.util.List;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++/**
++ * The Confluence index page (`confluence-index.html`) for Crossover's combinations: two sources that differ above the
++ * instance (SG vs CN, another project) must be told apart on the page, and each side links its own project's release.
++ * The /ccrg/report shape (same country / app / environment on both sides) keeps its plain instance cells.
++ */
++class CrossoverConfluenceIndexRenderTest {
++
++    private static RouteInfoVo route(String project, String release, String country, String env, String instance) {
++        RouteInfoVo r = new RouteInfoVo();
++        r.setProjectName(project);
++        r.setReleaseName(release);
++        r.setCountryCode(country);
++        r.setApp("CCS");
++        r.setEnvironment(env);
++        r.setInstance(instance);
++        r.setZone("Z1");
++        return r;
++    }
++
++    private static RouteFormVo combination(String file, RouteInfoVo... routes) {
++        RouteFormVo form = new RouteFormVo();
++        form.setCompareAll(true);
++        form.setRoutes(List.of(routes));
++        SimpleAttachmentContentVO attachment = new SimpleAttachmentContentVO();
++        attachment.setTitle(file);
++        form.setSimpleAttachmentContent(attachment);
++        return form;
++    }
++
++    private static ReportGenerationV2Service service() {
++        ClassLoaderTemplateResolver resolver = new ClassLoaderTemplateResolver();
++        resolver.setPrefix("templates/");
++        resolver.setSuffix(".html");
++        resolver.setTemplateMode(TemplateMode.HTML);
++        resolver.setCharacterEncoding("UTF-8");
++        SpringTemplateEngine engine = new SpringTemplateEngine();
++        engine.setTemplateResolver(resolver);
++        ReportGenerationV2Service service = new ReportGenerationV2Service();
++        ReflectionTestUtils.setField(service, "springTemplateEngine", engine);
++        return service;
++    }
++
++    @Test
++    void sgAgainstCnNamesEachSideAndLinksEachProject() {
++        ReportGenerationV2Service service = service();
++        List<RouteInfoGroupingVO> grouping = service.groupingForTemplate(List.of(
++                combination("sg-vs-cn.html",
++                        route("idbproxy", "R18.1_12", "SG", "PROD", "PROD1"),
++                        route("idbgst", "R18.1_12", "CN", "UAT", "PROD1"))));
++
++        String html = service.renderHtmlTemplate(grouping);
++
++        assertThat(grouping.getFirst().getSourceArtifactoryUrl()).contains("/idbproxy/release/R18.1/12/");
++        assertThat(grouping.getFirst().getComparisonArtifactoryUrl()).contains("/idbgst/release/R18.1/12/");
++        assertThat(html)
++                .contains("<em>SG / CCS / PROD</em>", "<em>CN / CCS / UAT</em>")
++                .contains("ri:filename=\"sg-vs-cn.html\"");
++    }
++
++    @Test
++    void theReportPagesShapeStaysPlain() {
++        ReportGenerationV2Service service = service();
++        String html = service.renderHtmlTemplate(service.groupingForTemplate(List.of(
++                combination("r1-vs-r2.html",
++                        route("idbproxy", "R18.1_12", "SG", "PROD", "PROD1"),
++                        route("idbproxy", "R18.2_3", "SG", "PROD", "PROD2")))));
++
++        assertThat(html).contains("PROD1", "PROD2").doesNotContain("<em>");
++    }
++}
+-- 
+2.50.1
+

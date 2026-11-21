@@ -1,0 +1,35 @@
+# OpenSearch —— 单节点、内网、无 security。@XXX@ 占位符由 install.sh 渲染，改完执行 install.sh --config-only。
+
+cluster.name: logstack
+node.name: @NODE_NAME@                 # 渲染为主机名 (hostname -s)
+
+# HTTP 监听所有网卡，靠防火墙只放行 127.0.0.1（firewall.sh）。
+# TODO: 想多一层保险就改成 127.0.0.1 —— Dashboards / Fluent Bit 都走本机，不受影响。
+network.host: 0.0.0.0
+http.port: 9200
+# 单节点不需要节点间通信，传输层 9300 只绑本机，避免多暴露一个端口
+transport.host: 127.0.0.1
+transport.port: 9300
+
+discovery.type: single-node
+
+path.data: @DATA_ROOT@/data
+path.logs: @DATA_ROOT@/logs
+
+# 锁住 JVM 堆不被换出；systemd 单元里必须有 LimitMEMLOCK=infinity，否则启动日志会报 "Unable to lock JVM Memory"
+bootstrap.memory_lock: true
+
+# 内网简化：关闭 security 插件，全程 HTTP、无账号。加固方法见 README「加固清单」。
+plugins.security.disabled: true
+
+# 副本数：index.number_of_replicas 是索引级设置，不能写在 opensearch.yml（写了节点起不来）。
+# 单节点副本永远分配不出去 → 集群常驻 yellow，所以副本数 0 由 bootstrap/01-index-template.sh 的索引模板保证：
+#   app-logs-* 模板 number_of_replicas: 0，外加一个 priority 0、匹配 * 的兜底模板。
+
+# 磁盘水位（默认值，写出来是为了让人看到）：85% 不再分配新分片，90% 迁移分片，95% 索引只读
+cluster.routing.allocation.disk.watermark.low: 85%
+cluster.routing.allocation.disk.watermark.high: 90%
+cluster.routing.allocation.disk.watermark.flood_stage: 95%
+
+# 删除索引必须写全名，防止 DELETE app-logs-* / _all 误删
+action.destructive_requires_name: true

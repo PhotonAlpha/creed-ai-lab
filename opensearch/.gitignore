@@ -1,0 +1,20 @@
+# 离线安装包与解压目录：几百 MB 到 GB 级，不进 git
+*.tar.gz
+*.tar.gz.sha512
+*.rpm
+packages/
+opensearch-[0-9]*/
+opensearch-dashboards-[0-9]*/
+fluent-bit-browser-experimental/
+.DS_Store
+# install.sh 在本目录生成的东西（INSTALL_ROOT 默认是本目录）
+/opensearch
+/opensearch-dashboards
+/fluent-bit/
+fluent-bit-[0-9]*/
+# fluent-bit-manual 运行时生成的缓冲 / 书签 / 日志
+/fluent-bit-manual/state/
+/fluent-bit-manual/*.log
+/fluent-bit-manual/*.pid
+*.pkg
+fluent-bit-pkg/

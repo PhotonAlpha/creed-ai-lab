@@ -1,0 +1,68 @@
+# Fluent Bit 汇聚端（手动 nohup 启动用，不经过 install.sh 渲染）
+# 接收各台 forwarder 发来的日志（forward 协议 :24224）→ 写入 OpenSearch 127.0.0.1:9200，按天建索引 app-logs-YYYY.MM.DD。
+#
+# 启动前必须先 cd 到本目录：
+#   parsers_file 的相对路径按「本文件所在目录」解析，
+#   storage.path 的相对路径按「当前目录」解析 —— 两者只有在本目录启动时才指向同一处。
+#
+#   cd <本目录>
+#   <fluent-bit 可执行文件> -c aggregator.yaml --dry-run
+#   nohup <fluent-bit 可执行文件> -c aggregator.yaml > aggregator.log 2>&1 &  echo $! > aggregator.pid
+#
+# 可执行文件：Linux = /opt/fluent-bit/bin/fluent-bit（dnf 装的 RPM）；macOS = 见 MANUAL.md 第 4 节。
+# YAML 里以 @ % * 开头的值必须加引号。
+
+service:
+  flush: 2
+  daemon: off
+  log_level: info
+  parsers_file: parsers.yaml
+  # 本机指标 http://127.0.0.1:2020/api/v1/metrics
+  http_server: on
+  http_listen: 127.0.0.1
+  http_port: 2020
+  health_check: on
+  # 磁盘缓冲：OpenSearch 挂了数据先落盘，恢复后补发；重启也不丢
+  storage.path: state/aggregator/buffer
+  storage.sync: normal
+  storage.checksum: off
+  storage.backlog.mem_limit: 64M
+  storage.max_chunks_up: 128
+  storage.metrics: on
+
+pipeline:
+  inputs:
+    - name: forward
+      listen: 0.0.0.0
+      port: 24224
+      buffer_chunk_size: 1M
+      buffer_max_size: 6M
+      storage.type: filesystem
+
+  filters:
+    # forwarder 没带 index / host 时兜底成 unknown（字段已存在时不覆盖）
+    - name: modify
+      match: '*'
+      add:
+        - index unknown
+        - host unknown
+
+  outputs:
+    - name: opensearch
+      match: '*'
+      host: 127.0.0.1
+      port: 9200
+      logstash_format: on
+      logstash_prefix: app-logs
+      logstash_dateformat: '%Y.%m.%d'
+      time_key: '@timestamp'
+      suppress_type_name: on
+      # 按记录内容生成 _id：重试补发时同一条不会重复入库
+      generate_id: on
+      replace_dots: on
+      # 被 OpenSearch 拒收时把原因打到 aggregator.log
+      trace_error: on
+      workers: 2
+      retry_limit: no_limits
+      # TODO: 缓冲上限。state/ 在本目录下，按本目录所在磁盘的余量调
+      storage.total_limit_size: 5G

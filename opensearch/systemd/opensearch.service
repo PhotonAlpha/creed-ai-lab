@@ -1,0 +1,33 @@
+[Unit]
+Description=OpenSearch (logstack, single node)
+Documentation=file://@INSTALL_ROOT@/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=@SVC_USER@
+Group=@SVC_USER@
+WorkingDirectory=@INSTALL_ROOT@/opensearch
+Environment=OPENSEARCH_HOME=@INSTALL_ROOT@/opensearch
+Environment=OPENSEARCH_PATH_CONF=@INSTALL_ROOT@/opensearch/config
+ExecStart=@INSTALL_ROOT@/opensearch/bin/opensearch
+
+# limits.d 对 systemd 服务不生效，必须写在这里
+LimitNOFILE=65536
+LimitNPROC=4096
+LimitMEMLOCK=infinity
+LimitAS=infinity
+LimitFSIZE=infinity
+
+TimeoutStartSec=180
+TimeoutStopSec=120
+KillSignal=SIGTERM
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

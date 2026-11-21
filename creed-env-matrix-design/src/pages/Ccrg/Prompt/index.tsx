@@ -7,13 +7,14 @@ import {
   DeleteOutlined,
   EyeOutlined,
   FileExcelOutlined,
+  FileZipOutlined,
   Html5Outlined,
   PlusOutlined,
   ReloadOutlined,
   SaveOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { ccrgApi } from '../../../api/ccrg';
+import { ccrgApi, saveFile } from '../../../api/ccrg';
 import type { ConfluenceContent, PromptCombinationRequest, SelectorVo } from '../../../api/ccrg';
 import { useI18n } from '../../../locales';
 import { CONFLUENCE_BASE, GuidelineBanner, errorText, storage, toOptions, useProgressOverlay } from '../shared';
@@ -92,7 +93,7 @@ function isDaysAgo(created: string | undefined, daysAgo: number): boolean {
 
 export function PromptPage() {
   const { t } = useI18n();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const navigate = useNavigate();
   const [batch, setBatch] = useState<Combination[]>(restore);
   const [projects, setProjects] = useState<SelectorVo[]>([]);
@@ -248,14 +249,8 @@ export function PromptPage() {
     else message.error(t('ccrg.saveFailed'));
   };
 
-  const generate = async (type: 'xlsx' | 'html') => {
-    if (batch.some(missing)) {
-      setShowErrors(true);
-      message.warning(t('ccrg.incomplete'));
-      return;
-    }
-    storage.save(STORAGE_KEY, { batch });
-    const request: PromptCombinationRequest[] = batch.map((c) => ({
+  const toRequest = (): PromptCombinationRequest[] =>
+    batch.map((c) => ({
       compareAll: c.compareAll,
       baseRelease: c.baselineRelease,
       projectName: c.projectName,
@@ -268,9 +263,40 @@ export function PromptPage() {
       baselineValue: c.baselineValue,
       comparisonValue: c.comparisonValue,
     }));
+
+  const generate = async (type: 'xlsx' | 'html' | 'zip') => {
+    if (batch.some(missing)) {
+      setShowErrors(true);
+      message.warning(t('ccrg.incomplete'));
+      return;
+    }
+    storage.save(STORAGE_KEY, { batch });
+    const request = toRequest();
+    // zip: the same combinations as the Confluence page, downloaded instead of published (like Batch / Crossover).
+    if (type === 'zip') {
+      try {
+        saveFile(await runWithProgress((connectionId) => ccrgApi.generativeHtmlZip(connectionId!, request), true));
+        message.success(t('ccrg.downloaded'));
+      } catch (e) {
+        message.error(t('ccrg.downloadFailed', { message: errorText(e) }));
+      }
+      return;
+    }
     try {
-      await runWithProgress((connectionId) => ccrgApi.generative(connectionId!, request, type), true);
-      message.success(t('ccrg.prompt.generated'));
+      const link = await runWithProgress((connectionId) => ccrgApi.generative(connectionId!, request, type), true);
+      if (type === 'html') {
+        // The same popup as Crossover's Generate HTML: the published page's link, opened in a new tab.
+        modal.success({
+          title: t('ccrg.compare.published'),
+          content: link ? (
+            <Typography.Link href={String(link)} target="_blank" rel="noreferrer">
+              {String(link)}
+            </Typography.Link>
+          ) : null,
+        });
+      } else {
+        message.success(t('ccrg.prompt.generated'));
+      }
     } catch (e) {
       message.error(errorText(e));
     } finally {
@@ -510,6 +536,9 @@ export function PromptPage() {
             </Button>
             <Button icon={<FileExcelOutlined />} onClick={() => generate('xlsx')}>
               {t('ccrg.generateXlsx')}
+            </Button>
+            <Button icon={<FileZipOutlined />} onClick={() => generate('zip')}>
+              {t('ccrg.compare.downloadHtmlZip')}
             </Button>
             <Button type="primary" icon={<Html5Outlined />} onClick={() => generate('html')}>
               {t('ccrg.generateHtml')}

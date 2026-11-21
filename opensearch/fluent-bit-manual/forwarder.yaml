@@ -1,0 +1,70 @@
+# Fluent Bit forwarder（手动 nohup 启动用）：tail 日志文件 → 加 index / host / source → forward 到汇聚端 :24224
+# 每台有日志的机器一份。拷到别的机器时连同 parsers.yaml 一起拷（它是指向 ../config/parsers.yaml 的软链接，用 cp -L 拷实体）。
+#
+# 启动前必须先 cd 到本目录（原因同 aggregator.yaml），并且显式给 HOSTNAME（bash 的 HOSTNAME 不导出，不给 host 就是空的）：
+#   cd <本目录>
+#   <fluent-bit 可执行文件> -c forwarder.yaml --dry-run
+#   HOSTNAME=$(hostname -s) nohup <fluent-bit 可执行文件> -c forwarder.yaml > forwarder.log 2>&1 &  echo $! > forwarder.pid
+#
+# 三个字段（对应 Splunk 的 index= host= source=）：
+#   index  —— 下面 record_modifier 里写死
+#   host   —— 启动时的 HOSTNAME 环境变量
+#   source —— tail 的 path_key，日志文件完整路径
+#   offset —— tail 的 offset_key，在文件里的位置（上下文视图排序用）
+
+service:
+  flush: 2
+  daemon: off
+  log_level: info
+  parsers_file: parsers.yaml
+  # 2021：和汇聚端（2020）在同一台机器上也不冲突
+  http_server: on
+  http_listen: 127.0.0.1
+  http_port: 2021
+  # 网络断开 / 汇聚端重启时落盘，恢复后补发
+  storage.path: state/forwarder/storage
+  storage.sync: normal
+  storage.backlog.mem_limit: 16M
+
+pipeline:
+  inputs:
+    - name: tail
+      tag: app.*
+      # TODO: 这台机器的日志路径；多个用逗号分隔
+      path: /Users/ethan/Desktop/workspace/sourcecode/github_space/creed-ai-lab/logs/*.log
+      # 指标日志不是业务日志，不收
+      exclude_path: '*-metrics.log'
+      key: log
+      path_key: source
+      # 这条日志在文件里的字节位置（记录末尾）。Discover 的上下文视图（View surrounding documents）
+      # 用它给同一毫秒的日志排序，顺序和文件里一致，相当于 Splunk 的 Show Source
+      offset_key: offset
+      # 书签：每个文件读到哪了。删掉它 = 下次从头重读（会产生重复数据）
+      db: state/forwarder/tail.db
+      db.locking: true
+      # 第一次见到的文件从头读（导入已有日志）；之后靠书签续读
+      read_from_head: true
+      refresh_interval: 5
+      rotate_wait: 30
+      skip_long_lines: on
+      buffer_max_size: 1M
+      # Java 堆栈合并成一条
+      multiline.parser: multiline_app
+      storage.type: filesystem
+
+  filters:
+    - name: record_modifier
+      match: app.*
+      record:
+        # TODO: 环境名
+        - index sg-sit
+        - host ${HOSTNAME}
+
+  outputs:
+    - name: forward
+      match: app.*
+      # TODO: 汇聚端 IP。汇聚端在同一台机器上就是 127.0.0.1
+      host: 127.0.0.1
+      port: 24224
+      retry_limit: no_limits
+      storage.total_limit_size: 2G
