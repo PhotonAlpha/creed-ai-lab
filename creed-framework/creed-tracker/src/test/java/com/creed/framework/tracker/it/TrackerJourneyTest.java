@@ -57,15 +57,16 @@ class TrackerJourneyTest {
 
         assertThat(journey.body()).isEqualTo("journey:echo");
         String inboundJourney = "sid=" + sid + " direction=inbound peer=";
-        String outboundEcho = "sid=" + sid + " direction=outbound peer=localhost ";
+        String outboundEcho = "direction=outbound peer=localhost ";
         assertThat(output.getOut())
                 .contains("sid=" + sid + " journey started at POST /api/connection")
                 // the inbound request and response of /api/journey (Logbook flips origin= on a response: direction= does not) ...
                 .containsPattern(inboundJourney + "\\S+ origin=remote type=request .*uri=http://localhost:" + port + "/api/journey")
                 .containsPattern(inboundJourney + "\\S+ origin=local type=response .*status=200")
-                // ... the call it made on a virtual thread, outbound, same sid ...
-                .containsPattern(outboundEcho + "origin=local type=request .*uri=http://localhost:" + port + "/api/echo")
-                .containsPattern(outboundEcho + "origin=remote type=response .*status=200")
+                // ... the call it made on a virtual thread, outbound: no sid - the application's own work, found by traceId ...
+                .containsPattern("(?m)^.* " + outboundEcho + "origin=local type=request .*uri=http://localhost:" + port + "/api/echo")
+                .containsPattern("(?m)^.* " + outboundEcho + "origin=remote type=response .*status=200")
+                .doesNotContainPattern("sid=\\S+ direction=outbound")
                 // ... and that call arriving, inbound - it carried no cookie, so it is outside the journey
                 .containsPattern("sid=- direction=inbound peer=\\S+ origin=remote type=request .*/api/echo")
                 .contains("creed.tracker.http.inbound", "creed.tracker.http.outbound");

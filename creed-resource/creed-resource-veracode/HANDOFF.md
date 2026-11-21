@@ -45,14 +45,16 @@ Asked for: follow one user through Splunk. `creed-framework/creed-tracker` (new 
   `Set-Cookie: sid=<uuid>; Path=/; HttpOnly; SameSite=Lax` and `X-Session-Id`. The browser sends it on every later
   `/api` request (same origin through Vite / creed-gateway-proxy - no page change needed).
 - `logbook.filter.enabled: true` (`CREED_VERACODE_LOGBOOK_FILTER`), style `splunk` (`CREED_VERACODE_LOGBOOK_STYLE`),
-  `/actuator/**` excluded, the page's token headers masked. Each line: `sid=… direction=inbound|outbound peer=…` on
+  `/actuator/**` excluded, the page's token headers masked. Inbound lines: `sid=… direction=inbound peer=…`; outbound (Jira /
+  Confluence): `direction=outbound peer=…`, no sid since 2026-11-22 (asked for - find them by traceId). On
   logger `creed.tracker.http.inbound` / `.outbound` (level `CREED_VERACODE_LOGBOOK_LEVEL`, INFO; was TRACE on
-  `org.zalando.logbook.Logbook`). Splunk: `sid=<id> | sort _time`; `direction=outbound` = the Jira / Confluence calls.
+  `org.zalando.logbook.Logbook`). Splunk: `sid=<id> | sort _time` = the user's requests; `traceId` of one of them = its Jira / Confluence calls.
 - Response headers > 8KB (`server.tomcat.max-http-response-header-size`): Tomcat answers 500 with no headers and logs
   `HeadersTooLargeException`; the request line is still in the log (written before the controller runs), the
   response line is not, and the tracker WARNs `sid=… GET /… response headers ~N bytes exceed 8192 … largest headers:`.
   Pinned in creed-tracker's `TrackerJourneyTest` on a real Tomcat.
 - Checked live (2026-11-20): connect → cookie; inbound + outbound Jira lines under one sid; token count in the log 0.
+  (2026-11-22: outbound lines no longer carry the sid.)
 
 ## API (`/api/veracode`)
 

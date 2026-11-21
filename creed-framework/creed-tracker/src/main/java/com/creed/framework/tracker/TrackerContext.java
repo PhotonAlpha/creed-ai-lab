@@ -4,7 +4,9 @@ import org.slf4j.MDC;
 
 /**
  * The current request's sid lives on the MDC under {@value #MDC_KEY} (a logging pattern prints it as {@code %X{sid}}).
- * A thread started by the request does not inherit it - see {@code SidThreadLocalAccessor}.
+ * Only the request thread has it, on purpose (2026-11-22, asked for): the sid marks the requests this application
+ * answers and the user's journey through them, not the work they do - a thread the request hands work to (a virtual
+ * thread, a pool) has none, and its log lines are found by traceId.
  */
 public final class TrackerContext {
 

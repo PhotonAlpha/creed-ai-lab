@@ -12,8 +12,8 @@
 
     <artifactId>creed-tracker</artifactId>
     <name>creed-tracker</name>
-    <description>User-journey tracking: a SameSite=Lax "sid" cookie issued at a start path, carried on the MDC (and
-        onto context-propagated threads), stamped on every Logbook line with its direction (inbound / outbound)</description>
+    <description>User-journey tracking: a SameSite=Lax "sid" cookie issued at a start path, on the request thread's
+        MDC, stamped on the inbound Logbook lines; every Logbook line gets its direction (inbound / outbound)</description>
 
     <properties>
         <!-- not in the Boot BOM; same as creed-resource-veracode / creed-simple-metrics (4.x = Boot 4 / Jackson 3) -->
@@ -35,12 +35,6 @@
             <optional>true</optional>
         </dependency>
         <!-- The sid ThreadLocalAccessor: ContextSnapshot carries it onto virtual / pool threads. -->
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>context-propagation</artifactId>
-            <optional>true</optional>
-        </dependency>
-
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

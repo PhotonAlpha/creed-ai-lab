@@ -1,6 +1,5 @@
 package com.creed.framework.tracker.it;
 
-import io.micrometer.context.ContextSnapshotFactory;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -36,13 +35,12 @@ public class TrackerTestApplication {
             return "echo";
         }
 
-        /** An outbound call made on another thread, the way veracode's Concurrently makes the Jira searches. */
+        /** An outbound call made on another thread, the way veracode's Concurrently makes the Jira searches - no context taken along. */
         @GetMapping("/api/journey")
         String journey(HttpServletRequest request) throws Exception {
             String base = request.getScheme() + "://localhost:" + request.getLocalPort();
             RestClient client = RestClient.builder().baseUrl(base).requestInterceptor(logbook).build();
-            Callable<String> call = ContextSnapshotFactory.builder().build().captureAll()
-                    .wrap(() -> client.get().uri("/api/echo").retrieve().body(String.class));
+            Callable<String> call = () -> client.get().uri("/api/echo").retrieve().body(String.class);
             try (ExecutorService threads = Executors.newVirtualThreadPerTaskExecutor()) {
                 return "journey:" + threads.submit(call).get();
             }

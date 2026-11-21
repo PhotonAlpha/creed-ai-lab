@@ -25,10 +25,15 @@ import java.util.Map;
  * <ul>
  *   <li>its own logger per direction: {@code creed.tracker.http.inbound} (Logbook's {@link Origin#REMOTE} - the caller
  *       is remote) and {@code creed.tracker.http.outbound} ({@link Origin#LOCAL}), at INFO;</li>
- *   <li>{@code sid=… direction=inbound|outbound peer=…} in the message itself (the client address inbound, the called
- *       host outbound) - Splunk extracts key=value pairs from the text, it does not see the MDC unless the pattern
- *       prints it. With {@code logbook.format.style: json} the fields go into the JSON object instead.</li>
+ *   <li>{@code sid=… direction=inbound peer=…} / {@code direction=outbound peer=…} in the message itself (the client
+ *       address inbound, the called host outbound) - Splunk extracts key=value pairs from the text, it does not see the
+ *       MDC unless the pattern prints it. With {@code logbook.format.style: json} the fields go into the JSON object
+ *       instead.</li>
  * </ul>
+ *
+ * <p><b>Only inbound lines carry a sid</b> (2026-11-22, asked for): the journey is the requests the application
+ * answers. An outbound call (RestTemplate / RestClient / Apache HttpClient) is the application's own work, often made
+ * on another thread where the sid is not - it is found by traceId, like any other line of that work.
  *
  * <p>The sid is the MDC's when the request is written. A response can be written on another thread (an async request
  * completing), so the request's sid is remembered by correlation id until its response is written - bounded, a
@@ -64,7 +69,7 @@ public final class TrackingSink implements Sink {
         if (!log.isInfoEnabled()) {
             return;
         }
-        String sid = TrackerContext.current();
+        String sid = inbound(request) ? TrackerContext.current() : null;
         if (sid != null) {
             sids.put(precorrelation.getId(), sid);
         }
@@ -78,7 +83,7 @@ public final class TrackingSink implements Sink {
         if (!log.isInfoEnabled()) {
             return;
         }
-        String sid = remembered != null ? remembered : TrackerContext.current();
+        String sid = !inbound(request) ? null : remembered != null ? remembered : TrackerContext.current();
         log.info(stamp(formatter.format(correlation, response), request, sid));
     }
 
@@ -90,15 +95,17 @@ public final class TrackingSink implements Sink {
         return request.getOrigin() == Origin.REMOTE;
     }
 
+    /** Inbound: {@code sid=} first ({@code -} outside a journey). Outbound: no sid at all. */
     static String stamp(String formatted, HttpRequest request, String sid) {
+        boolean in = inbound(request);
+        String direction = in ? "inbound" : "outbound";
+        String peer = in ? request.getRemote() : request.getHost();
         String s = sid == null ? TrackerContext.NONE : sid;
-        String direction = inbound(request) ? "inbound" : "outbound";
-        String peer = inbound(request) ? request.getRemote() : request.getHost();
         if (formatted.startsWith("{")) {
-            return "{\"sid\":\"" + json(s) + "\",\"direction\":\"" + direction + "\",\"peer\":\"" + json(peer) + "\","
-                    + formatted.substring(1);
+            return "{" + (in ? "\"sid\":\"" + json(s) + "\"," : "") + "\"direction\":\"" + direction + "\",\"peer\":\""
+                    + json(peer) + "\"," + formatted.substring(1);
         }
-        return "sid=" + s + " direction=" + direction + " peer=" + plain(peer) + " " + formatted;
+        return (in ? "sid=" + s + " " : "") + "direction=" + direction + " peer=" + plain(peer) + " " + formatted;
     }
 
     private static String json(String value) {

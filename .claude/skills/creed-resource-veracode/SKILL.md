@@ -230,9 +230,11 @@ typed from `en-US.ts`, numeric `scroll.x` with a fixed-right column).
   the user's Bearer token: never drop `Authorization` from `logbook.obfuscate.headers`.
 - **User journey = creed-tracker** (2026-11-20, asked for; `creed-framework/creed-tracker`): `POST /jira/connection`
   (`creed.tracker.start-paths`) answers a new `sid` cookie (`HttpOnly; SameSite=Lax`, + `X-Session-Id`); every later
-  request runs with it on the MDC, carried onto `Concurrently`'s threads by the tracker's `ThreadLocalAccessor`
-  (ServiceLoader - `captureAll()` picks it up). Logbook's **inbound filter is on** since then and writes through the
-  tracker's `TrackingSink`: `creed.tracker.http.inbound` / `.outbound` at INFO, each line `sid=… direction=… peer=…`,
+  request runs with it on the MDC - **the request thread only** (2026-11-22, asked for: the journey is requests and
+  responses; work on `Concurrently`'s threads is found by traceId, the tracker has no `ThreadLocalAccessor` any more).
+  Logbook's **inbound filter is on** since then and writes through the
+  tracker's `TrackingSink`: `creed.tracker.http.inbound` / `.outbound` at INFO, inbound lines `sid=… direction=inbound peer=…`,
+  outbound (Jira / Confluence) `direction=outbound peer=…` with no sid,
   style `splunk` (Splunk: `sid=<id> | sort _time`). This is only safe while `X-Jira-Token` / `X-Jira-User` /
   `X-Confluence-Token` / `X-Confluence-User` stay in `logbook.obfuscate.headers` and `JsonBodyOnlyStrategy` keeps
   multipart uploads, the SSE stream and the exports out (headers only, never buffered). A new token header must join
