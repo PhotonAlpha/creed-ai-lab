@@ -30,7 +30,7 @@ sid **只标记请求和响应**（用户旅程）。请求触发的业务处理
 ```yaml
 logbook:
   filter:
-    enabled: true            # 记录入站请求（Logbook 默认只记录客户端调用）
+    enabled: true            # 记录入站请求（Logbook 默认就是 true；这里写出来，方便用环境变量关掉）
   format:
     style: splunk            # 一个请求/响应一行 key=value，Splunk 能自动抽取字段
   obfuscate:
@@ -140,5 +140,5 @@ mvn -pl creed-framework/creed-tracker test
 ## 注意
 
 - sid 只用来关联日志，**不是**身份凭证，不能用于鉴权。
-- 要让 Logbook 打印入站请求，必须设置 `logbook.filter.enabled=true`。打开之后，请求头里的令牌也会被打印，所以 `logbook.obfuscate.headers` 要把所有令牌头都列进去。veracode 的配置已经包含 `Authorization`、`Cookie`、`Set-Cookie`、`X-Jira-*`、`X-Confluence-*`。`Set-Cookie` 被脱敏后，sid 的值只会出现在 "journey started" 那一行。
+- Logbook 的入站过滤器默认开启（`logbook.filter.enabled` 不写就是 `true`），排在过滤器链最后（`LOWEST_PRECEDENCE`）。顺序、写日志的时机，以及未处理异常时没有响应行、表单 `@RequestParam` 被读空这些坑，见 [docs/logbook-servlet-filter.md](docs/logbook-servlet-filter.md)。开启后，请求头里的令牌也会被打印，所以 `logbook.obfuscate.headers` 要把所有令牌头都列进去。veracode 的配置已经包含 `Authorization`、`Cookie`、`Set-Cookie`、`X-Jira-*`、`X-Confluence-*`。`Set-Cookie` 被脱敏后，sid 的值只会出现在 "journey started" 那一行。
 - 自定义 `Sink` bean 会让 `TrackingSink` 失效，日志就不再带 `sid` 和 `direction`。
