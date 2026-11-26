@@ -25,17 +25,17 @@ import java.util.regex.Pattern;
  * {@code clusterPool} / {@code clusterRestClient}, for when one cluster's calls need a pool of their own. Each
  * block takes {@link HttpPoolProperties} keys; whatever it leaves out comes from {@code creed.partner.http}.
  *
- * <p>For {@code catalog-bulk} it registers:
+ * <p>For {@code catalogbulk} it registers:
  * <ul>
- *   <li>{@code catalog-bulkPool} — a {@link ManagedHttpClientPool} (mTLS pool, request factory, idle evictor),
- *       closed by Spring; its gauges are tagged {@code loadBalancedPool-catalog-bulk} by
+ *   <li>{@code catalogbulkPool} — a {@link ManagedHttpClientPool} (mTLS pool, request factory, idle evictor),
+ *       closed by Spring; its gauges are tagged {@code loadBalancedPool-catalogbulk} by
  *       {@link PoolMetricNames} — never typed by hand — and bound by Boot because the pool is a
  *       {@code MeterBinder};</li>
- *   <li>{@code catalog-bulkRestClient} — a clone of the {@code @LoadBalanced} {@code clusterRestClientBuilder}
+ *   <li>{@code catalogbulkRestClient} — a clone of the {@code @LoadBalanced} {@code clusterRestClientBuilder}
  *       (so the load-balancer interceptor comes first) on that pool, with {@link LoadBalancerAuditInterceptor}
  *       appended to run innermost, exactly as {@code clusterRestClient}.</li>
  * </ul>
- * Inject one with {@code @Qualifier("catalog-bulkRestClient")}.
+ * Inject one with {@code @Qualifier("catalogbulkRestClient")}.
  *
  * <p>A {@link BeanDefinitionRegistryPostProcessor} ({@code static @Bean}), as {@code NamedHttpComponentRegistrar}:
  * the names come off the {@link Environment}, every collaborator is resolved lazily when the bean is created.
@@ -47,8 +47,13 @@ public class NamedRestClientRegistrar
     /** The fallback of every named block: the default business pool's keys. */
     public static final String DEFAULTS = "creed.partner.http";
 
-    /** Becomes part of a bean name and of a metric tag: lower case, digits, '-'. */
-    private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9-]*");
+    /**
+     * Becomes part of a bean name ({@code catalogbulkRestClient}), a config key and a metric tag: lower-case letters
+     * and digits, the same rule as {@code CamelHttpComponents}' component names. {@code -} breaks Sonar's bean-name
+     * rule ({@code ^[a-z][a-zA-Z0-9]*$}, e.g. on {@code @Qualifier} targets); upper case is refused by Boot when the
+     * block is bound ({@code InvalidConfigurationPropertyNameException}) and lost in an environment variable.
+     */
+    private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9]*");
 
     private Environment environment;
     private BeanFactory beanFactory;
@@ -70,8 +75,8 @@ public class NamedRestClientRegistrar
                 .orElse(Map.of());
         for (String name : declared.keySet()) {
             if (!NAME.matcher(name).matches()) {
-                throw new IllegalStateException(NAMED + "." + name + ": a client name is lower-case letters, digits"
-                        + " and '-', starting with a letter (e.g. catalog-bulk)");
+                throw new IllegalStateException(NAMED + "." + name + ": a client name is lower-case letters and"
+                        + " digits, starting with a letter (e.g. catalogbulk)");
             }
         }
         return List.copyOf(declared.keySet());

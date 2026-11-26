@@ -30,15 +30,15 @@ import java.util.function.Supplier;
 /**
  * One camel-http component per {@code creed.camel.http-components.<name>} - per-endpoint isolation (asked for,
  * 2026-11-11): a cluster's bulk and real-time calls on separate pools, so a slow bulk export cannot take the
- * connections the real-time path needs. A route picks one by its scheme: {@code catalog-bulk:https://catalog-resource/...}.
+ * connections the real-time path needs. A route picks one by its scheme: {@code catalogbulk:https://catalog-resource/...}.
  *
- * <p>For {@code catalog-bulk} it registers:
+ * <p>For {@code catalogbulk} it registers:
  * <ul>
- *   <li>{@code catalog-bulk} - the {@link HttpComponent}, built by {@link CamelHttpComponents} like the default one;</li>
- *   <li>{@code catalog-bulkConnectionManager} - its mTLS pool ({@code destroyMethod=""}: the component's
+ *   <li>{@code catalogbulk} - the {@link HttpComponent}, built by {@link CamelHttpComponents} like the default one;</li>
+ *   <li>{@code catalogbulkConnectionManager} - its mTLS pool ({@code destroyMethod=""}: the component's
  *       {@code doStop()} closes it, as for the default pool);</li>
- *   <li>{@code catalog-bulkPoolEvictor} - its idle / expired sweep;</li>
- *   <li>{@code catalog-bulkPoolMetrics} - gauges tagged {@code camelHttpPool-catalog-bulk}.</li>
+ *   <li>{@code catalogbulkPoolEvictor} - its idle / expired sweep;</li>
+ *   <li>{@code catalogbulkPoolMetrics} - gauges tagged {@code camelHttpPool-catalogbulk}.</li>
  * </ul>
  *
  * <p>A {@link BeanDefinitionRegistryPostProcessor} ({@code static @Bean}), as {@code ClusterClientBeanRegistrar} in

@@ -35,24 +35,24 @@ creed:
       max-total: 50
       max-per-route: 20
     rest-clients:
-      catalog-bulk:             # 名字：小写字母开头，只含小写字母、数字、'-'
+      catalogbulk:              # 名字：小写字母开头，只含小写字母和数字
         max-total: 10
         response-timeout: 60s   # 只写和 creed.partner.http 不同的键
-      order-report:
+      orderreport:
         max-per-route: 4
 ```
 
-每个名字注册两个 bean（以 `catalog-bulk` 为例）：
+每个名字注册两个 bean（以 `catalogbulk` 为例）：
 
 | bean | 内容 | 生命周期 |
 |---|---|---|
-| `catalog-bulkPool` | `ManagedHttpClientPool`：mTLS 连接池、request factory、空闲清理；指标 `loadBalancedPool-catalog-bulk` | Spring `close()`；它本身是 `MeterBinder`，Boot 自动绑定 |
-| `catalog-bulkRestClient` | 克隆 `@LoadBalanced` 的 `clusterRestClientBuilder`，用上面的池，末尾加 `LoadBalancerAuditInterceptor` | — |
+| `catalogbulkPool` | `ManagedHttpClientPool`：mTLS 连接池、request factory、空闲清理；指标 `loadBalancedPool-catalogbulk` | Spring `close()`；它本身是 `MeterBinder`，Boot 自动绑定 |
+| `catalogbulkRestClient` | 克隆 `@LoadBalanced` 的 `clusterRestClientBuilder`，用上面的池，末尾加 `LoadBalancerAuditInterceptor` | — |
 
 使用：
 
 ```java
-public BulkFetcher(@Qualifier("catalog-bulkRestClient") RestClient client) { … }
+public BulkFetcher(@Qualifier("catalogbulkRestClient") RestClient client) { … }
 client.get().uri("https://catalog-resource/api/catalog/bulk").retrieve().body(JsonNode.class);
 ```
 
@@ -68,8 +68,10 @@ client.get().uri("https://catalog-resource/api/catalog/bulk").retrieve().body(Js
 和 `NamedHttpComponentRegistrar` 同一个结构（`static @Bean` 的 `BeanDefinitionRegistryPostProcessor`，
 原因见 `camel-http-per-endpoint-pools.md` §10.1）：
 
-1. `names(environment)`：用 `Binder` 读 `creed.partner.rest-clients` 的键，名字不符合 `[a-z][a-z0-9-]*`
-   就启动失败。这个名字既是 bean 名的一部分，也是指标标签的一部分。
+1. `names(environment)`：用 `Binder` 读 `creed.partner.rest-clients` 的键，名字不符合 `[a-z][a-z0-9]*`
+   就启动失败。这个名字既是 bean 名的一部分，也是配置键和指标标签的一部分；不允许 `-`（`catalog-bulkRestClient`
+   过不了 Sonar 的 bean 命名规则）和大写（Boot 绑定时报错），与 camel-http 具名组件同一条规则，原因见
+   `camel-http-per-endpoint-pools.md` §5。
 2. `<name>Pool` 或 `<name>RestClient` 和已有 bean 重名，启动失败。
 3. `HttpPoolProperties.layered(env, "creed.partner.rest-clients.<name>", "creed.partner.http")` 在注册时就绑好属性。
 4. `<name>Pool` 的 supplier 调 `RestClientSuppliers.pool(..., PoolMetricNames.of(LOAD_BALANCED, name))`，
@@ -96,7 +98,7 @@ client.get().uri("https://catalog-resource/api/catalog/bulk").retrieve().body(Js
 `NamedRestClientRegistrarTest`（`ApplicationContextRunner`，SSL bundle 不存在，退回非 mTLS 的池）：
 
 - 两个名字各有 `<name>Pool` 和 `<name>RestClient`；指标的 `httpclient` 标签分别是
-  `loadBalancedPool-catalog-bulk`、`loadBalancedPool-order-report`；具名键生效，没写的键取 `creed.partner.http`；
+  `loadBalancedPool-catalogbulk`、`loadBalancedPool-orderreport`；具名键生效，没写的键取 `creed.partner.http`；
 - 每个客户端的拦截器依次是 [负载均衡, 审计]；共享 builder 上仍然只有负载均衡拦截器；
 - 名字不合法（`Catalog_Bulk`）时启动失败，消息里带配置键；
 - 默认池的名字没有变（`loadBalancedPool` / `healthCheckPool`）。

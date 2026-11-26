@@ -22,7 +22,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * The registrar's beans as Camel sees them: a Spring-registry Camel context resolves {@code catalog-bulk:https://...}
+ * The registrar's beans as Camel sees them: a Spring-registry Camel context resolves {@code catalogbulk:https://...}
  * to the dynamically registered component, on the pool bean of the same name.
  */
 class NamedHttpComponentRegistrarTest {
@@ -36,8 +36,8 @@ class NamedHttpComponentRegistrarTest {
             .withBean(Logbook.class, Logbook::create)
             .withPropertyValues(
                     "creed.camel.http.max-total=40",
-                    "creed.camel.http-components.catalog-bulk.max-per-route=5",
-                    "creed.camel.http-components.catalog-realtime.max-total=8");
+                    "creed.camel.http-components.catalogbulk.max-per-route=5",
+                    "creed.camel.http-components.catalogrealtime.max-total=8");
 
     private static SslBundles missingBundles() {
         SslBundles bundles = mock(SslBundles.class);
@@ -49,17 +49,17 @@ class NamedHttpComponentRegistrarTest {
     void eachNamedComponentGetsItsOwnPoolEvictorAndMetrics() {
         runner.run(context -> {
             assertThat(context).hasNotFailed();
-            for (String name : new String[] {"catalog-bulk", "catalog-realtime"}) {
+            for (String name : new String[] {"catalogbulk", "catalogrealtime"}) {
                 assertThat(context).hasBean(name).hasBean(name + "ConnectionManager")
                         .hasBean(name + "PoolEvictor").hasBean(name + "PoolMetrics");
                 assertThat(context.getBean(name + "PoolEvictor", IdleConnectionEvictor.class).isRunning()).isTrue();
                 assertThat(context.getBean(name + "PoolMetrics")).isInstanceOf(MeterBinder.class);
             }
-            PoolingHttpClientConnectionManager bulk = context.getBean("catalog-bulkConnectionManager",
+            PoolingHttpClientConnectionManager bulk = context.getBean("catalogbulkConnectionManager",
                     PoolingHttpClientConnectionManager.class);
             assertThat(bulk.getDefaultMaxPerRoute()).isEqualTo(5);
             assertThat(bulk.getMaxTotal()).isEqualTo(40);
-            assertThat(context.getBean("catalog-realtimeConnectionManager", PoolingHttpClientConnectionManager.class)
+            assertThat(context.getBean("catalogrealtimeConnectionManager", PoolingHttpClientConnectionManager.class)
                     .getMaxTotal()).isEqualTo(8);
         });
     }
@@ -71,10 +71,10 @@ class NamedHttpComponentRegistrarTest {
             camel.start();
             try {
                 HttpEndpoint endpoint = camel.getEndpoint(
-                        "catalog-bulk:https://catalog-resource/api/catalog/bulk", HttpEndpoint.class);
-                assertThat(endpoint.getComponent()).isSameAs(context.getBean("catalog-bulk", HttpComponent.class));
+                        "catalogbulk:https://catalog-resource/api/catalog/bulk", HttpEndpoint.class);
+                assertThat(endpoint.getComponent()).isSameAs(context.getBean("catalogbulk", HttpComponent.class));
                 assertThat(endpoint.getClientConnectionManager())
-                        .isSameAs(context.getBean("catalog-bulkConnectionManager"));
+                        .isSameAs(context.getBean("catalogbulkConnectionManager"));
                 assertThat(endpoint.getHttpUri()).hasScheme("https");
             } finally {
                 camel.stop();

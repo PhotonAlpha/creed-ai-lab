@@ -40,10 +40,14 @@ public final class CamelHttpComponents {
     public static final String DEFAULTS = "creed.camel.http";
 
     /**
-     * A component name is a URI scheme ({@code catalog-bulk:https://...}): letters, digits, {@code + - .}, starting
-     * with a letter. Lower case only - Spring bean names are case-sensitive, Camel's scheme lookup is not.
+     * A component name is the URI scheme ({@code catalogbulk:https://...}), the bean name, a config key and part of the
+     * derived bean names ({@code catalogbulkConnectionManager}) all at once; the one form all four accept is lower-case
+     * letters and digits. {@code -} breaks Sonar's bean-name rule ({@code ^[a-z][a-zA-Z0-9]*$}); upper case breaks
+     * the registrar itself - {@code named()} binds {@code creed.camel.http-components.<name>}, and Boot refuses a
+     * non-canonical name ({@code InvalidConfigurationPropertyNameException}, checked on Boot 4.1.1), and an
+     * environment variable override arrives lower-cased anyway; URI schemes are canonically lower case.
      */
-    private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9+.-]*");
+    private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9]*");
 
     private CamelHttpComponents() {
     }
@@ -63,9 +67,9 @@ public final class CamelHttpComponents {
     }
 
     /**
-     * A named component: its endpoints must spell the protocol ({@code catalog-bulk:https://catalog-resource/...}).
+     * A named component: its endpoints must spell the protocol ({@code catalogbulk:https://catalog-resource/...}).
      * camel-http decides TLS by {@code uri.startsWith("https")} ({@code HttpHelper.isSecureConnection}), so
-     * {@code catalog-bulk://catalog-resource/...} would silently go out as plain HTTP to an mTLS server - refused here
+     * {@code catalogbulk://catalog-resource/...} would silently go out as plain HTTP to an mTLS server - refused here
      * at endpoint creation instead.
      */
     public static HttpComponent createNamed(String name, PoolingHttpClientConnectionManager pool,
@@ -140,8 +144,9 @@ public final class CamelHttpComponents {
 
     static void requireValidName(String name) {
         if (!NAME.matcher(name).matches()) {
-            throw new IllegalStateException(NAMED + "." + name + ": a component name is a URI scheme - lower-case"
-                    + " letters, digits, '+', '-', '.', starting with a letter (e.g. catalog-bulk)");
+            throw new IllegalStateException(NAMED + "." + name + ": a component name is lower-case letters and"
+                    + " digits, starting with a letter (e.g. catalogbulk) - it is the URI scheme, the bean name and a"
+                    + " config key at once");
         }
         if (name.equals("http") || name.equals("https")) {
             throw new IllegalStateException(NAMED + "." + name + ": 'http' / 'https' is the default component"

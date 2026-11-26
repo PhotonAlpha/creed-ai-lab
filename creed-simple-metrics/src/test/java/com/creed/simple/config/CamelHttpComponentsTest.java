@@ -15,6 +15,7 @@ import org.apache.hc.core5.util.Timeout;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.source.InvalidConfigurationPropertyNameException;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
 import org.springframework.cloud.client.loadbalancer.LoadBalancerClient;
 import org.springframework.mock.env.MockEnvironment;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.mockito.Mockito.mock;
 
 /**
- * Per-endpoint pools: a named component ({@code catalog-bulk:https://...}) next to the default {@code https} one,
+ * Per-endpoint pools: a named component ({@code catalogbulk:https://...}) next to the default {@code https} one,
  * each endpoint on its own component's pool, and a stopped endpoint never closing a pool its siblings still use.
  */
 class CamelHttpComponentsTest {
@@ -48,7 +49,7 @@ class CamelHttpComponentsTest {
         bulkPool = new PoolingHttpClientConnectionManager();
         camel = new DefaultCamelContext();
         camel.getRegistry().bind("https", CamelHttpComponents.create(defaultPool, props, shared));
-        camel.getRegistry().bind("catalog-bulk", CamelHttpComponents.createNamed("catalog-bulk", bulkPool, props, shared));
+        camel.getRegistry().bind("catalogbulk", CamelHttpComponents.createNamed("catalogbulk", bulkPool, props, shared));
         camel.start();
     }
 
@@ -59,7 +60,7 @@ class CamelHttpComponentsTest {
 
     @Test
     void anEndpointRidesItsComponentsPoolOverHttps() {
-        HttpEndpoint bulk = camel.getEndpoint("catalog-bulk:https://catalog-resource/api/catalog/bulk", HttpEndpoint.class);
+        HttpEndpoint bulk = camel.getEndpoint("catalogbulk:https://catalog-resource/api/catalog/bulk", HttpEndpoint.class);
         HttpEndpoint items = camel.getEndpoint("https://catalog-resource/api/catalog/items", HttpEndpoint.class);
 
         assertThat(bulk.getClientConnectionManager()).isSameAs(bulkPool);
@@ -69,18 +70,18 @@ class CamelHttpComponentsTest {
 
     @Test
     void aNamedComponentWithoutTheProtocolIsRefusedNotSentAsPlainHttp() {
-        // camel-http decides TLS by uri.startsWith("https"): "catalog-bulk://..." would be plain HTTP
-        assertThatThrownBy(() -> camel.getEndpoint("catalog-bulk://catalog-resource/api/catalog/bulk"))
+        // camel-http decides TLS by uri.startsWith("https"): "catalogbulk://..." would be plain HTTP
+        assertThatThrownBy(() -> camel.getEndpoint("catalogbulk://catalog-resource/api/catalog/bulk"))
                 .isInstanceOf(ResolveEndpointFailedException.class)
-                .rootCause().hasMessageContaining("catalog-bulk:https://<service-id>/...");
-        assertThat(camel.getEndpoint("catalog-bulk:http://catalog-resource/x", HttpEndpoint.class).getHttpUri())
+                .rootCause().hasMessageContaining("catalogbulk:https://<service-id>/...");
+        assertThat(camel.getEndpoint("catalogbulk:http://catalog-resource/x", HttpEndpoint.class).getHttpUri())
                 .hasScheme("http");
     }
 
     @Test
     void stoppingOneEndpointLeavesTheSharedPoolOpen() throws Exception {
-        HttpEndpoint first = camel.getEndpoint("catalog-bulk:https://catalog-resource/api/catalog/bulk", HttpEndpoint.class);
-        HttpEndpoint second = camel.getEndpoint("catalog-bulk:https://catalog-resource/api/catalog/export", HttpEndpoint.class);
+        HttpEndpoint first = camel.getEndpoint("catalogbulk:https://catalog-resource/api/catalog/bulk", HttpEndpoint.class);
+        HttpEndpoint second = camel.getEndpoint("catalogbulk:https://catalog-resource/api/catalog/export", HttpEndpoint.class);
         first.getHttpClient();
         second.getHttpClient();
 
@@ -97,25 +98,41 @@ class CamelHttpComponentsTest {
         MockEnvironment env = new MockEnvironment()
                 .withProperty("creed.camel.http.max-total", "40")
                 .withProperty("creed.camel.http.response-timeout", "8s")
-                .withProperty("creed.camel.http-components.catalog-bulk.max-per-route", "5")
-                .withProperty("creed.camel.http-components.catalog-bulk.response-timeout", "60s");
+                .withProperty("creed.camel.http-components.catalogbulk.max-per-route", "5")
+                .withProperty("creed.camel.http-components.catalogbulk.response-timeout", "60s");
 
-        HttpPoolProperties bulk = CamelHttpComponents.named(env, "catalog-bulk");
+        HttpPoolProperties bulk = CamelHttpComponents.named(env, "catalogbulk");
 
         assertThat(bulk.maxPerRoute()).isEqualTo(5);                        // its own
         assertThat(bulk.responseTimeout()).isEqualTo(Duration.ofSeconds(60)); // its own, over the default block's
         assertThat(bulk.maxTotal()).isEqualTo(40);                          // inherited from creed.camel.http
         assertThat(bulk.connectTimeout()).isEqualTo(Duration.ofSeconds(5)); // neither: the record default
-        assertThat(CamelHttpComponents.names(env)).containsExactly("catalog-bulk");
+        assertThat(CamelHttpComponents.names(env)).containsExactly("catalogbulk");
     }
 
     @Test
-    void aComponentNameMustBeALowerCaseSchemeOtherThanHttp() {
-        for (String bad : new String[] {"Catalog", "catalog_bulk", "9bulk", "http", "https"}) {
+    void aComponentNameIsLowerCaseLettersAndDigitsOtherThanHttp() {
+        // '-' is legal in a URI scheme but breaks Sonar's bean-name rule; upper case breaks the binding below.
+        // '.' and '+' never reach the check: Boot reads http-components.catalog.bulk as the name "catalog" + a nested
+        // key, and drops the '+' of catalog+bulk - the bean would be "catalogbulk" while the route says catalog+bulk:
+        for (String bad : new String[] {"catalog-bulk", "catalogBulk", "Catalog",
+                "catalog_bulk", "9bulk", "http", "https"}) {
             MockEnvironment env = new MockEnvironment()
                     .withProperty("creed.camel.http-components." + bad + ".max-total", "5");
             assertThatThrownBy(() -> CamelHttpComponents.names(env)).as(bad).isInstanceOf(IllegalStateException.class);
         }
+        MockEnvironment ok = new MockEnvironment().withProperty("creed.camel.http-components.catalogbulk2.max-total", "5");
+        assertThat(CamelHttpComponents.names(ok)).containsExactly("catalogbulk2");
+    }
+
+    @Test
+    void aCamelCaseNameCouldNotBeBoundAnyway() {
+        // why upper case is refused up front: the map key survives, but named() binds <prefix>.<name>, and Boot only
+        // takes canonical (lower-case) names - a camelCase component would fail startup in the registrar instead
+        MockEnvironment env = new MockEnvironment()
+                .withProperty("creed.camel.http-components.catalogBulk.max-total", "5");
+        assertThatThrownBy(() -> HttpPoolProperties.layered(env, CamelHttpComponents.NAMED + ".catalogBulk",
+                CamelHttpComponents.DEFAULTS)).isInstanceOf(InvalidConfigurationPropertyNameException.class);
     }
 
     private static void leaseAndRelease(PoolingHttpClientConnectionManager pool) throws Exception {

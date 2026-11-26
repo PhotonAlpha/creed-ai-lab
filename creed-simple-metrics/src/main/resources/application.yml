@@ -204,7 +204,7 @@ creed:
     # creed.camel.http above. None declared: every route is on the default pool.
     # Design + comparison: docs/camel-http-per-endpoint-pools.md
     # http-components:
-    #  catalog-bulk:
+    #  catalogbulk:
     #    max-total: 10
     #    max-per-route: 5
     #    response-timeout: 60s

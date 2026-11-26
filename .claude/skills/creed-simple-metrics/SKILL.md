@@ -60,6 +60,10 @@ default too) comes from `CamelHttpComponents` so none misses the route planner /
 Endpoint URI is `<name>:https://<service-id>/...`: TLS is `uri.startsWith("https")`, so `<name>://` would go out as
 plain HTTP — `ExplicitProtocolHttpComponent` refuses it. The `name:https://` form is source behaviour, not documented:
 `CamelHttpComponentsTest` locks it. Comparison: `docs/camel-http-per-endpoint-pools.md`.
+**Names are `[a-z][a-z0-9]*` (`catalogbulk`), both registrars** — the name is scheme, bean name, config key and
+metric tag at once: `-` fails Sonar's bean-name rule, camelCase makes Boot throw `InvalidConfigurationPropertyNameException`
+when the block is bound, `+` is silently dropped from the map key (bean `catalogbulk` vs route `catalog+bulk:`),
+`.` nests. Camel's scheme is everything before the first `:`/`?`, so a bean name with `:` is unreachable. Doc §5.
 
 ## Pool metric names and batch-declared pools
 

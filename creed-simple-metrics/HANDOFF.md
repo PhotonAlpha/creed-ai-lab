@@ -20,6 +20,12 @@ HTTPS `8096`, context path **`/simple`**, Camel REST under `/simple/camel/*`. Re
 
 ## Current state
 
+- 2026-11-26: **Named pool names are `[a-z][a-z0-9]*`** (`catalogbulk`) in both registrars — was `[a-z][a-z0-9+.-]*`
+  (camel-http) / `[a-z][a-z0-9-]*` (RestClient). `-` fails Sonar's bean-name rule; camelCase makes Boot throw when
+  the block is bound; `+` is dropped from the map key by Boot (bean `catalogbulk`, route `catalog+bulk:` → not found);
+  `.` nests. A name with `-` now fails startup — none is declared in `application.yml`, so a running app is unchanged.
+  Docs / tests / javadoc renamed `catalog-bulk` → `catalogbulk` (`catalogrealtime`, `orderreport`); the 2026-11-11
+  entry below keeps the name it was run with. Rationale: `docs/camel-http-per-endpoint-pools.md` §5.
 - 2026-11-15: **Pool metric names by rule + batch load-balanced RestClients** — `PoolMetricNames` names every
   pool (`<base>` for a default pool, `<base>-<name>` for a batch-declared one); the three base names are unchanged,
   so dashboards are too. `creed.partner.rest-clients.<name>` registers `<name>Pool` + `<name>RestClient`
